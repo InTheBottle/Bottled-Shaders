@@ -170,6 +170,16 @@ public:
 	const char* debug_text = nullptr;
 	std::unordered_set<std::uint64_t> whitelist;
 	std::unordered_set<std::uint64_t> blacklist;
+	// BSLightingShader_Setup's verdict per geometry. HasAnimation walks extra data with string
+	// compares and the name is hashed; neither is worth repeating on every pass.
+	struct SetupCacheEntry
+	{
+		RE::TESObjectREFR* userData = nullptr;
+		uint32_t frame = 0;
+		bool noSnow = false;
+		bool noFoliageTint = false;
+	};
+	std::unordered_map<const RE::BSGeometry*, SetupCacheEntry> setupCache;
 
 	float GetSeasonalAltitude()
 	{

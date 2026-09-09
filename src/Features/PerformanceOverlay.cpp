@@ -27,8 +27,10 @@
 #include "Menu.h"
 #include "Menu/ProfilingRenderer.h"
 #include "State.h"
+#include "Features/Upscaling/DlssNR.h"
 #include "Utils/FileSystem.h"
 #include "Utils/Format.h"
+#include "Utils/FrameCosts.h"
 #include "Utils/Game.h"
 
 #define I18N_KEY_PREFIX "feature.perf_overlay."
@@ -108,6 +110,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	ShowDrawCalls,
 	ShowVRAM,
 	ShowCSPasses,
+	ShowDetailedBreakdown,
 	ShowFPS,
 	ShowPreFGFrameTimeGraph,
 	ShowPostFGFrameTimeGraph,
@@ -160,6 +163,11 @@ void PerformanceOverlay::DrawSettings()
 		ImGui::Checkbox(T(TKEY("show_draw_calls"), "Show Draw Calls"), &this->settings.ShowDrawCalls);
 		ImGui::Checkbox(T(TKEY("show_vram"), "Show VRAM Usage"), &this->settings.ShowVRAM);
 		ImGui::Checkbox(T(TKEY("show_cs_passes"), "Show CS Render Passes"), &this->settings.ShowCSPasses);
+		ImGui::Checkbox(T(TKEY("show_detailed_breakdown"), "Show Detailed Frametime Breakdown"), &this->settings.ShowDetailedBreakdown);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::TextUnformatted(T(TKEY("show_detailed_breakdown_tooltip_1"), "Every measured cost that makes up the frame: game shader passes, each Bottled Shaders pass, the upscaler and neural rendering, frame generation setup, present and vsync waits, the frame limiter, Reflex and the interface."));
+			ImGui::TextUnformatted(T(TKEY("show_detailed_breakdown_tooltip_2"), "Hover a row to see whether that cost is directly a Bottled Shaders feature, indirectly raised by features hooking a game shader, or the game's own work."));
+		}
 
 		bool isFrameGenerationActive = globals::features::upscaling.IsFrameGenerationActive();
 		if (this->settings.ShowFPS && isFrameGenerationActive) {
@@ -271,6 +279,8 @@ void PerformanceOverlay::DrawOverlay()
 		return;
 	}
 
+	FrameCosts::Scope overlayScope(FrameCosts::overlayDrawMs);
+
 	// Build draw call rows ONCE per frame and reuse
 	auto [mainRows, summaryRows] = this->BuildDrawCallRows();
 	std::vector<DrawCallRow> allRows = mainRows;
@@ -380,6 +390,13 @@ void PerformanceOverlay::DrawOverlay()
 		if (needsSeparator)
 			ImGui::Separator();
 		ProfilingRenderer::RenderStatistics(false, false);
+		needsSeparator = true;
+	}
+
+	if (this->settings.ShowDetailedBreakdown) {
+		if (needsSeparator)
+			ImGui::Separator();
+		DrawDetailedBreakdown();
 		needsSeparator = true;
 	}
 
@@ -2005,9 +2022,10 @@ void PerformanceOverlay::UpdateGraphValues()
 			state.postFGFrameTimeMs = fgDeltaTime * 1000.0f;
 			state.postFGFps = 1000.0f / state.postFGFrameTimeMs;
 		} else {
-			// Fallback if FG time is not available
-			state.postFGFrameTimeMs = state.frameTimeMs / Settings::kFrameGenerationMultiplier;
-			state.postFGFps = state.fps * Settings::kFrameGenerationMultiplier;
+			// Presented frames per rendered frame: DLSS-G reports its multiplier (2x..6x), FSR is 2x.
+			const float multiplier = static_cast<float>(std::max(1u, globals::features::upscaling.GetFrameGenerationMultiplier()));
+			state.postFGFrameTimeMs = state.frameTimeMs / multiplier;
+			state.postFGFps = state.fps * multiplier;
 		}
 
 		// Update post-FG smooth values when timer elapses
@@ -2026,6 +2044,489 @@ void PerformanceOverlay::UpdateGraphValues()
 		state.smoothFps = state.fps;  // Sampling white noise won't give you smoothed noise. This is useless.
 		state.smoothFrameTimeMs = state.frameTimeMs;
 		state.updateTimer = 0.0f;
+		state.detailedRefreshDue = true;
 	}
+
+	// Detailed breakdown costs are noisy frame to frame; smooth them the way the graph range is.
+	const auto smooth = [](float& a_value, float a_sample) {
+		a_value += Settings::kSmoothingFactor * (a_sample - a_value);
+	};
+	smooth(state.smoothPresentMs, FrameCosts::presentMs.Last());
+	smooth(state.smoothFrameLimiterMs, FrameCosts::frameLimiterMs.Last());
+	smooth(state.smoothReflexSleepMs, FrameCosts::reflexSleepMs.Last());
+	smooth(state.smoothFrameGenSetupMs, FrameCosts::frameGenSetupMs.Last());
+	smooth(state.smoothUiDrawMs, FrameCosts::uiDrawMs.Last());
+	smooth(state.smoothOverlayDrawMs, FrameCosts::overlayDrawMs.Last());
+	smooth(state.smoothDlssBridgeCpuMs, FrameCosts::dlssBridgeCpuMs.Last());
+	smooth(state.smoothDlssEvalGpuMs, FrameCosts::dlssEvalGpuMs.Last());
+	smooth(state.smoothDlssBridgeGpuMs, FrameCosts::dlssBridgeGpuMs.Last());
+	smooth(state.smoothDrawHookMs, FrameCosts::drawHookMs.Last());
+	float neuralTotal = 0.0f, neuralModel = 0.0f;
+	if (DlssNR::GetLastCostMs(neuralTotal, neuralModel)) {
+		smooth(state.smoothNeuralTotalMs, neuralTotal);
+		smooth(state.smoothNeuralModelMs, neuralModel);
+	} else {
+		state.smoothNeuralTotalMs = 0.0f;
+		state.smoothNeuralModelMs = 0.0f;
+	}
+}
+
+// ============================================================================
+// DETAILED FRAMETIME BREAKDOWN
+// ============================================================================
+
+namespace
+{
+	enum class CostAttribution
+	{
+		Direct,    // work Bottled Shaders performs itself
+		Indirect,  // a game pass whose cost is raised by Bottled Shaders features hooking it
+		Game,      // the game's own work, untouched by Bottled Shaders
+		Wait       // time the CPU spends waiting (vsync, GPU-bound, pacing)
+	};
+
+	struct CostRow
+	{
+		std::string label;
+		float ms = 0.0f;
+		bool cpu = false;  // CPU wall time rather than GPU time
+		CostAttribution attribution = CostAttribution::Game;
+		std::string attributionText;
+		std::string detail;
+		int depth = 0;
+	};
+
+	const char* AttributionLabel(CostAttribution a_attribution)
+	{
+		switch (a_attribution) {
+		case CostAttribution::Direct:
+			return "Direct";
+		case CostAttribution::Indirect:
+			return "Indirect";
+		case CostAttribution::Wait:
+			return "Wait";
+		default:
+			return "Game";
+		}
+	}
+
+	ImVec4 AttributionColor(const Menu::ThemeSettings& a_theme, CostAttribution a_attribution)
+	{
+		switch (a_attribution) {
+		case CostAttribution::Direct:
+			return a_theme.StatusPalette.Error;
+		case CostAttribution::Indirect:
+			return a_theme.StatusPalette.Warning;
+		case CostAttribution::Wait:
+			return a_theme.StatusPalette.Disable;
+		default:
+			return a_theme.Palette.Text;
+		}
+	}
+
+	ImVec4 CostColor(const Menu::ThemeSettings& a_theme, float a_ms)
+	{
+		if (a_ms > PerformanceOverlay::Settings::kFrameTimeWarningThreshold)
+			return a_theme.StatusPalette.Error;
+		if (a_ms > PerformanceOverlay::Settings::kFrameTimeGoodThreshold)
+			return a_theme.StatusPalette.Warning;
+		return a_theme.StatusPalette.SuccessColor;
+	}
+
+	std::string FormatMs(float a_ms)
+	{
+		if (a_ms < PerformanceOverlay::Settings::kMicrosecondThreshold)
+			return std::format("{:.0f} us", a_ms * 1000.0f);
+		return std::format("{:.2f} ms", a_ms);
+	}
+
+	// Display name of the feature owning a profiler group ("Upscaling" in "Upscaling::RCAS").
+	std::string FeatureDisplayName(std::string_view a_shortName)
+	{
+		for (auto* feature : Feature::GetFeatureList()) {
+			if (feature->GetShortName() == a_shortName || feature->GetName() == a_shortName)
+				return feature->GetDisplayName();
+		}
+		return std::string(a_shortName);
+	}
+
+	// Loaded features that inject into a game shader type, which is where their indirect cost lands.
+	std::string FeaturesHookingShader(RE::BSShader::Type a_type)
+	{
+		std::string names;
+		for (auto* feature : Feature::GetFeatureList()) {
+			if (!feature->loaded || !feature->HasShaderDefine(a_type))
+				continue;
+			if (!names.empty())
+				names += ", ";
+			names += feature->GetDisplayName();
+		}
+		return names;
+	}
+
+	void DrawCostRow(const Menu::ThemeSettings& a_theme, const CostRow& a_row, float a_frameMs)
+	{
+		ImGui::TableNextRow();
+		ImGui::TableNextColumn();
+		if (a_row.depth > 0)
+			ImGui::Indent(ImGui::GetTextLineHeight() * static_cast<float>(a_row.depth));
+		ImGui::TextUnformatted(a_row.label.c_str());
+		if (a_row.depth > 0)
+			ImGui::Unindent(ImGui::GetTextLineHeight() * static_cast<float>(a_row.depth));
+		const bool hovered = ImGui::IsItemHovered();
+
+		ImGui::TableNextColumn();
+		ImGui::TextColored(CostColor(a_theme, a_row.ms), "%s", FormatMs(a_row.ms).c_str());
+
+		ImGui::TableNextColumn();
+		const float percent = a_frameMs > 0.0f ? a_row.ms / a_frameMs * 100.0f : 0.0f;
+		ImGui::Text("%.1f%%", percent);
+
+		ImGui::TableNextColumn();
+		ImGui::TextColored(AttributionColor(a_theme, a_row.attribution), "%s", AttributionLabel(a_row.attribution));
+
+		if (hovered || ImGui::IsItemHovered()) {
+			if (auto _tt = Util::HoverTooltipWrapper()) {
+				ImGui::TextColored(AttributionColor(a_theme, a_row.attribution), "%s", a_row.attributionText.c_str());
+				if (!a_row.detail.empty()) {
+					ImGui::Separator();
+					ImGui::TextUnformatted(a_row.detail.c_str());
+				}
+				ImGui::Separator();
+				ImGui::TextDisabled("%s", a_row.cpu ? "CPU wall time on the render thread" : "GPU time from timestamp queries");
+			}
+		}
+	}
+}
+
+namespace
+{
+	// The breakdown is text and sorting, all of it CPU on the render thread; rebuilding it every
+	// frame is exactly the kind of cost the overlay exists to show. Rebuilt on the update interval.
+	struct DetailedCache
+	{
+		std::vector<CostRow> gameRows;
+		std::vector<CostRow> featureRows;
+		std::vector<CostRow> presentationRows;
+		std::vector<CostRow> interfaceRows;
+		std::vector<CostRow> summaryRows;
+		float frameMs = 0.0f;
+		bool valid = false;
+	};
+	DetailedCache g_detailedCache;
+}
+
+void PerformanceOverlay::DrawDetailedBreakdown()
+{
+	auto* menu = Menu::GetSingleton();
+	const auto& theme = menu->GetTheme();
+	auto& upscaling = globals::features::upscaling;
+	auto& cache = g_detailedCache;
+
+	if (this->state.detailedRefreshDue || !cache.valid) {
+		this->state.detailedRefreshDue = false;
+		cache = {};
+		cache.valid = true;
+		cache.frameMs = this->state.smoothFrameTimeMs;
+		const float frameMs = cache.frameMs;
+
+		float gpuGameMs = 0.0f;
+		float totalDrawCalls = 0.0f;
+		float gpuFeatureMs = 0.0f;
+		float cpuWaitMs = 0.0f;
+
+		// ---- Game rendering by shader type (GPU) ------------------------------------------
+		globals::state->ForEachShaderTypeWithMetrics([&](auto type, int, float drawCalls, float frameTime, float, float) {
+			CostRow row;
+			row.label = std::string(magic_enum::enum_name(type));
+			row.ms = frameTime;
+			row.cpu = true;
+			const std::string hooking = FeaturesHookingShader(type);
+			if (hooking.empty()) {
+				row.attribution = CostAttribution::Game;
+				row.attributionText = std::format("Game: render-thread CPU time spent between draw calls while the {} shader is active (submission, driver, culling). No loaded Bottled Shaders feature injects into this shader type.", row.label);
+			} else {
+				row.attribution = CostAttribution::Indirect;
+				row.attributionText = std::format("Indirect: render-thread CPU time between draw calls while the {} shader is active. Bottled Shaders per-draw hooks add to it; features injected into this shader: {}.", row.label, hooking);
+			}
+			row.detail = std::format("{} draw calls this frame. This is CPU time measured between consecutive draws, not GPU execution time; fewer draws (shadow distance, object density) or cheaper per-draw work lowers it.", static_cast<int>(drawCalls));
+			gpuGameMs += frameTime;
+			totalDrawCalls += drawCalls;
+			cache.gameRows.push_back(std::move(row));
+		});
+		std::sort(cache.gameRows.begin(), cache.gameRows.end(), [](const CostRow& a, const CostRow& b) { return a.ms > b.ms; });
+		{
+			CostRow total;
+			total.label = T(TKEY("detailed_subtotal"), "Subtotal");
+			total.ms = gpuGameMs;
+			total.cpu = true;
+			total.attribution = CostAttribution::Indirect;
+			total.attributionText = "Render-thread CPU time attributed to draw submission across all shader types.";
+			cache.gameRows.push_back(std::move(total));
+		}
+		if (this->state.smoothDrawHookMs > 0.0f) {
+			CostRow hook;
+			hook.label = T(TKEY("detailed_draw_hook"), "Bottled Shaders per-draw hook (CPU, included above)");
+			hook.ms = this->state.smoothDrawHookMs;
+			hook.cpu = true;
+			hook.attribution = CostAttribution::Direct;
+			hook.attributionText = "Direct: the Bottled Shaders work that runs on every draw call (feature callbacks, permutation constant upload, shader tracking) plus the per-draw timer itself.";
+			hook.detail = std::format("Part of the submission rows above, not additional to them. About {:.2f} us per draw.", totalDrawCalls > 0.0f ? this->state.smoothDrawHookMs * 1000.0f / totalDrawCalls : 0.0f);
+			cache.gameRows.push_back(std::move(hook));
+		}
+
+		// ---- Bottled Shaders passes grouped by feature (GPU) --------------------------------
+		struct Group
+		{
+			std::string name;
+			float gpuMs = 0.0f;
+			float cpuMs = 0.0f;
+			std::vector<CostRow> passes;
+		};
+		std::vector<Group> groups;
+		std::unordered_map<std::string, size_t> groupIndex;
+		for (const auto& result : globals::profiler->GetResults()) {
+			if (!result.valid)
+				continue;
+			std::string groupName = result.name;
+			std::string passName = result.name;
+			if (const auto pos = result.name.find("::"); pos != std::string::npos) {
+				groupName = result.name.substr(0, pos);
+				passName = result.name.substr(pos + 2);
+			}
+			auto it = groupIndex.find(groupName);
+			if (it == groupIndex.end()) {
+				groupIndex[groupName] = groups.size();
+				groups.push_back({ groupName });
+				it = groupIndex.find(groupName);
+			}
+			auto& group = groups[it->second];
+			group.gpuMs += result.avgMs;
+			group.cpuMs += result.cpuAvgMs;
+			CostRow pass;
+			pass.label = passName;
+			pass.ms = result.avgMs;
+			pass.depth = 1;
+			pass.attribution = CostAttribution::Direct;
+			pass.attributionText = std::format("Direct: a {} pass run by Bottled Shaders.", FeatureDisplayName(groupName));
+			pass.detail = std::format("GPU avg {:.2f} ms, p95 {:.2f} ms, p99 {:.2f} ms. CPU submit {:.2f} ms.", result.avgMs, result.p95Ms, result.p99Ms, result.cpuAvgMs);
+			group.passes.push_back(std::move(pass));
+		}
+		std::sort(groups.begin(), groups.end(), [](const Group& a, const Group& b) { return a.gpuMs > b.gpuMs; });
+		for (auto& group : groups) {
+			gpuFeatureMs += group.gpuMs;
+			CostRow row;
+			row.label = FeatureDisplayName(group.name);
+			row.ms = group.gpuMs;
+			row.attribution = CostAttribution::Direct;
+			row.attributionText = std::format("Direct: GPU work performed by the {} feature ({} pass{}).", row.label, group.passes.size(), group.passes.size() == 1 ? "" : "es");
+			row.detail = std::format("CPU submit cost {:.2f} ms. Disable the feature to remove this cost entirely.", group.cpuMs);
+			cache.featureRows.push_back(std::move(row));
+			std::sort(group.passes.begin(), group.passes.end(), [](const CostRow& a, const CostRow& b) { return a.ms > b.ms; });
+			for (auto& pass : group.passes)
+				cache.featureRows.push_back(std::move(pass));
+		}
+		{
+			CostRow total;
+			total.label = T(TKEY("detailed_subtotal"), "Subtotal");
+			total.ms = gpuFeatureMs;
+			total.attribution = CostAttribution::Direct;
+			total.attributionText = "All profiled Bottled Shaders passes.";
+			cache.featureRows.push_back(std::move(total));
+		}
+
+		// ---- Upscaling, frame generation, presentation -------------------------------------
+		const bool fgPath = upscaling.IsFrameGenerationDx12PathActive();
+		const bool dlssg = upscaling.IsDlssFrameGenerationPathActive();
+		const bool fgActive = upscaling.IsFrameGenerationActive();
+
+		if (this->state.smoothDlssEvalGpuMs > 0.0f) {
+			float upscalePassMs = 0.0f;
+			for (const auto& result : globals::profiler->GetResults())
+				if (result.name == "Upscaling::Upscale")
+					upscalePassMs = result.avgMs;
+			const float overheadMs = upscalePassMs > 0.0f ? std::max(0.0f, upscalePassMs - this->state.smoothDlssBridgeGpuMs) : 0.0f;
+			CostRow sr;
+			sr.label = T(TKEY("detailed_dlss_eval"), "DLSS Super Resolution (GPU, D3D12)");
+			sr.ms = this->state.smoothDlssEvalGpuMs;
+			sr.attribution = CostAttribution::Direct;
+			sr.attributionText = "Direct: the DLSS model itself, timestamped on the D3D12 queue inside the bridge. Included in the Upscaling::Upscale pass above.";
+			sr.detail = upscalePassMs > 0.0f ?
+			                std::format("Upscaling::Upscale pass {:.2f} ms = DLSS {:.2f} ms + neural rendering {:.2f} ms + bridge copies and queue sync {:.2f} ms.", upscalePassMs, this->state.smoothDlssEvalGpuMs, std::max(0.0f, this->state.smoothDlssBridgeGpuMs - this->state.smoothDlssEvalGpuMs), overheadMs) :
+			                "Only the DLSS quality preset and model change this number.";
+			cache.presentationRows.push_back(std::move(sr));
+		}
+		if (this->state.smoothNeuralTotalMs > 0.0f) {
+			CostRow nr;
+			nr.label = T(TKEY("detailed_neural_rendering"), "DLSS 5 Neural Rendering");
+			nr.ms = this->state.smoothNeuralTotalMs;
+			nr.attribution = CostAttribution::Direct;
+			nr.attributionText = "Direct: the Upscaling feature's neural rendering pass (model plus composition), measured on the D3D12 queue.";
+			nr.detail = std::format("Model {:.2f} ms, composition {:.2f} ms. Lower the model resolution on the DLSS 5 tab to cut it.", this->state.smoothNeuralModelMs, this->state.smoothNeuralTotalMs - this->state.smoothNeuralModelMs);
+			cache.presentationRows.push_back(std::move(nr));
+		}
+		if (this->state.smoothDlssBridgeCpuMs > 0.0f) {
+			CostRow bridge;
+			bridge.label = T(TKEY("detailed_dlss_bridge"), "D3D12 DLSS bridge (CPU)");
+			bridge.ms = this->state.smoothDlssBridgeCpuMs;
+			bridge.cpu = true;
+			bridge.attribution = CostAttribution::Direct;
+			bridge.attributionText = "Direct: the Upscaling feature copying DLSS inputs to D3D12, submitting, and waiting for the result so the D3D11 frame can continue.";
+			bridge.detail = "Only present when Streamline is bound to the D3D12 proxy (frame generation on). The GPU time of DLSS itself is in the Upscaling::Upscale pass above.";
+			cache.presentationRows.push_back(std::move(bridge));
+		}
+		if (fgPath) {
+			CostRow setup;
+			setup.label = dlssg ? T(TKEY("detailed_dlssg_setup"), "DLSS Frame Generation setup (CPU)") : T(TKEY("detailed_fsrfg_setup"), "FSR Frame Generation setup (CPU)");
+			setup.ms = this->state.smoothFrameGenSetupMs;
+			setup.cpu = true;
+			setup.attribution = CostAttribution::Direct;
+			setup.attributionText = dlssg ?
+			                            "Direct: the Upscaling feature applying DLSS-G options and tagging its inputs each present. The interpolation itself runs on the GPU inside the NVIDIA runtime and is not measurable from here." :
+			                            "Direct: the Upscaling feature configuring FidelityFX frame generation and dispatching its prepare pass. The interpolation itself runs inside the AMD runtime at present time.";
+			setup.detail = fgActive ? std::format("Frame generation is presenting {}x this frame.", upscaling.GetFrameGenerationMultiplier()) : "Frame generation is idle this frame (menu, unfocused, or settling).";
+			cache.presentationRows.push_back(std::move(setup));
+		}
+		const float limiterMs = this->state.smoothFrameLimiterMs;
+		const float presentWaitMs = std::max(0.0f, this->state.smoothPresentMs - limiterMs - this->state.smoothFrameGenSetupMs);
+		{
+			CostRow present;
+			present.label = T(TKEY("detailed_present_wait"), "Present and vsync wait (CPU)");
+			present.ms = presentWaitMs;
+			present.cpu = true;
+			present.attribution = CostAttribution::Wait;
+			present.attributionText = "Wait: time the render thread spends inside Present. This is vsync, the GPU finishing earlier work, or frame generation pacing; it is not work Bottled Shaders performs.";
+			present.detail = fgPath ?
+			                     "Includes the D3D11 to D3D12 hand-off of the frame and the proxy swap chain's present. A large value with low GPU load usually means vsync or pacing." :
+			                     "A large value with low GPU load usually means vsync; with high GPU load it means the GPU is the bottleneck.";
+			cache.presentationRows.push_back(std::move(present));
+			cpuWaitMs += presentWaitMs;
+		}
+		if (fgPath) {
+			CostRow limiter;
+			limiter.label = T(TKEY("detailed_frame_limiter"), "Frame limiter (CPU)");
+			limiter.ms = limiterMs;
+			limiter.cpu = true;
+			limiter.attribution = CostAttribution::Direct;
+			limiter.attributionText = "Direct: the Upscaling feature's frame limiter (Frame Limit setting) waiting for the next presentation slot on the D3D12 proxy.";
+			limiter.detail = "Intentional idle time that keeps frame generation paced to the display. Turn off Frame Limit to remove it. Zero while DLSS Frame Generation paces presents itself.";
+			cache.presentationRows.push_back(std::move(limiter));
+			cpuWaitMs += limiterMs;
+		}
+		{
+			CostRow reflex;
+			reflex.label = T(TKEY("detailed_reflex_sleep"), "NVIDIA Reflex sleep (CPU)");
+			reflex.ms = this->state.smoothReflexSleepMs;
+			reflex.cpu = true;
+			reflex.attribution = CostAttribution::Direct;
+			reflex.attributionText = "Direct: the Upscaling feature's Reflex low-latency sleep at the start of the frame, requested by the Reflex Mode setting (forced on by DLSS Frame Generation).";
+			reflex.detail = "Reflex delays simulation so input is sampled closer to display; this is latency reduction, not lost throughput. Zero when Reflex is off.";
+			cache.presentationRows.push_back(std::move(reflex));
+			cpuWaitMs += this->state.smoothReflexSleepMs;
+		}
+
+		// ---- Interface -----------------------------------------------------------------------
+		{
+			const float overlayMs = std::min(this->state.smoothOverlayDrawMs, this->state.smoothUiDrawMs);
+			const float menuMs = std::max(0.0f, this->state.smoothUiDrawMs - overlayMs);
+			CostRow menuRow;
+			menuRow.label = T(TKEY("detailed_ui_menu"), "Bottled Shaders menu (CPU)");
+			menuRow.ms = menuMs;
+			menuRow.cpu = true;
+			menuRow.attribution = CostAttribution::Direct;
+			menuRow.attributionText = "Direct: building the Bottled Shaders settings menu, editors and other windows with ImGui, plus submitting the draw data.";
+			menuRow.detail = "Falls to a fraction of a millisecond when the menu is closed; the open menu rebuilds every feature page, table and search result each frame.";
+			cache.interfaceRows.push_back(std::move(menuRow));
+			CostRow overlayRow;
+			overlayRow.label = T(TKEY("detailed_ui_overlay"), "Performance overlay (CPU)");
+			overlayRow.ms = overlayMs;
+			overlayRow.cpu = true;
+			overlayRow.attribution = CostAttribution::Direct;
+			overlayRow.attributionText = "Direct: this overlay window, including this breakdown, the draw call table and the graphs.";
+			overlayRow.detail = "The breakdown tables are rebuilt on the update interval rather than every frame to keep this small.";
+			cache.interfaceRows.push_back(std::move(overlayRow));
+		}
+
+		// ---- Summary -------------------------------------------------------------------------
+		{
+			const float gpuMeasuredMs = gpuFeatureMs + this->state.smoothNeuralTotalMs;
+			const float cpuMeasuredMs = gpuGameMs + cpuWaitMs + this->state.smoothUiDrawMs + this->state.smoothFrameGenSetupMs + this->state.smoothDlssBridgeCpuMs;
+			const float unaccountedMs = std::max(0.0f, frameMs - cpuMeasuredMs);
+
+			CostRow gpu;
+			gpu.label = T(TKEY("detailed_gpu_measured"), "Measured GPU work (Bottled Shaders passes)");
+			gpu.ms = gpuMeasuredMs;
+			gpu.attribution = CostAttribution::Direct;
+			gpu.attributionText = std::format("Bottled Shaders passes {:.2f} ms + neural rendering {:.2f} ms. The game's own GPU passes are not timestamped, so this is a floor, not the whole GPU frame.", gpuFeatureMs, this->state.smoothNeuralTotalMs);
+			gpu.detail = "Runs in parallel with the CPU rows; when the GPU is the bottleneck the Present wait grows.";
+			cache.summaryRows.push_back(std::move(gpu));
+
+			CostRow cpu;
+			cpu.label = T(TKEY("detailed_cpu_measured"), "Measured render-thread CPU time");
+			cpu.ms = cpuMeasuredMs;
+			cpu.cpu = true;
+			cpu.attribution = CostAttribution::Wait;
+			cpu.attributionText = std::format("Draw submission {:.2f} ms + present/vsync, limiter and Reflex waits {:.2f} ms + interface {:.2f} ms + frame generation setup and the D3D12 bridge {:.2f} ms.", gpuGameMs, cpuWaitMs, this->state.smoothUiDrawMs, this->state.smoothFrameGenSetupMs + this->state.smoothDlssBridgeCpuMs);
+			cpu.detail = "When draw submission dominates and the Present wait is small, the frame is CPU-bound on the render thread.";
+			cache.summaryRows.push_back(std::move(cpu));
+
+			CostRow rest;
+			rest.label = T(TKEY("detailed_unaccounted"), "Game simulation and unmeasured work");
+			rest.ms = unaccountedMs;
+			rest.cpu = true;
+			rest.attribution = CostAttribution::Game;
+			rest.attributionText = "Game: everything on the render thread outside the measured rows (scene setup before the first draw, vanilla post-processing, UI submission).";
+			rest.detail = "Frame time minus the measured render-thread rows.";
+			cache.summaryRows.push_back(std::move(rest));
+
+			CostRow total;
+			total.label = T(TKEY("detailed_frame_total"), "Frame");
+			total.ms = frameMs;
+			total.cpu = true;
+			total.attribution = CostAttribution::Game;
+			total.attributionText = std::format("Rendered frame time: {:.1f} FPS before frame generation.", frameMs > 0.0f ? 1000.0f / frameMs : 0.0f);
+			cache.summaryRows.push_back(std::move(total));
+		}
+	}
+
+	const float frameMs = cache.frameMs;
+
+	ImGui::TextUnformatted(T(TKEY("detailed_title"), "Frametime Breakdown"));
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::TextUnformatted(T(TKEY("detailed_title_tooltip_1"), "Percentages are of the rendered frame time. GPU passes overlap CPU waits, so the groups do not add up to 100%."));
+		ImGui::TextUnformatted(T(TKEY("detailed_title_tooltip_2"), "Direct = work Bottled Shaders does itself. Indirect = a game pass made heavier by features hooking it. Game = untouched game work. Wait = the CPU idling on vsync, the GPU or frame pacing."));
+	}
+
+	const ImGuiTableFlags tableFlags = ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH;
+	const auto drawTable = [&](const char* a_id, const std::vector<CostRow>& a_rows) {
+		if (!ImGui::BeginTable(a_id, 4, tableFlags))
+			return;
+		ImGui::TableSetupColumn(T(TKEY("detailed_col_cost"), "Cost"), ImGuiTableColumnFlags_WidthStretch, 3.0f);
+		ImGui::TableSetupColumn(T(TKEY("detailed_col_time"), "Time"), ImGuiTableColumnFlags_WidthStretch, 1.0f);
+		ImGui::TableSetupColumn(T(TKEY("detailed_col_share"), "Share"), ImGuiTableColumnFlags_WidthStretch, 0.7f);
+		ImGui::TableSetupColumn(T(TKEY("detailed_col_source"), "Source"), ImGuiTableColumnFlags_WidthStretch, 0.9f);
+		ImGui::TableHeadersRow();
+		for (const auto& row : a_rows)
+			DrawCostRow(theme, row, frameMs);
+		ImGui::EndTable();
+	};
+
+	if (ImGui::TreeNodeEx(T(TKEY("detailed_game_passes"), "Draw submission (CPU, by shader)"), ImGuiTreeNodeFlags_DefaultOpen)) {
+		drawTable("##DetailedGamePasses", cache.gameRows);
+		ImGui::TreePop();
+	}
+	if (ImGui::TreeNodeEx(T(TKEY("detailed_feature_passes"), "Bottled Shaders passes (GPU, by feature)"), ImGuiTreeNodeFlags_DefaultOpen)) {
+		drawTable("##DetailedFeaturePasses", cache.featureRows);
+		ImGui::TreePop();
+	}
+	if (ImGui::TreeNodeEx(T(TKEY("detailed_presentation"), "Upscaling, frame generation and presentation"), ImGuiTreeNodeFlags_DefaultOpen)) {
+		drawTable("##DetailedPresentation", cache.presentationRows);
+		ImGui::TreePop();
+	}
+	if (ImGui::TreeNodeEx(T(TKEY("detailed_interface"), "Interface"), ImGuiTreeNodeFlags_DefaultOpen)) {
+		drawTable("##DetailedInterface", cache.interfaceRows);
+		ImGui::TreePop();
+	}
+	drawTable("##DetailedSummary", cache.summaryRows);
 }
 #undef I18N_KEY_PREFIX

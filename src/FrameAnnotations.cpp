@@ -1,5 +1,7 @@
 #include "FrameAnnotations.h"
 
+#include "Features/Upscaling.h"
+
 #include "State.h"
 #include "Util.h"
 
@@ -262,6 +264,7 @@ namespace FrameAnnotations
 	{
 		static void thunk(void* a1, bool a2, bool a3)
 		{
+			globals::features::upscaling.streamline.OnRenderSubmitStart();
 			globals::state->BeginPerfEvent("Player View");
 
 			func(a1, a2, a3);

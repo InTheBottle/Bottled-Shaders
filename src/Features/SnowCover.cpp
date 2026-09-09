@@ -694,22 +694,35 @@ void SnowCover::Hooks::BSEffectShader_SetupGeometry::thunk(RE::BSShader* This, R
 void SnowCover::BSLightingShader_Setup(RE::BSRenderPass* a_pass)
 {
 	auto state = globals::state;
-	auto userData = a_pass->geometry->GetUserData();
-	auto name = a_pass->geometry->name.c_str();
-	// Hash once per pass; fnv_hash dereferences unguarded and BSFixedString::c_str() can be null.
-	const uint64_t nameHash = name ? FormIdParser::fnv_hash(name) : 0;
-	if ((a_pass->geometry->HasAnimation() || (userData && ((userData->GetObjectReference() && userData->GetObjectReference()->IsBoundAnimObject()) || userData->CanBeMoved()))) && !(name && whitelist.contains(nameHash))) {
-		if (settings.AffectHavok && userData && userData->formType != RE::FormType::ActorCharacter && userData->CanBeMoved())
-			state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::NoSnow;
-		else
-			state->permutationData.ExtraShaderDescriptor |= (uint)State::ExtraShaderDescriptors::NoSnow;
-	} else if (name && blacklist.contains(nameHash)) {
-		state->permutationData.ExtraShaderDescriptor |= (uint)State::ExtraShaderDescriptors::NoSnow;
-	} else {
-		state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::NoSnow;
+	auto* geometry = a_pass->geometry;
+	auto userData = geometry->GetUserData();
+	// Cached per geometry for 30 frames (keyed on the reference too, so a reused address or a
+	// re-parented shape recomputes). Everything below is visual state that can lag that long.
+	const uint32_t frame = state->frameCount;
+	if ((frame & 4095) == 0 && setupCache.size() > 16384)
+		setupCache.clear();
+	auto& entry = setupCache[geometry];
+	if (entry.userData != userData || frame - entry.frame > 30) {
+		auto name = geometry->name.c_str();
+		// Hash once per pass; fnv_hash dereferences unguarded and BSFixedString::c_str() can be null.
+		const uint64_t nameHash = name ? FormIdParser::fnv_hash(name) : 0;
+		bool noSnow = false;
+		if ((geometry->HasAnimation() || (userData && ((userData->GetObjectReference() && userData->GetObjectReference()->IsBoundAnimObject()) || userData->CanBeMoved()))) && !(name && whitelist.contains(nameHash))) {
+			noSnow = !(settings.AffectHavok && userData && userData->formType != RE::FormType::ActorCharacter && userData->CanBeMoved());
+		} else if (name && blacklist.contains(nameHash)) {
+			noSnow = true;
+		}
+		entry.userData = userData;
+		entry.frame = frame;
+		entry.noSnow = noSnow;
+		entry.noFoliageTint = !settings.AffectFloraTint && IsHarvestableFlora(userData);
 	}
 
-	if (!settings.AffectFloraTint && IsHarvestableFlora(userData))
+	if (entry.noSnow)
+		state->permutationData.ExtraShaderDescriptor |= (uint)State::ExtraShaderDescriptors::NoSnow;
+	else
+		state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::NoSnow;
+	if (entry.noFoliageTint)
 		state->permutationData.ExtraShaderDescriptor |= (uint)State::ExtraShaderDescriptors::NoFoliageTint;
 	else
 		state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::NoFoliageTint;
