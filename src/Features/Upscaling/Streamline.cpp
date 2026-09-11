@@ -928,14 +928,27 @@ void Streamline::UpdateReflex()
 	// input, which is where the reference implementation paces as well. Without this cap the
 	// presented rate above 2x ran past the display (3x and 4x of a 50 to 60 fps render on a 164 Hz
 	// panel) and DLSS-G had to hold and drop generated frames, which showed as jittery movement.
-	if (settings.frameLimitMode && upscaling.IsDlssFrameGenerationPathActive() && settings.frameGenerationMode != 0 && upscaling.refreshRate > 1.0) {
+	// The frame generation FPS limit is a second, separate cap on the presented rate that only
+	// applies while generation is on; the lowest enabled cap wins.
+	if (upscaling.IsDlssFrameGenerationPathActive() && settings.frameGenerationMode != 0) {
 		const uint32_t presentedPerRendered = std::clamp(settings.dlssgGeneratedFrames + 1u, 2u, 5u);
-		const float renderedCap = static_cast<float>(upscaling.refreshRate / static_cast<double>(presentedPerRendered));
-		fpsLimit = fpsLimit > 0.0f ? std::min(fpsLimit, renderedCap) : renderedCap;
-		static uint32_t loggedPerRendered = 0;
-		if (loggedPerRendered != presentedPerRendered) {
-			loggedPerRendered = presentedPerRendered;
-			logger::info("[Streamline] Reflex caps the rendered rate at {:.1f} fps: {} presented per rendered frame at {:.1f} Hz", renderedCap, presentedPerRendered, upscaling.refreshRate);
+		double presentedCap = 0.0;
+		if (settings.frameLimitMode && upscaling.refreshRate > 1.0)
+			presentedCap = upscaling.refreshRate;
+		if (settings.frameGenerationFPSLimitEnabled && std::isfinite(settings.frameGenerationFPSLimit)) {
+			const double fgCap = std::clamp(settings.frameGenerationFPSLimit, 30.0f, 480.0f);
+			presentedCap = presentedCap > 0.0 ? std::min(presentedCap, fgCap) : fgCap;
+		}
+		if (presentedCap > 0.0) {
+			const float renderedCap = static_cast<float>(presentedCap / static_cast<double>(presentedPerRendered));
+			fpsLimit = fpsLimit > 0.0f ? std::min(fpsLimit, renderedCap) : renderedCap;
+			static uint32_t loggedPerRendered = 0;
+			static double loggedPresentedCap = 0.0;
+			if (loggedPerRendered != presentedPerRendered || loggedPresentedCap != presentedCap) {
+				loggedPerRendered = presentedPerRendered;
+				loggedPresentedCap = presentedCap;
+				logger::info("[Streamline] Reflex caps the rendered rate at {:.1f} fps: {} presented per rendered frame for {:.1f} presented", renderedCap, presentedPerRendered, presentedCap);
+			}
 		}
 	}
 	options.frameLimitUs = fpsLimit > 0.0f ? static_cast<uint32_t>(std::lround(1000000.0 / static_cast<double>(fpsLimit))) : 0u;

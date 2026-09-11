@@ -32,6 +32,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	upscaleMethodNoDLSS,
 	qualityMode,
 	frameLimitMode,
+	frameGenerationFPSLimitEnabled,
+	frameGenerationFPSLimit,
 	frameGenerationMode,
 	frameGenerationForceEnable,
 	frameGenerationAllowInMenus,
@@ -588,6 +590,22 @@ void Upscaling::DrawUpscalingTab()
 			ImGui::EndDisabled();
 
 		ImGui::TextWrapped("Caps the rendered rate at the refresh rate divided by the frame generation multiplier, so the presented rate lands on the display instead of running past it. Detected: %.2f Hz", refreshRate);
+
+		if (!frameGenerationDx12PathActive)
+			ImGui::BeginDisabled();
+		ImGui::Checkbox(T(TKEY("frame_generation_fps_limit"), "Frame Generation FPS Limit"), &settings.frameGenerationFPSLimitEnabled);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::TextUnformatted(T(TKEY("frame_generation_fps_limit_tooltip_1"), "A limit on the presented frame rate that only applies while frame generation is on, separate from the refresh-rate limiter above and from the Reflex FPS limit."));
+			ImGui::TextUnformatted(T(TKEY("frame_generation_fps_limit_tooltip_2"), "The rendered rate is capped at this value divided by the multiplier (3x at 120 renders 40). The lowest of the enabled limits wins."));
+		}
+		if (settings.frameGenerationFPSLimitEnabled) {
+			if (!std::isfinite(settings.frameGenerationFPSLimit))
+				settings.frameGenerationFPSLimit = 120.0f;
+			settings.frameGenerationFPSLimit = std::clamp(settings.frameGenerationFPSLimit, 30.0f, 480.0f);
+			ImGui::SliderFloat(T(TKEY("frame_generation_fps_limit_value"), "Presented FPS"), &settings.frameGenerationFPSLimit, 30.0f, 480.0f, "%.0f");
+		}
+		if (!frameGenerationDx12PathActive)
+			ImGui::EndDisabled();
 		bool fgForce = settings.frameGenerationForceEnable != 0;
 		if (ImGui::Checkbox(T(TKEY("force_enable_frame_generation"), "Force Enable Frame Generation"), &fgForce))
 			settings.frameGenerationForceEnable = fgForce ? 1 : 0;
@@ -1662,12 +1680,17 @@ void Upscaling::FrameLimiter()
 			if (ShouldUseFrameGenerationThisFrame())
 				presentedPerRendered = activeFrameGenIsDLSSG ? std::clamp(settings.dlssgGeneratedFrames + 1u, 2u, 5u) : 2u;
 			const double frameRateScale = 1.0 / static_cast<double>(presentedPerRendered);
+			double presentedCap = refreshRate;
+			if (presentedPerRendered > 1 && settings.frameGenerationFPSLimitEnabled && std::isfinite(settings.frameGenerationFPSLimit))
+				presentedCap = std::min(presentedCap, static_cast<double>(std::clamp(settings.frameGenerationFPSLimit, 30.0f, 480.0f)));
 			static uint32_t loggedPerRendered = 0;
-			if (loggedPerRendered != presentedPerRendered) {
+			static double loggedPresentedCap = 0.0;
+			if (loggedPerRendered != presentedPerRendered || loggedPresentedCap != presentedCap) {
 				loggedPerRendered = presentedPerRendered;
-				logger::info("[Upscaling] Frame limiter: {} presented per rendered frame, rendered cap {:.1f} fps at {:.1f} Hz", presentedPerRendered, refreshRate * frameRateScale, refreshRate);
+				loggedPresentedCap = presentedCap;
+				logger::info("[Upscaling] Frame limiter: {} presented per rendered frame, rendered cap {:.1f} fps for {:.1f} presented", presentedPerRendered, presentedCap * frameRateScale, presentedCap);
 			}
-			int64_t targetFrameTimeNS = int64_t(static_cast<double>(kNanosecondsPerSecond) / (refreshRate * frameRateScale));
+			int64_t targetFrameTimeNS = int64_t(static_cast<double>(kNanosecondsPerSecond) / (presentedCap * frameRateScale));
 			int64_t targetFrameTicks = (targetFrameTimeNS * qpf.QuadPart) / kNanosecondsPerSecond;
 
 			static LARGE_INTEGER lastFrame = {};
