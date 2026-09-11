@@ -120,7 +120,7 @@ void DX12SwapChain::CreateD3D12Device(IDXGIAdapter* a_adapter)
 	if (streamline.UsesD3D12())
 		IsStreamlineProxy(streamline, "commandQueue", commandQueue.get());
 
-	for (int i = 0; i < 2; i++) {
+	for (UINT i = 0; i < kBackBufferCount; i++) {
 		DX::ThrowIfFailed(d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocators[i])));
 		DX::ThrowIfFailed(d3d12Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocators[i].get(), nullptr, IID_PPV_ARGS(&commandLists[i])));
 		commandLists[i]->Close();
@@ -164,7 +164,7 @@ void DX12SwapChain::CreateSwapChain(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC 
 	swapChainDesc.Format = negotiatedFormat;
 	swapChainDesc.SampleDesc.Count = 1;
 	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-	swapChainDesc.BufferCount = 2;
+	swapChainDesc.BufferCount = kBackBufferCount;
 	swapChainDesc.SwapEffect = a_swapChainDesc.SwapEffect;
 	swapChainDesc.Flags = a_swapChainDesc.Flags;
 
@@ -227,8 +227,8 @@ void DX12SwapChain::CreateSwapChain(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC 
 		}
 	}
 
-	DX::ThrowIfFailed(swapChain->GetBuffer(0, IID_PPV_ARGS(&swapChainBuffers[0])));
-	DX::ThrowIfFailed(swapChain->GetBuffer(1, IID_PPV_ARGS(&swapChainBuffers[1])));
+	for (UINT i = 0; i < kBackBufferCount; i++)
+		DX::ThrowIfFailed(swapChain->GetBuffer(i, IID_PPV_ARGS(&swapChainBuffers[i])));
 
 	frameIndex = swapChain->GetCurrentBackBufferIndex();
 
@@ -328,19 +328,22 @@ HRESULT DX12SwapChain::ResizeBuffers(UINT bufferCount, UINT width, UINT height, 
 	// frame-generation swap-chain stores the supplied value verbatim and uses it
 	// as its replacement-buffer count, so forwarding zero leaves it with no valid
 	// source resource at the next Present.
-	const UINT effectiveBufferCount = bufferCount ? bufferCount : swapChainDesc.BufferCount;
-	if (!bufferCount)
-		logger::warn("[DX12SwapChain] Normalized ResizeBuffers count from 0 to {} to preserve replacement buffers", effectiveBufferCount);
-	if (effectiveBufferCount != 2) {
-		logger::error("[DX12SwapChain] Rejected unsupported resize buffer count {} (CS requires 2)", effectiveBufferCount);
-		return DXGI_ERROR_UNSUPPORTED;
+	// The proxy owns its buffer count: the game asks for its own two (or zero, meaning keep), and
+	// the real chain keeps kBackBufferCount whatever it asks.
+	const UINT effectiveBufferCount = kBackBufferCount;
+	if (bufferCount && bufferCount != kBackBufferCount) {
+		static bool loggedCount = false;
+		if (!loggedCount) {
+			loggedCount = true;
+			logger::info("[DX12SwapChain] Game asked for {} buffers on resize; the proxy keeps {}", bufferCount, kBackBufferCount);
+		}
 	}
 
 	// These references are to the swap chain buffers. They must not keep
 	// the old generation alive across the resize, and must be refreshed
 	// before CS records another copy.
-	swapChainBuffers[0] = nullptr;
-	swapChainBuffers[1] = nullptr;
+	for (auto& buffer : swapChainBuffers)
+		buffer = nullptr;
 	const HRESULT result = swapChain->ResizeBuffers(effectiveBufferCount, width, height, format, flags);
 	if (FAILED(result))
 		return result;
@@ -357,8 +360,8 @@ HRESULT DX12SwapChain::ResizeBuffers(UINT bufferCount, UINT width, UINT height, 
 		RecreateWrappedResources(resizedDesc);
 	swapChainDesc = resizedDesc;
 
-	DX::ThrowIfFailed(swapChain->GetBuffer(0, IID_PPV_ARGS(swapChainBuffers[0].put())));
-	DX::ThrowIfFailed(swapChain->GetBuffer(1, IID_PPV_ARGS(swapChainBuffers[1].put())));
+	for (UINT i = 0; i < kBackBufferCount; i++)
+		DX::ThrowIfFailed(swapChain->GetBuffer(i, IID_PPV_ARGS(swapChainBuffers[i].put())));
 	frameIndex = swapChain->GetCurrentBackBufferIndex();
 	return S_OK;
 }

@@ -50,6 +50,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	reflexFPSLimit,
 	fsr4RuntimeEnable,
 	fsr4RuntimeSelectionSchemaVersion,
+	dlssHintMasks,
 	neuralRenderingEnabled,
 	neuralRendering);
 
@@ -395,6 +396,11 @@ void Upscaling::DrawUpscalingTab()
 			if (dlssBridge.IsQuarantined())
 				Util::Text::Warning("%s", T(TKEY("dlss_bridge_quarantined"), "The D3D12 DLSS bridge failed this session; DLSS and DLSS-NR on D3D12 are off until restart."));
 
+			ImGui::Checkbox(T(TKEY("dlss_hint_masks"), "DLSS Hint Masks"), &settings.dlssHintMasks);
+			if (auto _tt = Util::HoverTooltipWrapper()) {
+				ImGui::TextUnformatted(T(TKEY("dlss_hint_masks_tooltip_1"), "Sends the game's TAA mask and the transparency mask to DLSS as bias and transparency hints."));
+				ImGui::TextUnformatted(T(TKEY("dlss_hint_masks_tooltip_2"), "Off (default): DLSS works from colour, depth and motion only, as the reference implementation does. Turn on if particles or water ghost; turn off if skin and eyes show dark speckles below Native AA."));
+			}
 			ImGui::Checkbox(T(TKEY("enable_sharpening"), "Enable Sharpening"), &settings.sharpnessEnabledDLSS);
 			if (auto _tt = Util::HoverTooltipWrapper()) {
 				ImGui::Text("%s", T(TKEY("enable_sharpening_tooltip"),
@@ -581,7 +587,7 @@ void Upscaling::DrawUpscalingTab()
 		if (!frameGenerationDx12PathActive)
 			ImGui::EndDisabled();
 
-		ImGui::TextWrapped("Allows frame generation to function on low refresh rate monitors. Detected: %.2f Hz", refreshRate);
+		ImGui::TextWrapped("Caps the rendered rate at the refresh rate divided by the frame generation multiplier, so the presented rate lands on the display instead of running past it. Detected: %.2f Hz", refreshRate);
 		bool fgForce = settings.frameGenerationForceEnable != 0;
 		if (ImGui::Checkbox(T(TKEY("force_enable_frame_generation"), "Force Enable Frame Generation"), &fgForce))
 			settings.frameGenerationForceEnable = fgForce ? 1 : 0;
@@ -770,7 +776,7 @@ void Upscaling::DrawNeuralRenderingTab()
 	changed |= ImGui::SliderFloat(T(TKEY("nr_local_tone"), "Local Tone"), &nr.localToneStrength, 0.0f, 4.0f, "%.2f");
 	changed |= ImGui::SliderFloat(T(TKEY("nr_skin_structure"), "Skin Structure"), &nr.skinStructureStrength, -1.0f, 4.0f, "%.2f");
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::TextUnformatted(T(TKEY("nr_skin_structure_tooltip"), "-1 follows local structure (the model's own default)."));
+		ImGui::TextUnformatted(T(TKEY("nr_skin_structure_tooltip"), "Detail the model adds to skin. 1 is the reference default; below 0 follows Local Structure. Negative values reach the model as darkening and put blotches around the eyes."));
 	bool autoMask = nr.useAutoMask != 0;
 	if (ImGui::Checkbox(T(TKEY("nr_auto_mask"), "Auto Skin Mask"), &autoMask)) {
 		nr.useAutoMask = autoMask ? 1u : 0u;
@@ -1637,16 +1643,30 @@ void Upscaling::FrameLimiter()
 {
 	FrameCosts::AccumulatingScope limiterScope(FrameCosts::frameLimiterMs);
 	if (d3d12SwapChainActive) {
-		// Use frame latency waitable object if available for better frame pacing
-		HANDLE waitableObject = GetFrameLatencyWaitableObject();
-
-		// Wait for the next frame presentation slot
-		WaitForSingleObject(waitableObject, INFINITE);
+		// While DLSS-G presents, its presenter owns the flip queue and paces the generated frames
+		// against it. A second waiter on the same latency event starves that wait (the reference
+		// implementation measured 30 ms timeouts), so the wait only runs while generation is off.
+		if (!streamline.dlssgActive) {
+			HANDLE waitableObject = GetFrameLatencyWaitableObject();
+			if (waitableObject)
+				WaitForSingleObject(waitableObject, INFINITE);
+		}
 
 		if (settings.frameLimitMode) {
 			static constexpr int64_t kNanosecondsPerSecond = 1000000000LL;
-			static constexpr double kFrameGenerationRateScale = 0.5;
-			const double frameRateScale = ShouldUseFrameGenerationThisFrame() ? kFrameGenerationRateScale : 1.0;
+			// The limiter caps the rendered rate so the presented rate lands on the refresh rate:
+			// refresh / (generated + 1). It used to assume 2x, which at 3x and 4x pushed the
+			// presented rate far past the display and left DLSS-G holding and dropping frames,
+			// which is the jitter seen above 2x.
+			uint32_t presentedPerRendered = 1;
+			if (ShouldUseFrameGenerationThisFrame())
+				presentedPerRendered = activeFrameGenIsDLSSG ? std::clamp(settings.dlssgGeneratedFrames + 1u, 2u, 5u) : 2u;
+			const double frameRateScale = 1.0 / static_cast<double>(presentedPerRendered);
+			static uint32_t loggedPerRendered = 0;
+			if (loggedPerRendered != presentedPerRendered) {
+				loggedPerRendered = presentedPerRendered;
+				logger::info("[Upscaling] Frame limiter: {} presented per rendered frame, rendered cap {:.1f} fps at {:.1f} Hz", presentedPerRendered, refreshRate * frameRateScale, refreshRate);
+			}
 			int64_t targetFrameTimeNS = int64_t(static_cast<double>(kNanosecondsPerSecond) / (refreshRate * frameRateScale));
 			int64_t targetFrameTicks = (targetFrameTimeNS * qpf.QuadPart) / kNanosecondsPerSecond;
 
@@ -1982,8 +2002,12 @@ void Upscaling::Upscale()
 			bridgeInputs.output = sharpenerTexture ? sharpenerTexture->resource.get() : nullptr;
 			bridgeInputs.depth = dlssDepthTexture ? dlssDepthTexture->resource.get() : nullptr;
 			bridgeInputs.motionVectors = motionVectorCopyTexture->resource.get();
-			bridgeInputs.reactiveMask = reactiveMaskTexture->resource.get();
-			bridgeInputs.transparencyMask = transparencyCompositionMaskTexture->resource.get();
+			// The hint masks come from the game's TAA mask and the water/normals mask. The reference
+			// implementation stopped sending any hint: DLSS treats a marked pixel as one to trust the
+			// current frame for, and on skin and eyes below native resolution that shows the raw
+			// sample pattern as dark speckles. Off unless asked for.
+			bridgeInputs.reactiveMask = settings.dlssHintMasks ? reactiveMaskTexture->resource.get() : nullptr;
+			bridgeInputs.transparencyMask = settings.dlssHintMasks ? transparencyCompositionMaskTexture->resource.get() : nullptr;
 			bridgeInputs.renderWidth = std::max(1u, (uint32_t)renderSize.x);
 			bridgeInputs.renderHeight = std::max(1u, (uint32_t)renderSize.y);
 			bridgeInputs.displayWidth = mainDesc.Width;
@@ -2022,7 +2046,7 @@ void Upscaling::Upscale()
 					bridgeInputs.evaluateDLSS = false;
 					dlssBridge.Dispatch(bridgeInputs);
 				}
-				streamline.Upscale(main.texture, reactiveMaskTexture->resource.get(), transparencyCompositionMaskTexture->resource.get(), motionVectorCopyTexture->resource.get());
+				streamline.Upscale(main.texture, settings.dlssHintMasks ? reactiveMaskTexture->resource.get() : nullptr, settings.dlssHintMasks ? transparencyCompositionMaskTexture->resource.get() : nullptr, motionVectorCopyTexture->resource.get());
 			}
 		} else if (upscaleMethod == UpscaleMethod::kFSR) {
 			auto& depthStencil = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN];

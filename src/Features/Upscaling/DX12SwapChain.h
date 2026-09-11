@@ -78,8 +78,11 @@ public:
 	winrt::com_ptr<ID3D12Device> d3d12Device;
 	winrt::com_ptr<ID3D12Device> proxyD3D12Device;  ///< Streamline-upgraded device when bound to D3D12, else d3d12Device
 	winrt::com_ptr<ID3D12CommandQueue> commandQueue;
-	winrt::com_ptr<ID3D12CommandAllocator> commandAllocators[2];
-	winrt::com_ptr<ID3D12GraphicsCommandList4> commandLists[2];
+	/// Back buffers on the proxy swap chain. Three, as the reference implementation uses: with
+	/// two, DLSS-G above 2x has one buffer to pace its generated frames against and stutters.
+	static constexpr UINT kBackBufferCount = 3;
+	winrt::com_ptr<ID3D12CommandAllocator> commandAllocators[kBackBufferCount];
+	winrt::com_ptr<ID3D12GraphicsCommandList4> commandLists[kBackBufferCount];
 
 	IDXGISwapChain4* swapChain = nullptr;
 
@@ -98,12 +101,12 @@ public:
 	winrt::com_ptr<ID3D11Fence> d3d11Fence;
 	winrt::com_ptr<ID3D12Fence> d3d12Fence;
 
-	winrt::com_ptr<ID3D12Resource> swapChainBuffers[2];
+	winrt::com_ptr<ID3D12Resource> swapChainBuffers[kBackBufferCount];
 
 	UINT frameIndex = 0;
 	UINT64 fenceValue = 0;
 
-	UINT64 frameFenceValues[2] = { 0, 0 };
+	UINT64 frameFenceValues[kBackBufferCount] = {};
 
 	LARGE_INTEGER qpf;
 

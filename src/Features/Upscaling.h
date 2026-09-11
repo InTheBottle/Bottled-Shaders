@@ -96,6 +96,7 @@ public:
 		uint32_t fsr4RuntimeSelectionSchemaVersion = kFsr4RuntimeSelectionSchemaVersion;
 
 		// DLSS 5 Neural Rendering over the DLSS output (needs nvngx_dlssnr.dll in the Streamline folder)
+		bool dlssHintMasks = false;  ///< Tag the TAA-derived bias and transparency hints for DLSS; off matches the reference implementation
 		bool neuralRenderingEnabled = false;
 		DlssNR::Settings neuralRendering;
 	};

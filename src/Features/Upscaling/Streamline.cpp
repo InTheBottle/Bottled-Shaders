@@ -776,7 +776,11 @@ void Streamline::EvaluateDLSS(sl::ViewportHandle vp,
 		{ &transparencyMaskRes, sl::kBufferTypeTransparencyHint, sl::ResourceLifecycle::eValidUntilPresent, &extentIn }
 	};
 
-	if (SL_FAILED(tagResult, slSetTagForFrame(*frameToken, vp, tags, _countof(tags), context))) {
+	uint32_t numTags = _countof(tags);
+	if (!reactiveMask || !transparencyMask)
+		numTags -= 2;
+
+	if (SL_FAILED(tagResult, slSetTagForFrame(*frameToken, vp, tags, numTags, context))) {
 		static bool tagErrorLogged = false;
 		if (!tagErrorLogged) {
 			tagErrorLogged = true;
@@ -918,8 +922,23 @@ void Streamline::UpdateReflex()
 		settings.reflexFPSLimit = reflexFPSLimit;
 		logger::warn("[Streamline] reflexFPSLimit is not finite ({}), using {}", originalReflexFPSLimit, reflexFPSLimit);
 	}
-	const float fpsLimit = std::clamp(reflexFPSLimit, 20.0f, 240.0f);
-	options.frameLimitUs = settings.reflexUseFPSLimit ? static_cast<uint32_t>(std::lround(1000000.0 / static_cast<double>(fpsLimit))) : 0u;
+	float fpsLimit = settings.reflexUseFPSLimit ? std::clamp(reflexFPSLimit, 20.0f, 240.0f) : 0.0f;
+	// With DLSS-G on and the frame limiter enabled, the rendered rate is capped so the presented
+	// rate lands on the display's refresh rate: refresh / (generated + 1). Reflex sleeps before
+	// input, which is where the reference implementation paces as well. Without this cap the
+	// presented rate above 2x ran past the display (3x and 4x of a 50 to 60 fps render on a 164 Hz
+	// panel) and DLSS-G had to hold and drop generated frames, which showed as jittery movement.
+	if (settings.frameLimitMode && upscaling.IsDlssFrameGenerationPathActive() && settings.frameGenerationMode != 0 && upscaling.refreshRate > 1.0) {
+		const uint32_t presentedPerRendered = std::clamp(settings.dlssgGeneratedFrames + 1u, 2u, 5u);
+		const float renderedCap = static_cast<float>(upscaling.refreshRate / static_cast<double>(presentedPerRendered));
+		fpsLimit = fpsLimit > 0.0f ? std::min(fpsLimit, renderedCap) : renderedCap;
+		static uint32_t loggedPerRendered = 0;
+		if (loggedPerRendered != presentedPerRendered) {
+			loggedPerRendered = presentedPerRendered;
+			logger::info("[Streamline] Reflex caps the rendered rate at {:.1f} fps: {} presented per rendered frame at {:.1f} Hz", renderedCap, presentedPerRendered, upscaling.refreshRate);
+		}
+	}
+	options.frameLimitUs = fpsLimit > 0.0f ? static_cast<uint32_t>(std::lround(1000000.0 / static_cast<double>(fpsLimit))) : 0u;
 	// Official SL Reflex guidance says to leave marker-based optimization disabled unless the
 	// Reflex team advises otherwise. PCL markers are still emitted for latency reporting and
 	// DLSS-G frame matching.

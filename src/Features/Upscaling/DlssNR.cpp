@@ -136,6 +136,7 @@ namespace DlssNR
 			ID3D12Resource* proxy = nullptr;         // scene-linear frames: the encoded (soft knee + sRGB) full-size picture the model is shown
 			ID3D12Resource* modelOut = nullptr;      // the model's answer (work size)
 			ID3D12Resource* smallProxy = nullptr;
+			ID3D12Resource* guideDepth = nullptr;     // the guide-sized depth copy the model reads when the game's depth texture is larger than the picture
 			ID3D12Resource* nrMotion = nullptr;      // motion for the model: the game's vectors in guide pixels plus the jitter delta (RG16F, guide size)    // the proxy shrunk to work size, when reduced
 			bool encodeHdr = false;                  // the frame is float scene-linear and goes through the encode/decode
 			ID3D12Resource* modelStable = nullptr;   // reduced: the model's answer with its edit steadied over time (work size, fp16)
@@ -620,10 +621,10 @@ namespace DlssNR
 
 		void Barriers(ID3D12GraphicsCommandList* a_commandList, std::initializer_list<Transition> a_transitions)
 		{
-			D3D12_RESOURCE_BARRIER barriers[8]{};
+			D3D12_RESOURCE_BARRIER barriers[12]{};
 			UINT count = 0;
 			for (const auto& t : a_transitions) {
-				if (!t.resource || t.from == t.to || count >= 8)
+				if (!t.resource || t.from == t.to || count >= 12)
 					continue;
 				barriers[count++] = CD3DX12_RESOURCE_BARRIER::Transition(t.resource, t.from, t.to);
 			}
@@ -743,6 +744,16 @@ namespace DlssNR
 			g.builtLocalTone = s.localToneStrength;
 			g.builtSkin = s.skinStructureStrength;
 			g.builtAutoMask = s.useAutoMask;
+		}
+
+		/// The value the model is given for skin structure. The slider's -1 means "follow local
+		/// structure", and for a long time that -1 went to the model as it was: a negative skin
+		/// strength, which the model applied as darkening across skin detail. The eye sockets and the
+		/// bridge of the nose came out as dark blotches, worst below native resolution where the
+		/// upscaler then accumulated them.
+		float SkinStrength(const Settings& a_settings)
+		{
+			return a_settings.skinStructureStrength < 0.0f ? a_settings.localStructureStrength : a_settings.skinStructureStrength;
 		}
 
 		[[maybe_unused]] float WorkScale(uint32_t a_performanceMode)
@@ -870,6 +881,7 @@ namespace DlssNR
 					ParkResource(g.modelOut);
 					ParkResource(g.smallProxy);
 					ParkResource(g.nrMotion);
+					ParkResource(g.guideDepth);
 					ParkResource(g.modelStable);
 					ParkResource(g.editHistory[0]);
 					ParkResource(g.editHistory[1]);
@@ -882,6 +894,7 @@ namespace DlssNR
 			g.keep = CreateScratch(a_device, colorDesc.Format, width, height);
 			g.modelOut = CreateScratch(a_device, modelFormat, workWidth, workHeight);
 			g.nrMotion = CreateScratch(a_device, DXGI_FORMAT_R16G16_FLOAT, guideWidth, guideHeight);
+			g.guideDepth = CreateScratch(a_device, depthDesc.Format, guideWidth, guideHeight);
 			g.proxy = hdrFrame ? CreateScratch(a_device, modelFormat, width, height) : nullptr;
 			g.encodeHdr = hdrFrame;
 			g.width = width;
@@ -890,7 +903,7 @@ namespace DlssNR
 			g.workHeight = workHeight;
 			g.guideWidth = guideWidth;
 			g.guideHeight = guideHeight;
-			if (!g.keep || !g.modelOut || !g.nrMotion || (hdrFrame && !g.proxy)) {
+			if (!g.keep || !g.modelOut || !g.nrMotion || !g.guideDepth || (hdrFrame && !g.proxy)) {
 				Fail("scratch surfaces could not be created");
 				return;
 			}
@@ -915,7 +928,7 @@ namespace DlssNR
 				g.setExtras(g.capabilityParams, 1.0f, nullptr, nullptr, nullptr, 0, 0, 0, 0);
 			g.feature = g.create(snippet.c_str(), g.dataPath.c_str(), a_device, a_commandList, g.capabilityParams, workWidth, workHeight,
 				static_cast<int>(settings.preset), settings.intensity, static_cast<int>(settings.style), settings.localStructureStrength,
-				settings.localToneStrength, settings.skinStructureStrength, settings.useAutoMask ? 1 : 0, 1);
+				settings.localToneStrength, SkinStrength(settings), settings.useAutoMask ? 1 : 0, 1);
 			if (!g.feature) {
 				const auto initResult = static_cast<unsigned int>(g.lastInit ? *g.lastInit : 0);
 				const auto createResult = static_cast<unsigned int>(g.lastCreate ? *g.lastCreate : 0);
@@ -924,7 +937,7 @@ namespace DlssNR
 			}
 			RecordBuiltTuning(settings);
 			g.reset = true;
-			logger::info("[DLSS-NR] running at {}x{} (model {}x{}, guides {}x{}, preset {}, style {}, intensity {}, motion scale x{} -> {} px/unit to the model, edit stability {}, {} frame{})", width, height, workWidth, workHeight, guideWidth, guideHeight, settings.preset, settings.style, settings.intensity, settings.motionScale, static_cast<float>(guideWidth) * settings.motionScale * static_cast<float>(workWidth) / static_cast<float>(width), reduced ? settings.editStability : 0.0f, hdrFrame ? "scene-linear" : "display-referred", hdrFrame ? std::format(", white point {}", whitePoint) : std::string{});
+			logger::info("[DLSS-NR] running at {}x{} (model {}x{}, guides {}x{} from a {}x{} depth texture, preset {}, style {}, intensity {}, motion scale x{} -> {} px/unit to the model, edit stability {}, {} frame{})", width, height, workWidth, workHeight, guideWidth, guideHeight, static_cast<uint32_t>(depthDesc.Width), depthDesc.Height, settings.preset, settings.style, settings.intensity, settings.motionScale, static_cast<float>(guideWidth) * settings.motionScale * static_cast<float>(workWidth) / static_cast<float>(width), reduced ? settings.editStability : 0.0f, hdrFrame ? "scene-linear" : "display-referred", hdrFrame ? std::format(", white point {}", whitePoint) : std::string{});
 			// Creating and evaluating in the same list is what hung GPUs upstream. The creation goes
 			// through this frame's submit; the first evaluate happens next frame.
 			return;
@@ -961,6 +974,27 @@ namespace DlssNR
 		ID3D12Resource* fullProxy = hdrFrame ? g.proxy : g.keep;
 
 		Stamp(a_commandList, 0);
+
+		// The depth the game hands over is display-sized, with the render-resolution picture in its
+		// top-left corner. The model reads its guides by texture size, not by the subrect it is given,
+		// so below native resolution it took the background's depth for the character's: the black
+		// noise in the shape of whatever stood behind the player. The reference implementation gives
+		// its model a depth copy of exactly the guide's size; this does the same.
+		const bool copyDepth = g.guideDepth && (depthDesc.Width != guideWidth || depthDesc.Height != guideHeight) &&
+		                       depthDesc.Width >= guideWidth && depthDesc.Height >= guideHeight;
+		ID3D12Resource* modelDepth = a_depth;
+		if (copyDepth) {
+			Barriers(a_commandList, { { a_depth, common, D3D12_RESOURCE_STATE_COPY_SOURCE },
+										{ g.guideDepth, uav, D3D12_RESOURCE_STATE_COPY_DEST } });
+			const CD3DX12_TEXTURE_COPY_LOCATION copySource(a_depth, 0);
+			const CD3DX12_TEXTURE_COPY_LOCATION copyTarget(g.guideDepth, 0);
+			const D3D12_BOX box{ 0, 0, 0, guideWidth, guideHeight, 1 };
+			a_commandList->CopyTextureRegion(&copyTarget, 0, 0, 0, &copySource, &box);
+			Barriers(a_commandList, { { a_depth, D3D12_RESOURCE_STATE_COPY_SOURCE, common },
+										{ g.guideDepth, D3D12_RESOURCE_STATE_COPY_DEST, read } });
+			modelDepth = g.guideDepth;
+		}
+
 		// The guides are transitioned here too: nothing between this point and the model touches them,
 		// and NGX wants them readable at evaluate time.
 		if (hdrFrame) {
@@ -1018,9 +1052,9 @@ namespace DlssNR
 		if (g.setExtras)
 			g.setExtras(g.capabilityParams, 1.0f, nullptr, nullptr, nullptr, 0, 0, 0, 0);
 		Stamp(a_commandList, 1);
-		const int result = g.evaluate(a_commandList, g.feature, g.capabilityParams, modelInput, a_depth, g.nrMotion, g.modelOut,
+		const int result = g.evaluate(a_commandList, g.feature, g.capabilityParams, modelInput, modelDepth, g.nrMotion, g.modelOut,
 			workWidth, workHeight, guideWidth, guideHeight, 0, g.reset ? 1 : 0, settings.intensity, static_cast<int>(settings.style),
-			settings.localStructureStrength, settings.localToneStrength, settings.skinStructureStrength, settings.useAutoMask ? 1 : 0,
+			settings.localStructureStrength, settings.localToneStrength, SkinStrength(settings), settings.useAutoMask ? 1 : 0,
 			1.0f, 1.0f);
 		Stamp(a_commandList, 2);
 		g.reset = false;
@@ -1079,6 +1113,7 @@ namespace DlssNR
 			// Everything back where the next frame expects it, in one call.
 			Barriers(a_commandList, { { a_color, uav, common },
 										{ g.nrMotion, read, uav },
+										{ copyDepth ? g.guideDepth : nullptr, read, uav },
 										{ g.modelOut, read, uav },
 										{ stabilise ? g.modelStable : nullptr, read, uav },
 										{ a_depth, read, common },
@@ -1090,6 +1125,7 @@ namespace DlssNR
 			g.historyValid = false;
 			Barriers(a_commandList, { { a_color, read, common },
 										{ g.nrMotion, read, uav },
+										{ copyDepth ? g.guideDepth : nullptr, read, uav },
 										{ a_depth, read, common },
 										{ a_motion, read, common },
 										{ g.keep, read, uav },
@@ -1174,7 +1210,7 @@ namespace DlssNR
 				r.resource->Release();
 		}
 		g.retired.clear();
-		for (ID3D12Resource** r : { &g.keep, &g.proxy, &g.modelOut, &g.smallProxy, &g.nrMotion, &g.modelStable, &g.editHistory[0], &g.editHistory[1] }) {
+		for (ID3D12Resource** r : { &g.keep, &g.proxy, &g.modelOut, &g.smallProxy, &g.nrMotion, &g.guideDepth, &g.modelStable, &g.editHistory[0], &g.editHistory[1] }) {
 			if (*r) {
 				(*r)->Release();
 				*r = nullptr;

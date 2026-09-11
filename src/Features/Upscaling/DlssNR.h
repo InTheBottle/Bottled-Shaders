@@ -31,8 +31,8 @@ namespace DlssNR
 		float intensity = 1.0f;               ///< DLSSNR.Intensity
 		float localToneStrength = 1.0f;       ///< DLSSNR.LocalToneStrength
 		float localStructureStrength = 1.0f;  ///< DLSSNR.LocalStructureStrength
-		float skinStructureStrength = -1.0f;  ///< DLSSNR.SkinStructureStrength; -1 follows local structure
-		uint32_t useAutoMask = 1;             ///< DLSSNR.UseAutoMask (automatic skin mask)
+		float skinStructureStrength = 1.0f;   ///< DLSSNR.SkinStructureStrength (the reference default); below 0 follows local structure
+		uint32_t useAutoMask = 0;             ///< DLSSNR.UseAutoMask (automatic skin mask); off, as the reference implementation ships
 		float detailStrength = 1.0f;          ///< how far the frame moves toward the model's picture
 		float colourStrength = 1.0f;          ///< whether the model's colour arrives with its light
 		float maxRatio = 2.0f;                ///< cap on per-pixel brightening/darkening ratio
