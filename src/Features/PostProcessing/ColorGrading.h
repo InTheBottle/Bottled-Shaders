@@ -160,6 +160,7 @@ struct ColorGrading : public PostProcessFeature
 	virtual void SetupResources() override;
 	virtual void ClearShaderCache() override;
 	void CompileShaders();
+	bool IsReadyToTonemap() const;
 
 	virtual void RestoreDefaultSettings() override;
 	virtual void LoadSettings(json&) override;
