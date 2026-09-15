@@ -129,6 +129,11 @@ void LightLimitFix::DrawSettings()
 	if (ImGui::TreeNodeEx(T(TKEY("statistics"), "Statistics"), ImGuiTreeNodeFlags_DefaultOpen)) {
 		ImGui::Text(std::format("Clustered Light Count : {}", lightCount).c_str());
 		ImGui::Text(std::format("Shadow Casters : {} tracked, {} cached, {} rendered this frame", localShadowStatTracked, localShadowStatCached, localShadowStatRendered).c_str());
+		if (localShadowCache) {
+			const uint64_t bytesPerTexel = localShadowCacheFormat == DXGI_FORMAT_R16_UNORM ? 2 : 4;
+			const uint64_t cacheBytes = static_cast<uint64_t>(localShadowCacheSlots) * localShadowCacheResolution * localShadowCacheResolution * bytesPerTexel;
+			ImGui::Text(std::format("Shadow Cache : {} x {}x{}, {} MB", localShadowCacheSlots, localShadowCacheResolution, localShadowCacheResolution, cacheBytes >> 20).c_str());
+		}
 
 		ImGui::TreePop();
 	}
@@ -400,6 +405,7 @@ void LightLimitFix::BSLightingShader_SetupGeometry_GeometrySetupConstantPointLig
 			light.fade = runtimeData.fade;
 		}
 
+		light.lightFlags.reset(LightFlags::Shadow, LightFlags::ShadowCaster, LightFlags::LocalShadow);
 		light.fade *= bsLight->lodDimmer;
 
 		auto& effects11 = globals::features::effects11;
@@ -595,6 +601,7 @@ void LightLimitFix::UpdateLights()
 						light.fade = runtimeData.fade;
 					}
 
+					light.lightFlags.reset(LightFlags::Shadow, LightFlags::ShadowCaster, LightFlags::LocalShadow);
 					light.fade *= bsLight->lodDimmer;
 
 					auto& effects11 = globals::features::effects11;
@@ -1104,6 +1111,22 @@ namespace
 		DirectX::XMFLOAT4X4 lightTransform{};
 	};
 
+	DXGI_FORMAT GetDepthCopyFamily(DXGI_FORMAT a_format)
+	{
+		switch (a_format) {
+		case DXGI_FORMAT_R16_TYPELESS:
+		case DXGI_FORMAT_D16_UNORM:
+		case DXGI_FORMAT_R16_UNORM:
+			return DXGI_FORMAT_R16_TYPELESS;
+		case DXGI_FORMAT_R32_TYPELESS:
+		case DXGI_FORMAT_D32_FLOAT:
+		case DXGI_FORMAT_R32_FLOAT:
+			return DXGI_FORMAT_R32_TYPELESS;
+		default:
+			return DXGI_FORMAT_UNKNOWN;
+		}
+	}
+
 	bool ReadLocalShadowRenderInfo(RE::BSShadowLight* a_light, LocalShadowRenderInfo& a_info)
 	{
 		auto& runtimeData = a_light->GetRuntimeData();
@@ -1267,6 +1290,17 @@ void LightLimitFix::ScheduleLocalShadowCasters()
 			caster->light = light;
 		}
 
+		const float teleportDistance = std::max(LOCAL_SHADOW_TELEPORT_DISTANCE, niLight->GetLightRuntimeData().radius.x * 0.25f);
+		const bool teleported = caster->lastRenderedFrame != 0 &&
+		                        caster->renderedPosition.GetSquaredDistance(niLight->world.translate) > teleportDistance * teleportDistance;
+		if (caster->niLight != niLight || teleported) {
+			const int32_t slice = caster->slice;
+			*caster = LocalShadowCaster{};
+			caster->light = light;
+			caster->slice = slice;
+		}
+		caster->niLight = niLight;
+
 		caster->lastSeenFrame = frame;
 		caster->position = niLight->world.translate;
 		caster->radius = niLight->GetLightRuntimeData().radius.x;
@@ -1423,8 +1457,8 @@ bool LightLimitFix::FilterLocalShadowCaster(RE::BSShadowLight* a_light, const RE
 	if (a_result)
 		caster->lastEligibleFrame = localShadowFrame;
 
-	if (!a_result || localShadowAllowed.empty())
-		return a_result;
+	if (!a_result)
+		return false;
 
 	for (auto allowed : localShadowAllowed) {
 		if (allowed == a_light)
@@ -1438,6 +1472,7 @@ void LightLimitFix::ReleaseLocalShadowResources()
 	localShadowCache = nullptr;
 	localShadowBuffer = nullptr;
 	localShadowCacheSlots = 0;
+	localShadowRequestedSlots = 0;
 	localShadowCacheResolution = 0;
 	localShadowEngineResolution = 0;
 	localShadowCacheFormat = DXGI_FORMAT_UNKNOWN;
@@ -1459,7 +1494,7 @@ void LightLimitFix::EnsureLocalShadowResources(ID3D11Texture2D* a_engineShadowMa
 	uint32_t cacheResolution = std::min(requestedResolution, engineResolution);
 	if (engineResolution % cacheResolution != 0)
 		cacheResolution = engineResolution;
-	const uint32_t slots = std::clamp(settings.LocalShadowSlots, MIN_LOCAL_SHADOW_SLOTS, MAX_LOCAL_SHADOW_SLOTS);
+	const uint32_t requestedSlots = std::clamp(settings.LocalShadowSlots, MIN_LOCAL_SHADOW_SLOTS, MAX_LOCAL_SHADOW_SLOTS);
 
 	auto device = globals::d3d::device;
 
@@ -1470,22 +1505,52 @@ void LightLimitFix::EnsureLocalShadowResources(ID3D11Texture2D* a_engineShadowMa
 			cacheFormat = DXGI_FORMAT_R16_UNORM;
 	}
 
-	if (localShadowCache && localShadowBuffer && slots == localShadowCacheSlots && cacheResolution == localShadowCacheResolution && engineResolution == localShadowEngineResolution && cacheFormat == localShadowCacheFormat)
+	const DXGI_FORMAT engineCopyFamily = GetDepthCopyFamily(engineDesc.Format);
+	localShadowDirectCopy = cacheResolution == engineResolution && engineDesc.Height == engineDesc.Width &&
+	                        engineCopyFamily != DXGI_FORMAT_UNKNOWN && engineCopyFamily == GetDepthCopyFamily(cacheFormat);
+	localShadowEngineMipLevels = std::max(engineDesc.MipLevels, 1u);
+	localShadowEngineSlices = engineDesc.ArraySize;
+
+	if (requestedSlots == localShadowRequestedSlots && cacheResolution == localShadowCacheResolution && engineResolution == localShadowEngineResolution && cacheFormat == localShadowCacheFormat)
 		return;
 
 	ReleaseLocalShadowResources();
+
+	const uint64_t bytesPerSlot = static_cast<uint64_t>(cacheResolution) * cacheResolution * (cacheFormat == DXGI_FORMAT_R16_UNORM ? 2u : 4u);
+	uint32_t slots = static_cast<uint32_t>(std::clamp<uint64_t>((LOCAL_SHADOW_MAX_CACHE_BYTES - 1) / bytesPerSlot, MIN_LOCAL_SHADOW_SLOTS, requestedSlots));
 
 	D3D11_TEXTURE2D_DESC texDesc{};
 	texDesc.Width = cacheResolution;
 	texDesc.Height = cacheResolution;
 	texDesc.MipLevels = 1;
-	texDesc.ArraySize = slots;
 	texDesc.Format = cacheFormat;
 	texDesc.SampleDesc.Count = 1;
 	texDesc.Usage = D3D11_USAGE_DEFAULT;
 	texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
 
-	localShadowCache = eastl::make_unique<Texture2D>(texDesc, "LightLimitFix::LocalShadowCache");
+	ID3D11Texture2D* cacheTexture = nullptr;
+	while (true) {
+		texDesc.ArraySize = slots;
+		cacheTexture = nullptr;
+		if (SUCCEEDED(device->CreateTexture2D(&texDesc, nullptr, &cacheTexture)) && cacheTexture)
+			break;
+		cacheTexture = nullptr;
+		if (slots <= MIN_LOCAL_SHADOW_SLOTS)
+			break;
+		slots = std::max(slots / 2, MIN_LOCAL_SHADOW_SLOTS);
+	}
+
+	localShadowRequestedSlots = requestedSlots;
+	localShadowCacheResolution = cacheResolution;
+	localShadowEngineResolution = engineResolution;
+	localShadowCacheFormat = cacheFormat;
+
+	if (!cacheTexture) {
+		logger::warn("[LLF] Local shadow cache: could not allocate {} slots at {}x{}; using the game's shadow masks instead", requestedSlots, cacheResolution, cacheResolution);
+		return;
+	}
+
+	localShadowCache = eastl::make_unique<Texture2D>(cacheTexture, "LightLimitFix::LocalShadowCache");
 
 	D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
 	srvDesc.Format = cacheFormat;
@@ -1523,12 +1588,10 @@ void LightLimitFix::EnsureLocalShadowResources(ID3D11Texture2D* a_engineShadowMa
 
 	localShadowSliceOwner.assign(slots, nullptr);
 	localShadowCacheSlots = slots;
-	localShadowCacheResolution = cacheResolution;
-	localShadowEngineResolution = engineResolution;
-	localShadowCacheFormat = cacheFormat;
 
-	logger::info("[LLF] Local shadow cache: {} slots at {}x{} ({}), engine shadow maps {}x{} (format {})", slots, cacheResolution, cacheResolution,
-		cacheFormat == DXGI_FORMAT_R16_UNORM ? "R16_UNORM" : "R32_FLOAT", engineResolution, engineResolution, static_cast<uint32_t>(engineDesc.Format));
+	logger::info("[LLF] Local shadow cache: {} slots (requested {}) at {}x{} ({}), engine shadow maps {}x{} (format {}, {} slices), {}", slots, requestedSlots, cacheResolution, cacheResolution,
+		cacheFormat == DXGI_FORMAT_R16_UNORM ? "R16_UNORM" : "R32_FLOAT", engineResolution, engineResolution, static_cast<uint32_t>(engineDesc.Format), engineDesc.ArraySize,
+		localShadowDirectCopy ? "direct copy" : "compute copy");
 }
 
 int32_t LightLimitFix::AcquireLocalShadowSlice(RE::BSShadowLight* a_light, uint32_t a_frame)
@@ -1584,7 +1647,7 @@ void LightLimitFix::CopyLocalShadowMaps()
 		return;
 
 	EnsureLocalShadowResources(depthStencil.texture);
-	if (!localShadowCache || !localShadowBuffer || !localShadowCopyCS || !localShadowCopyCB)
+	if (!localShadowCache || !localShadowBuffer || (!localShadowDirectCopy && (!localShadowCopyCS || !localShadowCopyCB)))
 		return;
 
 	auto context = globals::d3d::context;
@@ -1611,8 +1674,9 @@ void LightLimitFix::CopyLocalShadowMaps()
 		if (!ReadLocalShadowRenderInfo(light, info))
 			return;
 
-		uint32_t engineSlice = info.engineSlice < ENGINE_SHADOW_MAP_SLICES ? info.engineSlice : info.maskIndex;
-		if (engineSlice >= ENGINE_SHADOW_MAP_SLICES) {
+		const uint32_t engineSliceCount = std::min(ENGINE_SHADOW_MAP_SLICES, localShadowEngineSlices);
+		uint32_t engineSlice = info.engineSlice < engineSliceCount ? info.engineSlice : info.maskIndex;
+		if (engineSlice >= engineSliceCount) {
 			static uint32_t warnedFrame = 0;
 			if (frame - warnedFrame > 600) {
 				warnedFrame = frame;
@@ -1629,23 +1693,29 @@ void LightLimitFix::CopyLocalShadowMaps()
 			caster->slice = AcquireLocalShadowSlice(light, frame);
 			if (caster->slice < 0)
 				return;
+		}
+		if (caster->lastRenderedFrame == 0)
 			caster->assignedFrame = frame;
-		}
 
-		if (!computeBound) {
-			ID3D11ShaderResourceView* srv = depthStencil.depthSRV;
-			ID3D11UnorderedAccessView* uav = localShadowCache->uav.get();
-			ID3D11Buffer* buffer = localShadowCopyCB->CB();
-			context->CSSetShaderResources(0, 1, &srv);
-			context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
-			context->CSSetConstantBuffers(0, 1, &buffer);
-			context->CSSetShader(localShadowCopyCS, nullptr, 0);
-			computeBound = true;
-		}
+		if (localShadowDirectCopy) {
+			context->CopySubresourceRegion(localShadowCache->resource.get(), D3D11CalcSubresource(0, static_cast<UINT>(caster->slice), 1), 0, 0, 0,
+				depthStencil.texture, D3D11CalcSubresource(0, engineSlice, localShadowEngineMipLevels), nullptr);
+		} else {
+			if (!computeBound) {
+				ID3D11ShaderResourceView* srv = depthStencil.depthSRV;
+				ID3D11UnorderedAccessView* uav = localShadowCache->uav.get();
+				ID3D11Buffer* buffer = localShadowCopyCB->CB();
+				context->CSSetShaderResources(0, 1, &srv);
+				context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
+				context->CSSetConstantBuffers(0, 1, &buffer);
+				context->CSSetShader(localShadowCopyCS, nullptr, 0);
+				computeBound = true;
+			}
 
-		LocalShadowCopyCB copyData{ engineSlice, static_cast<uint32_t>(caster->slice), scale, localShadowCacheResolution };
-		localShadowCopyCB->Update(copyData);
-		context->Dispatch(groups, groups, 1);
+			LocalShadowCopyCB copyData{ engineSlice, static_cast<uint32_t>(caster->slice), scale, localShadowCacheResolution };
+			localShadowCopyCB->Update(copyData);
+			context->Dispatch(groups, groups, 1);
+		}
 
 		DirectX::XMMATRIX projection = DirectX::XMLoadFloat4x4(&info.lightTransform);
 		DirectX::XMStoreFloat4x4(&caster->shadowProj, projection);

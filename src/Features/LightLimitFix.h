@@ -104,7 +104,8 @@ public:
 	static constexpr uint32_t ENGINE_SHADOW_SLOTS = 4;
 	static constexpr uint32_t ENGINE_SHADOW_MAP_SLICES = 8;
 	static constexpr uint32_t MIN_LOCAL_SHADOW_SLOTS = 4;
-	static constexpr uint32_t MAX_LOCAL_SHADOW_SLOTS = 32;
+	static constexpr uint32_t MAX_LOCAL_SHADOW_SLOTS = 64;
+	static constexpr uint64_t LOCAL_SHADOW_MAX_CACHE_BYTES = 2048ull * 1024ull * 1024ull;
 	static constexpr uint32_t LOCAL_SHADOW_FADE_FRAMES = 8;
 	static constexpr uint32_t LOCAL_SHADOW_SWEEP_INTERVAL = 30;
 	static constexpr uint32_t LOCAL_SHADOW_EVICT_AGE = 120;
@@ -120,6 +121,7 @@ public:
 	static constexpr float LOCAL_SHADOW_ANIMATION_SPEED = 90.0f;
 	static constexpr float LOCAL_SHADOW_MAX_SLACK = 24.0f;
 	static constexpr float LOCAL_SHADOW_DEFAULT_POISSON_RADIUS = 4.0f;
+	static constexpr float LOCAL_SHADOW_TELEPORT_DISTANCE = 128.0f;
 
 	struct alignas(16) LocalShadowData
 	{
@@ -143,6 +145,7 @@ public:
 	struct LocalShadowCaster
 	{
 		RE::BSShadowLight* light = nullptr;
+		RE::NiLight* niLight = nullptr;
 		int32_t slice = -1;
 		uint32_t lastSeenFrame = 0;
 		uint32_t lastEvaluatedFrame = 0;
@@ -340,9 +343,13 @@ public:
 	ConstantBuffer* localShadowCopyCB = nullptr;
 	ID3D11ComputeShader* localShadowCopyCS = nullptr;
 	uint32_t localShadowCacheSlots = 0;
+	uint32_t localShadowRequestedSlots = 0;
 	uint32_t localShadowCacheResolution = 0;
 	uint32_t localShadowEngineResolution = 0;
 	DXGI_FORMAT localShadowCacheFormat = DXGI_FORMAT_UNKNOWN;
+	uint32_t localShadowEngineMipLevels = 1;
+	uint32_t localShadowEngineSlices = 0;
+	bool localShadowDirectCopy = false;
 	RE::Setting* poissonRadiusScaleSetting = nullptr;
 	bool poissonRadiusScaleLookedUp = false;
 
