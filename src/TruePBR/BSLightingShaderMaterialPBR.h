@@ -140,7 +140,11 @@ public:
 	 */
 	void ApplyTextureSetData(const TruePBR::PBRTextureSetData& textureSetData);
 	/**
-	 * @brief Applies projected material object parameters (base color scale, roughness, specular, glint) to this material.
+	 * @brief Applies projected material object parameters and texture overrides to this material.
+	 *
+	 * The texture overrides are read from materialObjectData.projectedTextures, so callers must
+	 * have run TruePBR::ResolveProjectedTextures on the config first.
+	 *
 	 * @param materialObjectData The material object configuration to apply.
 	 */
 	void ApplyMaterialObjectData(const TruePBR::PBRMaterialObjectData& materialObjectData);
@@ -182,6 +186,8 @@ public:
 	float GetProjectedMaterialSpecularLevel() const;
 	/** @brief Returns the glint parameters for the projected (MATO) material. */
 	const GlintParameters& GetProjectedMaterialGlintParameters() const;
+	/** @brief Returns true when this material overrides at least one of the engine's global projected textures. */
+	bool HasProjectedMaterialTextures() const;
 
 	/** @brief Returns the fuzz layer color. */
 	const RE::NiColor& GetFuzzColor() const;
@@ -225,5 +231,10 @@ public:
 	float projectedMaterialRoughness = 1.f;
 	float projectedMaterialSpecularLevel = 0.04f;
 	GlintParameters projectedMaterialGlintParameters;
+
+	// Per-MATO replacements for the engine's global textures/effects/Projected*.dds set.
+	// Null slots keep the global texture.
+	TruePBR::PBRProjectedTextures projectedMaterialTextures;
+
 	std::string inputFilePath = "";
 };

@@ -57,6 +57,7 @@ void BSLightingShaderMaterialPBR::CopyMembers(RE::BSShaderMaterial* that)
 	projectedMaterialRoughness = pbrThat->projectedMaterialRoughness;
 	projectedMaterialSpecularLevel = pbrThat->projectedMaterialSpecularLevel;
 	projectedMaterialGlintParameters = pbrThat->projectedMaterialGlintParameters;
+	projectedMaterialTextures = pbrThat->projectedMaterialTextures;
 
 	rmaosTexture = pbrThat->rmaosTexture;
 	emissiveTexture = pbrThat->emissiveTexture;
@@ -87,6 +88,7 @@ std::uint32_t BSLightingShaderMaterialPBR::ComputeCRC32(uint32_t srcHash)
 		float projectedMaterialLogMicrofacetDensity = 0.f;
 		float projectedMaterialMicrofacetRoughness = 0.f;
 		float projectedMaterialDensityRandomization = 0.f;
+		uint32_t projectedMaterialTexturesHash = 0;
 		uint32_t rmaodHash = 0;
 		uint32_t emissiveHash = 0;
 		uint32_t displacementHash = 0;
@@ -115,6 +117,7 @@ std::uint32_t BSLightingShaderMaterialPBR::ComputeCRC32(uint32_t srcHash)
 	hashes.projectedMaterialLogMicrofacetDensity = projectedMaterialGlintParameters.logMicrofacetDensity * 100.f;
 	hashes.projectedMaterialMicrofacetRoughness = projectedMaterialGlintParameters.microfacetRoughness * 100.f;
 	hashes.projectedMaterialDensityRandomization = projectedMaterialGlintParameters.densityRandomization * 100.f;
+	hashes.projectedMaterialTexturesHash = projectedMaterialTextures.hash;
 	DiscardMislinkedTextureSet(textureSet);
 	if (textureSet != nullptr) {
 		hashes.rmaodHash = RE::BSCRC32<const char*>()(textureSet->GetTexturePath(RmaosTexture));
@@ -167,6 +170,7 @@ void BSLightingShaderMaterialPBR::ApplyMaterialObjectData(const TruePBR::PBRMate
 	projectedMaterialRoughness = materialObjectData.roughness;
 	projectedMaterialSpecularLevel = materialObjectData.specularLevel;
 	projectedMaterialGlintParameters = materialObjectData.glintParameters;
+	projectedMaterialTextures = materialObjectData.projectedTextures;
 }
 
 void BSLightingShaderMaterialPBR::ClearMaterialObjectData()
@@ -175,6 +179,7 @@ void BSLightingShaderMaterialPBR::ClearMaterialObjectData()
 	projectedMaterialRoughness = 1.f;
 	projectedMaterialSpecularLevel = 0.04f;
 	projectedMaterialGlintParameters = GlintParameters{};
+	projectedMaterialTextures = TruePBR::PBRProjectedTextures{};
 }
 
 void BSLightingShaderMaterialPBR::OnLoadTextureSet(std::uint64_t arg1, RE::BSTextureSet* inTextureSet)
@@ -376,6 +381,11 @@ float BSLightingShaderMaterialPBR::GetProjectedMaterialSpecularLevel() const
 const GlintParameters& BSLightingShaderMaterialPBR::GetProjectedMaterialGlintParameters() const
 {
 	return projectedMaterialGlintParameters;
+}
+
+bool BSLightingShaderMaterialPBR::HasProjectedMaterialTextures() const
+{
+	return projectedMaterialTextures.Any();
 }
 
 const RE::NiColor& BSLightingShaderMaterialPBR::GetFuzzColor() const
