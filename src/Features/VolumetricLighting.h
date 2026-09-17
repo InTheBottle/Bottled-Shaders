@@ -20,16 +20,28 @@ public:
 		int32_t ExteriorQuality = 2;
 		TextureSize ExteriorCustomSize;
 		float ExteriorStrength = 1.0f;
+		float ExteriorSunFocus = 1.0f;
 		float ExteriorShaftDefinition = 0.0f;
 		bool InteriorEnabled = true;
 		int32_t InteriorQuality = 2;
 		TextureSize InteriorCustomSize;
 		float InteriorStrength = 1.0f;
+		float InteriorSunFocus = 1.0f;
 		float InteriorShaftDefinition = 0.0f;
 		int32_t Effects11Priority = 0;
 	};
 
 	Settings settings;
+
+	struct GodRayBufferData
+	{
+		float GodRayGain;
+		float GodRayExponent;
+		float pad0[2];
+	};
+	static_assert(sizeof(GodRayBufferData) == 16);
+
+	GodRayBufferData GetCommonBufferData() const { return godRayBufferData; }
 
 	virtual inline std::string GetName() override { return "Volumetric Lighting"; }
 	virtual std::string GetDisplayName() override { return T("feature.volumetric_lighting.name", "Volumetric Lighting"); }
@@ -71,7 +83,7 @@ public:
 	 * Sky::UpdateColors, so writes to it are frame-local and never mutate form data.
 	 */
 	static RE::BSVolumetricLightingRenderData& GetRenderData();
-	/** @brief Applies the global god ray strength and shaft definition to the interpolated render data. */
+	/** @brief Splits the god ray strength between the interpolated render data and the sun-focused shader lobe. */
 	void ApplyGodRaySettings();
 	/**
 	 * @brief Returns whether Effects 11 should apply its own GAMEVOLUMETRICRAYS intensity this tick.
@@ -143,7 +155,7 @@ private:
 	static VolumetricLightingDescriptor& GetVLDescriptor();
 	static void SetVLQuality(VolumetricLightingDescriptor& descriptor, std::uint32_t quality);
 	void DrawVolumetricLightingSettings(int32_t& quality, TextureSize& customSize, bool isInterior, bool inLocationType);
-	void DrawGodRaySettings(float& strength, float& shaftDefinition, bool isInterior);
+	void DrawGodRaySettings(float& strength, float& sunFocus, float& shaftDefinition, bool isInterior);
 	void DrawEffects11PrioritySetting();
 	TextureSize& FetchCurrentSizeInUnits(bool interior);
 	void SetupVL();
@@ -173,8 +185,11 @@ private:
 	// both kept short of it.
 	static constexpr float MaxForwardScattering = 0.9f;
 	static constexpr float ScatteringLimit = 0.95f;
+	static constexpr float MinGodRayLobeExponentLog2 = 0.0f;
+	static constexpr float MaxGodRayLobeExponentLog2 = 7.0f;
 
 	bool effects11DroveIntensity = false;
+	GodRayBufferData godRayBufferData{ 0.0f, 1.0f, { 0.0f, 0.0f } };
 
 	TextureSize exteriorSizeInUnits;
 	TextureSize interiorSizeInUnits;

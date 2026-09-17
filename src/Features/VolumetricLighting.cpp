@@ -22,11 +22,13 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	ExteriorQuality,
 	ExteriorCustomSize,
 	ExteriorStrength,
+	ExteriorSunFocus,
 	ExteriorShaftDefinition,
 	InteriorEnabled,
 	InteriorQuality,
 	InteriorCustomSize,
 	InteriorStrength,
+	InteriorSunFocus,
 	InteriorShaftDefinition,
 	Effects11Priority);
 
@@ -37,7 +39,7 @@ void VolumetricLighting::DrawSettings()
 
 	if (settings.ExteriorEnabled) {
 		DrawVolumetricLightingSettings(settings.ExteriorQuality, settings.ExteriorCustomSize, false, !inInterior);
-		DrawGodRaySettings(settings.ExteriorStrength, settings.ExteriorShaftDefinition, false);
+		DrawGodRaySettings(settings.ExteriorStrength, settings.ExteriorSunFocus, settings.ExteriorShaftDefinition, false);
 	}
 
 	if (ImGui::Checkbox(T(TKEY("enable_interiors"), "Enable Volumetric Lighting in Interiors"), &settings.InteriorEnabled))
@@ -45,23 +47,28 @@ void VolumetricLighting::DrawSettings()
 
 	if (settings.InteriorEnabled) {
 		DrawVolumetricLightingSettings(settings.InteriorQuality, settings.InteriorCustomSize, true, inInterior);
-		DrawGodRaySettings(settings.InteriorStrength, settings.InteriorShaftDefinition, true);
+		DrawGodRaySettings(settings.InteriorStrength, settings.InteriorSunFocus, settings.InteriorShaftDefinition, true);
 	}
 
 	DrawEffects11PrioritySetting();
 }
 
-void VolumetricLighting::DrawGodRaySettings(float& strength, float& shaftDefinition, const bool isInterior)
+void VolumetricLighting::DrawGodRaySettings(float& strength, float& sunFocus, float& shaftDefinition, const bool isInterior)
 {
 	ImGui::SliderFloat(isInterior ? T(TKEY("interior_strength"), "Interior God Ray Strength") : T(TKEY("exterior_strength"), "Exterior God Ray Strength"),
 		&strength, 0.0f, MaxGodRayStrength, "%.2fx", ImGuiSliderFlags_AlwaysClamp);
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::TextUnformatted(T(TKEY("strength_tooltip"), "Scales the god ray intensity the current weather asks for, so no plugin edits are needed.\n1.00x is the weather's own Volumetric Lighting record. A weather with no volumetric lighting stays dark at any strength."));
+		ImGui::TextUnformatted(T(TKEY("strength_tooltip"), "Brightness of the rays looking straight at the sun or moon, relative to the weather's own Volumetric Lighting record.\nA weather with no volumetric lighting stays dark at any strength."));
+
+	ImGui::SliderFloat(isInterior ? T(TKEY("interior_sun_focus"), "Interior Sun Focus") : T(TKEY("exterior_sun_focus"), "Exterior Sun Focus"),
+		&sunFocus, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextUnformatted(T(TKEY("sun_focus_tooltip"), "Where God Ray Strength is spent.\n0.00 scales the whole scene evenly, 1.00 scales only the rays around the sun or moon and leaves the rest of the sky at the weather's own level."));
 
 	ImGui::SliderFloat(isInterior ? T(TKEY("interior_shaft_definition"), "Interior Shaft Definition") : T(TKEY("exterior_shaft_definition"), "Exterior Shaft Definition"),
 		&shaftDefinition, -1.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::TextUnformatted(T(TKEY("shaft_definition_tooltip"), "Biases the scattering phase function.\nPositive values tighten the rays into defined shafts around the sun or moon, negative values spread them into an even haze.\n0.00 keeps the weather's own value."));
+		ImGui::TextUnformatted(T(TKEY("shaft_definition_tooltip"), "How tightly the focused rays hug the sun or moon, plus a bias on the weather's scattering phase function.\nPositive values tighten them into defined shafts, negative values spread them into a wide glow."));
 }
 
 void VolumetricLighting::DrawEffects11PrioritySetting()
@@ -182,6 +189,8 @@ void VolumetricLighting::LoadSettings(json& o_json)
 	settings.InteriorQuality = std::clamp(settings.InteriorQuality, 0, static_cast<int32_t>(Quality::Count) - 1);
 	settings.ExteriorStrength = std::clamp(settings.ExteriorStrength, 0.0f, MaxGodRayStrength);
 	settings.InteriorStrength = std::clamp(settings.InteriorStrength, 0.0f, MaxGodRayStrength);
+	settings.ExteriorSunFocus = std::clamp(settings.ExteriorSunFocus, 0.0f, 1.0f);
+	settings.InteriorSunFocus = std::clamp(settings.InteriorSunFocus, 0.0f, 1.0f);
 	settings.ExteriorShaftDefinition = std::clamp(settings.ExteriorShaftDefinition, -1.0f, 1.0f);
 	settings.InteriorShaftDefinition = std::clamp(settings.InteriorShaftDefinition, -1.0f, 1.0f);
 	settings.Effects11Priority = std::clamp(settings.Effects11Priority, 0, static_cast<int32_t>(GodRayPriority::Count) - 1);
@@ -292,14 +301,22 @@ void VolumetricLighting::ApplyGodRaySettings()
 	const auto priority = static_cast<GodRayPriority>(settings.Effects11Priority);
 
 	const float strength = inInterior ? settings.InteriorStrength : settings.ExteriorStrength;
+	const float sunFocus = inInterior ? settings.InteriorSunFocus : settings.ExteriorSunFocus;
 	const float shaftDefinition = inInterior ? settings.InteriorShaftDefinition : settings.ExteriorShaftDefinition;
 
 	auto& renderData = GetRenderData();
 
+	godRayBufferData.GodRayGain = 0.0f;
+	godRayBufferData.GodRayExponent = std::exp2(std::lerp(MinGodRayLobeExponentLog2, MaxGodRayLobeExponentLog2, (shaftDefinition + 1.0f) * 0.5f));
+
 	// Under GodRayPriority::Effects11 the slider still applies whenever the preset is switched
 	// off, since nothing claimed the intensity that tick.
-	if (!(effects11Claimed && priority == GodRayPriority::Effects11))
-		renderData.intensity *= strength;
+	if (!(effects11Claimed && priority == GodRayPriority::Effects11)) {
+		const float uniformStrength = std::lerp(strength, 1.0f, sunFocus);
+		renderData.intensity *= uniformStrength;
+		if (uniformStrength > 1e-4f)
+			godRayBufferData.GodRayGain = strength / uniformStrength - 1.0f;
+	}
 
 	if (shaftDefinition != 0.0f) {
 		const float target = shaftDefinition > 0.0f ? MaxForwardScattering : 0.0f;

@@ -466,6 +466,13 @@ namespace SharedData
 		uint3 pad0;
 	};
 
+	struct VolumetricLightingSettings
+	{
+		float GodRayGain;
+		float GodRayExponent;
+		float2 pad0;
+	};
+
 	cbuffer FeatureData : register(b6)
 	{
 		GrassLightingSettings grassLightingSettings;
@@ -491,6 +498,7 @@ namespace SharedData
 		VanillaFresnelSettings vanillaFresnelSettings;
 		SnowCoverSettings snowCoverSettings;
 		PostProcessingSettings postProcessingSettings;
+		VolumetricLightingSettings volumetricLightingSettings;
 	};
 
 	Texture2D<float4> DepthTexture : register(t17);
