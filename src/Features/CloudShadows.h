@@ -6,6 +6,8 @@ private:
 	static constexpr std::string_view MOD_ID = "139185";
 
 public:
+	static constexpr int kMaxCloudLayers = 32;
+
 	struct alignas(16) Settings
 	{
 		float Opacity = 0.5f;
@@ -41,9 +43,17 @@ public:
 	 */
 	void SkyShaderHacks();
 
-	Texture2D* texCubemapCloudOcc = nullptr;
+	Texture2D* texCloudShadowLayers[kMaxCloudLayers] = {};
+	ID3D11RenderTargetView* cloudShadowLayerRTVs[kMaxCloudLayers][6] = {};
 	Texture2D* texCubemapCloudOccCopy = nullptr;
-	ID3D11RenderTargetView* cubemapCloudOccRTVs[6] = {};
+	Texture2D* texSelfShadowCopy = nullptr;
+
+	UINT cubemapMipLevels = 1;
+	int currentLayerForDraw = 0;
+
+	uint32_t renderedLayersMask[6] = {};
+	uint32_t globalRenderedMask = 0;
+	int previouslyRenderedSide = -1;
 
 	ID3D11BlendState* cloudShadowBlendState = nullptr;
 
@@ -64,15 +74,17 @@ public:
 	 * @param side Cubemap face index (0-5).
 	 */
 	void CheckResourcesSide(int side);
+	void PropagateToCompletion(int side);
 	/**
 	 * @brief Checks if the current sky render pass is rendering clouds to the reflections cubemap and flags it for override.
 	 * @param Pass The BSRenderPass being set up for rendering.
 	 */
+	int FindCloudLayer(RE::BSRenderPass* Pass);
 	void ModifySky(RE::BSRenderPass* Pass);
 
-	/** @brief Snapshots the live occlusion cubemap and binds the frozen copy for the duration of the reflections render. */
+	/** @brief Copies the cloud occlusion cubemap and binds it as a shader resource for the reflections prepass. */
 	virtual void ReflectionsPrepass() override;
-	/** @brief Binds the live occlusion cubemap every frame so t25 never depends on the reflections render cadence. */
+	/** @brief Binds the cloud occlusion cubemap as a shader resource for the early prepass. */
 	virtual void EarlyPrepass() override;
 
 	/** @brief Installs the BSSkyShader hooks after all plugins have loaded. */
@@ -92,8 +104,4 @@ public:
 			logger::info("[Cloud Shadows] Installed hooks");
 		}
 	};
-
-private:
-	bool IsSkyActive() const;
-	void BindOcclusion(ID3D11ShaderResourceView* srv);
 };
