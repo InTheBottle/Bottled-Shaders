@@ -253,6 +253,7 @@ namespace LightLimitFix
 		[branch] if (march)
 		{
 			float3 rayPosition = viewPosition + stepVS * noise;
+			const float rayEndFadeScale = float(CONTACT_SHADOW_COARSE_STEPS) / float(contactShadowSteps);
 			[loop] for (uint i = 0; i < contactShadowSteps; i++)
 			{
 				rayPosition += stepVS;
@@ -263,8 +264,10 @@ namespace LightLimitFix
 
 				float rayDepth = SharedData::GetScreenDepth(rayUV);
 				float depthDelta = rayPosition.z - rayDepth;
-				if (rayDepth > CONTACT_SHADOW_FIRST_PERSON_MAX_DEPTH)
-					contactShadow = max(contactShadow, saturate(depthDelta * depthDeltaThickness) - saturate(depthDelta * depthDeltaFade));
+				if (rayDepth > CONTACT_SHADOW_FIRST_PERSON_MAX_DEPTH) {
+					float occlusion = saturate(depthDelta * depthDeltaThickness) - saturate(depthDelta * depthDeltaFade);
+					contactShadow = max(contactShadow, occlusion * saturate(float(contactShadowSteps - i) * rayEndFadeScale));
+				}
 				if (contactShadow >= 1.0)
 					break;
 			}
