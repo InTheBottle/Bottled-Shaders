@@ -1,10 +1,12 @@
 #include "VolumetricLighting.h"
 
+#include "Effects11.h"
 #include "I18n/I18n.h"
 #include "InteriorSun.h"
 #include "ShaderCache.h"
 #include "State.h"
 #include "Utils/Game.h"
+#include "Utils/UI.h"
 
 #define I18N_KEY_PREFIX "feature.volumetric_lighting."
 
@@ -19,23 +21,64 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	ExteriorEnabled,
 	ExteriorQuality,
 	ExteriorCustomSize,
+	ExteriorStrength,
+	ExteriorShaftDefinition,
 	InteriorEnabled,
 	InteriorQuality,
-	InteriorCustomSize);
+	InteriorCustomSize,
+	InteriorStrength,
+	InteriorShaftDefinition,
+	Effects11Priority);
 
 void VolumetricLighting::DrawSettings()
 {
 	if (ImGui::Checkbox(T(TKEY("enable_exteriors"), "Enable Volumetric Lighting in Exteriors"), &settings.ExteriorEnabled))
 		SetupVL();
 
-	if (settings.ExteriorEnabled)
+	if (settings.ExteriorEnabled) {
 		DrawVolumetricLightingSettings(settings.ExteriorQuality, settings.ExteriorCustomSize, false, !inInterior);
+		DrawGodRaySettings(settings.ExteriorStrength, settings.ExteriorShaftDefinition, false);
+	}
 
 	if (ImGui::Checkbox(T(TKEY("enable_interiors"), "Enable Volumetric Lighting in Interiors"), &settings.InteriorEnabled))
 		SetupVL();
 
-	if (settings.InteriorEnabled)
+	if (settings.InteriorEnabled) {
 		DrawVolumetricLightingSettings(settings.InteriorQuality, settings.InteriorCustomSize, true, inInterior);
+		DrawGodRaySettings(settings.InteriorStrength, settings.InteriorShaftDefinition, true);
+	}
+
+	DrawEffects11PrioritySetting();
+}
+
+void VolumetricLighting::DrawGodRaySettings(float& strength, float& shaftDefinition, const bool isInterior)
+{
+	ImGui::SliderFloat(isInterior ? T(TKEY("interior_strength"), "Interior God Ray Strength") : T(TKEY("exterior_strength"), "Exterior God Ray Strength"),
+		&strength, 0.0f, MaxGodRayStrength, "%.2fx", ImGuiSliderFlags_AlwaysClamp);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextUnformatted(T(TKEY("strength_tooltip"), "Scales the god ray intensity the current weather asks for, so no plugin edits are needed.\n1.00x is the weather's own Volumetric Lighting record. A weather with no volumetric lighting stays dark at any strength."));
+
+	ImGui::SliderFloat(isInterior ? T(TKEY("interior_shaft_definition"), "Interior Shaft Definition") : T(TKEY("exterior_shaft_definition"), "Exterior Shaft Definition"),
+		&shaftDefinition, -1.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextUnformatted(T(TKEY("shaft_definition_tooltip"), "Biases the scattering phase function.\nPositive values tighten the rays into defined shafts around the sun or moon, negative values spread them into an even haze.\n0.00 keeps the weather's own value."));
+}
+
+void VolumetricLighting::DrawEffects11PrioritySetting()
+{
+	if (!globals::features::effects11.loaded)
+		return;
+
+	const char* priorityNames[] = {
+		T(TKEY("priority_effects11"), "Effects 11 Preset"),
+		T(TKEY("priority_community_shaders"), "Strength Sliders"),
+		T(TKEY("priority_combined"), "Both Combined")
+	};
+
+	settings.Effects11Priority = std::clamp(settings.Effects11Priority, 0, static_cast<int32_t>(GodRayPriority::Count) - 1);
+	ImGui::Combo(T(TKEY("priority"), "God Ray Intensity Source"), &settings.Effects11Priority, priorityNames, IM_ARRAYSIZE(priorityNames));
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextUnformatted(T(TKEY("priority_tooltip"), "Effects 11 presets set god ray intensity through the ENB [GAMEVOLUMETRICRAYS] Intensity key.\nThis chooses which one applies when both are active. The sliders take over on their own whenever the Effects 11 preset is switched off.\nShaft Definition is always applied, as Effects 11 does not control it."));
 }
 
 void VolumetricLighting::DrawVolumetricLightingSettings(int32_t& quality, TextureSize& customSize, const bool isInterior, const bool inLocationType)
@@ -137,6 +180,11 @@ void VolumetricLighting::LoadSettings(json& o_json)
 	settings = o_json;
 	settings.ExteriorQuality = std::clamp(settings.ExteriorQuality, 0, static_cast<int32_t>(Quality::Count) - 1);
 	settings.InteriorQuality = std::clamp(settings.InteriorQuality, 0, static_cast<int32_t>(Quality::Count) - 1);
+	settings.ExteriorStrength = std::clamp(settings.ExteriorStrength, 0.0f, MaxGodRayStrength);
+	settings.InteriorStrength = std::clamp(settings.InteriorStrength, 0.0f, MaxGodRayStrength);
+	settings.ExteriorShaftDefinition = std::clamp(settings.ExteriorShaftDefinition, -1.0f, 1.0f);
+	settings.InteriorShaftDefinition = std::clamp(settings.InteriorShaftDefinition, -1.0f, 1.0f);
+	settings.Effects11Priority = std::clamp(settings.Effects11Priority, 0, static_cast<int32_t>(GodRayPriority::Count) - 1);
 }
 
 void VolumetricLighting::SaveSettings(json& o_json)
@@ -219,6 +267,44 @@ void VolumetricLighting::SetupVL()
 		*globals::game::bEnableVolumetricLighting = settings.ExteriorEnabled;
 		*gVolumetricLightingSizeHigh = static_cast<Quality>(settings.ExteriorQuality) == Quality::Custom ? settings.ExteriorCustomSize : defaultSizeHigh;
 		SetVLQuality(GetVLDescriptor(), settings.ExteriorQuality);
+	}
+}
+
+RE::BSVolumetricLightingRenderData& VolumetricLighting::GetRenderData()
+{
+	static auto& renderData = *reinterpret_cast<RE::BSVolumetricLightingRenderData*>(
+		REL::RelocationID(527719, 414629).address() - offsetof(RE::BSVolumetricLightingRenderData, color));
+	return renderData;
+}
+
+bool VolumetricLighting::ClaimEffects11Intensity()
+{
+	if (!loaded)
+		return true;
+
+	effects11DroveIntensity = static_cast<GodRayPriority>(settings.Effects11Priority) != GodRayPriority::CommunityShaders;
+	return effects11DroveIntensity;
+}
+
+void VolumetricLighting::ApplyGodRaySettings()
+{
+	const bool effects11Claimed = std::exchange(effects11DroveIntensity, false);
+	const auto priority = static_cast<GodRayPriority>(settings.Effects11Priority);
+
+	const float strength = inInterior ? settings.InteriorStrength : settings.ExteriorStrength;
+	const float shaftDefinition = inInterior ? settings.InteriorShaftDefinition : settings.ExteriorShaftDefinition;
+
+	auto& renderData = GetRenderData();
+
+	// Under GodRayPriority::Effects11 the slider still applies whenever the preset is switched
+	// off, since nothing claimed the intensity that tick.
+	if (!(effects11Claimed && priority == GodRayPriority::Effects11))
+		renderData.intensity *= strength;
+
+	if (shaftDefinition != 0.0f) {
+		const float target = shaftDefinition > 0.0f ? MaxForwardScattering : 0.0f;
+		const float biased = std::lerp(renderData.phaseFunction.scattering, target, std::abs(shaftDefinition));
+		renderData.phaseFunction.scattering = std::clamp(biased, -ScatteringLimit, ScatteringLimit);
 	}
 }
 
