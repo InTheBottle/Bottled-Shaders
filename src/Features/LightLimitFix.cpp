@@ -1303,6 +1303,7 @@ void LightLimitFix::ScheduleLocalShadowCasters()
 
 		caster->lastSeenFrame = frame;
 		caster->position = niLight->world.translate;
+		caster->rotation = niLight->world.rotate;
 		caster->radius = niLight->GetLightRuntimeData().radius.x;
 		caster->hidden = niLight->GetFlags().any(RE::NiAVObject::Flag::kHidden);
 		caster->radiusAnchor = caster->radiusAnchor < 0.0f ?
@@ -1385,15 +1386,12 @@ void LightLimitFix::ScheduleLocalShadowCasters()
 	for (uint32_t i = 0; i < localShadowCasters.size(); i++) {
 		auto& caster = localShadowCasters[i];
 		caster.score = -1.0f;
+		caster.starved = false;
 		if (caster.hidden || caster.radius <= 0.0f)
 			continue;
 		if (caster.lastEvaluatedFrame == 0 || frame - caster.lastEvaluatedFrame > LOCAL_SHADOW_SWEEP_INTERVAL)
 			needsSweep = true;
 		if (caster.lastEligibleFrame == 0 || frame - caster.lastEligibleFrame > LOCAL_SHADOW_CAMERA_HOLD_FRAMES)
-			continue;
-		if (frame < caster.rejectUntilFrame)
-			continue;
-		if (caster.slice < 0 && !admitNewCasters)
 			continue;
 
 		const bool everRendered = caster.slice >= 0 && caster.lastRenderedFrame != 0;
@@ -1401,9 +1399,19 @@ void LightLimitFix::ScheduleLocalShadowCasters()
 		const float distance = caster.position.GetDistance(localShadowCameraPosition);
 		const float importance = caster.radius / std::max(distance, caster.radius);
 		const float moveThreshold = std::max(12.0f, caster.radius * 0.02f);
+		float axisDelta = 0.0f;
+		for (uint32_t row = 0; row < 3; row++)
+			for (uint32_t column = 0; column < 3; column++)
+				axisDelta = std::max(axisDelta, std::abs(caster.rotation.entry[row][column] - caster.renderedRotation.entry[row][column]));
 		const bool moved = everRendered &&
-		                   caster.position.GetSquaredDistance(caster.renderedPosition) > moveThreshold * moveThreshold;
+		                   (caster.position.GetSquaredDistance(caster.renderedPosition) > moveThreshold * moveThreshold ||
+							   caster.radius * axisDelta > moveThreshold);
 		const bool contentChanged = caster.skinnedCasters > 0 || caster.contentHash != caster.renderedContentHash;
+
+		if (frame < caster.rejectUntilFrame && !(moved && caster.rejectStreak <= 1))
+			continue;
+		if (caster.slice < 0 && !admitNewCasters)
+			continue;
 
 		if (!everRendered) {
 			caster.score = 1000000.0f + importance;
@@ -1413,7 +1421,8 @@ void LightLimitFix::ScheduleLocalShadowCasters()
 			const float sticky = staleness <= 1.0f ? 0.5f : 0.0f;
 			caster.score = 1000.0f + caster.actorImportance * (1.0f + 0.15f * staleness + sticky);
 		} else if (contentChanged) {
-			caster.score = staleness >= static_cast<float>(LOCAL_SHADOW_STATIC_STARVE_FRAMES) ? 1002.0f : 0.01f * staleness * (0.25f + importance);
+			caster.starved = staleness >= static_cast<float>(LOCAL_SHADOW_STATIC_STARVE_FRAMES);
+			caster.score = caster.starved ? LOCAL_SHADOW_STARVED_SCORE + staleness : 0.01f * staleness * (0.25f + importance);
 		} else if (staleness >= static_cast<float>(LOCAL_SHADOW_CLEAN_REFRESH_FRAMES)) {
 			caster.score = 0.001f * importance;
 		} else {
@@ -1429,6 +1438,26 @@ void LightLimitFix::ScheduleLocalShadowCasters()
 	std::partial_sort(order.begin(), order.begin() + allowedCount, order.end(), [&](uint32_t a_lhs, uint32_t a_rhs) {
 		return localShadowCasters[a_lhs].score > localShadowCasters[a_rhs].score;
 	});
+
+	if (allowedCount > 1 && order.size() > allowedCount) {
+		bool starvedAllowed = false;
+		for (size_t i = 0; i < allowedCount && !starvedAllowed; i++)
+			starvedAllowed = localShadowCasters[order[i]].starved;
+
+		if (!starvedAllowed) {
+			size_t best = order.size();
+			for (size_t i = allowedCount; i < order.size(); i++) {
+				auto& caster = localShadowCasters[order[i]];
+				if (!caster.starved)
+					continue;
+				if (best == order.size() || caster.score > localShadowCasters[order[best]].score)
+					best = i;
+			}
+			if (best != order.size())
+				std::swap(order[allowedCount - 1], order[best]);
+		}
+	}
+
 	for (size_t i = 0; i < allowedCount; i++)
 		localShadowAllowed.push_back(localShadowCasters[order[i]].light);
 
@@ -1633,6 +1662,7 @@ void LightLimitFix::CopyLocalShadowMaps()
 {
 	localShadowStatRendered = 0;
 	localShadowStatCached = 0;
+	localShadowStatCollisions = 0;
 
 	auto smState = globals::game::smState;
 	auto renderer = globals::game::renderer;
@@ -1660,6 +1690,20 @@ void LightLimitFix::CopyLocalShadowMaps()
 	bool computeBound = false;
 	bool sunSeen = false;
 	static bool loggedMapping = false;
+
+	const uint32_t engineSliceCount = std::min(ENGINE_SHADOW_MAP_SLICES, localShadowEngineSlices);
+
+	struct PendingLocalShadowCopy
+	{
+		RE::BSShadowLight* light;
+		LocalShadowCaster* caster;
+		LocalShadowRenderInfo info;
+		uint32_t engineSlice;
+	};
+	static eastl::vector<PendingLocalShadowCopy> pending;
+	pending.clear();
+	uint32_t sliceClaims[ENGINE_SHADOW_MAP_SLICES] = {};
+
 	ForEachAccumulatedShadowLight(runtimeData.shadowLightsAccum, [&](RE::BSShadowLight* light) {
 		if (light == sunLight) {
 			sunSeen = true;
@@ -1674,9 +1718,10 @@ void LightLimitFix::CopyLocalShadowMaps()
 		if (!ReadLocalShadowRenderInfo(light, info))
 			return;
 
-		const uint32_t engineSliceCount = std::min(ENGINE_SHADOW_MAP_SLICES, localShadowEngineSlices);
-		uint32_t engineSlice = info.engineSlice < engineSliceCount ? info.engineSlice : info.maskIndex;
-		if (engineSlice >= engineSliceCount) {
+		if (info.renderTarget != static_cast<int32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kSHADOWMAPS))
+			return;
+
+		if (info.engineSlice >= engineSliceCount) {
 			static uint32_t warnedFrame = 0;
 			if (frame - warnedFrame > 600) {
 				warnedFrame = frame;
@@ -1689,10 +1734,30 @@ void LightLimitFix::CopyLocalShadowMaps()
 			logger::info("[LLF] Local shadow slice mapping: shadowmapIndex {}, maskIndex {}, renderTarget {}, parabolic {}, shadowMapCount {}", info.engineSlice, info.maskIndex, info.renderTarget, light->GetIsParabolicLight(), light->shadowMapCount);
 		}
 
+		sliceClaims[info.engineSlice]++;
+		pending.push_back({ light, caster, info, info.engineSlice });
+	});
+
+	for (auto& entry : pending) {
+		auto* light = entry.light;
+		auto* caster = entry.caster;
+		const auto& info = entry.info;
+		const uint32_t engineSlice = entry.engineSlice;
+
+		if (sliceClaims[engineSlice] > 1) {
+			static uint32_t collisionFrame = 0;
+			if (frame - collisionFrame > 600) {
+				collisionFrame = frame;
+				logger::debug("[LLF] Engine shadow slice {} claimed by {} casters this frame; skipping the copy", engineSlice, sliceClaims[engineSlice]);
+			}
+			localShadowStatCollisions++;
+			continue;
+		}
+
 		if (caster->slice < 0) {
 			caster->slice = AcquireLocalShadowSlice(light, frame);
 			if (caster->slice < 0)
-				return;
+				continue;
 		}
 		if (caster->lastRenderedFrame == 0)
 			caster->assignedFrame = frame;
@@ -1737,10 +1802,11 @@ void LightLimitFix::CopyLocalShadowMaps()
 			caster->intervalEma += 0.3f * (std::min(static_cast<float>(frame - caster->lastRenderedFrame), 60.0f) - caster->intervalEma);
 		caster->lastRenderedFrame = frame;
 		caster->renderedPosition = caster->position;
+		caster->renderedRotation = caster->rotation;
 		caster->renderedContentHash = caster->contentHash;
 		caster->rejectStreak = 0;
 		localShadowStatRendered++;
-	});
+	}
 
 	localShadowSunActive = sunSeen || globals::state->HasDirectionalShadows();
 
