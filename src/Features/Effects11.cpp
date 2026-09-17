@@ -664,7 +664,7 @@ void Effects11::DrawVolumetricRays()
 	if (globals::game::sky && globals::game::sky->flags.any(RE::Sky::Flags::kHideSky))
 		return;
 
-	if (globals::state->IsFullScreenMenuOpen())
+	if (globals::state->IsFullScreenMenuOpen() || globals::state->isMapMenuOpen)
 		return;
 
 	auto& settingManager = SettingManager::GetSingleton();
