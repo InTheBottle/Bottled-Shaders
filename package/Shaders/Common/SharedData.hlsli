@@ -192,22 +192,6 @@ namespace SharedData
 		float3 pad0;
 	};
 
-	struct ProceduralSunSettings
-	{
-		uint enabled;
-		float sunDiskCos;
-		float diskIntensity;
-		float edgeSoftness;
-
-		uint haloEnabled;
-		float sunHaloCos;
-		float haloIntensity;
-		float haloFalloff;
-
-		float cloudOcclusionStrength;
-		float3 pad0;
-	};
-
 	struct LODBlendingSettings
 	{
 		float LODTerrainBrightness;
@@ -323,9 +307,15 @@ namespace SharedData
 		float CloudsEdgeIntensity;
 		float CloudsEdgeMoonMultiplier;
 
+		uint EnableProceduralSun;
+		float ProceduralSunDiskRadiusSq;
+		float ProceduralSunDiskEdgeScale;
+		float ProceduralSunGlowIntensity;
+
+		float ProceduralSunCoronaFalloff;
+		float ProceduralSunCoronaScale;
 		uint UseProceduralGradientWeights;
 		float ProceduralGradientWeightCurve;
-		float2 pad1;
 
 		float ParticleIntensity;
 		float ParticleLightingInfluence;
@@ -511,7 +501,6 @@ namespace SharedData
 		WetnessEffectsSettings wetnessEffectsSettings;
 		SkylightingSettings skylightingSettings;
 		CloudShadowsSettings cloudShadowsSettings;
-		ProceduralSunSettings proceduralSunSettings;
 		LODBlendingSettings lodBlendingSettings;
 		HairSpecularSettings hairSpecularSettings;
 		TerrainVariationSettings terrainVariationSettings;

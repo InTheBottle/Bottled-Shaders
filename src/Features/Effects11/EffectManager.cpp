@@ -164,6 +164,7 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterBoolSetting("EnableBloom", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableLens", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnablePostPassShader", "EFFECT", false, false);
+	settingManager.RegisterBoolSetting("EnableProceduralSun", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableCloudShadows", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableImageBasedLighting", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableVolumetricRays", "EFFECT", false, false);
@@ -256,6 +257,11 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterBoolSetting("UseProceduralGradientWeights", "SKY", false, false);
 	settingManager.RegisterTimeOfDaySetting("ProceduralGradientWeightCurve", "SKY", 4.0f, 1.0f, 32.0f, 0.01f, true);
 
+	settingManager.RegisterFloatSetting("Size", "PROCEDURALSUN", 1.0f, 0.0f, 12.0f, 0.01f, false);
+	settingManager.RegisterFloatSetting("EdgeSoftness", "PROCEDURALSUN", 0.4f, 0.0f, 1.0f, 0.01f, false);
+	settingManager.RegisterTimeOfDaySetting("GlowIntensity", "PROCEDURALSUN", 0.4f, 0.0f, 30000.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("GlowCurve", "PROCEDURALSUN", 10.0f, 0.0f, 100.0f, 0.01f, true);
+
 	settingManager.RegisterTimeOfDaySetting("Intensity", "VOLUMETRICFOG", 1.0f, 0.0f, 30000.0f, 0.01f, true);
 	settingManager.RegisterColorTimeOfDaySetting("ColorFilter", "VOLUMETRICFOG", { 1.0f, 1.0f, 1.0f }, true);
 
@@ -287,6 +293,7 @@ void EffectManager::RegisterSettings()
 	settingManager.SetCategoryDependency("BLOOM", "EnableBloom", "EFFECT");
 	settingManager.SetCategoryDependency("LENS", "EnableLens", "EFFECT");
 	settingManager.SetCategoryDependency("ADAPTATION", "EnableAdaptation", "EFFECT");
+	settingManager.SetCategoryDependency("PROCEDURALSUN", "EnableProceduralSun", "EFFECT");
 	settingManager.SetCategoryDependency("CLOUDSHADOWS", "EnableCloudShadows", "EFFECT");
 	settingManager.SetCategoryDependency("IMAGEBASEDLIGHTING", "EnableImageBasedLighting", "EFFECT");
 	settingManager.SetCategoryDependency("VOLUMETRICRAYS", "EnableVolumetricRays", "EFFECT");

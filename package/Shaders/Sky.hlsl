@@ -162,14 +162,6 @@ cbuffer AlphaTestRefCB : register(b11)
 #	include "Common/MotionBlur.hlsli"
 #	include "Common/SharedData.hlsli"
 
-#	if defined(CLOUD_SHADOWS)
-#		include "CloudShadows/CloudShadows.hlsli"
-#	endif
-
-#	if defined(PROCEDURAL_SUN)
-#		include "ProceduralSun/ProceduralSun.hlsli"
-#	endif
-
 #	if defined(EXP_HEIGHT_FOG)
 #		define SampColorSampler SampBaseSampler
 #		include "ExponentialHeightFog/ExponentialHeightFog.hlsli"
@@ -180,6 +172,21 @@ cbuffer AlphaTestRefCB : register(b11)
 #	endif
 
 Texture2D<float> TexDepthSampler : register(t17);
+
+#	if defined(EFFECTS11)
+float ComputeProceduralSun(float2 uv)
+{
+	float2 p = uv * 2.0 - 1.0;
+	float dist = dot(p, p) - SharedData::enbSettings.ProceduralSunDiskRadiusSq;
+
+	float c = saturate(dist * SharedData::enbSettings.ProceduralSunCoronaScale);
+	float corona = (1.0 - c) * rcp(SharedData::enbSettings.ProceduralSunCoronaFalloff * c + 1.0) * SharedData::enbSettings.ProceduralSunGlowIntensity;
+
+	float disk = saturate(-dist * SharedData::enbSettings.ProceduralSunDiskEdgeScale);
+
+	return corona + disk;
+}
+#	endif
 
 PS_OUTPUT main(PS_INPUT input)
 {
@@ -203,60 +210,17 @@ PS_OUTPUT main(PS_INPUT input)
 	baseColor = PParams.xxxx * (-baseColor + blendColor) + baseColor;
 #		endif
 
-#		if defined(PROCEDURAL_SUN) && defined(TEX) && defined(DEFERRED) && !defined(DITHER)
-	bool proceduralSunActive = SharedData::proceduralSunSettings.enabled &&
-	                           (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsSun) &&
-	                           (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InWorld);
-	if (proceduralSunActive) {
-		float3 viewDirection = normalize(input.WorldPosition.xyz);
-		float cosTheta = clamp(dot(viewDirection, SharedData::SunDirection.xyz), -1.0, 1.0);
-
-		float3 limbDarkening;
-		float discCoverage;
-		ProceduralSun::EvaluateDisc(
-			cosTheta,
-			SharedData::proceduralSunSettings.sunDiskCos,
-			SharedData::proceduralSunSettings.edgeSoftness,
-			limbDarkening,
-			discCoverage);
-
-		float haloProfile = 0.0;
-		if (SharedData::proceduralSunSettings.haloEnabled) {
-			haloProfile = ProceduralSun::EvaluateHalo(
-				cosTheta,
-				SharedData::proceduralSunSettings.sunDiskCos,
-				SharedData::proceduralSunSettings.sunHaloCos,
-				SharedData::proceduralSunSettings.haloFalloff);
-		}
-
-		float3 proceduralSunColor;
-		float sunCoverage;
-		ProceduralSun::ComposeDiscAndHalo(
-			limbDarkening,
-			discCoverage,
-			SharedData::proceduralSunSettings.diskIntensity,
-			haloProfile,
-			SharedData::proceduralSunSettings.haloIntensity,
-			proceduralSunColor,
-			sunCoverage);
-
-		baseColor.xyz = proceduralSunColor;
-		baseColor.w = sunCoverage;
-
-#			if defined(CLOUD_SHADOWS)
-		if (sunCoverage > 0.0 && SharedData::proceduralSunSettings.cloudOcclusionStrength > 0.0) {
-			float cloudOpacity = CloudShadows::CloudShadowsTexture.SampleLevel(SampBaseSampler, viewDirection, 0).x;
-			baseColor.w *= ProceduralSun::GetCloudTransmission(cloudOpacity, SharedData::proceduralSunSettings.cloudOcclusionStrength);
-		}
-#			endif
-
-		skyScale = 0.0;
-	}
-#		endif
-
 #		if defined(HDR_OUTPUT)
 	float hdrSunGain = HDRSun::GetHdrSunGain(input.TexCoord0.xy, baseColor);
 	baseColor.xyz *= hdrSunGain;
+#		endif
+
+#		if defined(TEX) && defined(EFFECTS11)
+	if (SharedData::enbSettings.EnableProceduralSun && (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsSun)) {
+		baseColor.xyz = ComputeProceduralSun(input.TexCoord0.xy);
+		baseColor.w = input.Color.w;
+		skyScale = 0.0;
+	}
 #		endif
 
 #		if defined(DITHER)

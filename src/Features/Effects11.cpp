@@ -67,6 +67,8 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 	data.FireIntensity = settingManager.GetInterpolatedTimeOfDayValue("FireIntensity", "FIRE");
 	data.FireCurve = settingManager.GetInterpolatedTimeOfDayValue("FireCurve", "FIRE");
 
+	data.EnableProceduralSun = enableEffect && settingManager.GetValue<bool>("EnableProceduralSun", "EFFECT");
+
 	data.EnableWater = enableEffect && settingManager.GetValue<bool>("EnableWater", "EFFECT");
 	data.WaterWavesAmplitude = settingManager.GetInterpolatedTimeOfDayValue("WavesAmplitude", "WATER");
 	data.WaterMuddiness = settingManager.GetValue<float>("Muddiness", "WATER");
@@ -76,6 +78,24 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 	data.WaterFresnelMax = settingManager.GetValue<float>("FresnelMax", "WATER");
 	data.WaterFresnelMultiplier = settingManager.GetValue<float>("FresnelMultiplier", "WATER");
 	data.WaterReflectionAmount = settingManager.GetValue<float>("ReflectionAmount", "WATER");
+
+	{
+		float size = settingManager.GetValue<float>("Size", "PROCEDURALSUN");
+		float edgeSoftness = settingManager.GetValue<float>("EdgeSoftness", "PROCEDURALSUN");
+		float glowCurve = std::max(FLT_MIN, settingManager.GetInterpolatedTimeOfDayValue("GlowCurve", "PROCEDURALSUN"));
+
+		float scaledSize = size * 0.04f;
+		float diskSq = scaledSize * scaledSize;
+		float outerSpan = std::max(1.0f - diskSq, FLT_MIN);
+		float softSq = std::max(edgeSoftness * edgeSoftness, FLT_MIN);
+
+		data.ProceduralSunDiskRadiusSq = diskSq;
+		data.ProceduralSunCoronaScale = 1.0f / outerSpan;
+		data.ProceduralSunDiskEdgeScale = 1.0f / (std::max(diskSq, FLT_MIN) * softSq);
+		data.ProceduralSunCoronaFalloff = 100.0f / (outerSpan * glowCurve);
+	}
+
+	data.ProceduralSunGlowIntensity = settingManager.GetInterpolatedTimeOfDayValue("GlowIntensity", "PROCEDURALSUN");
 
 	return data;
 }
