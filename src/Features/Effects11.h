@@ -44,15 +44,9 @@ public:
 		float CloudsEdgeIntensity;
 		float CloudsEdgeMoonMultiplier;
 
-		uint EnableProceduralSun;
-		float ProceduralSunDiskRadiusSq;
-		float ProceduralSunDiskEdgeScale;
-		float ProceduralSunGlowIntensity;
-
-		float ProceduralSunCoronaFalloff;
-		float ProceduralSunCoronaScale;
 		uint UseProceduralGradientWeights;
 		float ProceduralGradientWeightCurve;
+		float pad1[2];
 
 		float ParticleIntensity;
 		float ParticleLightingInfluence;
