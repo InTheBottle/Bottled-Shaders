@@ -126,7 +126,7 @@ void GrassLighting::DrawSettings()
 								  "Useful for grass that reads as too dark at midday with the sun overhead. Takes the greater of this and Soft Lighting."));
 		}
 
-		ImGui::SliderFloat(T(TKEY("sphere_normal"), "Rounded Clump Normals"), &settings.SphereNormalStrength, 0.0f, 1.0f, "%.2f");
+		ImGui::SliderFloat(T(TKEY("sphere_normal"), "Rounded Clump Normals"), &settings.SphereNormalStrength, 0.0f, 3.0f, "%.2f");
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T(TKEY("sphere_normal_tooltip"),
 								  "Bends each blade's normal outward from the base of its clump, ramping in toward the tips. "
