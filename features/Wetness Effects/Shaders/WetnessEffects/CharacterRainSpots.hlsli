@@ -293,7 +293,7 @@ namespace CharacterRainSpots
 				float rainDensity = 1.0f - pow(1.0f - baseRainDensity, activity);
 				float settledDensity = 1.0f - pow(1.0f - baseSettledDensity, activity);
 				float flowSlope = smoothstep(FlowSlopeFadeStart, FlowSlopeFadeEnd, length(worldNormal.xy));
-				[loop] for (uint projectionIndex = 0u; projectionIndex < SurfaceProjectionCount; ++projectionIndex)
+				[unroll] for (uint projectionIndex = 0u; projectionIndex < SurfaceProjectionCount; ++projectionIndex)
 				{
 					[branch] if (projectionWeights[projectionIndex] > MinimumProjectionWeight)
 					{
