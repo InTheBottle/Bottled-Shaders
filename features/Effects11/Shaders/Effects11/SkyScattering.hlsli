@@ -78,9 +78,11 @@ namespace SkyScattering
 			bool useMasser = masser >= secunda;
 			float3 moonDirection = useMasser ? SharedData::MasserDirection.xyz : SharedData::SecundaDirection.xyz;
 			float3 moonColor = max(useMasser ? SharedData::MasserColor.xyz : SharedData::SecundaColor.xyz, 0.0);
+			float moonBrightness = max(moonColor.r, max(moonColor.g, moonColor.b));
+			float3 moonChroma = GetChroma(moonColor);
 			light.direction = SafeNormalize(moonDirection);
-			light.color = lerp(dot(moonColor, 1.0 / 3.0).xxx, moonColor, SharedData::enbSettings.SkyScatteringColorFromSun);
-			light.weight = GetMoonPresence() * HorizonFade(light.direction.z) * SharedData::enbSettings.SkyScatteringMoonGlowAmount;
+			light.color = lerp(dot(moonChroma, 1.0 / 3.0).xxx, moonChroma, SharedData::enbSettings.SkyScatteringColorFromSun);
+			light.weight = GetMoonPresence() * HorizonFade(light.direction.z) * SharedData::enbSettings.SkyScatteringMoonGlowAmount * moonBrightness;
 		}
 		light.color *= SharedData::enbSettings.SkyScatteringColor * SharedData::enbSettings.SkyScatteringIntensity;
 		return light;
