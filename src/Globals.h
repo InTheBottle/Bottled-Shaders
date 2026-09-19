@@ -45,6 +45,7 @@ struct PostProcessing;
 struct ScreenshotFeature;
 struct Skin;
 struct SnowCover;
+struct FootstepParticles;
 
 class State;
 class Deferred;
@@ -142,6 +143,7 @@ namespace globals
 	extern PostProcessing postProcessing;
 		extern Skin skin;
 		extern SnowCover snowCover;
+		extern FootstepParticles footstepParticles;
 
 	}
 

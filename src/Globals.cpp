@@ -8,6 +8,7 @@
 #include "Features/ExponentialHeightFog.h"
 #include "Features/ExtendedMaterials.h"
 #include "Features/ExtendedTranslucency.h"
+#include "Features/FootstepParticles.h"
 #include "Features/FoliageLighting.h"
 #include "Features/GrassCollision.h"
 #include "Features/GrassLighting.h"
@@ -109,6 +110,7 @@ namespace globals
 		PostProcessing postProcessing{};
 		Skin skin{};
 		SnowCover snowCover{};
+		FootstepParticles footstepParticles{};
 
 		namespace llf
 		{

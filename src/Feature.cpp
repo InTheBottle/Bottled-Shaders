@@ -11,6 +11,7 @@
 #include "Features/ExtendedMaterials.h"
 #include "Features/ExtendedTranslucency.h"
 #include "Features/FoliageLighting.h"
+#include "Features/FootstepParticles.h"
 #include "Features/GrassCollision.h"
 #include "Features/GrassLighting.h"
 #include "Features/GrassOptimizations.h"
@@ -269,7 +270,8 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::hdrDisplay,
 		&globals::features::postProcessing,
 		&globals::features::skin,
-		&globals::features::snowCover
+		&globals::features::snowCover,
+		&globals::features::footstepParticles
 	};
 
 	return features;
