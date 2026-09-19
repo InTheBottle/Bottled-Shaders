@@ -565,29 +565,6 @@ bool Effects11::ReplacedTonemapperThisFrame() const
 	return tonemapReplacedFrame == globals::state->frameCount;
 }
 
-void Effects11::ModifySky(RE::BSRenderPass* Pass)
-{
-	// State::UpdateSkyShaderPermutation ran first and already flagged both the sun disc and its
-	// glare; only narrow that to the disc when a preset is actually driving the procedural sun
-	if (!enableEffect)
-		return;
-
-	if (!Pass || !Pass->shaderProperty) {
-		return;
-	}
-
-	auto skyProperty = static_cast<const RE::BSSkyShaderProperty*>(Pass->shaderProperty);
-
-	auto state = globals::state;
-
-	state->permutationData.ExtraShaderDescriptor &= ~static_cast<uint32_t>(State::ExtraShaderDescriptors::IsSun);
-
-	if (skyProperty->uiSkyObjectType == RE::BSSkyShaderProperty::SkyObject::SO_SUN) {
-		state->permutationData.ExtraShaderDescriptor |= static_cast<uint32_t>(State::ExtraShaderDescriptors::IsSun);
-	}
-}
-
-
 void Effects11::ModifyParticle(RE::BSRenderPass* Pass)
 {
 	if (!enableEffect || !raindropSRV)

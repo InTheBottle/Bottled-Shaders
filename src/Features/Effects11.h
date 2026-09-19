@@ -120,7 +120,6 @@ public:
 	};
 	void OverrideAmbientLighting(DirectionalAmbientColors& DirectionalAmbientColors);
 
-	void ModifySky(RE::BSRenderPass* Pass);
 	__declspec(noinline) void ModifyParticle(RE::BSRenderPass* Pass);
 	void ParticleShaderHacks();
 

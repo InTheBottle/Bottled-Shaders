@@ -17,7 +17,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	haloAngularWidth,
 	haloIntensity,
 	haloFalloff,
-	cloudOcclusionStrength,
+	cloudExtinction,
 	excludeFromAdaptation)
 
 namespace
@@ -32,7 +32,7 @@ namespace
 	constexpr float kMaximumHaloIntensity = 20.0f;
 	constexpr float kMinimumHaloFalloff = 1.0f;
 	constexpr float kMaximumHaloFalloff = 100.0f;
-	constexpr float kMaximumCloudOcclusionStrength = 4.0f;
+	constexpr float kMaximumCloudExtinction = 16.0f;
 
 	void ClampSettings(ProceduralSun::Settings& settings)
 	{
@@ -52,8 +52,8 @@ namespace
 			settings.haloIntensity = defaults.haloIntensity;
 		if (!std::isfinite(settings.haloFalloff))
 			settings.haloFalloff = defaults.haloFalloff;
-		if (!std::isfinite(settings.cloudOcclusionStrength))
-			settings.cloudOcclusionStrength = defaults.cloudOcclusionStrength;
+		if (!std::isfinite(settings.cloudExtinction))
+			settings.cloudExtinction = defaults.cloudExtinction;
 
 		settings.sunDiskAngularRadius = std::clamp(settings.sunDiskAngularRadius, kMinimumAngularRadius, kMaximumAngularRadius);
 		settings.diskIntensity = std::clamp(settings.diskIntensity, 0.0f, kMaximumDiskIntensity);
@@ -61,7 +61,7 @@ namespace
 		settings.haloAngularWidth = std::clamp(settings.haloAngularWidth, kMinimumHaloAngularWidth, kMaximumHaloAngularWidth);
 		settings.haloIntensity = std::clamp(settings.haloIntensity, 0.0f, kMaximumHaloIntensity);
 		settings.haloFalloff = std::clamp(settings.haloFalloff, kMinimumHaloFalloff, kMaximumHaloFalloff);
-		settings.cloudOcclusionStrength = std::clamp(settings.cloudOcclusionStrength, 0.0f, kMaximumCloudOcclusionStrength);
+		settings.cloudExtinction = std::clamp(settings.cloudExtinction, 0.0f, kMaximumCloudExtinction);
 	}
 }
 
@@ -83,9 +83,9 @@ void ProceduralSun::DrawSettings()
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::TextWrapped("%s", T(TKEY("edge_softness_tooltip"), "Width of the anti-aliased transition at the edge of the sun disc."));
 
-	ImGui::SliderFloat(T(TKEY("cloud_occlusion_strength"), "Cloud Occlusion Strength"), &settings.cloudOcclusionStrength, 0.0f, kMaximumCloudOcclusionStrength, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+	ImGui::SliderFloat(T(TKEY("cloud_extinction"), "Cloud Extinction"), &settings.cloudExtinction, 0.0f, kMaximumCloudExtinction, "%.1f", ImGuiSliderFlags_AlwaysClamp);
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::TextWrapped("%s", T(TKEY("cloud_occlusion_strength_tooltip"), "Additional fading of the disc and halo behind clouds. Requires Cloud Shadows. 0 preserves normal cloud blending; higher values hide the sun more strongly. Clear sky is unchanged."));
+		ImGui::TextWrapped("%s", T(TKEY("cloud_extinction_tooltip"), "How strongly clouds block the sun disc, inner halo, and glare. 0 is plain cloud blending; higher values let less sunlight through thin clouds. The clouds' own colour is unchanged."));
 
 	bool excludeFromAdaptation = settings.excludeFromAdaptation != 0;
 	if (ImGui::Checkbox(T(TKEY("exclude_from_adaptation"), "Hide From Effects11 Adaptation"), &excludeFromAdaptation))
@@ -141,6 +141,6 @@ ProceduralSun::PerFrameData ProceduralSun::GetCommonBufferData() const
 		.sunHaloCos = std::cos(settings.sunDiskAngularRadius + settings.haloAngularWidth),
 		.haloIntensity = settings.haloIntensity,
 		.haloFalloff = settings.haloFalloff,
-		.cloudOcclusionStrength = settings.cloudOcclusionStrength
+		.cloudExtinction = settings.cloudExtinction
 	};
 }

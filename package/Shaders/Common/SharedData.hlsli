@@ -204,7 +204,7 @@ namespace SharedData
 		float haloIntensity;
 		float haloFalloff;
 
-		float cloudOcclusionStrength;
+		float cloudExtinction;
 		float3 pad0;
 	};
 

@@ -14,7 +14,7 @@ struct ProceduralSun : Feature
 		float haloAngularWidth = DirectX::XMConvertToRadians(4.0f);
 		float haloIntensity = 0.4f;
 		float haloFalloff = 10.0f;
-		float cloudOcclusionStrength = 1.0f;
+		float cloudExtinction = 4.0f;
 		uint excludeFromAdaptation = true;
 	};
 
@@ -31,7 +31,7 @@ struct ProceduralSun : Feature
 		float haloIntensity;
 		float haloFalloff;
 
-		float cloudOcclusionStrength;
+		float cloudExtinction;
 		float pad[3] = {};
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrameData);
