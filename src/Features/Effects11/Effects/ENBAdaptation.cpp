@@ -108,7 +108,7 @@ ID3D11ShaderResourceView* ENBAdaptation::MaskProceduralSun(ID3D11ShaderResourceV
 	auto sky = globals::game::sky;
 	if (!sky || !sky->sun || !sky->sun->root || !sky->root)
 		return a_source;
-	if (sky->sun->root->GetFlags().any(RE::NiAVObject::Flag::kHidden))
+	if (ProceduralSun::GetSunVisibility() <= 0.0f)
 		return a_source;
 
 	const auto& sunPos = sky->sun->root->world.translate;

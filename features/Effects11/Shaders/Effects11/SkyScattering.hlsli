@@ -57,13 +57,21 @@ namespace SkyScattering
 		return saturate(SharedData::SunColor.w) * HorizonFade(SharedData::SunDirection.z);
 	}
 
+	float GetMoonPresence()
+	{
+		float sunBelowHorizon = 1.0 - smoothstep(-0.2, -0.1, SharedData::SunDirection.z);
+		float sunFadedOut = SharedData::SunColor.w > 0.0 ? 0.0 : smoothstep(0.0, 0.1, SharedData::SunDirection.z);
+		return max(sunBelowHorizon, sunFadedOut);
+	}
+
 	Light GetLight()
 	{
 		Light light;
-		if (SharedData::SunDirection.z > -0.1) {
+		float sunWeight = GetSunWeight();
+		if (sunWeight > 0.0) {
 			light.direction = SafeNormalize(SharedData::SunDirection.xyz);
 			light.color = lerp(1.0.xxx, GetChroma(SharedData::SunColor.xyz), SharedData::enbSettings.SkyScatteringColorFromSun);
-			light.weight = GetSunWeight();
+			light.weight = sunWeight;
 		} else {
 			float masser = dot(max(SharedData::MasserColor.xyz, 0.0), 1.0 / 3.0) * HorizonFade(SharedData::MasserDirection.z);
 			float secunda = dot(max(SharedData::SecundaColor.xyz, 0.0), 1.0 / 3.0) * HorizonFade(SharedData::SecundaDirection.z);
@@ -72,7 +80,7 @@ namespace SkyScattering
 			float3 moonColor = max(useMasser ? SharedData::MasserColor.xyz : SharedData::SecundaColor.xyz, 0.0);
 			light.direction = SafeNormalize(moonDirection);
 			light.color = lerp(dot(moonColor, 1.0 / 3.0).xxx, moonColor, SharedData::enbSettings.SkyScatteringColorFromSun);
-			light.weight = (1.0 - smoothstep(-0.2, -0.1, SharedData::SunDirection.z)) * HorizonFade(light.direction.z) * SharedData::enbSettings.SkyScatteringMoonGlowAmount;
+			light.weight = GetMoonPresence() * HorizonFade(light.direction.z) * SharedData::enbSettings.SkyScatteringMoonGlowAmount;
 		}
 		light.color *= SharedData::enbSettings.SkyScatteringColor * SharedData::enbSettings.SkyScatteringIntensity;
 		return light;

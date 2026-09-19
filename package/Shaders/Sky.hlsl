@@ -347,7 +347,8 @@ PS_OUTPUT main(PS_INPUT input)
 #			endif
 
 #			if defined(CLOUDS) && defined(DEFERRED) && defined(PROCEDURAL_SUN)
-	if (SharedData::proceduralSunSettings.enabled && SharedData::proceduralSunSettings.cloudExtinction > 0.0 &&
+	float cloudExtinction = SharedData::proceduralSunSettings.cloudExtinction * SharedData::proceduralSunSettings.sunVisibility;
+	if (SharedData::proceduralSunSettings.enabled && cloudExtinction > 0.0 &&
 		(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InWorld)) {
 		float cloudSunCosTheta = dot(normalize(input.WorldPosition.xyz), SharedData::SunDirection.xyz);
 		float sunMask = ProceduralSun::EvaluateCloudExtinctionMask(
@@ -358,7 +359,7 @@ PS_OUTPUT main(PS_INPUT input)
 			SharedData::proceduralSunSettings.sunHaloCos,
 			SharedData::proceduralSunSettings.haloIntensity,
 			SharedData::proceduralSunSettings.haloFalloff);
-		psout.Color = ProceduralSun::ApplyCloudExtinction(psout.Color, 1.0 + SharedData::proceduralSunSettings.cloudExtinction * sunMask);
+		psout.Color = ProceduralSun::ApplyCloudExtinction(psout.Color, 1.0 + cloudExtinction * sunMask);
 	}
 #			endif
 #		endif

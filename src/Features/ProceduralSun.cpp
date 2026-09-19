@@ -141,6 +141,24 @@ ProceduralSun::PerFrameData ProceduralSun::GetCommonBufferData() const
 		.sunHaloCos = std::cos(settings.sunDiskAngularRadius + settings.haloAngularWidth),
 		.haloIntensity = settings.haloIntensity,
 		.haloFalloff = settings.haloFalloff,
-		.cloudExtinction = settings.cloudExtinction
+		.cloudExtinction = settings.cloudExtinction,
+		.sunVisibility = GetSunVisibility()
 	};
+}
+
+float ProceduralSun::GetSunVisibility()
+{
+	const auto sky = globals::game::sky;
+	const auto sun = sky ? sky->sun : nullptr;
+	if (!sun || !sun->root || !sun->sunBaseNode || !sun->sunBase)
+		return 0.0f;
+	if (sun->root->GetFlags().any(RE::NiAVObject::Flag::kHidden) || sun->sunBaseNode->GetFlags().any(RE::NiAVObject::Flag::kHidden))
+		return 0.0f;
+
+	const auto prop = skyrim_cast<RE::BSSkyShaderProperty*>(sun->sunBase->GetGeometryRuntimeData().shaderProperty.get());
+	if (!prop)
+		return 0.0f;
+
+	const float alpha = prop->kBlendColor.alpha;
+	return alpha > 0.0f ? std::min(alpha, 1.0f) : 0.0f;
 }

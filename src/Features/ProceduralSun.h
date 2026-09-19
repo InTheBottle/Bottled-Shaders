@@ -32,7 +32,8 @@ struct ProceduralSun : Feature
 		float haloFalloff;
 
 		float cloudExtinction;
-		float pad[3] = {};
+		float sunVisibility;
+		float pad[2] = {};
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrameData);
 	static_assert(sizeof(PerFrameData) == 48);
@@ -74,4 +75,6 @@ struct ProceduralSun : Feature
 
 	/** @brief Returns the settings uploaded to the shared feature buffer. */
 	PerFrameData GetCommonBufferData() const;
+
+	static float GetSunVisibility();
 };
