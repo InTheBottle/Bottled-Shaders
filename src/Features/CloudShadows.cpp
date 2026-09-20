@@ -11,27 +11,22 @@
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	CloudShadows::Settings,
-	Opacity,
-	SelfShadowStrength)
+	Opacity)
 
 void CloudShadows::DrawSettings()
 {
-	bool opacityManagedByENB = globals::features::effects11.loaded && globals::features::effects11.enableEffect;
-
-	if (opacityManagedByENB) {
-		ImGui::TextColored(globals::menu->GetSettings().Theme.StatusPalette.Warning, "%s", T("common.settings_managed_by_enb", "Settings are currently managed by ENB."));
-	} else {
-		ImGui::SliderFloat(T(TKEY("opacity"), "Opacity"), &settings.Opacity, 0.0f, 4.0f, "%.1f");
-		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("opacity_tooltip"),
-								  "Higher values make cloud shadows darker."));
+	if (globals::features::effects11.loaded) {
+		auto& enb = globals::features::effects11;
+		if (enb.enableEffect) {
+			ImGui::TextColored(globals::menu->GetSettings().Theme.StatusPalette.Warning, "%s", T("common.settings_managed_by_enb", "Settings are currently managed by ENB."));
+			return;
 		}
 	}
 
-	ImGui::SliderFloat(T(TKEY("self_shadow_strength"), "Self-Shadow Strength"), &settings.SelfShadowStrength, 0.0f, 1.0f, "%.2f");
+	ImGui::SliderFloat(T(TKEY("opacity"), "Opacity"), &settings.Opacity, 0.0f, 4.0f, "%.1f");
 	if (auto _tt = Util::HoverTooltipWrapper()) {
-		ImGui::Text("%s", T(TKEY("self_shadow_strength_tooltip"),
-							  "Shades each cloud deck by the cloud cover between it and the sun, giving flat cloud planes a sense of depth. Set to 0 to disable.\n\nENB cloud scattering already does this, so this slider is ignored while that is enabled."));
+		ImGui::Text("%s", T(TKEY("opacity_tooltip"),
+							  "Higher values make cloud shadows darker."));
 	}
 }
 
@@ -106,11 +101,6 @@ void CloudShadows::PropagateToCompletion(int side)
 
 void CloudShadows::SkyShaderHacks()
 {
-	if (bindDeckAbove) {
-		bindDeckAbove = false;
-		globals::d3d::context->PSSetShaderResources(26, 1, &deckAboveSRVs[currentDeckForDraw]);
-	}
-
 	if (!overrideSky)
 		return;
 	overrideSky = false;
@@ -145,14 +135,7 @@ void CloudShadows::SkyShaderHacks()
 			context->CopySubresourceRegion(
 				texOcclusionChain[deck]->resource.get(), subresource, 0, 0, 0,
 				source, subresource, nullptr);
-
-			deckAboveSRVs[deck] = previousDeck >= 0 ? texOcclusionChain[previousDeck]->srv.get() : texOcclusionBase->srv.get();
 		}
-
-		// The chain entry about to become a render target may still be bound from the
-		// main pass, so drop it before binding rather than leaving D3D to resolve it.
-		ID3D11ShaderResourceView* nullSrv = nullptr;
-		context->PSSetShaderResources(26, 1, &nullSrv);
 
 		rtvs[3] = occlusionChainRTVs[deck][side];
 		context->OMSetRenderTargets(4, rtvs, nullptr);
@@ -161,8 +144,6 @@ void CloudShadows::SkyShaderHacks()
 		UINT sampleMask = 0xffffffff;
 
 		context->OMSetBlendState(cloudShadowBlendState, blendFactor, sampleMask);
-
-		context->PSSetShaderResources(26, 1, &deckAboveSRVs[deck]);
 
 		auto cubemapDepth = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kCUBEMAP_REFLECTIONS];
 		context->PSSetShaderResources(17, 1, &cubemapDepth.depthSRV);
@@ -209,14 +190,11 @@ void CloudShadows::ModifySky(RE::BSRenderPass* Pass)
 	if (deck < 0)
 		return;
 
-	currentDeckForDraw = deck;
+	if (cubeMapRenderTarget != RE::RENDER_TARGETS_CUBEMAP::kREFLECTIONS)
+		return;
 
-	// Both binds happen at draw time in SkyShaderHacks, after the game's own
-	// SetupMaterial has finished claiming pixel shader resources.
-	if (cubeMapRenderTarget == RE::RENDER_TARGETS_CUBEMAP::kREFLECTIONS)
-		overrideSky = true;
-	else
-		bindDeckAbove = true;
+	currentDeckForDraw = deck;
+	overrideSky = true;
 }
 
 void CloudShadows::ReflectionsPrepass()
@@ -286,8 +264,6 @@ void CloudShadows::SetupResources()
 				DX::ThrowIfFailed(device->CreateRenderTargetView(texOcclusionChain[deck]->resource.get(), &rtvDesc, &occlusionChainRTVs[deck][face]));
 				Util::SetResourceName(occlusionChainRTVs[deck][face], "CloudShadows::OcclusionChain[%d] RTV[%d]", deck, face);
 			}
-
-			deckAboveSRVs[deck] = texOcclusionBase->srv.get();
 		}
 
 		texCubemapCloudOcc = new Texture2D(texDesc, "CloudShadows::CubemapCloudOcc");

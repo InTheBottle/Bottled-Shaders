@@ -11,8 +11,7 @@ public:
 	struct alignas(16) Settings
 	{
 		float Opacity = 0.5f;
-		float SelfShadowStrength = 0.4f;
-		float pad[2]{};
+		float pad[3]{};
 	};
 
 	Settings settings;
@@ -30,19 +29,17 @@ public:
 				T("feature.cloud_shadows.key_feature_2", "Configurable shadow opacity for artistic control"),
 				T("feature.cloud_shadows.key_feature_3", "Real-time shadow movement synchronized with cloud motion"),
 				T("feature.cloud_shadows.key_feature_4", "Cubemap-based shadow calculation for accurate projection"),
-				T("feature.cloud_shadows.key_feature_5", "Cloud decks self-shadow the decks below them") } };
+				T("feature.cloud_shadows.key_feature_5", "Enhanced sky rendering integration") } };
 	};
 
 	virtual inline bool HasShaderDefine(RE::BSShader::Type) override { return true; }
 
 	bool overrideSky = false;
-	bool bindDeckAbove = false;
 	/**
-	 * @brief Applies the per-draw cloud shadow state, once the game has set up its own.
+	 * @brief Applies sky shader render state overrides for cloud shadow capture.
 	 *
-	 * When overrideSky is set, redirects rendering to the cloud occlusion cubemap and
-	 * configures the appropriate blend state and depth resources. When bindDeckAbove is
-	 * set, binds only the occlusion of the decks above the one about to draw.
+	 * When overrideSky is set, redirects rendering to the cloud occlusion cubemap
+	 * and configures the appropriate blend state and depth resources.
 	 */
 	void SkyShaderHacks();
 
@@ -59,9 +56,6 @@ public:
 	/** @brief Frozen snapshot of the composite, bound at t25 so the live composite can keep being written. */
 	Texture2D* texCubemapCloudOccCopy = nullptr;
 
-	/** @brief For each deck, the chain entry holding only the decks above it. Bound at t26. */
-	ID3D11ShaderResourceView* deckAboveSRVs[kMaxCloudDecks] = {};
-
 	UINT cubemapMipLevels = 1;
 	int currentDeckForDraw = 0;
 
@@ -73,7 +67,7 @@ public:
 	/** @brief Creates cubemap textures, SRVs, RTVs, and blend state for cloud shadow rendering. */
 	virtual void SetupResources() override;
 
-	/** @brief Draws the ImGui settings UI for cloud shadow opacity and self-shadowing. */
+	/** @brief Draws the ImGui settings UI for cloud shadow opacity. */
 	virtual void DrawSettings() override;
 
 	virtual void LoadSettings(json& o_json) override;
