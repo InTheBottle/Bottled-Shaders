@@ -87,6 +87,7 @@ public:
 	PerFrame GetCommonBufferData() const;
 	/** @brief Returns true when IBL should be suppressed in the current scene per the DisableIn* toggles (loading screens, world map, interiors). */
 	bool IsDisabledForCurrentScene() const;
+	bool IsManagedByENB() const;
 	/** @brief Returns the diffuse IBL spherical harmonics compute shader, compiling it on first use. */
 	ID3D11ComputeShader* GetDiffuseIBLCS();
 };
