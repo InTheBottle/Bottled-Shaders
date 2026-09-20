@@ -80,8 +80,6 @@ namespace Permutation
 		static const uint IsEye = (1 << 7);
 		static const uint NoSnow = (1 << 8);
 		static const uint NoFoliageTint = (1 << 9);
-		static const uint IsCharacterRainSurface = (1 << 10);
-		static const uint IsHeldWeapon = (1 << 11);
 	}
 
 	namespace ExtraFeatureFlags

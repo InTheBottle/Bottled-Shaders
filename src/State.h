@@ -280,9 +280,7 @@ public:
 		AdditiveLighting = 1 << 6,
 		IsEye = 1 << 7,
 		NoSnow = 1 << 8,
-		NoFoliageTint = 1 << 9,
-		IsCharacterRainSurface = 1 << 10,
-		IsHeldWeapon = 1 << 11
+		NoFoliageTint = 1 << 9
 	};
 
 	/** @brief Bitflags describing extra feature-specific properties related to terrain displacement and material models. */
