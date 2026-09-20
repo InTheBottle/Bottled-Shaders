@@ -196,31 +196,6 @@ public:
 	std::string selectedPbrTextureSetName;
 	PBRTextureSetData* selectedPbrTextureSet = nullptr;
 
-	/**
-	 * @brief Resolved projected (MATO) texture overrides for a single material object.
-	 *
-	 * The engine only ever binds one global set (textures/effects/Projected{Noise,Diffuse,
-	 * Normal,NormalDetail}.dds) for every single-pass material object in the game. Any slot
-	 * left null here keeps that global texture, so a config may override as few or as many
-	 * of the four as it needs.
-	 */
-	struct PBRProjectedTextures
-	{
-		RE::NiPointer<RE::NiSourceTexture> diffuse;
-		RE::NiPointer<RE::NiSourceTexture> normal;
-		RE::NiPointer<RE::NiSourceTexture> detailNormal;
-		RE::NiPointer<RE::NiSourceTexture> noise;
-
-		/** @brief CRC32 of the resolved texture paths, folded into the material hash. */
-		std::uint32_t hash = 0;
-
-		/** @brief Returns true when at least one slot overrides the engine global. */
-		bool Any() const
-		{
-			return diffuse != nullptr || normal != nullptr || detailNormal != nullptr || noise != nullptr;
-		}
-	};
-
 	struct PBRMaterialObjectData
 	{
 		std::array<float, 3> baseColorScale = { 1.f, 1.f, 1.f };
@@ -228,42 +203,10 @@ public:
 		float specularLevel = 1.f;
 
 		GlintParameters glintParameters;
-
-		std::string projectedDiffuse;
-		std::string projectedNormal;
-		std::string projectedDetailNormal;
-		std::string projectedNoise;
-
-		// Not serialized; filled on first use by ResolveProjectedTextures.
-		PBRProjectedTextures projectedTextures;
-		bool projectedTexturesResolved = false;
 	};
 
 	/** @brief Loads all PBR material object configurations from JSON files in Data/PBRMaterialObjects. */
 	void SetupMaterialObjectData();
-	/**
-	 * @brief Resolves and caches the projected texture overrides for a material object.
-	 *
-	 * Paths given in the JSON config win. Any diffuse/normal slot left blank falls back to
-	 * the texture set of the material object's own model NIF, which is the same data a
-	 * multi-pass MATO already ships and which the engine ignores under single pass.
-	 *
-	 * @param materialObject The material object form, used for the model NIF fallback. May be null.
-	 * @param data The config to resolve into. Resolution happens once; later calls return the cache.
-	 * @return The resolved texture set for this material object.
-	 */
-	const PBRProjectedTextures& ResolveProjectedTextures(RE::BGSMaterialObject* materialObject, PBRMaterialObjectData& data);
-	/**
-	 * @brief Drops the cached projected textures for one config so the next resolve re-reads disk.
-	 * @param data The config to invalidate.
-	 */
-	void InvalidateProjectedTextures(PBRMaterialObjectData& data);
-	/**
-	 * @brief Finds the material object form whose editor ID matches a config file name.
-	 * @param editorId The editor ID to look for.
-	 * @return The matching form, or nullptr if no material object carries that editor ID.
-	 */
-	RE::BGSMaterialObject* FindMaterialObjectByEditorID(const std::string& editorId);
 	/**
 	 * @brief Looks up PBR material object data by the form's editor ID.
 	 * @param materialObject The material object form to look up.
@@ -280,11 +223,6 @@ public:
 	std::unordered_map<std::string, PBRMaterialObjectData> pbrMaterialObjects;
 	std::string selectedPbrMaterialObjectName;
 	PBRMaterialObjectData* selectedPbrMaterialObject = nullptr;
-
-	// Clone3D runs on loader threads, so several refs sharing a material object can race to
-	// resolve its textures. The mutex only guards the one-shot resolve; reads afterwards are
-	// of immutable data.
-	std::mutex projectedTextureMutex;
 
 	RE::BGSTextureSet* currentTextureSet = nullptr;
 };

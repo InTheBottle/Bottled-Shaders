@@ -10,8 +10,6 @@
 #include "State.h"
 #include "Util.h"
 
-#include <imgui_stdlib.h>
-
 #define I18N_KEY_PREFIX "feature.true_pbr."
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
@@ -43,11 +41,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	baseColorScale,
 	roughness,
 	specularLevel,
-	glintParameters,
-	projectedDiffuse,
-	projectedNormal,
-	projectedDetailNormal,
-	projectedNoise);
+	glintParameters);
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	TruePBR::Settings,
@@ -328,29 +322,6 @@ void TruePBR::DrawSettings()
 				}
 				ImGui::TreePop();
 			}
-			if (ImGui::TreeNodeEx(T(TKEY("material_projected_textures"), "Projected Textures"))) {
-				ImGui::TextWrapped("%s", T(TKEY("material_projected_textures_desc"), "Replaces the global projected texture set for this material object only. Leave a field blank to keep the game's shared texture. A blank diffuse or normal also falls back to the texture set inside the material object's own model, so a multi-pass mod switched to Single Pass needs no paths here."));
-				ImGui::Spacing();
-
-				// Resolve on focus loss rather than per keystroke; each resolve is a blocking texture load.
-				bool texturesEdited = false;
-				ImGui::InputText(T(TKEY("material_projected_diffuse"), "Diffuse"), &selectedPbrMaterialObject->projectedDiffuse);
-				texturesEdited |= ImGui::IsItemDeactivatedAfterEdit();
-				ImGui::InputText(T(TKEY("material_projected_normal"), "Normal"), &selectedPbrMaterialObject->projectedNormal);
-				texturesEdited |= ImGui::IsItemDeactivatedAfterEdit();
-				ImGui::InputText(T(TKEY("material_projected_detail_normal"), "Detail Normal"), &selectedPbrMaterialObject->projectedDetailNormal);
-				texturesEdited |= ImGui::IsItemDeactivatedAfterEdit();
-				ImGui::InputText(T(TKEY("material_projected_noise"), "Noise"), &selectedPbrMaterialObject->projectedNoise);
-				texturesEdited |= ImGui::IsItemDeactivatedAfterEdit();
-
-				if (texturesEdited || ImGui::Button(T(TKEY("material_projected_reload"), "Reload Textures"))) {
-					InvalidateProjectedTextures(*selectedPbrMaterialObject);
-					ResolveProjectedTextures(FindMaterialObjectByEditorID(selectedPbrMaterialObjectName), *selectedPbrMaterialObject);
-					wasEdited = true;
-				}
-
-				ImGui::TreePop();
-			}
 			if (wasEdited) {
 				for (auto& [material, extensions] : BSLightingShaderMaterialPBR::All) {
 					if (extensions.materialObjectData == selectedPbrMaterialObject) {
@@ -567,131 +538,6 @@ void TruePBR::SetupMaterialObjectData()
 			return false;
 		}
 	}, enableVerboseJsonLogging);
-}
-
-namespace
-{
-	RE::NiPointer<RE::NiSourceTexture> LoadProjectedTexture(const std::string& path)
-	{
-		if (path.empty()) {
-			return nullptr;
-		}
-
-		RE::NiPointer<RE::NiTexture> texture;
-		RE::BSShaderManager::GetTexture(path.c_str(), true, texture, false);
-		if (texture == nullptr || texture->GetRTTI() != globals::rtti::NiSourceTextureRTTI.get()) {
-			logger::warn("[TruePBR] projected material texture {} could not be loaded; keeping the engine default", path);
-			return nullptr;
-		}
-
-		return RE::NiPointer<RE::NiSourceTexture>(static_cast<RE::NiSourceTexture*>(texture.get()));
-	}
-
-	/**
-	 * @brief Pulls diffuse/normal paths out of a material object's own model NIF.
-	 *
-	 * Multi-pass material objects already carry a full texture set in their model; the engine
-	 * simply ignores it once Single Pass is set. Reading it here lets an existing multi-pass
-	 * mod switch to single pass (the only mode TruePBR supports) without authoring anything new.
-	 * Only fills slots that are still empty, so JSON always wins.
-	 */
-	void ReadProjectedTexturesFromModel(RE::BGSMaterialObject* materialObject, std::string& diffuse, std::string& normal)
-	{
-		const char* modelPath = materialObject->GetModel();
-		if (modelPath == nullptr || *modelPath == 0) {
-			return;
-		}
-
-		std::string resourcePath = modelPath;
-		std::string lowered = resourcePath;
-		std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-		if (!lowered.starts_with("meshes\\") && !lowered.starts_with("meshes/")) {
-			resourcePath = "meshes\\" + resourcePath;
-		}
-
-		// Vanilla single-pass records point at ShaderTests\ShaderBox.nif, which does not ship.
-		// EnsureLoaded on a missing model is not worth risking, so gate on the resource existing.
-		RE::BSResourceNiBinaryStream stream(resourcePath);
-		if (!stream.good()) {
-			return;
-		}
-
-		materialObject->EnsureLoaded();
-
-		for (const auto& niProperty : materialObject->properties) {
-			if (niProperty == nullptr || niProperty->GetRTTI() != globals::rtti::BSLightingShaderPropertyRTTI.get()) {
-				continue;
-			}
-
-			auto* lightingProperty = static_cast<RE::BSLightingShaderProperty*>(niProperty.get());
-			auto* material = static_cast<RE::BSLightingShaderMaterialBase*>(lightingProperty->material);
-			if (material == nullptr || material->textureSet == nullptr) {
-				continue;
-			}
-
-			if (diffuse.empty()) {
-				if (const char* path = material->textureSet->GetTexturePath(RE::BSTextureSet::Texture::kDiffuse)) {
-					diffuse = path;
-				}
-			}
-			if (normal.empty()) {
-				if (const char* path = material->textureSet->GetTexturePath(RE::BSTextureSet::Texture::kNormal)) {
-					normal = path;
-				}
-			}
-			if (!diffuse.empty() && !normal.empty()) {
-				break;
-			}
-		}
-	}
-}
-
-const TruePBR::PBRProjectedTextures& TruePBR::ResolveProjectedTextures(RE::BGSMaterialObject* materialObject, PBRMaterialObjectData& data)
-{
-	std::scoped_lock lock(projectedTextureMutex);
-
-	if (data.projectedTexturesResolved) {
-		return data.projectedTextures;
-	}
-	data.projectedTexturesResolved = true;
-
-	std::string diffuse = data.projectedDiffuse;
-	std::string normal = data.projectedNormal;
-	if (materialObject != nullptr && (diffuse.empty() || normal.empty())) {
-		ReadProjectedTexturesFromModel(materialObject, diffuse, normal);
-	}
-
-	data.projectedTextures.diffuse = LoadProjectedTexture(diffuse);
-	data.projectedTextures.normal = LoadProjectedTexture(normal);
-	data.projectedTextures.detailNormal = LoadProjectedTexture(data.projectedDetailNormal);
-	data.projectedTextures.noise = LoadProjectedTexture(data.projectedNoise);
-
-	const std::string combined = std::format("{}|{}|{}|{}", diffuse, normal, data.projectedDetailNormal, data.projectedNoise);
-	data.projectedTextures.hash = RE::detail::GenerateCRC32({ reinterpret_cast<const std::uint8_t*>(combined.data()), combined.size() });
-
-	return data.projectedTextures;
-}
-
-void TruePBR::InvalidateProjectedTextures(PBRMaterialObjectData& data)
-{
-	std::scoped_lock lock(projectedTextureMutex);
-	data.projectedTextures = PBRProjectedTextures{};
-	data.projectedTexturesResolved = false;
-}
-
-RE::BGSMaterialObject* TruePBR::FindMaterialObjectByEditorID(const std::string& editorId)
-{
-	auto* dataHandler = RE::TESDataHandler::GetSingleton();
-	if (dataHandler == nullptr) {
-		return nullptr;
-	}
-
-	for (auto* materialObject : dataHandler->GetFormArray<RE::BGSMaterialObject>()) {
-		if (materialObject != nullptr && editorId == materialObject->GetFormEditorID()) {
-			return materialObject;
-		}
-	}
-	return nullptr;
 }
 
 TruePBR::PBRMaterialObjectData* TruePBR::GetPBRMaterialObjectData(const RE::TESForm* materialObject)
@@ -1260,80 +1106,6 @@ bool TruePBR::BSLightingShader_SetupMaterial(RE::BSLightingShader* shader, RE::B
 	return false;
 }
 
-namespace
-{
-	// BSLightingShader::SetupGeometry binds the four global projected textures (t3 diffuse,
-	// t8 normal, t10 detail normal, t11 noise) for every projected-UV geometry, so a per-MATO
-	// override has to be written after it returns. SetPSTexture only touches shadow state and
-	// dirty bits, which the draw flushes, so writing here is safe.
-	bool g_projectedTexturesOverridden = false;
-
-	BSLightingShaderMaterialPBR* GetProjectedOverrideMaterial(RE::BSRenderPass* pass)
-	{
-		if (pass == nullptr || pass->shaderProperty == nullptr) {
-			return nullptr;
-		}
-
-		auto* property = pass->shaderProperty;
-		using enum RE::BSShaderProperty::EShaderPropertyFlag;
-		if (!property->flags.any(kProjectedUV) || !property->flags.any(kVertexLighting)) {
-			return nullptr;
-		}
-		// kVertexLighting is also set on PBR terrain, whose material is a
-		// BSLightingShaderMaterialPBRLandscape; the cast below would be wrong for it.
-		if (property->flags.any(kMultiTextureLandscape)) {
-			return nullptr;
-		}
-		if (property->GetMaterialType() != RE::BSShaderMaterial::Type::kLighting) {
-			return nullptr;
-		}
-
-		auto* material = static_cast<BSLightingShaderMaterialPBR*>(property->material);
-		if (material == nullptr || !material->HasProjectedMaterialTextures()) {
-			return nullptr;
-		}
-		return material;
-	}
-
-	void SetupProjectedMaterialTextures(RE::BSRenderPass* pass)
-	{
-		auto* material = GetProjectedOverrideMaterial(pass);
-
-		// Nothing to override and nothing left over from a previous geometry.
-		if (material == nullptr && !g_projectedTexturesOverridden) {
-			return;
-		}
-
-		auto* shadowState = globals::game::shadowState;
-		auto* graphicsState = globals::game::graphicsState;
-		if (shadowState == nullptr || graphicsState == nullptr) {
-			return;
-		}
-
-		// Always write all four, even when only some are overridden: the previous geometry may
-		// have left a different material object's textures bound in the slots we do not own.
-		auto bindSlot = [&](size_t slot, const RE::NiPointer<RE::NiSourceTexture>& override_, const RE::NiPointer<RE::NiSourceTexture>& engineDefault) {
-			RE::NiSourceTexture* texture = override_ != nullptr ? override_.get() : engineDefault.get();
-			if (texture == nullptr) {
-				return;
-			}
-			shadowState->SetPSTexture(slot, texture->rendererTexture);
-			shadowState->SetPSTextureAddressMode(slot, RE::BSGraphics::TextureAddressMode::kWrapSWrapT);
-			shadowState->SetPSTextureFilterMode(slot, RE::BSGraphics::TextureFilterMode::kAnisotropic);
-		};
-
-		static const TruePBR::PBRProjectedTextures engineDefaults;
-		const auto& textures = material != nullptr ? material->projectedMaterialTextures : engineDefaults;
-
-		bindSlot(3, textures.diffuse, graphicsState->defaultTextureProjDiffuseMap);
-		bindSlot(8, textures.normal, graphicsState->defaultTextureProjNormalMap);
-		bindSlot(10, textures.detailNormal, graphicsState->defaultTextureProjNormalDetailMap);
-		bindSlot(11, textures.noise, graphicsState->defaultTextureProjNoiseMap);
-
-		g_projectedTexturesOverridden = material != nullptr;
-	}
-}
-
 struct BSLightingShader_SetupGeometry
 {
 	static void thunk(RE::BSLightingShader* shader, RE::BSRenderPass* pass, uint32_t renderFlags)
@@ -1349,8 +1121,6 @@ struct BSLightingShader_SetupGeometry
 		shader->currentRawTechnique |= (std::min((pass->numLights - 1), 7) << 3);
 
 		func(shader, pass, renderFlags);
-
-		SetupProjectedMaterialTextures(pass);
 
 		shader->currentRawTechnique = originalTechnique;
 	}
@@ -1799,9 +1569,6 @@ struct TESBoundObject_Clone3D
 			auto* pbrData = (currentMato != nullptr && currentMato->directionalData.singlePass) ? truePBR->GetPBRMaterialObjectData(currentMato) : nullptr;
 
 			if (pbrData != nullptr) {
-				// One-shot per material object; ApplyMaterialObjectData below copies the result.
-				truePBR->ResolveProjectedTextures(currentMato, *pbrData);
-
 				RE::BSVisit::TraverseScenegraphGeometries(result, [pbrData, ref](RE::BSGeometry* geometry) {
 					if (auto* shaderProperty = static_cast<RE::BSShaderProperty*>(geometry->GetGeometryRuntimeData().shaderProperty.get())) {
 						if (shaderProperty->GetMaterialType() == RE::BSShaderMaterial::Type::kLighting &&
