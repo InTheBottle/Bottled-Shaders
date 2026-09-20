@@ -23,6 +23,12 @@ namespace ProceduralSun
 		return max(a0 + a1 * mu + a2 * mu2 + a3 * mu3 + a4 * mu4 + a5 * mu5, 0.0f);
 	}
 
+	float GetInfluenceCos(float sunDiskCos, bool haloEnabled, float sunHaloCos, float haloIntensity)
+	{
+		bool haloActive = haloEnabled && haloIntensity > 0.0f && sunHaloCos < sunDiskCos;
+		return haloActive ? sunHaloCos : sunDiskCos;
+	}
+
 	void EvaluateDisc(float cosTheta, float sunDiskCos, float edgeSoftness, out float3 limbDarkening, out float coverage)
 	{
 		limbDarkening = 0.0f;

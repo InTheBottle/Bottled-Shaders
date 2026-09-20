@@ -210,42 +210,51 @@ PS_OUTPUT main(PS_INPUT input)
 	baseColor = PParams.xxxx * (-baseColor + blendColor) + baseColor;
 #		endif
 
-#		if defined(PROCEDURAL_SUN) && defined(TEX) && defined(DEFERRED) && !defined(DITHER)
+#		if defined(PROCEDURAL_SUN) && defined(TEX) && defined(DEFERRED) && !defined(DITHER) && !defined(CLOUDS) && !defined(MOONMASK)
 	bool proceduralSunActive = SharedData::proceduralSunSettings.enabled &&
 	                           (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsSun) &&
 	                           (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InWorld);
-	if (proceduralSunActive) {
+	[branch] if (proceduralSunActive) {
 		float3 viewDirection = normalize(input.WorldPosition.xyz);
 		float cosTheta = clamp(dot(viewDirection, SharedData::SunDirection.xyz), -1.0, 1.0);
 
-		float3 limbDarkening;
-		float discCoverage;
-		ProceduralSun::EvaluateDisc(
-			cosTheta,
+		float influenceCos = ProceduralSun::GetInfluenceCos(
 			SharedData::proceduralSunSettings.sunDiskCos,
-			SharedData::proceduralSunSettings.edgeSoftness,
-			limbDarkening,
-			discCoverage);
+			SharedData::proceduralSunSettings.haloEnabled,
+			SharedData::proceduralSunSettings.sunHaloCos,
+			SharedData::proceduralSunSettings.haloIntensity);
 
-		float haloProfile = 0.0;
-		if (SharedData::proceduralSunSettings.haloEnabled) {
-			haloProfile = ProceduralSun::EvaluateHalo(
+		float3 proceduralSunColor = 0.0;
+		float sunCoverage = 0.0;
+
+		[branch] if (cosTheta > influenceCos) {
+			float3 limbDarkening;
+			float discCoverage;
+			ProceduralSun::EvaluateDisc(
 				cosTheta,
 				SharedData::proceduralSunSettings.sunDiskCos,
-				SharedData::proceduralSunSettings.sunHaloCos,
-				SharedData::proceduralSunSettings.haloFalloff);
-		}
+				SharedData::proceduralSunSettings.edgeSoftness,
+				limbDarkening,
+				discCoverage);
 
-		float3 proceduralSunColor;
-		float sunCoverage;
-		ProceduralSun::ComposeDiscAndHalo(
-			limbDarkening,
-			discCoverage,
-			SharedData::proceduralSunSettings.diskIntensity,
-			haloProfile,
-			SharedData::proceduralSunSettings.haloIntensity,
-			proceduralSunColor,
-			sunCoverage);
+			float haloProfile = 0.0;
+			if (SharedData::proceduralSunSettings.haloEnabled) {
+				haloProfile = ProceduralSun::EvaluateHalo(
+					cosTheta,
+					SharedData::proceduralSunSettings.sunDiskCos,
+					SharedData::proceduralSunSettings.sunHaloCos,
+					SharedData::proceduralSunSettings.haloFalloff);
+			}
+
+			ProceduralSun::ComposeDiscAndHalo(
+				limbDarkening,
+				discCoverage,
+				SharedData::proceduralSunSettings.diskIntensity,
+				haloProfile,
+				SharedData::proceduralSunSettings.haloIntensity,
+				proceduralSunColor,
+				sunCoverage);
+		}
 
 		baseColor.xyz = proceduralSunColor;
 		baseColor.w = sunCoverage;
@@ -366,18 +375,26 @@ PS_OUTPUT main(PS_INPUT input)
 
 #			if defined(CLOUDS) && defined(DEFERRED) && defined(PROCEDURAL_SUN)
 	float cloudExtinction = SharedData::proceduralSunSettings.cloudExtinction * SharedData::proceduralSunSettings.sunVisibility;
-	if (SharedData::proceduralSunSettings.enabled && cloudExtinction > 0.0 &&
+	[branch] if (SharedData::proceduralSunSettings.enabled && cloudExtinction > 0.0 &&
 		(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InWorld)) {
 		float cloudSunCosTheta = dot(normalize(input.WorldPosition.xyz), SharedData::SunDirection.xyz);
-		float sunMask = ProceduralSun::EvaluateCloudExtinctionMask(
-			cloudSunCosTheta,
+		float influenceCos = ProceduralSun::GetInfluenceCos(
 			SharedData::proceduralSunSettings.sunDiskCos,
-			SharedData::proceduralSunSettings.edgeSoftness,
 			SharedData::proceduralSunSettings.haloEnabled,
 			SharedData::proceduralSunSettings.sunHaloCos,
-			SharedData::proceduralSunSettings.haloIntensity,
-			SharedData::proceduralSunSettings.haloFalloff);
-		psout.Color = ProceduralSun::ApplyCloudExtinction(psout.Color, 1.0 + cloudExtinction * sunMask);
+			SharedData::proceduralSunSettings.haloIntensity);
+
+		[branch] if (cloudSunCosTheta > influenceCos) {
+			float sunMask = ProceduralSun::EvaluateCloudExtinctionMask(
+				cloudSunCosTheta,
+				SharedData::proceduralSunSettings.sunDiskCos,
+				SharedData::proceduralSunSettings.edgeSoftness,
+				SharedData::proceduralSunSettings.haloEnabled,
+				SharedData::proceduralSunSettings.sunHaloCos,
+				SharedData::proceduralSunSettings.haloIntensity,
+				SharedData::proceduralSunSettings.haloFalloff);
+			psout.Color = ProceduralSun::ApplyCloudExtinction(psout.Color, 1.0 + cloudExtinction * sunMask);
+		}
 	}
 #			endif
 #		endif
@@ -410,7 +427,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 #	else
 	// Even without cloud shadows enabled, sun disc should be occluded by scene depth (clouds, terrain, etc.)
-	if ((Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsSun)) {
+	[branch] if ((Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsSun) && psout.Color.w > 0.0) {
 		float depth = TexDepthSampler.Load(int3(input.Position.xy, 0));
 		if (depth < input.Position.z)
 			psout.Color.w = 0;
