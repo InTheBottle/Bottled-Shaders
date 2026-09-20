@@ -163,6 +163,9 @@ cbuffer AlphaTestRefCB : register(b11)
 #	include "Common/SharedData.hlsli"
 
 #	if defined(CLOUD_SHADOWS)
+#		if defined(CLOUDS)
+#			define CLOUD_SELF_SHADOW
+#		endif
 #		include "CloudShadows/CloudShadows.hlsli"
 #	endif
 
@@ -307,6 +310,21 @@ PS_OUTPUT main(PS_INPUT input)
 
 	psout.Color.w = input.Color.w * baseColor.w;
 	psout.Color.xyz = Color::Sky(input.Color.xyz) * baseColor.xyz + skyScale;
+
+#			if defined(CLOUD_SELF_SHADOW)
+	bool selfShadowFromENB = false;
+#				if defined(EFFECTS11)
+	// ENB's cloud scattering already marches the same cubemap for its own shading.
+	selfShadowFromENB = SharedData::enbSettings.Enable && SharedData::enbSettings.EnableCloudsScattering;
+#				endif
+	if (!selfShadowFromENB && SharedData::cloudShadowsSettings.SelfShadowStrength > 0.0) {
+		psout.Color.xyz *= CloudShadows::GetCloudSelfShadow(
+			normalize(input.WorldPosition.xyz),
+			SharedData::DirLightDirection.xyz,
+			SharedData::cloudShadowsSettings.SelfShadowStrength,
+			SampBaseSampler);
+	}
+#			endif
 
 #			if defined(CLOUDS) && defined(EFFECTS11)
 	if (SharedData::enbSettings.Enable) {

@@ -1,8 +1,8 @@
 #include "CloudShadows.h"
 
+#include "../I18n/I18n.h"
 #include "Effects11.h"
 #include "Effects11/SettingManager.h"
-#include "../I18n/I18n.h"
 #include "Globals.h"
 #include "State.h"
 #include "Utils/D3D.h"
@@ -11,22 +11,27 @@
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	CloudShadows::Settings,
-	Opacity)
+	Opacity,
+	SelfShadowStrength)
 
 void CloudShadows::DrawSettings()
 {
-	if (globals::features::effects11.loaded) {
-		auto& enb = globals::features::effects11;
-		if (enb.enableEffect) {
-			ImGui::TextColored(globals::menu->GetSettings().Theme.StatusPalette.Warning, "%s", T("common.settings_managed_by_enb", "Settings are currently managed by ENB."));
-			return;
+	bool opacityManagedByENB = globals::features::effects11.loaded && globals::features::effects11.enableEffect;
+
+	if (opacityManagedByENB) {
+		ImGui::TextColored(globals::menu->GetSettings().Theme.StatusPalette.Warning, "%s", T("common.settings_managed_by_enb", "Settings are currently managed by ENB."));
+	} else {
+		ImGui::SliderFloat(T(TKEY("opacity"), "Opacity"), &settings.Opacity, 0.0f, 4.0f, "%.1f");
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("opacity_tooltip"),
+								  "Higher values make cloud shadows darker."));
 		}
 	}
 
-	ImGui::SliderFloat(T(TKEY("opacity"), "Opacity"), &settings.Opacity, 0.0f, 4.0f, "%.1f");
+	ImGui::SliderFloat(T(TKEY("self_shadow_strength"), "Self-Shadow Strength"), &settings.SelfShadowStrength, 0.0f, 1.0f, "%.2f");
 	if (auto _tt = Util::HoverTooltipWrapper()) {
-		ImGui::Text("%s", T(TKEY("opacity_tooltip"),
-							  "Higher values make cloud shadows darker."));
+		ImGui::Text("%s", T(TKEY("self_shadow_strength_tooltip"),
+							  "Shades each cloud deck by the cloud cover between it and the sun, giving flat cloud planes a sense of depth. Set to 0 to disable.\n\nENB cloud scattering already does this, so this slider is ignored while that is enabled."));
 	}
 }
 
@@ -82,96 +87,74 @@ void CloudShadows::CheckResourcesSide(int side)
 	auto context = globals::d3d::context;
 
 	float black[4] = { 0, 0, 0, 0 };
-	context->ClearRenderTargetView(cloudShadowLayerRTVs[0][side], black);
-	renderedLayersMask[side] = 0;
+	context->ClearRenderTargetView(occlusionBaseRTVs[side], black);
+	chainLastDeck[side] = -1;
 }
 
 void CloudShadows::PropagateToCompletion(int side)
 {
-	uint32_t mask = renderedLayersMask[side];
-	unsigned long highBit;
-	int fromLayer = _BitScanReverse(&highBit, mask) ? static_cast<int>(highBit) : 0;
-
 	auto context = globals::d3d::context;
 
-	uint32_t newLayers = mask & ~globalRenderedMask;
-	if (newLayers) {
-		unsigned long bit;
-		uint32_t remaining = newLayers;
-		while (_BitScanForward(&bit, remaining)) {
-			int newLayer = static_cast<int>(bit);
-			for (int otherSide = 0; otherSide < 6; otherSide++) {
-				if (otherSide == side)
-					continue;
-				if (renderedLayersMask[otherSide] & (1u << newLayer))
-					continue;
-				uint32_t belowMask = renderedLayersMask[otherSide] & ((1u << newLayer) - 1);
-				unsigned long nearestBit;
-				int srcLayer = _BitScanReverse(&nearestBit, belowMask) ? static_cast<int>(nearestBit) : 0;
-				UINT otherSub = D3D11CalcSubresource(0, otherSide, cubemapMipLevels);
-				context->CopySubresourceRegion(
-					texCloudShadowLayers[newLayer]->resource.get(), otherSub, 0, 0, 0,
-					texCloudShadowLayers[srcLayer]->resource.get(), otherSub, nullptr);
-				renderedLayersMask[otherSide] |= (1u << newLayer);
-			}
-			remaining &= ~(1u << bit);
-		}
-		globalRenderedMask |= mask;
-	}
+	int deck = chainLastDeck[side];
+	auto* source = deck >= 0 ? texOcclusionChain[deck]->resource.get() : texOcclusionBase->resource.get();
 
-	if (fromLayer < kMaxCloudLayers - 1) {
-		UINT subresource = D3D11CalcSubresource(0, side, cubemapMipLevels);
-		context->CopySubresourceRegion(
-			texCloudShadowLayers[kMaxCloudLayers - 1]->resource.get(), subresource, 0, 0, 0,
-			texCloudShadowLayers[fromLayer]->resource.get(), subresource, nullptr);
-	}
+	UINT subresource = D3D11CalcSubresource(0, side, cubemapMipLevels);
+	context->CopySubresourceRegion(
+		texCubemapCloudOcc->resource.get(), subresource, 0, 0, 0,
+		source, subresource, nullptr);
 }
 
 void CloudShadows::SkyShaderHacks()
 {
-	if (overrideSky) {
-		auto renderer = globals::game::renderer;
-		auto context = globals::d3d::context;
+	if (bindDeckAbove) {
+		bindDeckAbove = false;
+		globals::d3d::context->PSSetShaderResources(26, 1, &deckAboveSRVs[currentDeckForDraw]);
+	}
 
-		auto reflections = renderer->GetRendererData().cubemapRenderTargets[RE::RENDER_TARGET_CUBEMAP::kREFLECTIONS];
+	if (!overrideSky)
+		return;
+	overrideSky = false;
 
-		// render targets
-		ID3D11RenderTargetView* rtvs[4];
-		ID3D11DepthStencilView* dsv;
-		context->OMGetRenderTargets(3, rtvs, &dsv);
+	auto renderer = globals::game::renderer;
+	auto context = globals::d3d::context;
 
-		int side = -1;
-		for (int i = 0; i < 6; ++i)
-			if (rtvs[0] == reflections.cubeSideRTV[i]) {
-				side = i;
-				break;
-			}
-		if (side == -1)
-			return;
+	auto reflections = renderer->GetRendererData().cubemapRenderTargets[RE::RENDER_TARGET_CUBEMAP::kREFLECTIONS];
 
-		CheckResourcesSide(side);
+	ID3D11RenderTargetView* rtvs[4] = {};
+	ID3D11DepthStencilView* dsv = nullptr;
+	context->OMGetRenderTargets(3, rtvs, &dsv);
 
-		int layer = currentLayerForDraw;
-
-		unsigned long highBit;
-		int prevLayer = _BitScanReverse(&highBit, renderedLayersMask[side]) ? static_cast<int>(highBit) : -1;
-
-		UINT subresource = D3D11CalcSubresource(0, side, cubemapMipLevels);
-
-		int fromLayer = std::max(prevLayer, 0);
-
-		context->CopyResource(texSelfShadowCopy->resource.get(), texCloudShadowLayers[layer]->resource.get());
-
-		if (layer > 0) {
-			context->CopySubresourceRegion(
-				texCloudShadowLayers[layer]->resource.get(), subresource, 0, 0, 0,
-				texCloudShadowLayers[fromLayer]->resource.get(), subresource, nullptr);
+	int side = -1;
+	for (int i = 0; i < 6; ++i)
+		if (rtvs[0] == reflections.cubeSideRTV[i]) {
+			side = i;
+			break;
 		}
 
-		ID3D11ShaderResourceView* selfShadowSrv = texSelfShadowCopy->srv.get();
-		context->PSSetShaderResources(26, 1, &selfShadowSrv);
+	if (side >= 0) {
+		CheckResourcesSide(side);
 
-		rtvs[3] = cloudShadowLayerRTVs[layer][side];
+		int deck = currentDeckForDraw;
+		int previousDeck = chainLastDeck[side];
+
+		// A deck that draws twice for one face keeps accumulating in place, and must
+		// not copy a resource onto itself.
+		if (previousDeck != deck) {
+			auto* source = previousDeck >= 0 ? texOcclusionChain[previousDeck]->resource.get() : texOcclusionBase->resource.get();
+			UINT subresource = D3D11CalcSubresource(0, side, cubemapMipLevels);
+			context->CopySubresourceRegion(
+				texOcclusionChain[deck]->resource.get(), subresource, 0, 0, 0,
+				source, subresource, nullptr);
+
+			deckAboveSRVs[deck] = previousDeck >= 0 ? texOcclusionChain[previousDeck]->srv.get() : texOcclusionBase->srv.get();
+		}
+
+		// The chain entry about to become a render target may still be bound from the
+		// main pass, so drop it before binding rather than leaving D3D to resolve it.
+		ID3D11ShaderResourceView* nullSrv = nullptr;
+		context->PSSetShaderResources(26, 1, &nullSrv);
+
+		rtvs[3] = occlusionChainRTVs[deck][side];
 		context->OMSetRenderTargets(4, rtvs, nullptr);
 
 		float blendFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -179,30 +162,32 @@ void CloudShadows::SkyShaderHacks()
 
 		context->OMSetBlendState(cloudShadowBlendState, blendFactor, sampleMask);
 
+		context->PSSetShaderResources(26, 1, &deckAboveSRVs[deck]);
+
 		auto cubemapDepth = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kCUBEMAP_REFLECTIONS];
 		context->PSSetShaderResources(17, 1, &cubemapDepth.depthSRV);
 
-		// Release COM objects to prevent memory leaks
-		for (int i = 0; i < 3; ++i) {
-			if (rtvs[i])
-				rtvs[i]->Release();
-		}
-		if (dsv)
-			dsv->Release();
-
-		renderedLayersMask[side] |= (1u << layer);
-
-		overrideSky = false;
+		chainLastDeck[side] = deck;
 	}
+
+	// rtvs[3] is ours and was never referenced, so it is excluded from the release loop.
+	for (int i = 0; i < 3; ++i) {
+		if (rtvs[i])
+			rtvs[i]->Release();
+	}
+	if (dsv)
+		dsv->Release();
 }
 
-int CloudShadows::FindCloudLayer(RE::BSRenderPass* Pass)
+int CloudShadows::FindCloudDeck(RE::BSRenderPass* Pass)
 {
 	auto sky = globals::game::sky;
 	if (!sky || !sky->clouds)
 		return -1;
 
-	for (int i = 0; i < kMaxCloudLayers; i++) {
+	// Slots past numLayers can still hold pointers left over from a previous weather.
+	int deckCount = std::min(static_cast<int>(sky->clouds->numLayers), kMaxCloudDecks);
+	for (int i = 0; i < deckCount; i++) {
 		if (sky->clouds->clouds[i].get() == Pass->geometry)
 			return i;
 	}
@@ -220,36 +205,33 @@ void CloudShadows::ModifySky(RE::BSRenderPass* Pass)
 	if (skyProperty->uiSkyObjectType != RE::BSSkyShaderProperty::SkyObject::SO_CLOUDS)
 		return;
 
-	int layer = FindCloudLayer(Pass);
-	if (layer < 0)
+	int deck = FindCloudDeck(Pass);
+	if (deck < 0)
 		return;
 
-	if (cubeMapRenderTarget == RE::RENDER_TARGETS_CUBEMAP::kREFLECTIONS) {
-		currentLayerForDraw = layer;
+	currentDeckForDraw = deck;
+
+	// Both binds happen at draw time in SkyShaderHacks, after the game's own
+	// SetupMaterial has finished claiming pixel shader resources.
+	if (cubeMapRenderTarget == RE::RENDER_TARGETS_CUBEMAP::kREFLECTIONS)
 		overrideSky = true;
-	} else {
-		auto context = globals::d3d::context;
-		ID3D11ShaderResourceView* srv = texCloudShadowLayers[layer]->srv.get();
-		context->PSSetShaderResources(26, 1, &srv);
-	}
+	else
+		bindDeckAbove = true;
 }
 
 void CloudShadows::ReflectionsPrepass()
 {
-	Util::FrameChecker frameChecker;
-	if (frameChecker.IsNewFrame()) {
-		if ((globals::game::sky->mode.get() != RE::Sky::Mode::kFull) ||
-			!globals::game::sky->currentClimate)
-			return;
+	auto sky = globals::game::sky;
+	if (!sky || sky->mode.get() != RE::Sky::Mode::kFull || !sky->currentClimate)
+		return;
 
-		auto context = globals::d3d::context;
+	auto context = globals::d3d::context;
 
-		context->CopyResource(texCubemapCloudOccCopy->resource.get(), texCloudShadowLayers[kMaxCloudLayers - 1]->resource.get());
+	context->CopyResource(texCubemapCloudOccCopy->resource.get(), texCubemapCloudOcc->resource.get());
 
-		ID3D11ShaderResourceView* srv = texCubemapCloudOccCopy->srv.get();
-		context->PSSetShaderResources(25, 1, &srv);
-		context->CSSetShaderResources(25, 1, &srv);
-	}
+	ID3D11ShaderResourceView* srv = texCubemapCloudOccCopy->srv.get();
+	context->PSSetShaderResources(25, 1, &srv);
+	context->CSSetShaderResources(25, 1, &srv);
 }
 
 void CloudShadows::EarlyPrepass()
@@ -258,13 +240,13 @@ void CloudShadows::EarlyPrepass()
 		PropagateToCompletion(previouslyRenderedSide);
 		previouslyRenderedSide = -1;
 	}
-	globalRenderedMask = 0;
 }
 
 void CloudShadows::SetupResources()
 {
 	auto renderer = globals::game::renderer;
 	auto device = globals::d3d::device;
+	auto context = globals::d3d::context;
 
 	{
 		auto reflections = renderer->GetRendererData().cubemapRenderTargets[RE::RENDER_TARGET_CUBEMAP::kREFLECTIONS];
@@ -279,25 +261,45 @@ void CloudShadows::SetupResources()
 		texDesc.Format = srvDesc.Format = DXGI_FORMAT_R8_UNORM;
 		cubemapMipLevels = texDesc.MipLevels;
 
-		for (int layer = 0; layer < kMaxCloudLayers; ++layer) {
+		float black[4] = { 0, 0, 0, 0 };
+
+		texOcclusionBase = new Texture2D(texDesc, "CloudShadows::OcclusionBase");
+		texOcclusionBase->CreateSRV(srvDesc);
+
+		for (int face = 0; face < 6; ++face) {
+			reflections.cubeSideRTV[face]->GetDesc(&rtvDesc);
+			rtvDesc.Format = texDesc.Format;
+			DX::ThrowIfFailed(device->CreateRenderTargetView(texOcclusionBase->resource.get(), &rtvDesc, &occlusionBaseRTVs[face]));
+			Util::SetResourceName(occlusionBaseRTVs[face], "CloudShadows::OcclusionBase RTV[%d]", face);
+			context->ClearRenderTargetView(occlusionBaseRTVs[face], black);
+		}
+
+		for (int deck = 0; deck < kMaxCloudDecks; ++deck) {
 			char name[64];
-			snprintf(name, sizeof(name), "CloudShadows::Layer[%d]", layer);
-			texCloudShadowLayers[layer] = new Texture2D(texDesc, name);
-			texCloudShadowLayers[layer]->CreateSRV(srvDesc);
+			snprintf(name, sizeof(name), "CloudShadows::OcclusionChain[%d]", deck);
+			texOcclusionChain[deck] = new Texture2D(texDesc, name);
+			texOcclusionChain[deck]->CreateSRV(srvDesc);
 
 			for (int face = 0; face < 6; ++face) {
 				reflections.cubeSideRTV[face]->GetDesc(&rtvDesc);
 				rtvDesc.Format = texDesc.Format;
-				DX::ThrowIfFailed(device->CreateRenderTargetView(texCloudShadowLayers[layer]->resource.get(), &rtvDesc, &cloudShadowLayerRTVs[layer][face]));
-				Util::SetResourceName(cloudShadowLayerRTVs[layer][face], "CloudShadows::Layer[%d] RTV[%d]", layer, face);
+				DX::ThrowIfFailed(device->CreateRenderTargetView(texOcclusionChain[deck]->resource.get(), &rtvDesc, &occlusionChainRTVs[deck][face]));
+				Util::SetResourceName(occlusionChainRTVs[deck][face], "CloudShadows::OcclusionChain[%d] RTV[%d]", deck, face);
 			}
+
+			deckAboveSRVs[deck] = texOcclusionBase->srv.get();
 		}
+
+		texCubemapCloudOcc = new Texture2D(texDesc, "CloudShadows::CubemapCloudOcc");
+		texCubemapCloudOcc->CreateSRV(srvDesc);
 
 		texCubemapCloudOccCopy = new Texture2D(texDesc, "CloudShadows::CubemapCloudOccCopy");
 		texCubemapCloudOccCopy->CreateSRV(srvDesc);
 
-		texSelfShadowCopy = new Texture2D(texDesc, "CloudShadows::SelfShadowCopy");
-		texSelfShadowCopy->CreateSRV(srvDesc);
+		// Faces are only written as the engine gets round to rendering them, so start
+		// both cleared rather than letting undrawn faces serve whatever was in memory.
+		context->CopyResource(texCubemapCloudOcc->resource.get(), texOcclusionBase->resource.get());
+		context->CopyResource(texCubemapCloudOccCopy->resource.get(), texOcclusionBase->resource.get());
 	}
 	{
 		D3D11_BLEND_DESC blendDesc = {};

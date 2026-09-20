@@ -189,7 +189,8 @@ namespace SharedData
 	struct CloudShadowsSettings
 	{
 		float Opacity;
-		float3 pad0;
+		float SelfShadowStrength;
+		float2 pad0;
 	};
 
 	struct ProceduralSunSettings
