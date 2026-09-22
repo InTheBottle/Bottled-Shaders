@@ -2558,7 +2558,8 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #			endif
 	const float2x2 localShadowRotation = LightLimitFix::GetShadowRotationMatrix(screenNoise);
 #			if defined(DEFERRED)
-	const uint contactShadowSteps = LightLimitFix::GetContactShadowSteps(viewPosition.z);
+	float contactShadowStrengthScale = 0.0;
+	const uint contactShadowSteps = LightLimitFix::GetContactShadowSteps(viewPosition.z, contactShadowStrengthScale);
 #			endif
 
 	[loop] for (uint lightIndex = 0; lightIndex < totalLightCount; lightIndex++)
@@ -2609,9 +2610,8 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #			if defined(DEFERRED)
 		[branch] if (contactShadowSteps > 0 && shadowComponent > 0.0 && lightAngle > 0.0 && !(light.lightFlags & LightLimitFix::LightFlags::Simple))
 		{
-			float3 lightPositionVS = mul(FrameBuffer::CameraView, float4(light.positionWS.xyz, 1)).xyz;
-			float3 lightDirectionVS = normalize(lightPositionVS - viewPosition);
-			float contactShadow = LightLimitFix::ContactShadows(viewPosition, screenNoise, lightDirectionVS, contactShadowSteps);
+			float3 lightVectorVS = mul((float3x3)FrameBuffer::CameraView, lightDirection);
+			float contactShadow = LightLimitFix::ContactShadows(viewPosition, screenNoise, lightVectorVS, lightDist, contactShadowSteps, contactShadowStrengthScale);
 			shadowComponent *= contactShadow;
 			lightShadow *= contactShadow;
 		}
