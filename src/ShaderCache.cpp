@@ -14,6 +14,7 @@
 #include "Utils/D3D.h"
 
 #include "Features/DynamicCubemaps.h"
+#include "Features/ReverseZ.h"
 
 #include "Plugin.h"
 
@@ -660,6 +661,11 @@ namespace SIE
 			}
 
 			defines[lastIndex++] = { "SHADOWSPLITCOUNT", "3" };
+
+			auto& reverseZ = globals::features::reverseZ;
+			if (reverseZ.loaded && reverseZ.HasShaderDefine(RE::BSShader::Type::Utility)) {
+				defines[lastIndex++] = { reverseZ.GetShaderDefineName().data(), nullptr };
+			}
 
 			if ((descriptor & 0x14000) != 0x14000 &&
 				((descriptor & 0x20004000) == 0x4000 || (descriptor & 0x1E02000) == 0x2000) &&

@@ -6,6 +6,7 @@
 #include "Effects/ENBEffect.h"
 #include "Effects/ENBEffectPostPass.h"
 #include "Effects/ENBLens.h"
+#include "Buffer.h"
 #include "Profiler.h"
 
 enum class TimeOfDay1Index : int
@@ -83,11 +84,20 @@ public:
 	winrt::com_ptr<ID3D11ComputeShader> colorCorrectionComputeShader;
 	winrt::com_ptr<ID3D11Buffer> colorCorrectionConstantBuffer;
 
+	// Standard-Z depth copy handed to .fx files when the scene depth is reversed
+	winrt::com_ptr<ID3D11ComputeShader> standardDepthComputeShader;
+	std::unique_ptr<Texture2D> standardDepthTexture;
+	uint32_t standardDepthFrame = 0xFFFFFFFF;
+
 	static std::string LoadShaderFile(const char* path);
 	void CreateQuadGeometry();
 	void CreateRenderStates();
 	void CreateCopyShaders();
 	void CreateColorCorrectionShader();
+	void CreateStandardDepthShader();
+
+	/** @brief Depth SRV for .fx files: the scene depth, or a standard-Z (1 - z) copy of it when Reverse Z is active. */
+	ID3D11ShaderResourceView* GetEffectDepthSRV();
 
 	void RenderEffectsList();
 

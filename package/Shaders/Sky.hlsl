@@ -119,7 +119,12 @@ VS_OUTPUT main(VS_INPUT input)
 	vsout.SkyBlendColor2 = float4(BlendColor[2].xyz * VParams, 0);
 #	endif      // OCCLUSION MOONMASK HORIZFADE
 
+#	ifdef REVERSE_Z
+	float4 skyPosition = mul(WorldViewProj, inputPosition);
+	vsout.Position = float4(skyPosition.xy, FrameBuffer::FarPlaneClipZ(skyPosition.w), skyPosition.w);
+#	else
 	vsout.Position = mul(WorldViewProj, inputPosition).xyww;
+#	endif
 	vsout.WorldPosition = mul(World, inputPosition);
 	vsout.FogPosition = vsout.WorldPosition.xyz - EyePosition.xyz;
 	vsout.PreviousWorldPosition = mul(PreviousWorld, inputPosition);
@@ -404,14 +409,22 @@ PS_OUTPUT main(PS_INPUT input)
 
 	// Keep sun behind scene depth to prevent halo leaks through geometry.
 	float depth = TexDepthSampler.Load(int3(input.Position.xy, 0));
+#		ifdef REVERSE_Z
+	if (depth > 0.0 && depth < 1.0 && SharedData::GetScreenDepth(depth) < SharedData::GetScreenDepth(input.Position.z) * 0.99)
+#		else
 	if (depth < input.Position.z)
+#		endif
 		psout.Color.w = 0;
 
 #	else
 	// Even without cloud shadows enabled, sun disc should be occluded by scene depth (clouds, terrain, etc.)
 	[branch] if ((Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsSun) && psout.Color.w > 0.0) {
 		float depth = TexDepthSampler.Load(int3(input.Position.xy, 0));
+#		ifdef REVERSE_Z
+		if (depth > 0.0 && depth < 1.0 && SharedData::GetScreenDepth(depth) < SharedData::GetScreenDepth(input.Position.z) * 0.99)
+#		else
 		if (depth < input.Position.z)
+#		endif
 			psout.Color.w = 0;
 	}
 #	endif

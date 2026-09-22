@@ -95,6 +95,7 @@ struct VS_OUTPUT
 cbuffer VS_PerFrame : register(b12)
 {
 	row_major float4x4 ScreenProj : packoffset(c0);
+	row_major float4x4 Proj : packoffset(c4);
 	row_major float4x4 ViewProj : packoffset(c8);
 #	if defined(SKINNED)
 	float3 BonesPivot : packoffset(c40);
@@ -230,7 +231,7 @@ VS_OUTPUT main(VS_INPUT input)
 
 #	if !defined(MOTIONVECTORS_NORMALS)
 	float fogColorParam = min(FogParam.w,
-		exp2(FogParam.z * log2(saturate(length(viewPos.xyz) * FogParam.y - FogParam.x))));
+		exp2(FogParam.z * log2(saturate(length(FrameBuffer::ToStandardClip(viewPos, FrameBuffer::IsReverseProjection(Proj))) * FogParam.y - FogParam.x))));
 
 	vsout.FogParam.xyz = lerp(FogNearColor.xyz, FogFarColor.xyz, fogColorParam);
 	vsout.FogParam.w = fogColorParam;
@@ -656,6 +657,10 @@ PS_OUTPUT main(PS_INPUT input)
 	float depth = 1;
 #	if defined(SOFT)
 	depth = TexDepthSamplerEffect.Load(int3(input.Position.xy, 0)).x;
+#		ifdef REVERSE_Z
+	if (FrameBuffer::IsReverseProjection())
+		depth = 1 - depth;
+#		endif
 	softMul = saturate(-input.TexCoord0.w + LightingInfluence.y / ((1 - depth) * CameraDataEffect.z + CameraDataEffect.y));
 #	endif
 

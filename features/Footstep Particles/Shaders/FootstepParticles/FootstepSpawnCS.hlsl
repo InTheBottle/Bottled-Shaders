@@ -14,7 +14,7 @@
 #if defined(TERRAIN_BLENDING)
 Texture2D<float> SceneDepth : register(t0);
 #else
-Texture2D<unorm float> SceneDepth : register(t0);
+Texture2D<SCENE_DEPTH_FORMAT> SceneDepth : register(t0);
 #endif
 Texture2D<unorm float3> AlbedoTexture : register(t1);
 Texture2D<unorm float3> NormalRoughnessTexture : register(t2);

@@ -48,7 +48,11 @@ RWTexture2D<float> DepthOutput : register(u3);
 			float neighborDepth = DepthMask[samplePos];
 
 			// Take neighbor if it's longer AND closer
+#ifdef REVERSE_Z
+			if (neighborDepth > depth) {
+#else
 			if (neighborDepth < depth) {
+#endif
 				float2 neighborMotionVector = MotionVectorMask[samplePos];
 
 				// Square motion vector for length

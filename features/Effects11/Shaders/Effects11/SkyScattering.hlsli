@@ -99,7 +99,11 @@ namespace SkyScattering
 	float GetRayLength(float3 viewDirection, float depth, float3 positionMS)
 	{
 		float cloudDistance = GetCloudLayerDistance(viewDirection);
+#ifdef REVERSE_Z
+		return depth > 0.0 ? min(length(positionMS), cloudDistance) : cloudDistance;
+#else
 		return depth < 1.0 ? min(length(positionMS), cloudDistance) : cloudDistance;
+#endif
 	}
 
 	float GetOpticalDepth(float distance, float viewZ)

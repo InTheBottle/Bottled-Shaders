@@ -10,7 +10,7 @@ SamplerState LinearSampler : register(s0);
 #if defined(TERRAIN_BLENDING)
 Texture2D<float> SceneDepth : register(t0);
 #else
-Texture2D<unorm float> SceneDepth : register(t0);
+Texture2D<SCENE_DEPTH_FORMAT> SceneDepth : register(t0);
 #endif
 Texture2D<float4> ShadowMaskTexture : register(t1);
 

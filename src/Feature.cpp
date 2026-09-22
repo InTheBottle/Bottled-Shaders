@@ -45,6 +45,7 @@
 #include "Features/VanillaFresnel.h"
 #include "Features/VolumetricLighting.h"
 #include "Features/VolumetricShadows.h"
+#include "Features/ReverseZ.h"
 #include "Features/WaterEffects.h"
 #include "Features/WetnessEffects.h"
 #include "I18n/I18n.h"
@@ -261,6 +262,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::terrainVariation,
 		&globals::features::ibl,
 		&globals::features::extendedTranslucency,
+		&globals::features::reverseZ,
 		&globals::features::upscaling,
 		&globals::features::renderDoc,
 		&globals::features::remoteControl,

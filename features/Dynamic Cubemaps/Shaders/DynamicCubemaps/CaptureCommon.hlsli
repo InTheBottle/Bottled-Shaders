@@ -88,7 +88,11 @@ bool SampleCapture(uint3 texel, out float3 position, out float3 color, out float
 #if defined(REFLECTIONS)
 	if (SharedData::GetScreenDepth(depth) <= 16.5)
 #else
+#	ifdef REVERSE_Z
+	if (depth == 0.0 || SharedData::GetScreenDepth(depth) <= 16.5)
+#	else
 	if (depth == 1.0 || SharedData::GetScreenDepth(depth) <= 16.5)
+#	endif
 #endif
 		return false;
 

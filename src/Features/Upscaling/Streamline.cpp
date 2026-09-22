@@ -1,4 +1,5 @@
 #include "Streamline.h"
+#include "Features/ReverseZ.h"
 
 #include <algorithm>
 #include <cmath>
@@ -345,7 +346,7 @@ bool Streamline::CheckFrameConstants(sl::ViewportHandle p_viewport)
 	slConstants.cameraFwd = { viewMatrix._31, viewMatrix._32, viewMatrix._33 };
 	slConstants.cameraPos = *(sl::float3*)&globals::game::frameBufferCached.GetCameraPosAdjust();
 	slConstants.cameraViewToClip = *(sl::float4x4*)&cameraViewToClip;
-	slConstants.depthInverted = sl::Boolean::eFalse;
+	slConstants.depthInverted = globals::features::reverseZ.IsActive() ? sl::Boolean::eTrue : sl::Boolean::eFalse;
 
 	recalculateCameraMatrices(slConstants);
 

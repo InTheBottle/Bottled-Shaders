@@ -252,7 +252,7 @@ VS_OUTPUT main(VS_INPUT input)
 	vsout.TexCoord = input.TexCoord.xy;
 
 	float perInstanceFade = dot(cb8[(asuint(cb7[0].x) >> 2)].xyzw, Math::IdentityMatrix[(asint(cb7[0].x) & 3)].xyzw);
-	float distanceFade = 1 - saturate((length(projSpacePosition.xyz) - AlphaParam1) / AlphaParam2);
+	float distanceFade = 1 - saturate((length(FrameBuffer::ToStandardClip(projSpacePosition)) - AlphaParam1) / AlphaParam2);
 
 #		if defined(RENDER_DEPTH)
 	vsout.Depth = projSpacePosition.zw;
