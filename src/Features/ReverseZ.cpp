@@ -47,31 +47,15 @@ namespace
 
 	std::mutex g_stateMutex;
 	std::unordered_map<ID3D11DepthStencilState*, winrt::com_ptr<ID3D11DepthStencilState>> g_reversedStates;
-	std::unordered_map<ID3D11DepthStencilState*, ID3D11DepthStencilState*> g_reversedStateOrigin;
 
 	std::mutex g_rasterMutex;
 	std::unordered_map<ID3D11RasterizerState*, winrt::com_ptr<ID3D11RasterizerState>> g_reversedRasterStates;
-	std::unordered_map<ID3D11RasterizerState*, ID3D11RasterizerState*> g_reversedRasterOrigin;
-
-	ID3D11DepthStencilState* OriginalDepthState(ID3D11DepthStencilState* a_state)
-	{
-		std::scoped_lock lock(g_stateMutex);
-		if (auto it = g_reversedStateOrigin.find(a_state); it != g_reversedStateOrigin.end())
-			return it->second;
-		return a_state;
-	}
-
-	ID3D11RasterizerState* OriginalRasterState(ID3D11RasterizerState* a_state)
-	{
-		std::scoped_lock lock(g_rasterMutex);
-		if (auto it = g_reversedRasterOrigin.find(a_state); it != g_reversedRasterOrigin.end())
-			return it->second;
-		return a_state;
-	}
 
 	ID3D11DepthStencilState* g_requestedState = nullptr;
+	ID3D11DepthStencilState* g_boundState = nullptr;
 	UINT g_requestedStencilRef = 0;
 	ID3D11RasterizerState* g_requestedRasterState = nullptr;
+	ID3D11RasterizerState* g_boundRasterState = nullptr;
 	bool g_reverseTargetBound = false;
 	bool g_projectionReversed = false;
 
@@ -423,8 +407,6 @@ ID3D11RasterizerState* ReverseZ::GetReversedRasterizerState(ID3D11RasterizerStat
 		return nullptr;
 
 	std::scoped_lock lock(g_rasterMutex);
-	if (g_reversedRasterOrigin.contains(a_state))
-		return a_state;
 	if (auto it = g_reversedRasterStates.find(a_state); it != g_reversedRasterStates.end())
 		return it->second ? it->second.get() : a_state;
 
@@ -445,7 +427,6 @@ ID3D11RasterizerState* ReverseZ::GetReversedRasterizerState(ID3D11RasterizerStat
 	}
 	Util::SetResourceName(reversed.get(), "ReverseZ::RasterizerState");
 	auto* raw = reversed.get();
-	g_reversedRasterOrigin.insert_or_assign(raw, a_state);
 	g_reversedRasterStates.insert_or_assign(a_state, std::move(reversed));
 	return raw;
 }
@@ -456,8 +437,6 @@ ID3D11DepthStencilState* ReverseZ::GetReversedState(ID3D11DepthStencilState* a_s
 		return nullptr;
 
 	std::scoped_lock lock(g_stateMutex);
-	if (g_reversedStateOrigin.contains(a_state))
-		return a_state;
 	if (auto it = g_reversedStates.find(a_state); it != g_reversedStates.end())
 		return it->second ? it->second.get() : a_state;
 
@@ -472,7 +451,6 @@ ID3D11DepthStencilState* ReverseZ::GetReversedState(ID3D11DepthStencilState* a_s
 	}
 	Util::SetResourceName(reversed.get(), "ReverseZ::DepthStencilState");
 	auto* raw = reversed.get();
-	g_reversedStateOrigin.insert_or_assign(raw, a_state);
 	g_reversedStates.insert_or_assign(a_state, std::move(reversed));
 	return raw;
 }
@@ -650,13 +628,11 @@ namespace
 		static void thunk(ID3D11DeviceContext* This, ID3D11DepthStencilState* pDepthStencilState, UINT StencilRef)
 		{
 			if (This == globals::d3d::context) {
-				auto* original = OriginalDepthState(pDepthStencilState);
-				g_requestedState = original;
+				g_requestedState = pDepthStencilState;
 				g_requestedStencilRef = StencilRef;
-				if (original) {
-					func(This, ShouldFlip() ? globals::features::reverseZ.GetReversedState(original) : original, StencilRef);
-					return;
-				}
+				g_boundState = ShouldFlip() ? globals::features::reverseZ.GetReversedState(pDepthStencilState) : pDepthStencilState;
+				func(This, g_boundState, StencilRef);
+				return;
 			}
 			func(This, pDepthStencilState, StencilRef);
 		}
@@ -668,12 +644,10 @@ namespace
 		static void thunk(ID3D11DeviceContext* This, ID3D11RasterizerState* pRasterizerState)
 		{
 			if (This == globals::d3d::context) {
-				auto* original = OriginalRasterState(pRasterizerState);
-				g_requestedRasterState = original;
-				if (original) {
-					func(This, ShouldFlip() ? globals::features::reverseZ.GetReversedRasterizerState(original) : original);
-					return;
-				}
+				g_requestedRasterState = pRasterizerState;
+				g_boundRasterState = ShouldFlip() ? globals::features::reverseZ.GetReversedRasterizerState(pRasterizerState) : pRasterizerState;
+				func(This, g_boundRasterState);
+				return;
 			}
 			func(This, pRasterizerState);
 		}
@@ -707,12 +681,12 @@ namespace
 	{
 		const bool flip = ShouldFlip();
 		if (g_requestedState) {
-			auto* state = flip ? globals::features::reverseZ.GetReversedState(g_requestedState) : g_requestedState;
-			ID3D11DeviceContext_OMSetDepthStencilState::func(This, state, g_requestedStencilRef);
+			g_boundState = flip ? globals::features::reverseZ.GetReversedState(g_requestedState) : g_requestedState;
+			ID3D11DeviceContext_OMSetDepthStencilState::func(This, g_boundState, g_requestedStencilRef);
 		}
 		if (g_requestedRasterState) {
-			auto* raster = flip ? globals::features::reverseZ.GetReversedRasterizerState(g_requestedRasterState) : g_requestedRasterState;
-			ID3D11DeviceContext_RSSetState::func(This, raster);
+			g_boundRasterState = flip ? globals::features::reverseZ.GetReversedRasterizerState(g_requestedRasterState) : g_requestedRasterState;
+			ID3D11DeviceContext_RSSetState::func(This, g_boundRasterState);
 		}
 		if (g_requestedViewportCount > 0) {
 			for (UINT i = 0; i < g_requestedViewportCount; ++i)
@@ -826,12 +800,11 @@ namespace
 			func(This, ppDepthStencilState, pStencilRef);
 			if (This != globals::d3d::context || !ppDepthStencilState || !*ppDepthStencilState)
 				return;
-			auto* original = OriginalDepthState(*ppDepthStencilState);
-			if (original == *ppDepthStencilState)
+			if (*ppDepthStencilState != g_boundState || !g_requestedState || g_requestedState == g_boundState)
 				return;
-			original->AddRef();
+			g_requestedState->AddRef();
 			(*ppDepthStencilState)->Release();
-			*ppDepthStencilState = original;
+			*ppDepthStencilState = g_requestedState;
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -843,12 +816,11 @@ namespace
 			func(This, ppRasterizerState);
 			if (This != globals::d3d::context || !ppRasterizerState || !*ppRasterizerState)
 				return;
-			auto* original = OriginalRasterState(*ppRasterizerState);
-			if (original == *ppRasterizerState)
+			if (*ppRasterizerState != g_boundRasterState || !g_requestedRasterState || g_requestedRasterState == g_boundRasterState)
 				return;
-			original->AddRef();
+			g_requestedRasterState->AddRef();
 			(*ppRasterizerState)->Release();
-			*ppRasterizerState = original;
+			*ppRasterizerState = g_requestedRasterState;
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
