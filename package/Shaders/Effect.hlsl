@@ -184,7 +184,12 @@ VS_OUTPUT main(VS_INPUT input)
 		transpose(float3x3(transpose(World)[0], transpose(World)[1], transpose(World)[2]));
 
 #	if defined(SKY_OBJECT)
-	float4x4 viewProj = float4x4(ViewProj[0], ViewProj[1], ViewProj[3], ViewProj[3]);
+#		ifdef REVERSE_Z
+	float4 skyObjectDepthRow = FrameBuffer::IsReverseProjection(Proj) ? 0.0.xxxx : ViewProj[3];
+#		else
+	float4 skyObjectDepthRow = ViewProj[3];
+#		endif
+	float4x4 viewProj = float4x4(ViewProj[0], ViewProj[1], skyObjectDepthRow, ViewProj[3]);
 #	else
 	row_major float4x4 viewProj = ViewProj;
 #	endif
