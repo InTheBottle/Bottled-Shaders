@@ -1816,9 +1816,9 @@ namespace SIE
 				// { "BSISWaterWadingHeightmap", RE::ImageSpaceManager::GetCurrentIndex(ISWaterWadingHeightmap) },
 				// { "BSImagespaceShaderMap", RE::ImageSpaceManager::GetCurrentIndex(ISMap) },
 				// { "BSImagespaceShaderMap", RE::ImageSpaceManager::GetCurrentIndex(ISMap) },
-				// { "BSImagespaceShaderWorldMap", RE::ImageSpaceManager::GetCurrentIndex(ISWorldMap) },
-				// { "BSImagespaceShaderWorldMapNoSkyBlur",
-				// 	RE::ImageSpaceManager::GetCurrentIndex(ISWorldMapNoSkyBlur) },
+				{ "BSImagespaceShaderWorldMap", RE::ImageSpaceManager::GetCurrentIndex(ISWorldMap) },
+				{ "BSImagespaceShaderWorldMapNoSkyBlur",
+					RE::ImageSpaceManager::GetCurrentIndex(ISWorldMapNoSkyBlur) },
 				{ "BSImagespaceShaderISMinify", RE::ImageSpaceManager::GetCurrentIndex(ISMinify) },
 				{ "BSImagespaceShaderISMinifyContrast", RE::ImageSpaceManager::GetCurrentIndex(ISMinifyContrast) },
 				// { "BSImagespaceShaderNoiseNormalmap", RE::ImageSpaceManager::GetCurrentIndex(ISNoiseNormalmap) },
@@ -1833,7 +1833,7 @@ namespace SIE
 				{ "BSImagespaceShaderISSAOCompositeSAOFog", RE::ImageSpaceManager::GetCurrentIndex(ISSAOCompositeSAOFog) },
 				{ "BSImagespaceShaderISSAOCameraZ", RE::ImageSpaceManager::GetCurrentIndex(ISSAOCameraZ) },
 				// { "BSImagespaceShaderISSILComposite", RE::ImageSpaceManager::GetCurrentIndex(ISSILComposite) },
-				// { "BSImagespaceShaderISSnowSSS", RE::ImageSpaceManager::GetCurrentIndex(ISSnowSSS) },
+				{ "BSImagespaceShaderISSnowSSS", RE::ImageSpaceManager::GetCurrentIndex(ISSnowSSS) },
 				// { "BSImagespaceShaderISSAOBlurH", RE::ImageSpaceManager::GetCurrentIndex(ISSAOBlurH) },
 				// { "BSImagespaceShaderISSAOBlurV", RE::ImageSpaceManager::GetCurrentIndex(ISSAOBlurV) },
 				// { "BSImagespaceShaderISUnderwaterMask", RE::ImageSpaceManager::GetCurrentIndex(ISUnderwaterMask) },
@@ -1861,6 +1861,11 @@ namespace SIE
 
 			auto it = descriptors.find(imagespaceShader.name);
 			if (it == descriptors.cend()) {
+				return false;
+			}
+			static constexpr std::string_view reverseZOnly[] = { "BSImagespaceShaderWorldMap", "BSImagespaceShaderWorldMapNoSkyBlur" };
+			auto& reverseZ = globals::features::reverseZ;
+			if (!(reverseZ.loaded && reverseZ.HasShaderDefine(RE::BSShader::Type::ImageSpace)) && std::ranges::find(reverseZOnly, it->first) != std::end(reverseZOnly)) {
 				return false;
 			}
 			descriptor = it->second;
