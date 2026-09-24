@@ -115,7 +115,7 @@ struct DispatchParameters
 
 	// TERRAIN_BLENDING ON  -> bound to TerrainBlending::blendedDepthTexture (R32_FLOAT) — must NOT be unorm.
 	// TERRAIN_BLENDING OFF -> bound to game's kPOST_ZPREPASS_COPY (R24_UNORM_X8_TYPELESS) — unorm.
-#if defined(TERRAIN_BLENDING)
+#if defined(TERRAIN_BLENDING) || defined(REVERSE_Z)
 	Texture2D<float> DepthTexture;  // Depth Buffer Texture (rasterized non-linear depth, R32_FLOAT)
 #else
 	Texture2D<unorm float> DepthTexture;  // Depth Buffer Texture (rasterized non-linear depth, R24_UNORM_X8_TYPELESS)
@@ -189,6 +189,13 @@ static void ComputeWavefrontExtents(DispatchParameters inParameters, int3 inGrou
 
 // Number of bilinear sample reads performed per-thread
 #define READ_COUNT (SAMPLE_COUNT / WAVE_SIZE + 2)
+
+#if SAMPLE_COUNT >= 32
+#	define FADE_OUT_SAMPLES 8
+#else
+#	define FADE_OUT_SAMPLES (SAMPLE_COUNT / 4)
+#endif
+#define MAIN_SAMPLES (SAMPLE_COUNT - FADE_OUT_SAMPLES)
 
 // Common shared data
 groupshared half DepthData[READ_COUNT * WAVE_SIZE];
@@ -339,13 +346,24 @@ void WriteScreenSpaceShadow(DispatchParameters inParameters, int3 inGroupID, int
 	half front_start_depth = scaled_start_depth - z_sign;
 	half back_start_depth = scaled_start_depth + z_sign;
 
-	[unroll] for (i = 0; i < SAMPLE_COUNT; i++)
+	[unroll] for (i = 0; i < MAIN_SAMPLES; i++)
 	{
 		half shadow_depth = DepthData[sample_index + i] * depth_scale;
 		half front_depth_delta = abs(front_start_depth - shadow_depth);
 		half back_depth_delta = abs(back_start_depth - shadow_depth);
 
 		// By using 4 values, the average shadow can be taken, which can help soften single-pixel shadows.
+		front_shadow_value[i & 3] = min(front_shadow_value[i & 3], front_depth_delta);
+		back_shadow_value[i & 3] = min(back_shadow_value[i & 3], back_depth_delta);
+	}
+
+	[unroll] for (i = MAIN_SAMPLES; i < SAMPLE_COUNT; i++)
+	{
+		half shadow_depth = DepthData[sample_index + i] * depth_scale;
+		half fade_out = (half)(i + 1 - MAIN_SAMPLES) / (half)(FADE_OUT_SAMPLES + 1) * 0.75;
+		half front_depth_delta = abs(front_start_depth - shadow_depth) + fade_out;
+		half back_depth_delta = abs(back_start_depth - shadow_depth) + fade_out;
+
 		front_shadow_value[i & 3] = min(front_shadow_value[i & 3], front_depth_delta);
 		back_shadow_value[i & 3] = min(back_shadow_value[i & 3], back_depth_delta);
 	}

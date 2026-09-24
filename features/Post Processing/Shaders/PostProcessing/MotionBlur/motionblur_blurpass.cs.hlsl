@@ -114,7 +114,7 @@ float2 GetVelocityTexCoord(float2 targetTexCoord)
 	// Sample center pixel data
 	float2 texCoord = (pixelPos + 0.5f) / float2(dimensions);
 	float4 centerColor = TexColor.SampleLevel(LinearSampler, texCoord, 0);
-	float centerDepth = TexDepth.SampleLevel(PointSampler, texCoord, 0);
+	float centerDepth = FrameBuffer::ToStandardDepth(TexDepth.SampleLevel(PointSampler, texCoord, 0));
 	float2 centerVelocity = TexVelocity.SampleLevel(PointSampler, GetVelocityTexCoord(texCoord), 0).xy;
 
 	centerVelocity *= g_VelocityParams.x;
@@ -148,9 +148,9 @@ float2 GetVelocityTexCoord(float2 targetTexCoord)
 
 	// Initialize for sampling
 	float4 sum = float4(0.0f, 0.0f, 0.0f, 0.0f);
-	uint sampleCount = uint(g_SampleCount);
+	uint sampleCount = (uint)(clamp(g_SampleCount, 2, 32) & ~1);
 	uint halfSampleCount = sampleCount / 2u;
-	float pixelToSampleUnitsScale = float(g_SampleCount) / blurLength;
+	float pixelToSampleUnitsScale = float(sampleCount) / blurLength;
 
 	// Sample in pairs (mirrored)
 	for (uint i = 0; i < halfSampleCount; i++) {
@@ -166,8 +166,8 @@ float2 GetVelocityTexCoord(float2 targetTexCoord)
 		float2 sampleTexCoordsBck = (pixelPos + pixelOffsetBck + 0.5f) / float2(dimensions);
 
 		// Sample depth and velocity
-		float sampleDepthFwd = TexDepth.SampleLevel(PointSampler, sampleTexCoordsFwd, 0);
-		float sampleDepthBck = TexDepth.SampleLevel(PointSampler, sampleTexCoordsBck, 0);
+		float sampleDepthFwd = FrameBuffer::ToStandardDepth(TexDepth.SampleLevel(PointSampler, sampleTexCoordsFwd, 0));
+		float sampleDepthBck = FrameBuffer::ToStandardDepth(TexDepth.SampleLevel(PointSampler, sampleTexCoordsBck, 0));
 
 		float4 rawVelocityDepthFwd = TexVelocity.SampleLevel(PointSampler, GetVelocityTexCoord(sampleTexCoordsFwd), 0);
 		float4 rawVelocityDepthBck = TexVelocity.SampleLevel(PointSampler, GetVelocityTexCoord(sampleTexCoordsBck), 0);

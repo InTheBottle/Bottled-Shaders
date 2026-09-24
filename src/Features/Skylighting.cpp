@@ -13,11 +13,21 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	Skylighting::Settings,
 	MaxZenith,
 	MinDiffuseVisibility,
-	MinSpecularVisibility)
+	MinSpecularVisibility,
+	OcclusionUpdateInterval,
+	OcclusionDistanceCulling)
 
 void Skylighting::LoadSettings(json& o_json)
 {
 	settings = o_json;
+
+	if (!std::isfinite(settings.OcclusionUpdateInterval))
+		settings.OcclusionUpdateInterval = Settings{}.OcclusionUpdateInterval;
+	if (!std::isfinite(settings.OcclusionDistanceCulling))
+		settings.OcclusionDistanceCulling = Settings{}.OcclusionDistanceCulling;
+
+	settings.OcclusionUpdateInterval = std::clamp(settings.OcclusionUpdateInterval, 0.f, 100.f);
+	settings.OcclusionDistanceCulling = std::clamp(settings.OcclusionDistanceCulling, 0.f, 1.f);
 }
 
 void Skylighting::SaveSettings(json& o_json)
@@ -60,6 +70,16 @@ void Skylighting::DrawSettings()
 	ImGui::SliderAngle(T(TKEY("max_zenith"), "Max Zenith Angle"), &settings.MaxZenith, 0, 90);
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::Text("%s", T(TKEY("max_zenith_tooltip"), "Smaller angles creates more focused top-down shadow."));
+
+	ImGui::Separator();
+
+	ImGui::SliderFloat(T(TKEY("occlusion_update_interval"), "Occlusion Update Interval"), &settings.OcclusionUpdateInterval, 0.f, 100.f, "%.0f ms", ImGuiSliderFlags_AlwaysClamp);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextWrapped("%s", T(TKEY("occlusion_update_interval_tooltip"), "Minimum time between occlusion height map renders. The height map is the largest source of utility draw calls, so raising this lowers CPU and GPU cost in geometry-dense areas. 0 renders it every frame. Rendering also pauses once the camera has stayed in one probe cell long enough for skylighting to settle, since only static geometry is captured."));
+
+	ImGui::SliderFloat(T(TKEY("occlusion_distance_culling"), "Occlusion Distance Culling"), &settings.OcclusionDistanceCulling, 0.f, 1.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextWrapped("%s", T(TKEY("occlusion_distance_culling_tooltip"), "Drops small distant objects from the occlusion height map, lowering the cost of each render rather than how often it runs. Large occluders such as mountains and buildings are kept at any distance. 0 captures everything, as before."));
 }
 
 void Skylighting::SetupResources()
@@ -405,6 +425,18 @@ RE::BSShaderProperty::RenderPassArray* Skylighting::BSLightingShaderProperty_Get
 			return precipitationOcclusionMapRenderPassList;
 	}
 
+	const bool validOccluder = property->flags.any(kZBufferWrite) &&
+		property->flags.none(kRefraction, kTempRefraction, kLODLandscape, kEyeReflect, kDecal, kDynamicDecal) &&
+		(skylighting.inOcclusion || property->flags.none(kMultiTextureLandscape, kNoLODLandBlend));
+	float minOccluderRadius = 32.f;
+	if (skylighting.inOcclusion && skylighting.settings.OcclusionDistanceCulling > 0.f) {
+		const float distance = geometry->worldBound.center.GetDistance(skylighting.occlusionEyePosition);
+		minOccluderRadius += skylighting.settings.OcclusionDistanceCulling * 256.f * std::min(distance / skylighting.occlusionDistance, 1.f);
+	}
+
+	if (!validOccluder || !(geometry->worldBound.radius > minOccluderRadius))
+		return precipitationOcclusionMapRenderPassList;
+
 	if (skylighting.inOcclusion) {
 		if (auto userData = geometry->GetUserData()) {
 			RE::BSFadeNode* fadeNode = nullptr;
@@ -436,44 +468,32 @@ RE::BSShaderProperty::RenderPassArray* Skylighting::BSLightingShaderProperty_Get
 		}
 	}
 
-	bool valid = false;
+	stl::enumeration<RE::BSUtilityShader::Flags> technique;
+	technique.set(RenderDepth);
 
-	if (skylighting.inOcclusion) {
-		valid = property->flags.any(kZBufferWrite) && property->flags.none(kRefraction, kTempRefraction, kLODLandscape, kEyeReflect, kDecal, kDynamicDecal);
-	} else {
-		valid = property->flags.any(kZBufferWrite) && property->flags.none(kRefraction, kTempRefraction, kMultiTextureLandscape, kNoLODLandBlend, kLODLandscape, kEyeReflect, kDecal, kDynamicDecal);
+	if (property->flags.any(kVertexColors)) {
+		technique.set(Vc);
 	}
 
-	if (valid) {
-		if (geometry->worldBound.radius > 32) {
-			stl::enumeration<RE::BSUtilityShader::Flags> technique;
-			technique.set(RenderDepth);
-
-			if (property->flags.any(kVertexColors)) {
-				technique.set(Vc);
-			}
-
-			const auto alphaProperty = static_cast<RE::NiAlphaProperty*>(geometry->GetGeometryRuntimeData().alphaProperty.get());
-			if (alphaProperty && alphaProperty->GetAlphaTesting()) {
-				technique.set(Texture);
-				technique.set(AlphaTest);
-			}
-
-			if (property->flags.any(kLODObjects, kHDLODObjects)) {
-				technique.set(LodObject);
-			}
-
-			if (property->flags.any(kTreeAnim)) {
-				technique.set(TreeAnim);
-			}
-
-			precipitationOcclusionMapRenderPassList->EmplacePass(
-				globals::game::utilityShader,
-				property,
-				geometry,
-				technique.underlying() + static_cast<uint32_t>(ShaderTechnique::UtilityGeneralStart));
-		}
+	const auto alphaProperty = static_cast<RE::NiAlphaProperty*>(geometry->GetGeometryRuntimeData().alphaProperty.get());
+	if (alphaProperty && alphaProperty->GetAlphaTesting()) {
+		technique.set(Texture);
+		technique.set(AlphaTest);
 	}
+
+	if (property->flags.any(kLODObjects, kHDLODObjects)) {
+		technique.set(LodObject);
+	}
+
+	if (property->flags.any(kTreeAnim)) {
+		technique.set(TreeAnim);
+	}
+
+	precipitationOcclusionMapRenderPassList->EmplacePass(
+		globals::game::utilityShader,
+		property,
+		geometry,
+		technique.underlying() + static_cast<uint32_t>(ShaderTechnique::UtilityGeneralStart));
 	return precipitationOcclusionMapRenderPassList;
 }
 
@@ -493,6 +513,47 @@ void Skylighting::SetViewFrustum::thunk(RE::NiCamera* a_camera, RE::NiFrustum* a
 	}
 
 	func(a_camera, a_frustum);
+}
+
+bool Skylighting::ShouldRenderOcclusion()
+{
+	const auto now = std::chrono::steady_clock::now();
+
+	if (queuedResetSkylighting) {
+		haveLastOccCell = false;
+		occlusionConvergedFrames = 0;
+		lastUpdateTimer = now;
+		return true;
+	}
+
+	if (settings.OcclusionUpdateInterval > 0.f) {
+		const float elapsedMs = std::chrono::duration<float, std::milli>(now - lastUpdateTimer).count();
+		if (elapsedMs < settings.OcclusionUpdateInterval)
+			return false;
+	}
+
+	const float3 cellSize = {
+		occlusionDistance / probeArrayDims[0],
+		occlusionDistance / probeArrayDims[1],
+		occlusionDistance * .5f / probeArrayDims[2]
+	};
+	const auto eyePosNI = Util::GetEyePosition();
+	const float3 eyePos = { eyePosNI.x, eyePosNI.y, eyePosNI.z };
+	float3 cellID = eyePos / cellSize;
+	cellID = { round(cellID.x), round(cellID.y), round(cellID.z) };
+
+	if (haveLastOccCell && cellID.x == lastOccCell.x && cellID.y == lastOccCell.y && cellID.z == lastOccCell.z) {
+		if (occlusionConvergedFrames >= OcclusionConvergenceFrames)
+			return false;
+		occlusionConvergedFrames++;
+	} else {
+		lastOccCell = cellID;
+		haveLastOccCell = true;
+		occlusionConvergedFrames = 0;
+	}
+
+	lastUpdateTimer = now;
+	return true;
 }
 
 void Skylighting::RenderOcclusion()
@@ -542,7 +603,7 @@ void Skylighting::RenderOcclusion()
 				state->EndPerfEvent();
 			}
 
-			{
+			if (ShouldRenderOcclusion()) {
 				TracyD3D11Zone(globals::state->tracyCtx, "Skylighting Mask");
 				state->BeginPerfEvent("Skylighting Mask");
 
@@ -565,6 +626,7 @@ void Skylighting::RenderOcclusion()
 				RE::NiPoint3 originalParticleShaderDirection = PrecipitationShaderDirection;
 
 				inOcclusion = true;
+				occlusionEyePosition = Util::GetEyePosition();
 				PrecipitationShaderCubeSize = occlusionDistance;
 
 				float originaLastCubeSize = precip->lastCubeSize;

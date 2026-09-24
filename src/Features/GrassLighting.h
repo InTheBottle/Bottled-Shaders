@@ -43,7 +43,7 @@ public:
 		float NormalStrength = 1.0f;
 		float SpecularAAStrength = 1.0f;
 		uint EnableWrappedLighting = false;
-		float SphereNormalStrength = 1.0f;
+		float SphereNormalStrength = 3.0f;
 
 		float ClassicScattering = 0.25f;
 		float TransmissionSaturation = 1.4f;

@@ -3,6 +3,7 @@
 #include <atomic>
 
 struct CloudShadows;
+struct ProceduralSun;
 struct DynamicCubemaps;
 struct VolumetricShadows;
 struct ExtendedMaterials;
@@ -34,6 +35,7 @@ struct WaterEffects;
 struct PerformanceOverlay;
 struct WetnessEffects;
 struct ExtendedTranslucency;
+struct ReverseZ;
 struct Upscaling;
 class Profiler;
 struct CSEditor;
@@ -44,6 +46,7 @@ struct PostProcessing;
 struct ScreenshotFeature;
 struct Skin;
 struct SnowCover;
+struct FootstepParticles;
 
 class State;
 class Deferred;
@@ -97,6 +100,7 @@ namespace globals
 	namespace features
 	{
 		extern CloudShadows cloudShadows;
+		extern ProceduralSun proceduralSun;
 		extern DynamicCubemaps dynamicCubemaps;
 		extern VolumetricShadows volumetricShadows;
 		extern ExtendedMaterials extendedMaterials;
@@ -128,6 +132,7 @@ namespace globals
 		extern PerformanceOverlay performanceOverlay;
 		extern WetnessEffects wetnessEffects;
 		extern ExtendedTranslucency extendedTranslucency;
+		extern ReverseZ reverseZ;
 		extern Upscaling upscaling;
 		extern HDRDisplay hdrDisplay;
 		extern Effects11 effects11;
@@ -140,6 +145,7 @@ namespace globals
 	extern PostProcessing postProcessing;
 		extern Skin skin;
 		extern SnowCover snowCover;
+		extern FootstepParticles footstepParticles;
 
 	}
 

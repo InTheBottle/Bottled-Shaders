@@ -1,6 +1,12 @@
 #ifndef __SHARED_DATA_DEPENDENCY_HLSL__
 #define __SHARED_DATA_DEPENDENCY_HLSL__
 
+#ifdef REVERSE_Z
+#	define SCENE_DEPTH_FORMAT float
+#else
+#	define SCENE_DEPTH_FORMAT unorm float
+#endif
+
 #include "Common/FrameBuffer.hlsli"
 #include "Common/Spherical Harmonics/SphericalHarmonics.hlsli"
 
@@ -97,6 +103,18 @@ namespace SharedData
 		uint LightsVisualisationMode;
 		float2 pad0;
 		uint4 ClusterSize;
+		uint EnableContactShadows;
+		uint ContactShadowMaxSteps;
+		float ContactShadowMaxDistance;
+		float ContactShadowStride;
+		float ContactShadowThickness;
+		float ContactShadowDepthFade;
+		float ContactShadowStrength;
+		uint EnableLocalShadows;
+		uint LocalShadowSamples;
+		float LocalShadowFilterRadius;
+		float LocalShadowTexelSize;
+		float pad1;
 	};
 
 	struct WetnessEffectsSettings
@@ -164,6 +182,23 @@ namespace SharedData
 		float3 pad0;
 	};
 
+	struct ProceduralSunSettings
+	{
+		uint enabled;
+		float sunDiskCos;
+		float diskIntensity;
+		float edgeSoftness;
+
+		uint haloEnabled;
+		float sunHaloCos;
+		float haloIntensity;
+		float haloFalloff;
+
+		float cloudExtinction;
+		float sunVisibility;
+		float2 pad0;
+	};
+
 	struct LODBlendingSettings
 	{
 		float LODTerrainBrightness;
@@ -202,7 +237,8 @@ namespace SharedData
 	struct TerrainVariationSettings
 	{
 		uint enableLODTerrainTilingFix;  ///< 1 = apply variation to LOD terrain.
-		uint3 pad;
+		uint enableMeshSupport;          ///< 1 = apply variation to landscape-textured meshes.
+		uint2 pad;
 	};
 
 	struct IBLSettings
@@ -278,15 +314,9 @@ namespace SharedData
 		float CloudsEdgeIntensity;
 		float CloudsEdgeMoonMultiplier;
 
-		uint EnableProceduralSun;
-		float ProceduralSunDiskRadiusSq;
-		float ProceduralSunDiskEdgeScale;
-		float ProceduralSunGlowIntensity;
-
-		float ProceduralSunCoronaFalloff;
-		float ProceduralSunCoronaScale;
 		uint UseProceduralGradientWeights;
 		float ProceduralGradientWeightCurve;
+		float2 pad1;
 
 		float ParticleIntensity;
 		float ParticleLightingInfluence;
@@ -315,6 +345,29 @@ namespace SharedData
 		float WaterPad0;
 		float WaterPad1;
 		float WaterPad2;
+
+		uint EnableCloudsScattering;
+		float SkyScatteringIntensity;
+		float SkyScatteringColorFromSun;
+		float SkyScatteringShadowAmount;
+
+		float3 SkyScatteringColor;
+		float SkyScatteringExtinction;
+
+		float SkyScatteringScaleHeight;
+		float SkyScatteringSunGlowIntensity;
+		float SkyScatteringSunGlowAnisotropy;
+		float SkyScatteringAirGlowIntensity;
+
+		float SkyScatteringAirGlowAnisotropy;
+		float SkyScatteringMoonGlowAmount;
+		float CloudsLightingSunMultiplier;
+		float CloudsLightingSunMinIntensity;
+
+		float CloudsLightingMoonIntensity;
+		uint EnableCloudsLightingFromMoon;
+		uint CalculateCloudsEdgeFromScattering;
+		float CloudsLightingDensity;
 	};
 	struct TerrainBlendingSettings
 	{
@@ -364,7 +417,9 @@ namespace SharedData
 	struct TruePBRSettings
 	{
 		float VertexAOStrength;
-		uint3 pad;
+		uint EnableMicroShadows;
+		float MicroShadowStrength;
+		uint pad;
 	};
 
 	struct FoliageLightingSettings
@@ -415,11 +470,6 @@ namespace SharedData
 		float SnowHeightOffset;
 		uint2 pad;
 
-		uint EnableFireMelt;
-		float FireRadiusScale;
-		float FireInnerScale;
-		float FireMaxDistance;
-
 		uint EnableSnowCover;
 		uint AffectGrassTint;
 		uint AffectTreeTint;
@@ -450,16 +500,19 @@ namespace SharedData
 		float ObjectFadeEnd;
 		float ObjectFadeAmount;
 		uint2 pad2;
-
-		uint FireCount;
-		uint3 firePad;
-		float4 FireSources[16];  // xyz = world position, w = melt radius
 	};
 
 	struct PostProcessingSettings
 	{
 		uint DisableVanillaTonemapping;
 		uint3 pad0;
+	};
+
+	struct VolumetricLightingSettings
+	{
+		float GodRayGain;
+		float GodRayExponent;
+		float2 pad0;
 	};
 
 	cbuffer FeatureData : register(b6)
@@ -472,6 +525,7 @@ namespace SharedData
 		WetnessEffectsSettings wetnessEffectsSettings;
 		SkylightingSettings skylightingSettings;
 		CloudShadowsSettings cloudShadowsSettings;
+		ProceduralSunSettings proceduralSunSettings;
 		LODBlendingSettings lodBlendingSettings;
 		HairSpecularSettings hairSpecularSettings;
 		TerrainVariationSettings terrainVariationSettings;
@@ -487,6 +541,7 @@ namespace SharedData
 		VanillaFresnelSettings vanillaFresnelSettings;
 		SnowCoverSettings snowCoverSettings;
 		PostProcessingSettings postProcessingSettings;
+		VolumetricLightingSettings volumetricLightingSettings;
 	};
 
 	Texture2D<float4> DepthTexture : register(t17);
@@ -506,12 +561,28 @@ namespace SharedData
 
 	float GetScreenDepth(float depth)
 	{
+#ifdef REVERSE_Z
+#	if defined(PSHADER) || defined(VSHADER)
+		if (!FrameBuffer::IsReverseProjection())
+			return (CameraData.w / (-depth * CameraData.z + CameraData.x));
+#	endif
+		return (CameraData.w / (depth * CameraData.z + CameraData.y));
+#else
 		return (CameraData.w / (-depth * CameraData.z + CameraData.x));
+#endif
 	}
 
 	float4 GetScreenDepths(float4 depths)
 	{
+#ifdef REVERSE_Z
+#	if defined(PSHADER) || defined(VSHADER)
+		if (!FrameBuffer::IsReverseProjection())
+			return (CameraData.w / (-depths * CameraData.z + CameraData.x));
+#	endif
+		return (CameraData.w / (depths * CameraData.z + CameraData.y));
+#else
 		return (CameraData.w / (-depths * CameraData.z + CameraData.x));
+#endif
 	}
 
 	float GetScreenDepth(float2 uv)

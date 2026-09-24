@@ -5,11 +5,13 @@
 #include "Features/CSEditor.h"
 #include "Features/CloudShadows.h"
 #include "Features/DynamicCubemaps.h"
+#include "Features/ProceduralSun.h"
 #include "Features/Effects11.h"
 #include "Features/ExponentialHeightFog.h"
 #include "Features/ExtendedMaterials.h"
 #include "Features/ExtendedTranslucency.h"
 #include "Features/FoliageLighting.h"
+#include "Features/FootstepParticles.h"
 #include "Features/GrassCollision.h"
 #include "Features/GrassLighting.h"
 #include "Features/GrassOptimizations.h"
@@ -43,6 +45,7 @@
 #include "Features/VanillaFresnel.h"
 #include "Features/VolumetricLighting.h"
 #include "Features/VolumetricShadows.h"
+#include "Features/ReverseZ.h"
 #include "Features/WaterEffects.h"
 #include "Features/WetnessEffects.h"
 #include "I18n/I18n.h"
@@ -198,6 +201,10 @@ bool Feature::ValidateCache(CSimpleIniA& a_ini)
 
 	if (loaded) {
 		auto versionInCache = a_ini.GetValue(ini_name.c_str(), "Version");
+		if (!versionInCache) {
+			logger::info("No cached version found. Installed {}", version);
+			return false;
+		}
 		if (strcmp(versionInCache, version.c_str()) != 0) {
 			logger::info("Change in version detected. Installed {} but {} in Disk Cache", version, versionInCache);
 			return false;
@@ -236,6 +243,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::lightLimitFix,
 		&globals::features::dynamicCubemaps,
 		&globals::features::cloudShadows,
+		&globals::features::proceduralSun,
 		&globals::features::waterEffects,
 		&globals::features::performanceOverlay,
 		&globals::features::subsurfaceScattering,
@@ -254,6 +262,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::terrainVariation,
 		&globals::features::ibl,
 		&globals::features::extendedTranslucency,
+		&globals::features::reverseZ,
 		&globals::features::upscaling,
 		&globals::features::renderDoc,
 		&globals::features::remoteControl,
@@ -267,7 +276,8 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::hdrDisplay,
 		&globals::features::postProcessing,
 		&globals::features::skin,
-		&globals::features::snowCover
+		&globals::features::snowCover,
+		&globals::features::footstepParticles
 	};
 
 	return features;

@@ -12,12 +12,14 @@
 #include "Menu.h"
 #include "ShaderCache.h"
 #include "State.h"
+#include "TruePBR.h"
 #include "Util.h"
 
 #include "Features/Effects11.h"
 #include "Features/HDRDisplay.h"
 #include "Features/InteriorSun.h"
 #include "Features/LightLimitFix.h"
+#include "Features/ReverseZ.h"
 #include "Features/PostProcessing.h"
 #include "Features/ScreenshotFeature.h"
 #include "Features/Skin.h"
@@ -117,7 +119,7 @@ struct BSShader_LoadShaders
 					if (const auto bytecode = GetShaderBytecode(entry->shader)) {
 						DumpShader(shader, entry, std::span(*bytecode));
 					} else {
-						logger::warn("No captured bytecode for vertex shader {} descriptor {:X}", shader->fxpFilename, entry->id);
+						logger::warn("No captured bytecode for vertex shader {} descriptor {:X}", shader->fxpFilename ? shader->fxpFilename : "Unknown", entry->id);
 					}
 				}
 				auto vertexShaderDesriptor = entry->id;
@@ -131,7 +133,7 @@ struct BSShader_LoadShaders
 					if (const auto bytecode = GetShaderBytecode(entry->shader)) {
 						DumpShader(shader, entry, std::span(*bytecode));
 					} else {
-						logger::warn("No captured bytecode for pixel shader {} descriptor {:X}", shader->fxpFilename, entry->id);
+						logger::warn("No captured bytecode for pixel shader {} descriptor {:X}", shader->fxpFilename ? shader->fxpFilename : "Unknown", entry->id);
 					}
 				}
 				auto vertexShaderDesriptor = entry->id;
@@ -244,8 +246,6 @@ namespace SkyExtensions
 		static void thunk(RE::BSShader* shader, RE::BSRenderPass* pass, uint32_t renderFlags)
 		{
 			globals::state->UpdateSkyShaderPermutation(pass);
-			if (globals::features::effects11.loaded)
-				globals::features::effects11.ModifySky(pass);
 			func(shader, pass, renderFlags);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
@@ -263,6 +263,7 @@ namespace GrassExtensions
 			auto* lightingProperty = *reinterpret_cast<RE::BSLightingShaderProperty**>(lightingPropertyAddress);
 
 			RE::BSLightingShaderProperty* grassProperty = func(property);
+			globals::features::truePBR.SetupGrassMaterial(lightingProperty, grassProperty);
 
 			if (lightingProperty->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kEffectLighting)) {
 				grassProperty->SetFlags(RE::BSShaderProperty::EShaderPropertyFlag8::kEffectLighting, true);
@@ -326,6 +327,8 @@ namespace WeatherExtensions
 			if (globals::features::effects11.loaded)
 				globals::features::effects11.OnSkyUpdateColors(sky);
 			globals::features::skySync.OnSkyUpdateColors(sky);
+			if (globals::features::volumetricLighting.loaded)
+				globals::features::volumetricLighting.ApplyGodRaySettings();
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -406,12 +409,14 @@ struct IDXGISwapChain_Present
 				SyncInterval,
 				Flags,
 				[&](IDXGISwapChain* swapChain, UINT syncInterval, UINT presentFlags) {
-					// Capture here, after HDR output and before the proxy swap chain presents and
-					// clears its wrapped back buffer; afterwards the proxy path reads back black.
-					globals::features::screenshotFeature.ProcessCaptureRequest();
 					return func(swapChain, syncInterval, presentFlags);
 				});
 		}
+
+		// The wrapped back buffer still holds the frame here, so the capture reads it before
+		// the clear for the next frame.
+		globals::features::screenshotFeature.ProcessCaptureRequest();
+		globals::features::upscaling.dx12SwapChain.ClearWrappedBuffers();
 
 		TracyD3D11Collect(globals::state->tracyCtx);
 
@@ -549,6 +554,7 @@ struct BSShaderRenderTargets_Create
 		Util::SetGameSettingValue<std::int32_t>("iNumFocusShadow:Display", iNumFocusShadow, 0);
 		func();
 		globals::ReInit();
+		globals::features::reverseZ.SetupDepthTargets();
 		globals::state->Setup();
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
@@ -975,12 +981,12 @@ namespace Hooks
 							techniqueId = 0;
 							isShader = vl.GetOrCreateBlurHCS(CurrentlyDispatchedComputeShader);
 							vl.SetDimensionsCB();
-							vl.SetGroupCountsHCS(threadGroupCountX);
+							vl.SetGroupCountsHCS(threadGroupCountX, threadGroupCountY);
 						} else if (CurrentlyDispatchedComputeShader->name == "ISVolumetricLightingBlurVCS"sv) {
 							techniqueId = 0;
 							isShader = vl.GetOrCreateBlurVCS(CurrentlyDispatchedComputeShader);
 							vl.SetDimensionsCB();
-							vl.SetGroupCountsVCS(threadGroupCountY);
+							vl.SetGroupCountsVCS(threadGroupCountX, threadGroupCountY);
 						}
 					}
 					if (isShader != nullptr) {
@@ -1035,8 +1041,8 @@ namespace Hooks
 			void* a6,
 			void* a7)
 		{
-			auto* enableIBLF = reinterpret_cast<bool*>(REL::RelocationID(513510, 391362).address());
-			*enableIBLF = false;
+			auto* enableIBLF = reinterpret_cast<float*>(REL::RelocationID(513510, 391362).address());
+			*enableIBLF = 0.0f;
 
 			func(a1, a2, a3, a4, a5, a6, a7);
 		}

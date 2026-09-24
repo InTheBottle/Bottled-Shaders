@@ -1,4 +1,5 @@
 #include "FidelityFX.h"
+#include "Features/ReverseZ.h"
 
 #include <directx/d3dx12.h>
 
@@ -168,6 +169,8 @@ void FidelityFX::SetupFrameGeneration()
 	createFg.displaySize = { swapChain.swapChainDesc.Width, swapChain.swapChainDesc.Height };
 	createFg.maxRenderSize = createFg.displaySize;
 	createFg.flags = FFX_FRAMEGENERATION_ENABLE_ASYNC_WORKLOAD_SUPPORT;
+	if (globals::features::reverseZ.IsActive())
+		createFg.flags |= FFX_FRAMEGENERATION_ENABLE_DEPTH_INVERTED;
 	createFg.backBufferFormat = ffxApiGetSurfaceFormatDX12(swapChain.swapChainDesc.Format);
 
 	ffx::CreateBackendDX12Desc backendDesc{};
@@ -379,8 +382,8 @@ void FidelityFX::CreateFSRResources()
 	memset(fsrScratchBuffer, 0, scratchBufferSize);
 
 	FfxInterface fsrInterface;
-	if (ffxGetInterfaceDX11(&fsrInterface, fsrDevice, fsrScratchBuffer, scratchBufferSize, numContexts) != FFX_OK) {
-		logger::critical("[FidelityFX] Failed to initialize FSR3 backend interface!");
+	if (const auto interfaceResult = ffxGetInterfaceDX11(&fsrInterface, fsrDevice, fsrScratchBuffer, scratchBufferSize, numContexts); interfaceResult != FFX_OK) {
+		logger::critical("[FidelityFX] Failed to initialize FSR3 backend interface (error {:#x})!", static_cast<uint32_t>(interfaceResult));
 		free(fsrScratchBuffer);
 		fsrScratchBuffer = nullptr;
 		return;
@@ -402,6 +405,8 @@ void FidelityFX::CreateFSRResources()
 	contextDescription.displaySize.width = displayWidth;
 	contextDescription.displaySize.height = displayHeight;
 	contextDescription.flags = FFX_FSR3_ENABLE_UPSCALING_ONLY | FFX_FSR3_ENABLE_AUTO_EXPOSURE;
+	if (globals::features::reverseZ.IsActive())
+		contextDescription.flags |= FFX_FSR3_ENABLE_DEPTH_INVERTED;
 	if (globals::features::hdrDisplay.loaded) {
 		contextDescription.flags |= FFX_FSR3_ENABLE_HIGH_DYNAMIC_RANGE;
 		contextDescription.backBufferFormat = FFX_SURFACE_FORMAT_R10G10B10A2_UNORM;
@@ -410,8 +415,8 @@ void FidelityFX::CreateFSRResources()
 	}
 	contextDescription.backendInterfaceUpscaling = fsrInterface;
 
-	if (ffxFsr3ContextCreate(&fsrContext[0], &contextDescription) != FFX_OK) {
-		logger::critical("[FidelityFX] Failed to initialize FSR3 context!");
+	if (const auto contextResult = ffxFsr3ContextCreate(&fsrContext[0], &contextDescription); contextResult != FFX_OK) {
+		logger::critical("[FidelityFX] Failed to initialize FSR3 context (error {:#x}, render {}x{}, display {}x{})!", static_cast<uint32_t>(contextResult), renderWidth, renderHeight, displayWidth, displayHeight);
 		free(fsrScratchBuffer);
 		fsrScratchBuffer = nullptr;
 		return;

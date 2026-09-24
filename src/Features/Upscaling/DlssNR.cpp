@@ -1,4 +1,6 @@
 #include "DlssNR.h"
+#include "Features/ReverseZ.h"
+#include "Globals.h"
 
 #include <d3dcompiler.h>
 #include <directx/d3dx12.h>
@@ -1053,7 +1055,7 @@ namespace DlssNR
 			g.setExtras(g.capabilityParams, 1.0f, nullptr, nullptr, nullptr, 0, 0, 0, 0);
 		Stamp(a_commandList, 1);
 		const int result = g.evaluate(a_commandList, g.feature, g.capabilityParams, modelInput, modelDepth, g.nrMotion, g.modelOut,
-			workWidth, workHeight, guideWidth, guideHeight, 0, g.reset ? 1 : 0, settings.intensity, static_cast<int>(settings.style),
+			workWidth, workHeight, guideWidth, guideHeight, globals::features::reverseZ.IsActive() ? 1 : 0, g.reset ? 1 : 0, settings.intensity, static_cast<int>(settings.style),
 			settings.localStructureStrength, settings.localToneStrength, SkinStrength(settings), settings.useAutoMask ? 1 : 0,
 			1.0f, 1.0f);
 		Stamp(a_commandList, 2);

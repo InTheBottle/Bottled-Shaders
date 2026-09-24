@@ -2,6 +2,7 @@
 
 #include "D3D11StateBackup.h"
 #include "Features/Effects11.h"
+#include "Features/ReverseZ.h"
 #include "Globals.h"
 #include "State.h"
 
@@ -164,8 +165,8 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterBoolSetting("EnableBloom", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableLens", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnablePostPassShader", "EFFECT", false, false);
-	settingManager.RegisterBoolSetting("EnableProceduralSun", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableCloudShadows", "EFFECT", false, false);
+	settingManager.RegisterBoolSetting("EnableCloudsScattering", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableImageBasedLighting", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableVolumetricRays", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableDepthOfField", "EFFECT", false, false);
@@ -257,10 +258,23 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterBoolSetting("UseProceduralGradientWeights", "SKY", false, false);
 	settingManager.RegisterTimeOfDaySetting("ProceduralGradientWeightCurve", "SKY", 4.0f, 1.0f, 32.0f, 0.01f, true);
 
-	settingManager.RegisterFloatSetting("Size", "PROCEDURALSUN", 1.0f, 0.0f, 12.0f, 0.01f, false);
-	settingManager.RegisterFloatSetting("EdgeSoftness", "PROCEDURALSUN", 0.4f, 0.0f, 1.0f, 0.01f, false);
-	settingManager.RegisterTimeOfDaySetting("GlowIntensity", "PROCEDURALSUN", 0.4f, 0.0f, 30000.0f, 0.01f, true);
-	settingManager.RegisterTimeOfDaySetting("GlowCurve", "PROCEDURALSUN", 10.0f, 0.0f, 100.0f, 0.01f, true);
+	settingManager.RegisterBoolSetting("EnableCloudsLightingFromMoon", "SKYSCATTERING", true, false);
+	settingManager.RegisterBoolSetting("CalculateCloudsEdgeFromScattering", "SKYSCATTERING", false, false);
+	settingManager.RegisterTimeOfDaySetting("Intensity", "SKYSCATTERING", 1.0f, 0.0f, 100.0f, 0.01f, true);
+	settingManager.RegisterColorTimeOfDaySetting("ScatteringColor", "SKYSCATTERING", { 1.0f, 1.0f, 1.0f }, true);
+	settingManager.RegisterTimeOfDaySetting("ColorFromSun", "SKYSCATTERING", 1.0f, 0.0f, 1.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("ShadowAmount", "SKYSCATTERING", 0.8f, 0.0f, 1.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("SunGlowIntensity", "SKYSCATTERING", 1.5f, 0.0f, 100.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("SunGlowRange", "SKYSCATTERING", 1.5f, 0.2f, 6.67f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("AirGlowIntensity", "SKYSCATTERING", 0.2f, 0.0f, 100.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("AirGlowRange", "SKYSCATTERING", 5.0f, 0.2f, 6.67f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("MoonGlowAmount", "SKYSCATTERING", 1.0f, 0.0f, 10.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("DustDensity", "SKYSCATTERING", 2.0f, 0.0f, 100.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("AtmosphereThickness", "SKYSCATTERING", 1.0f, 0.05f, 10.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("CloudsLightingSunMultiplier", "SKYSCATTERING", 0.35f, 0.0f, 100.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("CloudsLightingSunMinIntensity", "SKYSCATTERING", 0.55f, 0.0f, 1.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("CloudsLightingMoonIntensity", "SKYSCATTERING", 1.0f, 0.0f, 10.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("CloudsLightingDensity", "SKYSCATTERING", 2.0f, 0.0f, 10.0f, 0.01f, true);
 
 	settingManager.RegisterTimeOfDaySetting("Intensity", "VOLUMETRICFOG", 1.0f, 0.0f, 30000.0f, 0.01f, true);
 	settingManager.RegisterColorTimeOfDaySetting("ColorFilter", "VOLUMETRICFOG", { 1.0f, 1.0f, 1.0f }, true);
@@ -293,8 +307,8 @@ void EffectManager::RegisterSettings()
 	settingManager.SetCategoryDependency("BLOOM", "EnableBloom", "EFFECT");
 	settingManager.SetCategoryDependency("LENS", "EnableLens", "EFFECT");
 	settingManager.SetCategoryDependency("ADAPTATION", "EnableAdaptation", "EFFECT");
-	settingManager.SetCategoryDependency("PROCEDURALSUN", "EnableProceduralSun", "EFFECT");
 	settingManager.SetCategoryDependency("CLOUDSHADOWS", "EnableCloudShadows", "EFFECT");
+	settingManager.SetCategoryDependency("SKYSCATTERING", "EnableCloudsScattering", "EFFECT");
 	settingManager.SetCategoryDependency("IMAGEBASEDLIGHTING", "EnableImageBasedLighting", "EFFECT");
 	settingManager.SetCategoryDependency("VOLUMETRICRAYS", "EnableVolumetricRays", "EFFECT");
 
@@ -308,6 +322,7 @@ void EffectManager::RegisterSettings()
 	settingManager.SetCategoryExteriorOnly("CLOUDSHADOWS", true);
 	settingManager.SetCategoryExteriorOnly("IMAGEBASEDLIGHTING", true);
 	settingManager.SetCategoryExteriorOnly("VOLUMETRICRAYS", true);
+	settingManager.SetCategoryExteriorOnly("SKYSCATTERING", true);
 	settingManager.SetCategoryExteriorOnly("VOLUMETRICFOG", true);
 	settingManager.SetCategoryExteriorOnly("GAMEVOLUMETRICRAYS", true);
 
@@ -450,6 +465,94 @@ void EffectManager::CreateCommonResources()
 	CreateRenderStates();
 	CreateCopyShaders();
 	CreateColorCorrectionShader();
+	CreateStandardDepthShader();
+}
+
+void EffectManager::CreateStandardDepthShader()
+{
+	auto computeShaderSource = LoadShaderFile("Data\\Shaders\\Effects11\\StandardDepthCS.hlsl");
+	if (computeShaderSource.empty())
+		return;
+
+	winrt::com_ptr<ID3DBlob> csBlob, errorBlob;
+	HRESULT hr = D3DCompile(computeShaderSource.data(), computeShaderSource.size(), "StandardDepthCS.hlsl", nullptr, nullptr,
+		"main", "cs_5_0", 0, 0, csBlob.put(), errorBlob.put());
+
+	if (FAILED(hr)) {
+		if (errorBlob) {
+			logger::error("[EFFECTS11] Failed to compile standard depth compute shader: {}", static_cast<char*>(errorBlob->GetBufferPointer()));
+		}
+		return;
+	}
+
+	hr = globals::d3d::device->CreateComputeShader(csBlob->GetBufferPointer(), csBlob->GetBufferSize(), nullptr, standardDepthComputeShader.put());
+	if (FAILED(hr)) {
+		logger::error("[EFFECTS11] Failed to create standard depth compute shader");
+		return;
+	}
+}
+
+ID3D11ShaderResourceView* EffectManager::GetEffectDepthSRV()
+{
+	auto renderer = globals::game::renderer;
+	auto* sceneDepthSRV = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN].depthSRV;
+	if (!globals::features::reverseZ.IsActive() || !standardDepthComputeShader || !sceneDepthSRV)
+		return sceneDepthSRV;
+
+	winrt::com_ptr<ID3D11Resource> resource;
+	sceneDepthSRV->GetResource(resource.put());
+	winrt::com_ptr<ID3D11Texture2D> sourceTexture;
+	if (!resource || !resource.try_as(sourceTexture) || !sourceTexture)
+		return sceneDepthSRV;
+
+	D3D11_TEXTURE2D_DESC sourceDesc{};
+	sourceTexture->GetDesc(&sourceDesc);
+
+	if (!standardDepthTexture || standardDepthTexture->desc.Width != sourceDesc.Width || standardDepthTexture->desc.Height != sourceDesc.Height) {
+		D3D11_TEXTURE2D_DESC desc{};
+		desc.Width = sourceDesc.Width;
+		desc.Height = sourceDesc.Height;
+		desc.MipLevels = 1;
+		desc.ArraySize = 1;
+		desc.Format = DXGI_FORMAT_R32_FLOAT;
+		desc.SampleDesc = { 1, 0 };
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+		standardDepthTexture = std::make_unique<Texture2D>(desc, "Effects11::StandardDepth");
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = desc.Format;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MipLevels = 1;
+		standardDepthTexture->CreateSRV(srvDesc);
+
+		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+		uavDesc.Format = desc.Format;
+		uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+		standardDepthTexture->CreateUAV(uavDesc);
+
+		standardDepthFrame = 0xFFFFFFFF;
+	}
+
+	if (standardDepthFrame != globals::state->frameCount) {
+		standardDepthFrame = globals::state->frameCount;
+
+		auto context = globals::d3d::context;
+		context->CSSetShader(standardDepthComputeShader.get(), nullptr, 0);
+		ID3D11ShaderResourceView* srvs[] = { sceneDepthSRV };
+		context->CSSetShaderResources(0, 1, srvs);
+		ID3D11UnorderedAccessView* uavs[] = { standardDepthTexture->uav.get() };
+		context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+		context->Dispatch((sourceDesc.Width + 7) / 8, (sourceDesc.Height + 7) / 8, 1);
+
+		ID3D11ShaderResourceView* nullSRV = nullptr;
+		ID3D11UnorderedAccessView* nullUAV = nullptr;
+		context->CSSetShader(nullptr, nullptr, 0);
+		context->CSSetShaderResources(0, 1, &nullSRV);
+		context->CSSetUnorderedAccessViews(0, 1, &nullUAV, nullptr);
+	}
+
+	return standardDepthTexture->srv.get();
 }
 
 void EffectManager::CreateQuadGeometry()
@@ -808,10 +911,7 @@ void EffectManager::UpdateCommonVariablesForEffect(Effect& effect)
 	if (!effect.GetEffect())
 		return;
 
-	auto renderer = globals::game::renderer;
-
-	effect.SetShaderResourceVariable("TextureDepth",
-		renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN].depthSRV);
+	effect.SetShaderResourceVariable("TextureDepth", GetEffectDepthSRV());
 
 	static const char* const formatTargets[] = {
 		"RenderTargetRGBA32", "RenderTargetRGBA64", "RenderTargetRGBA64F",
@@ -989,8 +1089,10 @@ void EffectManager::ReloadShaders()
 	copyVertexShader = nullptr;
 	copyPixelShader = nullptr;
 	colorCorrectionComputeShader = nullptr;
+	standardDepthComputeShader = nullptr;
 	CreateCopyShaders();
 	CreateColorCorrectionShader();
+	CreateStandardDepthShader();
 }
 
 void EffectManager::RenderEffectsList()

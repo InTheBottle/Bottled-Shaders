@@ -1,5 +1,7 @@
 #pragma once
 
+#include "RE/B/BSVolumetricLightingRenderData.h"
+
 /** @brief Adds configurable volumetric lighting with god rays and atmospheric scattering effects. */
 struct VolumetricLighting : Feature
 {
@@ -17,12 +19,29 @@ public:
 		bool ExteriorEnabled = true;
 		int32_t ExteriorQuality = 2;
 		TextureSize ExteriorCustomSize;
+		float ExteriorStrength = 1.0f;
+		float ExteriorSunFocus = 1.0f;
+		float ExteriorShaftDefinition = 0.0f;
 		bool InteriorEnabled = true;
 		int32_t InteriorQuality = 2;
 		TextureSize InteriorCustomSize;
+		float InteriorStrength = 1.0f;
+		float InteriorSunFocus = 1.0f;
+		float InteriorShaftDefinition = 0.0f;
+		int32_t Effects11Priority = 0;
 	};
 
 	Settings settings;
+
+	struct GodRayBufferData
+	{
+		float GodRayGain;
+		float GodRayExponent;
+		float pad0[2];
+	};
+	static_assert(sizeof(GodRayBufferData) == 16);
+
+	GodRayBufferData GetCommonBufferData() const { return godRayBufferData; }
 
 	virtual inline std::string GetName() override { return "Volumetric Lighting"; }
 	virtual std::string GetDisplayName() override { return T("feature.volumetric_lighting.name", "Volumetric Lighting"); }
@@ -56,6 +75,22 @@ public:
 	virtual void EarlyPrepass() override;
 
 	virtual bool IsCore() const override { return true; };
+
+	/**
+	 * @brief Returns the engine's volumetric lighting render data for the current weather and time of day.
+	 *
+	 * The engine rewrites this from the active weather's BGSVolumetricLighting records on every
+	 * Sky::UpdateColors, so writes to it are frame-local and never mutate form data.
+	 */
+	static RE::BSVolumetricLightingRenderData& GetRenderData();
+	/** @brief Splits the god ray strength between the interpolated render data and the sun-focused shader lobe. */
+	void ApplyGodRaySettings();
+	/**
+	 * @brief Returns whether Effects 11 should apply its own GAMEVOLUMETRICRAYS intensity this tick.
+	 * @note Calling this also records that Effects 11 was active, which suppresses the strength slider
+	 *       under GodRayPriority::Effects11. Always true while this feature is unloaded.
+	 */
+	bool ClaimEffects11Intensity();
 
 	/**
 	 * @brief Creates a BSImagespaceShader wrapping a compute shader for volumetric lighting passes.
@@ -92,15 +127,25 @@ public:
 	/** @brief Binds the screen dimensions constant buffer to compute shader slot 1. */
 	void SetDimensionsCB() const;
 	/**
-	 * @brief Calculates the thread group count for the horizontal blur dispatch.
+	 * @brief Calculates the thread group counts for the horizontal blur dispatch.
+	 *
+	 * Both axes are sized from the dynamic resolution render area so the blur never
+	 * touches the stale region outside it.
+	 *
 	 * @param threadGroupCountX Output parameter set to the required X thread group count.
+	 * @param threadGroupCountY Output parameter set to the number of rows to blur.
 	 */
-	void SetGroupCountsHCS(uint32_t& threadGroupCountX) const;
+	void SetGroupCountsHCS(uint32_t& threadGroupCountX, uint32_t& threadGroupCountY) const;
 	/**
-	 * @brief Calculates the thread group count for the vertical blur dispatch.
+	 * @brief Calculates the thread group counts for the vertical blur dispatch.
+	 *
+	 * Both axes are sized from the dynamic resolution render area so the blur never
+	 * touches the stale region outside it.
+	 *
+	 * @param threadGroupCountX Output parameter set to the number of columns to blur.
 	 * @param threadGroupCountY Output parameter set to the required Y thread group count.
 	 */
-	void SetGroupCountsVCS(uint32_t& threadGroupCountY) const;
+	void SetGroupCountsVCS(uint32_t& threadGroupCountX, uint32_t& threadGroupCountY) const;
 
 private:
 	struct VolumetricLightingDescriptor
@@ -110,6 +155,8 @@ private:
 	static VolumetricLightingDescriptor& GetVLDescriptor();
 	static void SetVLQuality(VolumetricLightingDescriptor& descriptor, std::uint32_t quality);
 	void DrawVolumetricLightingSettings(int32_t& quality, TextureSize& customSize, bool isInterior, bool inLocationType);
+	void DrawGodRaySettings(float& strength, float& sunFocus, float& shaftDefinition, bool isInterior);
+	void DrawEffects11PrioritySetting();
 	TextureSize& FetchCurrentSizeInUnits(bool interior);
 	void SetupVL();
 
@@ -122,7 +169,27 @@ private:
 		Count
 	};
 
+	/** @brief Which source wins when both this feature and an Effects 11 preset set god ray intensity. */
+	enum class GodRayPriority : uint8_t
+	{
+		Effects11,
+		CommunityShaders,
+		Combined,
+		Count
+	};
+
 	const char* QualityNames[static_cast<uint8_t>(Quality::Count)] = { "Low", "Medium", "High", "Custom" };
+
+	static constexpr float MaxGodRayStrength = 3.0f;
+	// Henyey-Greenstein blows up as g approaches 1, so the bias target and the final value are
+	// both kept short of it.
+	static constexpr float MaxForwardScattering = 0.9f;
+	static constexpr float ScatteringLimit = 0.95f;
+	static constexpr float MinGodRayLobeExponentLog2 = 0.0f;
+	static constexpr float MaxGodRayLobeExponentLog2 = 7.0f;
+
+	bool effects11DroveIntensity = false;
+	GodRayBufferData godRayBufferData{ 0.0f, 1.0f, { 0.0f, 0.0f } };
 
 	TextureSize exteriorSizeInUnits;
 	TextureSize interiorSizeInUnits;
@@ -136,6 +203,13 @@ private:
 	bool inInterior = false;
 	bool inInteriorWithSun = false;
 
+	/**
+	 * @brief Bounds of the dynamic resolution render area, in pixels.
+	 *
+	 * The blur targets are allocated at the full screen size but only the top-left
+	 * dynamic resolution region holds valid data, so these are the clamp bounds the
+	 * blur shaders sample against.
+	 */
 	struct VLData
 	{
 		int32_t screenX;
@@ -144,6 +218,11 @@ private:
 		int32_t screenYMin1;
 	};
 	VLData vlData = VLData();
+
+	// Full (non-dynamic) screen size, tracked separately so the cached blur shaders are
+	// only invalidated on an actual resolution change and not every dynamic resolution step.
+	int32_t fullScreenX = 0;
+	int32_t fullScreenY = 0;
 	ConstantBuffer* vlDataCB = nullptr;
 
 	static constexpr int32_t BlurThreadGroupSizeX = 256;

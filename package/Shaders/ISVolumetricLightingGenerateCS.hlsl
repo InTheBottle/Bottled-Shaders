@@ -1,3 +1,4 @@
+#include "Common/FrameBuffer.hlsli"
 #include "Common/Math.hlsli"
 #include "Common/Random.hlsli"
 
@@ -54,7 +55,7 @@ cbuffer PerTechnique : register(b0)
 
 	float3 normalizedCoordinates = float3(dispatchID.xy + 0.5, dispatchID.z - 1.0) * rcp(TextureDimensions.xyz);
 	float3 depthUv = normalizedCoordinates + StepCoefficients[IterationIndex];
-	float depth = InverseRepartitionTex.SampleLevel(InverseRepartitionSampler, depthUv.z, 0);
+	float depth = FrameBuffer::ToNativeDepth(InverseRepartitionTex.SampleLevel(InverseRepartitionSampler, depthUv.z, 0));
 	float4 positionCS = float4(2 * depthUv.x - 1, 1 - 2 * depthUv.y, depth, 1);
 
 	float4 positionWS = mul(CameraViewProjInverse, positionCS);
@@ -63,7 +64,7 @@ cbuffer PerTechnique : register(b0)
 	float4 positionCSShifted = mul(CameraViewProj, positionWS);
 	positionCSShifted *= rcp(positionCSShifted.w);
 
-	float shadowMapDepth = positionCSShifted.z;
+	float shadowMapDepth = FrameBuffer::ToStandardDepth(positionCSShifted.z);
 
 	bool noShadow = !SharedData::InInterior;
 	if (EndSplitDistances.z >= shadowMapDepth) {
@@ -87,9 +88,15 @@ cbuffer PerTechnique : register(b0)
 	float densityFactor = noise * (1 - 0.75 * smoothstep(0, 1, saturate(2 * positionWS.z / 300)));
 	float densityContribution = lerp(1, densityFactor, DensityContribution);
 
-	float LdotN = dot(normalize(-positionWS.xyz), DirLightDirection);
+	float3 viewDirection = normalize(positionWS.xyz);
+
+	float LdotN = dot(-viewDirection, DirLightDirection);
 	float phaseFactor = (1 - PhaseScattering * PhaseScattering) * rcp(4 * Math::PI * (1 - LdotN * PhaseScattering));
 	float phaseContribution = lerp(1, phaseFactor, PhaseContribution);
+
+	float lightAlignment = saturate(dot(viewDirection, SharedData::DirLightDirection.xyz));
+	float godRayLobe = pow(lightAlignment, SharedData::volumetricLightingSettings.GodRayExponent);
+	float godRayContribution = 1 + SharedData::volumetricLightingSettings.GodRayGain * godRayLobe;
 
 	float shadowContribution = noShadow;
 
@@ -97,7 +104,7 @@ cbuffer PerTechnique : register(b0)
 	shadowContribution *= sqrt(ShadowSampling::GetWorldShadow(positionWS.xyz, PosAdjust));
 #	endif
 
-	float vl = shadowContribution * densityContribution * phaseContribution;
+	float vl = shadowContribution * densityContribution * phaseContribution * godRayContribution;
 
 	DensityRW[dispatchID.xyz] = vl;
 }

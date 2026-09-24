@@ -8,6 +8,7 @@
 #include "Features/ExponentialHeightFog.h"
 #include "Features/ExtendedMaterials.h"
 #include "Features/ExtendedTranslucency.h"
+#include "Features/FootstepParticles.h"
 #include "Features/FoliageLighting.h"
 #include "Features/GrassCollision.h"
 #include "Features/GrassLighting.h"
@@ -23,6 +24,7 @@
 #include "Features/LinearLighting.h"
 #include "Features/PerformanceOverlay.h"
 #include "Features/PostProcessing.h"
+#include "Features/ProceduralSun.h"
 #include "Features/RemoteControl.h"
 #include "Features/RenderDoc.h"
 #include "Features/ScreenSpaceGI.h"
@@ -43,6 +45,7 @@
 #include "Features/VolumetricLighting.h"
 #include "Features/VolumetricShadows.h"
 #include "Features/WaterEffects.h"
+#include "Features/ReverseZ.h"
 #include "Features/WetnessEffects.h"
 #include "Menu.h"
 #include "SceneSettingsManager.h"
@@ -64,6 +67,7 @@ namespace globals
 	namespace features
 	{
 		CloudShadows cloudShadows{};
+		ProceduralSun proceduralSun{};
 		DynamicCubemaps dynamicCubemaps{};
 		VolumetricShadows volumetricShadows{};
 		ExtendedMaterials extendedMaterials{};
@@ -95,6 +99,7 @@ namespace globals
 		PerformanceOverlay performanceOverlay{};
 		WetnessEffects wetnessEffects{};
 		ExtendedTranslucency extendedTranslucency{};
+		ReverseZ reverseZ{};
 		Upscaling upscaling{};
 		HDRDisplay hdrDisplay{};
 		Effects11 effects11{};
@@ -107,6 +112,7 @@ namespace globals
 		PostProcessing postProcessing{};
 		Skin skin{};
 		SnowCover snowCover{};
+		FootstepParticles footstepParticles{};
 
 		namespace llf
 		{
@@ -270,6 +276,7 @@ namespace globals
 	{
 		using namespace game;
 		auto frameBuffer = (FrameBuffer*)mappedFrameBuffer->pData;
+		features::reverseZ.FixupMappedFrameBuffer(*frameBuffer);
 		frameBufferCached.data = *frameBuffer;
 		mappedFrameBuffer = nullptr;
 	}

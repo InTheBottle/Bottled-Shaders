@@ -280,9 +280,7 @@ void DX12SwapChain::RecreateWrappedResources(const DXGI_SWAP_CHAIN_DESC1& desc)
 	swapChainBufferWrapped = newSwapChainBuffer.release();
 	uiBufferWrapped = newUiBuffer.release();
 
-	const float clearColor[4]{};
-	d3d11Context->ClearRenderTargetView(swapChainBufferWrapped->rtv, clearColor);
-	d3d11Context->ClearRenderTargetView(uiBufferWrapped->rtv, clearColor);
+	ClearWrappedBuffers();
 }
 
 DXGISwapChainProxy* DX12SwapChain::GetSwapChainProxy()
@@ -568,10 +566,6 @@ HRESULT DX12SwapChain::PresentFidelityFX(UINT SyncInterval, UINT Flags, bool a_i
 	// Update the frame index
 	frameIndex = swapChain->GetCurrentBackBufferIndex();
 
-	float clearColor[4]{ 0, 0, 0, 0 };
-	d3d11Context->ClearRenderTargetView(swapChainBufferWrapped->rtv, clearColor);
-	d3d11Context->ClearRenderTargetView(uiBufferWrapped->rtv, clearColor);
-
 	// If VSync is disabled, use frame limiter to prevent tearing and optimise pacing
 	if (SyncInterval == 0)
 		upscaling.FrameLimiter();
@@ -836,9 +830,7 @@ HRESULT DX12SwapChain::PresentDlssg(UINT SyncInterval, UINT Flags, bool)
 	if (dlssgPresentSafety)
 		streamline.QueryDLSSGState("post-present");
 
-	float clearColor[4]{ 0, 0, 0, 0 };
-	d3d11Context->ClearRenderTargetView(swapChainBufferWrapped->rtv, clearColor);
-	d3d11Context->ClearRenderTargetView(uiBufferWrapped->rtv, clearColor);
+	// The wrapped buffers are cleared by the present hook after the screenshot capture has read them.
 
 	// DLSS-G paces its own presents; otherwise the frame limiter keeps the swap chain in step when
 	// the game itself presents unthrottled
@@ -1102,6 +1094,18 @@ void DX12SwapChain::SetColorSpace(bool enableHDR)
 		swapChain->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
 		logger::info("[DX12SwapChain] Set color space to SDR (sRGB)");
 	}
+}
+
+void DX12SwapChain::ClearWrappedBuffers()
+{
+	if (!d3d11Context)
+		return;
+
+	float clearColor[4]{ 0, 0, 0, 0 };
+	if (swapChainBufferWrapped && swapChainBufferWrapped->rtv)
+		d3d11Context->ClearRenderTargetView(swapChainBufferWrapped->rtv, clearColor);
+	if (uiBufferWrapped && uiBufferWrapped->rtv)
+		d3d11Context->ClearRenderTargetView(uiBufferWrapped->rtv, clearColor);
 }
 
 DX12SwapChain::BlurResources DX12SwapChain::GetBlurResources() const
