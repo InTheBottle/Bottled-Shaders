@@ -108,6 +108,8 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/cmake/Streamline)
 find_path(DETOURS_INCLUDE_DIRS "detours/detours.h")
 find_library(DETOURS_LIBRARY detours REQUIRED)
 include(FidelityFX-SDK)
+# Extracts the DLSS 5 model into the Streamline folder before the feature globs below run.
+include(DlssNRModel)
 
 target_compile_definitions(
     ${PROJECT_NAME}
