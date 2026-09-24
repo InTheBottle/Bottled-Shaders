@@ -135,7 +135,8 @@ public:
 	bool d3d12SwapChainActive = false;
 	bool activeFrameGenIsDLSSG = false;  ///< Resolved frame generation technology for this session (valid with d3d12SwapChainActive)
 	bool rtx40MFGUnlockBoot = false;     ///< Unlock setting as read at device creation (the setting needs a restart)
-	std::atomic<bool> windowFocused{ true };  ///< Cleared on WM_ACTIVATEAPP/WM_KILLFOCUS; frame generation pauses while unfocused
+	std::atomic<bool> windowFocused{ true };  ///< False while the window is minimised; frame generation pauses
+	std::atomic<bool> windowActive{ true };   ///< False while another application is in the foreground (WM_ACTIVATEAPP); the DLSS-G presenter rejects presents then
 
 	// Timing and scaling
 	double refreshRate = 0.0f;

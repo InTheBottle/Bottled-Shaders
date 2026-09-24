@@ -651,7 +651,25 @@ HRESULT DX12SwapChain::PresentDlssg(UINT SyncInterval, UINT Flags, bool)
 		dlssgResumeFailures = 0;
 		dlssgPresentFailures = 0;
 	}
-	const bool windowUnavailable = presentOccluded || !upscaling.windowFocused.load(std::memory_order_relaxed);
+	// Coming back to the foreground lifts a failure latch: the failures it counted were presents
+	// the DLSS-G presenter rejected while the game was alt-tabbed away. So does time: a latch
+	// is a pause, not a verdict on the session.
+	const bool windowActive = upscaling.windowActive.load(std::memory_order_relaxed);
+	if (windowActive && !dlssgLastWindowActive && (dlssgFailureLatched || dlssgResumeFailures)) {
+		logger::info("[DX12SwapChain] Application is in the foreground again; clearing the DLSS-G present-failure latch");
+		dlssgFailureLatched = false;
+		dlssgResumeFailures = 0;
+		dlssgPresentFailures = 0;
+	}
+	dlssgLastWindowActive = windowActive;
+	constexpr uint64_t kDlssgLatchRetryMs = 30000;
+	if (dlssgFailureLatched && GetTickCount64() - dlssgLatchedAtTick >= kDlssgLatchRetryMs) {
+		logger::info("[DX12SwapChain] Retrying DLSS-G after the {} s latch", kDlssgLatchRetryMs / 1000);
+		dlssgFailureLatched = false;
+		dlssgResumeFailures = 0;
+		dlssgPresentFailures = 0;
+	}
+	const bool windowUnavailable = presentOccluded || !upscaling.windowFocused.load(std::memory_order_relaxed) || !windowActive;
 	const bool dlssgConditions = frameGenerationThisFrame && streamline.featureDLSSG && swapChainIsStreamlineProxy &&
 	                             depthBufferShared12 && motionVectorBufferShared12 && !presentOccluded && !dlssgFailureLatched;
 	if (!dlssgConditions && (windowUnavailable || dlssgResumeFailures))
@@ -675,6 +693,8 @@ HRESULT DX12SwapChain::PresentDlssg(UINT SyncInterval, UINT Flags, bool)
 				reason += "frame generation disabled in settings; ";
 			if (!upscaling.windowFocused.load(std::memory_order_relaxed))
 				reason += "window minimised; ";
+			if (!windowActive)
+				reason += "another application is in the foreground; ";
 			if (upscaling.IsFrameGenerationBlockedByMenu())
 				reason += "full-screen menu (loading, main, map or skills); ";
 			if (presentOccluded)
@@ -765,7 +785,10 @@ HRESULT DX12SwapChain::PresentDlssg(UINT SyncInterval, UINT Flags, bool)
 		const uint32_t failedGenerated = streamline.currentGeneratedFrames();
 		streamline.DisableDLSSG(true);
 		dlssgStableFrames = 0;
-		if (dlssgPresenting) {
+		if (dlssgPresenting && !windowActive) {
+			// Expected: the presenter rejects presents while another application is in front.
+			dlssgDroppedByWindowEvent = true;
+		} else if (dlssgPresenting) {
 			++dlssgResumeFailures;
 			dlssgResumeSuccessFrames = 0;
 			if (settings.dynamicMFGEnabled && !dynamicMFGBlocked && dlssgResumeFailures >= 2) {
@@ -780,12 +803,14 @@ HRESULT DX12SwapChain::PresentDlssg(UINT SyncInterval, UINT Flags, bool)
 				logger::warn("[DX12SwapChain] DLSS-G rejects presents at {}x; trying {}x", failedGenerated + 1, dlssgGeneratedFramesCap + 1);
 			} else if (dlssgResumeFailures >= 6 && !dlssgFailureLatched && SUCCEEDED(removedReason)) {
 				dlssgFailureLatched = true;
-				logger::error("[DX12SwapChain] DLSS-G fails on every resume; frame generation is off until its settings change");
+				dlssgLatchedAtTick = GetTickCount64();
+				logger::error("[DX12SwapChain] DLSS-G fails on every resume; frame generation is off for 30 s or until the window or its settings change");
 			}
 		}
 		if (dlssgPresentFailures >= 60 && !dlssgFailureLatched && SUCCEEDED(removedReason)) {
 			dlssgFailureLatched = true;
-			logger::error("[DX12SwapChain] DLSS-G present keeps failing; frame generation is off for the rest of this session");
+			dlssgLatchedAtTick = GetTickCount64();
+			logger::error("[DX12SwapChain] DLSS-G present keeps failing; frame generation is off for 30 s or until the window or its settings change");
 		}
 	} else if (dlssgPresentFailures) {
 		logger::info("[DX12SwapChain] Present recovered after {} failures", dlssgPresentFailures);

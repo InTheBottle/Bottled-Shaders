@@ -126,6 +126,8 @@ public:
 	uint32_t dlssgResumeSuccessFrames = 0;
 	bool dynamicMFGBlocked = false;      ///< Dynamic MFG was rejected by the runtime at present; fixed multiplier for the session
 	bool dlssgFailureLatched = false;    ///< DLSS-G refused to present repeatedly; plain presents for the rest of the session
+	uint64_t dlssgLatchedAtTick = 0;     ///< GetTickCount64 when the latch was set; it lifts on its own after kDlssgLatchRetryMs
+	bool dlssgLastWindowActive = true;    ///< For clearing the latch when the application comes back to the foreground
 	uint32_t dlssgGeneratedFramesCap = 0;  ///< 0 = none; otherwise the largest generated-frame count the runtime has accepted presents at, after a higher one kept failing
 	uint32_t dlssgLatchSettingGenerated = UINT32_MAX;  ///< The generated-frames setting the latch and cap were taken under; a change clears both
 	uint32_t dlssgLatchSettingMode = UINT32_MAX;

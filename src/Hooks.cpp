@@ -642,12 +642,16 @@ namespace Hooks
 			if (a_msg == WM_CLOSE) {
 				globals::OnGameWindowClose();
 			}
-			// Frame generation only stops for a minimised window; losing activation (alt-tab to
-			// another window) no longer drops it, matching the reference implementation.
+			// Frame generation stops for a minimised window and while another application is in
+			// the foreground: the DLSS-G presenter rejects every present with DXGI_ERROR_INVALID_CALL
+			// while the game is alt-tabbed away, which used to burn through the retry budget and
+			// leave generation off after tabbing back.
 			if (a_msg == WM_SIZE) {
 				globals::features::upscaling.windowFocused.store(a_wParam != SIZE_MINIMIZED, std::memory_order_relaxed);
-			} else if (a_msg == WM_ACTIVATEAPP && a_wParam != 0) {
-				globals::features::upscaling.windowFocused.store(true, std::memory_order_relaxed);
+			} else if (a_msg == WM_ACTIVATEAPP) {
+				globals::features::upscaling.windowActive.store(a_wParam != 0, std::memory_order_relaxed);
+				if (a_wParam != 0)
+					globals::features::upscaling.windowFocused.store(true, std::memory_order_relaxed);
 			}
 			{
 				// NVIDIA Reflex latency overlay: answer the PC latency stats ping with a PCL marker.

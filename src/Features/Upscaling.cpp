@@ -1795,7 +1795,7 @@ bool Upscaling::ShouldUseFrameGenerationThisFrame() const
 {
 	// DLSS-G must be off while the window is minimised; FSR FG is left alone there since it
 	// never had that constraint.
-	if (activeFrameGenIsDLSSG && !windowFocused.load(std::memory_order_relaxed))
+	if (activeFrameGenIsDLSSG && (!windowFocused.load(std::memory_order_relaxed) || !windowActive.load(std::memory_order_relaxed)))
 		return false;
 	return IsFrameGenerationDx12PathActive() && settings.frameGenerationMode && !IsFrameGenerationBlockedByMenu();
 }
