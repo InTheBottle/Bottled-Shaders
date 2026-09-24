@@ -46,7 +46,8 @@ public:
 
 		uint UseProceduralGradientWeights;
 		float ProceduralGradientWeightCurve;
-		float pad1[2];
+		float LightSpriteCurve;
+		float pad1;
 
 		float ParticleIntensity;
 		float ParticleLightingInfluence;
@@ -150,6 +151,7 @@ public:
 
 	__declspec(noinline) void ModifyParticle(RE::BSRenderPass* Pass);
 	void ParticleShaderHacks();
+	bool IsRainEnabled();
 
 	/**
 	 * @brief Whether Effects11 wants to replace the vanilla tonemap this frame.
