@@ -1678,7 +1678,7 @@ void Upscaling::FrameLimiter()
 			// which is the jitter seen above 2x.
 			uint32_t presentedPerRendered = 1;
 			if (ShouldUseFrameGenerationThisFrame())
-				presentedPerRendered = activeFrameGenIsDLSSG ? std::clamp(settings.dlssgGeneratedFrames + 1u, 2u, 5u) : 2u;
+				presentedPerRendered = activeFrameGenIsDLSSG ? std::clamp((streamline.currentGeneratedFrames() ? streamline.currentGeneratedFrames() : settings.dlssgGeneratedFrames + 1u) + 1u, 2u, 6u) : 2u;  // the setting is generated frames minus one
 			const double frameRateScale = 1.0 / static_cast<double>(presentedPerRendered);
 			double presentedCap = refreshRate;
 			if (presentedPerRendered > 1 && settings.frameGenerationFPSLimitEnabled && std::isfinite(settings.frameGenerationFPSLimit))

@@ -306,6 +306,8 @@ public:
 	void OnPresentStart();
 	void OnPresentEnd();
 
+	/** @brief Generated frames in the options currently applied to DLSS-G (0 when off). */
+	uint32_t currentGeneratedFrames() const { return dlssgOptionsCache.valid && dlssgOptionsCache.mode != sl::DLSSGMode::eOff ? dlssgOptionsCache.generatedFrames : 0; }
 	/** @brief Multiplier actually presented by DLSS-G last query (1 when off). */
 	uint32_t GetDLSSGPresentedMultiplier() const { return dlssgActive && dlssgPresentedFrames ? dlssgPresentedFrames : 1; }
 

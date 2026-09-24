@@ -931,7 +931,9 @@ void Streamline::UpdateReflex()
 	// The frame generation FPS limit is a second, separate cap on the presented rate that only
 	// applies while generation is on; the lowest enabled cap wins.
 	if (upscaling.IsDlssFrameGenerationPathActive() && settings.frameGenerationMode != 0) {
-		const uint32_t presentedPerRendered = std::clamp(settings.dlssgGeneratedFrames + 1u, 2u, 5u);
+		// The setting stores generated frames minus one (0 = 2x), and the presented count is generated + 1.
+		const uint32_t generated = currentGeneratedFrames() ? currentGeneratedFrames() : settings.dlssgGeneratedFrames + 1u;
+		const uint32_t presentedPerRendered = std::clamp(generated + 1u, 2u, 6u);
 		double presentedCap = 0.0;
 		if (settings.frameLimitMode && upscaling.refreshRate > 1.0)
 			presentedCap = upscaling.refreshRate;

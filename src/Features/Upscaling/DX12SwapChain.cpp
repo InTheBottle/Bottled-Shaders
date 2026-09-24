@@ -639,6 +639,18 @@ HRESULT DX12SwapChain::PresentDlssg(UINT SyncInterval, UINT Flags, bool)
 	// on the first frame after an alt-tab is what produced a stuck swap chain, and a resume whose
 	// first present fails doubles the wait before the next attempt instead of retrying forever.
 	const auto& settings = upscaling.settings;
+	// A latch or a stepped-down multiplier belongs to the settings it was taken under. Changing
+	// the generated-frame count or toggling frame generation is the user asking for another go.
+	if (dlssgLatchSettingGenerated != settings.dlssgGeneratedFrames || dlssgLatchSettingMode != settings.frameGenerationMode) {
+		if (dlssgFailureLatched || dlssgGeneratedFramesCap)
+			logger::info("[DX12SwapChain] Frame generation settings changed; clearing the present-failure latch and the multiplier cap");
+		dlssgLatchSettingGenerated = settings.dlssgGeneratedFrames;
+		dlssgLatchSettingMode = settings.frameGenerationMode;
+		dlssgFailureLatched = false;
+		dlssgGeneratedFramesCap = 0;
+		dlssgResumeFailures = 0;
+		dlssgPresentFailures = 0;
+	}
 	const bool windowUnavailable = presentOccluded || !upscaling.windowFocused.load(std::memory_order_relaxed);
 	const bool dlssgConditions = frameGenerationThisFrame && streamline.featureDLSSG && swapChainIsStreamlineProxy &&
 	                             depthBufferShared12 && motionVectorBufferShared12 && !presentOccluded && !dlssgFailureLatched;
@@ -691,7 +703,10 @@ HRESULT DX12SwapChain::PresentDlssg(UINT SyncInterval, UINT Flags, bool)
 		D3D11_TEXTURE2D_DESC depthDesc{};
 		depthBufferShared12->resource11->GetDesc(&depthDesc);
 
-		if (streamline.UpdateDLSSG(true, settings.dlssgGeneratedFrames + 1, settings.dynamicMFGEnabled && !dynamicMFGBlocked, settings.dynamicMFGTargetFPS,
+		uint32_t generatedFrames = settings.dlssgGeneratedFrames + 1;
+		if (dlssgGeneratedFramesCap)
+			generatedFrames = std::min(generatedFrames, dlssgGeneratedFramesCap);
+		if (streamline.UpdateDLSSG(true, generatedFrames, settings.dynamicMFGEnabled && !dynamicMFGBlocked, settings.dynamicMFGTargetFPS,
 				renderWidth, renderHeight, swapChainDesc.Width, swapChainDesc.Height,
 				swapChainDesc.Format, mvecDesc.Format, depthDesc.Format, swapChainDesc.BufferCount) &&
 			streamline.dlssgActive) {
@@ -747,6 +762,7 @@ HRESULT DX12SwapChain::PresentDlssg(UINT SyncInterval, UINT Flags, bool)
 		}
 		// Recovery: DLSS-G off with its resources released, and a settle period before it may
 		// return. If plain presents keep failing with DLSS-G off the runtime is wedged; leave it off.
+		const uint32_t failedGenerated = streamline.currentGeneratedFrames();
 		streamline.DisableDLSSG(true);
 		dlssgStableFrames = 0;
 		if (dlssgPresenting) {
@@ -756,9 +772,15 @@ HRESULT DX12SwapChain::PresentDlssg(UINT SyncInterval, UINT Flags, bool)
 				dynamicMFGBlocked = true;
 				dlssgResumeFailures = 0;
 				logger::warn("[DX12SwapChain] The runtime rejects presents in dynamic MFG mode; using the fixed multiplier for the rest of this session");
+			} else if (dlssgResumeFailures >= 3 && SUCCEEDED(removedReason) && failedGenerated > 1) {
+				// The runtime accepts a lower multiplier more often than none at all: step down one
+				// generated frame and try again before giving up on frame generation.
+				dlssgGeneratedFramesCap = failedGenerated - 1;
+				dlssgResumeFailures = 0;
+				logger::warn("[DX12SwapChain] DLSS-G rejects presents at {}x; trying {}x", failedGenerated + 1, dlssgGeneratedFramesCap + 1);
 			} else if (dlssgResumeFailures >= 6 && !dlssgFailureLatched && SUCCEEDED(removedReason)) {
 				dlssgFailureLatched = true;
-				logger::error("[DX12SwapChain] DLSS-G fails on every resume; frame generation is off for the rest of this session");
+				logger::error("[DX12SwapChain] DLSS-G fails on every resume; frame generation is off until its settings change");
 			}
 		}
 		if (dlssgPresentFailures >= 60 && !dlssgFailureLatched && SUCCEEDED(removedReason)) {
