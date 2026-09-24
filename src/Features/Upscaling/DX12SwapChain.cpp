@@ -428,13 +428,13 @@ bool DX12SwapChain::EnsureUIComposite()
 		DX::ThrowIfFailed(d3d12Device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(uiCompositePipeline.put())));
 
 		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
-		srvHeapDesc.NumDescriptors = 2 * 2;  // two SRVs per frame slot
+		srvHeapDesc.NumDescriptors = kBackBufferCount * 2;  // two SRVs per back buffer slot
 		srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 		srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 		DX::ThrowIfFailed(d3d12Device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(uiCompositeSrvHeap.put())));
 
 		D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc{};
-		rtvHeapDesc.NumDescriptors = 2;
+		rtvHeapDesc.NumDescriptors = kBackBufferCount;  // one RTV per back buffer slot
 		rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 		DX::ThrowIfFailed(d3d12Device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(uiCompositeRtvHeap.put())));
 	} catch (const std::exception& e) {
