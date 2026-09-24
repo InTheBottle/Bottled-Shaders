@@ -790,7 +790,6 @@ void HDRDisplay::RedirectFramebuffer()
 	fb.RTV = hdrTexture->rtv.get();
 
 	framebufferRedirected = true;
-	scenePresentFrame = globals::state->frameCount + 1;
 }
 
 void HDRDisplay::RestoreFramebuffer()
@@ -821,7 +820,7 @@ HDRDisplay::D3D12UIBufferMode HDRDisplay::GetD3D12UIBufferMode()
 	if (!globals::features::upscaling.d3d12SwapChainActive)
 		return mode;
 
-	const bool hdrReady = loaded && hdrDataCB && outputTexture;
+	const bool hdrReady = loaded && settings.enableHDR && hdrDataCB && outputTexture;
 	const bool hdrShaderAvailable = hdrReady && GetHDROutputCS() != nullptr;
 
 	mode.useUIBuffer = hdrShaderAvailable || IsFGCompositingThisFrame();
@@ -1090,7 +1089,7 @@ HRESULT HDRDisplay::HandleSwapChainPresent(
 	const std::function<HRESULT(IDXGISwapChain*, UINT, UINT)>& presentChain)
 {
 	const bool frameGenActive = globals::features::upscaling.d3d12SwapChainActive;
-	const bool hdrReady = loaded && hdrDataCB && outputTexture && (settings.enableHDR || frameGenActive);
+	const bool hdrReady = loaded && hdrDataCB && outputTexture && settings.enableHDR;
 
 	D3D11_VIEWPORT savedViewport{};
 	UINT viewportCount = 1;
@@ -1176,6 +1175,7 @@ void HDRDisplay::ApplyHDR()
 				}
 			}
 
+			RestoreCleanScene();
 			state->EndPerfEvent();
 			return;
 		}
@@ -1198,6 +1198,7 @@ void HDRDisplay::ApplyHDR()
 		}
 	}
 
+	RestoreCleanScene();
 	state->EndPerfEvent();
 }
 
@@ -1279,14 +1280,18 @@ void HDRDisplay::SnapshotCleanScene()
 	cleanSceneCaptureFrame = globals::state->frameCount;
 }
 
+void HDRDisplay::RestoreCleanScene()
+{
+	if (!IsCleanSceneCaptureFresh() || !hdrTexture || !hdrTexture->resource ||
+		!cleanSceneCapture || !cleanSceneCapture->resource)
+		return;
+
+	globals::d3d::context->CopyResource(hdrTexture->resource.get(), cleanSceneCapture->resource.get());
+}
+
 bool HDRDisplay::IsCleanSceneCaptureFresh() const
 {
 	return cleanSceneCapture && cleanSceneCapture->srv && cleanSceneCaptureFrame == globals::state->frameCount;
-}
-
-bool HDRDisplay::IsSceneFreshForPresent() const
-{
-	return scenePresentFrame == globals::state->frameCount;
 }
 
 ID3D11Texture2D* HDRDisplay::ComposeCleanCapture(ID3D11ShaderResourceView* sceneSRV, bool sdrPreview)

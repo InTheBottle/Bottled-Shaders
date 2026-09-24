@@ -116,8 +116,6 @@ public:
 	/** @brief Returns true when the snapshot was refreshed this frame; stale means hdrTexture wasn't blurred. */
 	bool IsCleanSceneCaptureFresh() const;
 
-	bool IsSceneFreshForPresent() const;
-
 	/** @brief Runs the HDR output transform on a clean scene (no UI buffer) and writes into outputTexture.
 	 *  @param sceneSRV The clean HDR scene SRV.
 	 *  @param sdrPreview If true, applies SDR preview transform instead of HDR output.
@@ -191,7 +189,6 @@ public:
 	Texture2D* uiTexture = nullptr;          // Separate UI render target for proper compositing
 	Texture2D* cleanSceneCapture = nullptr;  // Pre-blur copy of hdrTexture for clean captures
 	uint cleanSceneCaptureFrame = UINT32_MAX;  // frameCount when cleanSceneCapture was last refreshed
-	uint scenePresentFrame = UINT32_MAX;
 
 	ID3D11ComputeShader* hdrOutputCS = nullptr;
 	/** @brief Returns the HDR output compute shader, compiling it on first use. */
@@ -239,6 +236,9 @@ public:
 	std::vector<std::pair<RE::RENDER_TARGETS::RENDER_TARGET, SavedRenderTarget>> savedLDRTargets;
 
 private:
+	/** @brief Restores hdrTexture after the blurred scene has been composed for presentation. */
+	void RestoreCleanScene();
+
 	bool showHDRWarningPopup = false;
 	bool pendingHDREnable = false;
 	bool presentSuppressed = false;
