@@ -839,13 +839,11 @@ PS_OUTPUT main(PS_INPUT input)
 	if (SharedData::exponentialHeightFogSettings.enabled) {
 		float4 exponentialHeightFog = ExponentialHeightFog::GetExponentialHeightFog(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, fogColor, float4(input.Position.xy * FrameBuffer::DynamicResolutionParams2.xy, input.Position.z, 1));
 		expFogFactor = exponentialHeightFog.w;
-#			if defined(ADDBLEND) || defined(MULTBLEND) || defined(MULTBLEND_DECAL)
 		fogColor = exponentialHeightFog.xyz;
 		fogFactor = exponentialHeightFog.w;
-#			else
-		fogColor = exponentialHeightFog.xyz;
-		fogFactor = exponentialHeightFog.w;
-		alpha *= 1 - exponentialHeightFog.w;
+#			if !defined(ADDBLEND) && !defined(MULTBLEND) && !defined(MULTBLEND_DECAL)
+		if (SharedData::exponentialHeightFogSettings.useVanillaFogSettings == 0)
+			alpha *= 1 - exponentialHeightFog.w;
 #			endif
 		if (ExponentialHeightFog::ShouldDisableVanillaFog()) {
 			vanillaFogColor = lightColor;
@@ -877,7 +875,10 @@ PS_OUTPUT main(PS_INPUT input)
 #		else
 #			if defined(EXP_HEIGHT_FOG)
 	float3 blendedColor = lerp(lightColor, vanillaFogColor, vanillaFogFactor.xxx);
-	blendedColor = lerp(blendedColor, fogColor, expFogFactor.xxx);
+	if (SharedData::exponentialHeightFogSettings.enabled) {
+		blendedColor = ExponentialHeightFog::GetVanillaFogFade(input.FogAlpha) * lerp(blendedColor, fogColor, expFogFactor.xxx);
+		fogMul.xyz = 1.0.xxx;
+	}
 #			else
 	float3 blendedColor = lerp(lightColor, fogColor, fogFactor.xxx);
 #			endif
