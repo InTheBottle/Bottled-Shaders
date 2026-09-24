@@ -322,6 +322,11 @@ PS_OUTPUT main(PS_INPUT input)
 	psout.Color.w = input.Color.w * baseColor.w;
 	psout.Color.xyz = Color::Sky(input.Color.xyz) * baseColor.xyz + skyScale;
 
+#			if defined(PROCEDURAL_SUN) && defined(TEX) && defined(DEFERRED) && !defined(DITHER) && !defined(CLOUDS) && !defined(MOONMASK)
+	[branch] if (proceduralSunActive)
+		psout.Color = ProceduralSun::ToAdditiveBlend(psout.Color, SharedData::proceduralSunSettings.radianceLimit);
+#			endif
+
 #			if defined(CLOUDS) && defined(EFFECTS11)
 	if (SharedData::enbSettings.Enable) {
 		float3 cloudColor = psout.Color.xyz;
@@ -372,15 +377,22 @@ PS_OUTPUT main(PS_INPUT input)
 			SharedData::proceduralSunSettings.haloIntensity);
 
 		[branch] if (cloudSunCosTheta > influenceCos) {
-			float sunMask = ProceduralSun::EvaluateCloudExtinctionMask(
+			float sunMask;
+			float sunProfile;
+			ProceduralSun::EvaluateCloudExtinction(
 				cloudSunCosTheta,
 				SharedData::proceduralSunSettings.sunDiskCos,
 				SharedData::proceduralSunSettings.edgeSoftness,
+				SharedData::proceduralSunSettings.diskIntensity,
 				SharedData::proceduralSunSettings.haloEnabled,
 				SharedData::proceduralSunSettings.sunHaloCos,
 				SharedData::proceduralSunSettings.haloIntensity,
-				SharedData::proceduralSunSettings.haloFalloff);
-			psout.Color = ProceduralSun::ApplyCloudExtinction(psout.Color, 1.0 + cloudExtinction * sunMask);
+				SharedData::proceduralSunSettings.haloFalloff,
+				sunMask,
+				sunProfile);
+			float sunLuminance = sunProfile * ProceduralSun::GetSunLuminance(SharedData::SunColor);
+			float sunShare = sunLuminance / max(sunLuminance + Color::RGBToLuminance(max(psout.Color.xyz, 0.0)), 1e-5);
+			psout.Color = ProceduralSun::ApplyCloudExtinction(psout.Color, 1.0 + cloudExtinction * sunMask, sunShare);
 		}
 	}
 #			endif

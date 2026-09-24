@@ -142,8 +142,28 @@ ProceduralSun::PerFrameData ProceduralSun::GetCommonBufferData() const
 		.haloIntensity = settings.haloIntensity,
 		.haloFalloff = settings.haloFalloff,
 		.cloudExtinction = settings.cloudExtinction,
-		.sunVisibility = GetSunVisibility()
+		.sunVisibility = GetSunVisibility(),
+		.radianceLimit = GetMainTargetRadianceLimit()
 	};
+}
+
+float ProceduralSun::GetMainTargetRadianceLimit()
+{
+	const auto renderer = globals::game::renderer;
+	const auto rtv = renderer ? renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN].RTV : nullptr;
+	if (!rtv)
+		return 1.0f;
+
+	D3D11_RENDER_TARGET_VIEW_DESC desc{};
+	rtv->GetDesc(&desc);
+	switch (desc.Format) {
+	case DXGI_FORMAT_R16G16B16A16_FLOAT:
+	case DXGI_FORMAT_R32G32B32A32_FLOAT:
+	case DXGI_FORMAT_R11G11B10_FLOAT:
+		return 4096.0f;
+	default:
+		return 1.0f;
+	}
 }
 
 float ProceduralSun::GetSunVisibility()

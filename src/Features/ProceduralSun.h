@@ -33,7 +33,8 @@ struct ProceduralSun : Feature
 
 		float cloudExtinction;
 		float sunVisibility;
-		float pad[2] = {};
+		float radianceLimit;
+		float pad = 0.0f;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrameData);
 	static_assert(sizeof(PerFrameData) == 48);
@@ -77,4 +78,5 @@ struct ProceduralSun : Feature
 	PerFrameData GetCommonBufferData() const;
 
 	static float GetSunVisibility();
+	static float GetMainTargetRadianceLimit();
 };

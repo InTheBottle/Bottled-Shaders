@@ -198,7 +198,8 @@ namespace SharedData
 
 		float cloudExtinction;
 		float sunVisibility;
-		float2 pad0;
+		float radianceLimit;
+		float pad0;
 	};
 
 	struct LODBlendingSettings
