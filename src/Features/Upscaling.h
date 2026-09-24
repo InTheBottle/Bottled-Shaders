@@ -68,7 +68,7 @@ public:
 		uint upscaleMethod = (uint)UpscaleMethod::kDLSS;
 		uint upscaleMethodNoDLSS = (uint)UpscaleMethod::kFSR;
 		uint qualityMode = 1;  // Default to Quality (1=Quality, 2=Balanced, 3=Performance, 4=Ultra Performance, 0=Native AA)
-		uint frameLimitMode = 1;
+		uint frameLimitMode = 0;  ///< Off by default; caps the rendered rate at refresh / multiplier while frame generation is on
 		bool frameGenerationFPSLimitEnabled = false;  ///< Cap the presented rate while frame generation is on, independent of the refresh-rate limiter
 		float frameGenerationFPSLimit = 120.0f;       ///< Presented frames per second; the rendered rate is this divided by the multiplier
 		uint frameGenerationMode = 1;
