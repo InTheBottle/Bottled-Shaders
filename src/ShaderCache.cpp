@@ -2472,6 +2472,9 @@ namespace SIE
 					return;
 				}
 
+				if (globals::features::reverseZ.IsActive())
+					defines.emplace_back("REVERSE_Z", "");
+
 				std::string defineSlug;
 				for (const auto& d : defines) {
 					if (!d.first || !d.first[0])

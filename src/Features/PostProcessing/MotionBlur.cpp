@@ -1,6 +1,7 @@
 #include "MotionBlur.h"
 #include "Features/Upscaling.h"
 #include "ShaderCache.h"
+#include "State.h"
 #include "Util.h"
 
 #pragma warning(disable: 4324)
@@ -545,6 +546,9 @@ void MotionBlur::ExecuteBlurPass(TextureInfo& inout_tex)
 
 	ID3D11SamplerState* samplers[] = { linearSampler.get(), pointSampler.get() };
 	context->CSSetSamplers(0, 2, samplers);
+
+	auto* sharedDataBuf = globals::state->sharedDataCB->CB();
+	context->CSSetConstantBuffers(5, 1, &sharedDataBuf);
 
 	// Setup blur pass
 	ID3D11ShaderResourceView* srvs[] = { inout_tex.srv, velocitySRV, neighborMaxTexture->srv.get(), depthSRV };
