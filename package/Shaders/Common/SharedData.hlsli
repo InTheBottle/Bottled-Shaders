@@ -108,15 +108,14 @@ namespace SharedData
 		uint EnableContactShadows;
 		uint ContactShadowMaxSteps;
 		float ContactShadowMaxDistance;
-		float ContactShadowStride;
-		float ContactShadowThickness;
-		float ContactShadowDepthFade;
+		float ContactShadowLength;
+		float ContactShadowDepthThickness;
 		float ContactShadowStrength;
 		uint EnableLocalShadows;
 		uint LocalShadowSamples;
 		float LocalShadowFilterRadius;
 		float LocalShadowTexelSize;
-		float pad1;
+		float2 pad1;
 	};
 
 	struct WetnessEffectsSettings
