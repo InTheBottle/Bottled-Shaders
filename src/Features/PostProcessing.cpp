@@ -601,7 +601,7 @@ void PostProcessing::DrawBeforeUpscaling()
 	auto renderer = globals::game::renderer;
 	auto state = globals::state;
 
-	bool inMainLoadingMenu = state->IsMainOrLoadingMenuOpen();
+	bool inMainLoadingMenu = state->IsMainLoadingOrFlatMapOpen();
 	auto gameTexMain = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
 	PostProcessFeature::TextureInfo lastTexColor = { gameTexMain.texture, gameTexMain.SRV };
 
@@ -640,7 +640,7 @@ void PostProcessing::PreProcess(RE::RENDER_TARGET a_input)
 	globals::d3d::context->OMSetRenderTargets(0, nullptr, nullptr);
 	globals::game::stateUpdateFlags->set(RE::BSGraphics::ShaderFlags::DIRTY_RENDERTARGET);
 
-	bool inMainLoadingMenu = globals::state->IsMainOrLoadingMenuOpen();
+	bool inMainLoadingMenu = globals::state->IsMainLoadingOrFlatMapOpen();
 
 	auto& gameTexMainRT = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
 	auto& gameTexMainCopyRT = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN_COPY];
@@ -685,7 +685,7 @@ void PostProcessing::ClearBorderMotionVectorsForFrameGen()
 {
 	// Effects11 owns the image, so no letterbox is drawn and zeroing its motion vectors
 	// would hand frame generation a band of static pixels over live scene content.
-	if (bypass || IsTonemapOwnedByEffects11())
+	if (bypass || IsTonemapOwnedByEffects11() || globals::state->IsFlatWorldMapOpen())
 		return;
 
 	auto borderIdx = static_cast<size_t>(FeaturePipelineIndex::Border);
@@ -705,7 +705,7 @@ bool PostProcessing::WantsTonemapOwnership() const
 	// main menu or a loading screen -- Color Grading included. Claiming the tonemap there
 	// would send ISHDR down its POSTPROCESS passthrough branch with no replacement
 	// tonemapper behind it, writing the raw linear scene straight to the screen.
-	if (globals::state->IsMainOrLoadingMenuOpen())
+	if (globals::state->IsMainLoadingOrFlatMapOpen())
 		return false;
 
 	const auto* colorGrading = static_cast<const ColorGrading*>(pipeline[static_cast<size_t>(FeaturePipelineIndex::ColorGrading)].get());

@@ -306,6 +306,8 @@ public:
 	bool isLoadingMenuOpen = false;
 	bool isMapMenuOpen = false;
 	bool isStatsMenuOpen = false;
+	bool flatWorldMapLoaded = false;
+	bool IsFlatWorldMapOpen() const { return isMapMenuOpen && flatWorldMapLoaded; }
 	/**
 	 * @brief Checks whether the main menu or loading menu is cached as open.
 	 * @returns true if either the main menu or loading menu is open, false otherwise.
@@ -322,7 +324,8 @@ public:
 		       (ui && (ui->IsMenuOpen(RE::MainMenu::MENU_NAME) || ui->IsMenuOpen(RE::LoadingMenu::MENU_NAME)));
 	}
 	/** @brief Full-screen menus drawing their own art, which must not be graded by post-process effects. */
-	bool IsFullScreenMenuOpen() const { return IsMainOrLoadingMenuOpen() || isStatsMenuOpen; }
+	bool IsFullScreenMenuOpen() const { return IsMainOrLoadingMenuOpen() || isStatsMenuOpen || IsFlatWorldMapOpen(); }
+	bool IsMainLoadingOrFlatMapOpen() const { return IsMainOrLoadingMenuOpen() || IsFlatWorldMapOpen(); }
 	/** @brief A menu is rendering its own scene instead of the gameplay view, so scene-adaptive state must not track it. */
 	bool IsMenuSceneOpen() const { return IsFullScreenMenuOpen() || isMapMenuOpen; }
 	/** @brief Gameplay is paused or suspended behind a menu. Cached menus are kept explicit in case a mod clears kPausesGame. */
