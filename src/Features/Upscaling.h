@@ -2,6 +2,8 @@
 
 #include "Feature.h"
 #include "Upscaling/DX12SwapChain.h"
+#include "Upscaling/DlssD3D12Bridge.h"
+#include "Upscaling/DlssNR.h"
 #include "Upscaling/FidelityFX.h"
 #include "Upscaling/RCAS/RCAS.h"
 #include "Upscaling/Streamline.h"
@@ -39,6 +41,8 @@ public:
 	};
 
 	float2 jitter = { 0, 0 };
+	float2 neuralPreviousJitter = { 0, 0 };            ///< Last frame's jitter, for the neural rendering model's motion input
+	uint32_t neuralPreviousJitterFrame = UINT32_MAX;
 
 	enum class UpscaleMethod
 	{
@@ -48,6 +52,15 @@ public:
 		kDLSS
 	};
 
+	/// Which frame generation runtime drives the D3D12 proxy swap chain. Resolved once at device
+	/// creation; switching needs a restart.
+	enum class FrameGenerationTech : uint32_t
+	{
+		kAuto = 0,   ///< DLSS Frame Generation on NVIDIA when its runtime is present, else FSR
+		kFSR = 1,    ///< AMD FidelityFX Frame Generation
+		kDLSSG = 2,  ///< NVIDIA DLSS Frame Generation (multi-frame capable)
+	};
+
 	static constexpr uint32_t kFsr4RuntimeSelectionSchemaVersion = 1;
 
 	struct Settings
@@ -55,18 +68,23 @@ public:
 		uint upscaleMethod = (uint)UpscaleMethod::kDLSS;
 		uint upscaleMethodNoDLSS = (uint)UpscaleMethod::kFSR;
 		uint qualityMode = 1;  // Default to Quality (1=Quality, 2=Balanced, 3=Performance, 4=Ultra Performance, 0=Native AA)
-		uint frameLimitMode = 1;
+		uint frameLimitMode = 0;  ///< Off by default; caps the rendered rate at refresh / multiplier while frame generation is on
+		bool frameGenerationFPSLimitEnabled = false;  ///< Cap the presented rate while frame generation is on, independent of the refresh-rate limiter
+		float frameGenerationFPSLimit = 120.0f;       ///< Presented frames per second; the rendered rate is this divided by the multiplier
 		uint frameGenerationMode = 1;
 		uint frameGenerationForceEnable = 0;
 		bool frameGenerationAllowInMenus = false;
-		uint streamlineLogLevel = 0;  // 0=Off, 1=Default, 2=Verbose
+		uint frameGenerationTech = (uint)FrameGenerationTech::kAuto;
+		uint dlssgGeneratedFrames = 0;    // Index: 0 = one generated frame (2x) .. 4 = five (6x); the runtime clamps
+		bool dynamicMFGEnabled = false;   // DLSS-G Dynamic Multi Frame Generation when the runtime supports it
+		uint dynamicMFGTargetFPS = 0;     // Dynamic MFG target output rate; 0 = display refresh
+		bool rtx40MFGUnlock = false;      // Patch DLSS-G in memory so RTX 40 (Ada) can generate more than one frame; needs a restart
+		uint streamlineLogLevel = 0;      // 0=Off, 1=Default, 2=Verbose
 		float sharpnessFSR = 0.0f;
 		bool sharpnessEnabledDLSS = false;
 		float sharpnessDLSS = 0.0f;
 		uint presetDLSS = 0;  // 0=Default, 1=J, 2=K, 3=L, 4=M
-		bool reflexLowLatencyMode = false;
-		bool reflexLowLatencyBoost = false;
-		bool reflexUseMarkersToOptimize = false;
+		uint reflexMode = 1;  // 0=Off, 1=On, 2=On + Boost
 		bool reflexUseFPSLimit = false;
 		float reflexFPSLimit = 60.0f;
 
@@ -78,6 +96,11 @@ public:
 		// Defaults to current so a fresh config needs no migration; LoadSettings resets it to
 		// 0 when absent from JSON so pre-existing configs run the migration once.
 		uint32_t fsr4RuntimeSelectionSchemaVersion = kFsr4RuntimeSelectionSchemaVersion;
+
+		// DLSS 5 Neural Rendering over the DLSS output (needs nvngx_dlssnr.dll in the Streamline folder)
+		bool dlssHintMasks = false;  ///< Tag the TAA-derived bias and transparency hints for DLSS; off matches the reference implementation
+		bool neuralRenderingEnabled = false;
+		DlssNR::Settings neuralRendering;
 	};
 
 	Settings settings;
@@ -110,6 +133,10 @@ public:
 	bool lowRefreshRate = false;
 	bool fidelityFXMissing = false;
 	bool d3d12SwapChainActive = false;
+	bool activeFrameGenIsDLSSG = false;  ///< Resolved frame generation technology for this session (valid with d3d12SwapChainActive)
+	bool rtx40MFGUnlockBoot = false;     ///< Unlock setting as read at device creation (the setting needs a restart)
+	std::atomic<bool> windowFocused{ true };  ///< False while the window is minimised; frame generation pauses
+	std::atomic<bool> windowActive{ true };   ///< False while another application is in the foreground (WM_ACTIVATEAPP); the DLSS-G presenter rejects presents then
 
 	// Timing and scaling
 	double refreshRate = 0.0f;
@@ -119,9 +146,21 @@ public:
 	// FG FPS Measurement for Overlay
 	bool IsFrameGenerationDx12PathActive() const;
 	bool IsFrameGenerationActive() const;
+
+	/** @brief True for menus that must run without frame generation (loading, main menu, and the map/skills menus unless allowed). */
+	bool IsFrameGenerationBlockedByMenu() const;
 	bool ShouldUseFrameGenerationThisFrame() const;
 	float GetFrameGenerationFrameTime() const;
+	/** @brief Presented frames per rendered frame: DLSS-G's reported multiplier, or 2 for FSR. 1 when off. */
+	uint32_t GetFrameGenerationMultiplier() const;
 	bool IsUpscalingActive() const;
+
+	/** @brief True when the D3D12 proxy is presenting through DLSS Frame Generation. */
+	bool IsDlssFrameGenerationPathActive() const { return d3d12SwapChainActive && activeFrameGenIsDLSSG; }
+	/** @brief True when the D3D12 proxy is the FidelityFX frame-generation swap chain. */
+	bool IsFsrFrameGenerationPathActive() const { return d3d12SwapChainActive && !activeFrameGenIsDLSSG; }
+	/** @brief True when DLSS super resolution evaluates on the D3D12 bridge (Streamline bound to D3D12). */
+	bool UsesD3D12DLSS() const { return streamline.UsesD3D12(); }
 
 	// Feature interface overrides
 	virtual void DrawSettings() override;
@@ -136,6 +175,9 @@ public:
 	 * Loads FidelityFX support and patches the import address table (IAT) to redirect D3D11 device and DXGI factory creation functions to custom hook implementations.
 	**/
 	virtual void Load() override;
+
+	/** @brief Re-applies the device creation IAT hook after RenderDoc rewrote the import table; see Hooks::ReapplyEarlyHooks. */
+	void ReapplyDeviceHook();
 	virtual void PostPostLoad() override;
 	virtual void SetupResources() override;
 
@@ -147,6 +189,7 @@ public:
 
 	winrt::com_ptr<ID3D11ComputeShader> encodeTexturesCS[4];          // One for each UpscaleMethod (kNONE, kTAA, kFSR, kDLSS)
 	winrt::com_ptr<ID3D11ComputeShader> encodeTexturesCSDepthOutput;  // FSR: converts R24G8_TYPELESS depth to R32_FLOAT
+	winrt::com_ptr<ID3D11ComputeShader> encodeTexturesCSDepthOutputDLSS;  // DLSS: same, feeds the D3D12 bridge
 	ID3D11ComputeShader* GetEncodeTexturesCS();
 
 	winrt::com_ptr<ID3D11PixelShader> depthRefractionUpscalePS;
@@ -176,6 +219,7 @@ public:
 	Texture2D* motionVectorCopyTexture = nullptr;
 	Texture2D* sharpenerTexture = nullptr;
 	Texture2D* runtimeFsrDepthTexture = nullptr;
+	Texture2D* dlssDepthTexture = nullptr;  ///< Typed R32_FLOAT depth for the D3D12 bridge (DLSS on D3D12, DLSS-NR)
 
 	virtual void ClearShaderCache() override;
 
@@ -184,6 +228,7 @@ public:
 	static inline FidelityFX fidelityFX;  ///< Only for frame generation
 	static inline DX12SwapChain dx12SwapChain;
 	static inline RCAS rcas;  ///< Standalone RCAS sharpening for DLSS
+	static inline DlssD3D12Bridge dlssBridge;  ///< D3D12 DLSS super resolution and DLSS-NR
 
 	winrt::com_ptr<ID3D11PixelShader> copyDepthToSharedBufferPS;
 
@@ -195,6 +240,7 @@ public:
 
 	bool previousUpscalingWasActive = false;
 	bool depthUpscaleUseWideKernel = false;
+	bool dlssD3D12FailureLogged = false;
 
 	/**
 	 * Set by MenuOpenCloseEventHandler when LoadingMenu closes (cell/worldspace transitions,
@@ -235,6 +281,8 @@ public:
 
 	// Module availability methods
 	bool HasFrameGenModule() const;
+	bool HasFsrFrameGenModule() const;
+	bool HasDlssFrameGenModule() const;
 
 	// Proxy interface methods
 	void SetProxyD3D11Device(ID3D11Device* device);
@@ -248,7 +296,13 @@ public:
 	// Get all D3D11 resources needed for background blur when D3D12 swap chain is active
 	BlurResources GetBlurResources() const;
 
+	/** @brief Pushes the neural rendering settings and enable flag to the DLSS-NR pass. */
+	void SyncNeuralRenderingSettings();
+
 private:
+	void DrawUpscalingTab();
+	void DrawNeuralRenderingTab();
+
 	struct Main_UpdateJitter
 	{
 		static void thunk(RE::BSGraphics::State* a_state);

@@ -409,6 +409,7 @@ public:
 	PermutationCB permutationDataPrevious{};
 
 	Util::FrameChecker frameChecker;
+	Util::FrameChecker weatherFrameChecker;  // WeatherManager::UpdateFeatures once per frame, not per draw
 	uint frameCount = 0;
 	// Thread-safe mirror of frameCount maintained by the render thread.
 	// Off-thread readers (MCP listener, future telemetry) must read this

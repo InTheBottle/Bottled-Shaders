@@ -61,20 +61,35 @@ public:
 	virtual HRESULT STDMETHODCALLTYPE GetLastPresentCount(_Out_ UINT* pLastPresentCount);
 };
 
+/**
+ * @brief D3D12 proxy swap chain that receives the D3D11 frame through a shared texture.
+ *
+ * Two flavours, decided at creation:
+ *  - FidelityFX frame generation: the swap chain is the FFX frame-generation swap chain and
+ *    UI composition is done by FidelityFX at present time.
+ *  - NVIDIA DLSS Frame Generation: a plain DXGI swap chain created through the Streamline
+ *    proxied factory (so DLSS-G can intercept Present). The HUD-less scene is copied to the
+ *    back buffer and the UI buffer is composited over it on the D3D12 command list before
+ *    the DLSS-G inputs are tagged.
+ */
 class DX12SwapChain
 {
 public:
 	winrt::com_ptr<ID3D12Device> d3d12Device;
+	winrt::com_ptr<ID3D12Device> proxyD3D12Device;  ///< Streamline-upgraded device when bound to D3D12, else d3d12Device
 	winrt::com_ptr<ID3D12CommandQueue> commandQueue;
-	winrt::com_ptr<ID3D12CommandAllocator> commandAllocators[2];
-	winrt::com_ptr<ID3D12GraphicsCommandList4> commandLists[2];
+	/// Back buffers on the proxy swap chain. Three, as the reference implementation uses: with
+	/// two, DLSS-G above 2x has one buffer to pace its generated frames against and stutters.
+	static constexpr UINT kBackBufferCount = 3;
+	winrt::com_ptr<ID3D12CommandAllocator> commandAllocators[kBackBufferCount];
+	winrt::com_ptr<ID3D12GraphicsCommandList4> commandLists[kBackBufferCount];
 
-	IDXGISwapChain4* swapChain;
+	IDXGISwapChain4* swapChain = nullptr;
 
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc;
 
-	WrappedResource* swapChainBufferWrapped;
-	WrappedResource* uiBufferWrapped;
+	WrappedResource* swapChainBufferWrapped = nullptr;
+	WrappedResource* uiBufferWrapped = nullptr;
 
 	// D3D12 interop resources for frame generation
 	WrappedResource* depthBufferShared12 = nullptr;
@@ -86,18 +101,41 @@ public:
 	winrt::com_ptr<ID3D11Fence> d3d11Fence;
 	winrt::com_ptr<ID3D12Fence> d3d12Fence;
 
-	winrt::com_ptr<ID3D12Resource> swapChainBuffers[2];
+	winrt::com_ptr<ID3D12Resource> swapChainBuffers[kBackBufferCount];
 
 	UINT frameIndex = 0;
 	UINT64 fenceValue = 0;
 
-	UINT64 frameFenceValues[2] = {0, 0};
+	UINT64 frameFenceValues[kBackBufferCount] = {};
 
 	LARGE_INTEGER qpf;
 
 	double refreshRate = 0;
 
 	DXGISwapChainProxy* swapChainProxy = nullptr;
+
+	/// True when the swap chain was created for DLSS Frame Generation (Streamline proxy factory)
+	/// rather than the FidelityFX frame-generation swap chain. Set by Upscaling before CreateSwapChain.
+	bool useDlssgSwapChain = false;
+	bool swapChainIsStreamlineProxy = false;
+	bool presentOccluded = false;  ///< Last Present returned DXGI_STATUS_OCCLUDED
+	uint32_t dlssgStableFrames = 0;      ///< Consecutive frames the DLSS-G conditions held; it re-enables after a settle period
+	uint32_t dlssgPresentFailures = 0;   ///< Consecutive failed presents while DLSS-G was involved
+	bool dlssgDroppedByWindowEvent = false;  ///< Last drop was occlusion/minimise/failure (long settle) rather than a menu (short settle)
+	uint32_t dlssgResumeFailures = 0;    ///< Consecutive resumes whose first DLSS-G present failed; doubles the settle period each time
+	uint32_t dlssgResumeSuccessFrames = 0;
+	bool dynamicMFGBlocked = false;      ///< Dynamic MFG was rejected by the runtime at present; fixed multiplier for the session
+	bool dlssgFailureLatched = false;    ///< DLSS-G refused to present repeatedly; plain presents for the rest of the session
+	uint64_t dlssgLatchedAtTick = 0;     ///< GetTickCount64 when the latch was set; it lifts on its own after kDlssgLatchRetryMs
+	bool dlssgLastWindowActive = true;    ///< For clearing the latch when the application comes back to the foreground
+	uint32_t dlssgGeneratedFramesCap = 0;  ///< 0 = none; otherwise the largest generated-frame count the runtime has accepted presents at, after a higher one kept failing
+	uint32_t dlssgLatchSettingGenerated = UINT32_MAX;  ///< The generated-frames setting the latch and cap were taken under; a change clears both
+	uint32_t dlssgLatchSettingMode = UINT32_MAX;
+	bool loggedPresentParameters = false;
+	HWND outputWindow = nullptr;
+	bool loggedVsyncSupport = false;
+	bool loggedDlssgWanted = false;      ///< Last logged DLSS-G wanted state, so transitions log with their reason
+	bool loggedDlssgWantedKnown = false;
 
 	// Returns the current frame time (in seconds) for accurate FPS calculation when frame generation is active
 	float GetFrameTime() const;
@@ -135,4 +173,17 @@ public:
 
 	// D3D12 interop resource management
 	void CreateSharedResources();
+
+private:
+	// DLSS-G present path: HUD-less scene copy + UI composite on the D3D12 command list.
+	bool EnsureUIComposite();
+	void CompositeUI(ID3D12GraphicsCommandList* a_commandList, ID3D12Resource* a_backBuffer, ID3D12Resource* a_hudless, ID3D12Resource* a_ui, uint32_t a_slot);
+	HRESULT PresentDlssg(UINT SyncInterval, UINT Flags, bool a_isHDR);
+	HRESULT PresentFidelityFX(UINT SyncInterval, UINT Flags, bool a_isHDR);
+
+	winrt::com_ptr<ID3D12RootSignature> uiCompositeRootSignature;
+	winrt::com_ptr<ID3D12PipelineState> uiCompositePipeline;
+	winrt::com_ptr<ID3D12DescriptorHeap> uiCompositeSrvHeap;
+	winrt::com_ptr<ID3D12DescriptorHeap> uiCompositeRtvHeap;
+	DXGI_FORMAT uiCompositeFormat = DXGI_FORMAT_UNKNOWN;
 };

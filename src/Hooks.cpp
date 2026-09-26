@@ -1,5 +1,7 @@
 #include "Hooks.h"
 
+#include "Utils/FrameCosts.h"
+
 #include "ShaderTools/BSShaderHooks.h"
 #include "ShaderTools/LegacyGraphicsCompatibility.h"
 #include "Utils/ExternalEmittance.h"
@@ -400,14 +402,22 @@ struct IDXGISwapChain_Present
 	{
 		globals::state->Reset();
 
-		HRESULT retval = globals::features::hdrDisplay.HandleSwapChainPresent(
-			This,
-			SyncInterval,
-			Flags,
-			[&](IDXGISwapChain* swapChain, UINT syncInterval, UINT presentFlags) {
-				return func(swapChain, syncInterval, presentFlags);
-			});
+		HRESULT retval = S_OK;
+		{
+			// Everything the game waits on at present time: HDR output, the proxy swap chain,
+			// frame generation setup, vsync / pacing and the frame limiter.
+			FrameCosts::Scope presentScope(FrameCosts::presentMs);
+			retval = globals::features::hdrDisplay.HandleSwapChainPresent(
+				This,
+				SyncInterval,
+				Flags,
+				[&](IDXGISwapChain* swapChain, UINT syncInterval, UINT presentFlags) {
+					return func(swapChain, syncInterval, presentFlags);
+				});
+		}
 
+		// The wrapped back buffer still holds the frame here, so the capture reads it before
+		// the clear for the next frame.
 		globals::features::screenshotFeature.ProcessCaptureRequest();
 
 		TracyD3D11Collect(globals::state->tracyCtx);
@@ -478,7 +488,16 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 void Hooks::BSGraphics_SetDirtyStates::thunk(bool isCompute)
 {
 	func(isCompute);
-	globals::state->Draw();
+	auto* state = globals::state;
+	if (state->frameTimingActive) {
+		// The overlay's per-shader timer is running: also account for our own per-draw work
+		// (feature callbacks, permutation upload, the timer itself) so it can be shown separately.
+		const int64_t start = FrameCosts::Now();
+		state->Draw();
+		FrameCosts::drawHookMs.Add(FrameCosts::ElapsedMs(start));
+	} else {
+		state->Draw();
+	}
 }
 
 struct ID3D11Device_CreateVertexShader
@@ -630,6 +649,24 @@ namespace Hooks
 			}
 			if (a_msg == WM_CLOSE) {
 				globals::OnGameWindowClose();
+			}
+			// Frame generation stops for a minimised window and while another application is in
+			// the foreground: the DLSS-G presenter rejects every present with DXGI_ERROR_INVALID_CALL
+			// while the game is alt-tabbed away, which used to burn through the retry budget and
+			// leave generation off after tabbing back.
+			if (a_msg == WM_SIZE) {
+				globals::features::upscaling.windowFocused.store(a_wParam != SIZE_MINIMIZED, std::memory_order_relaxed);
+			} else if (a_msg == WM_ACTIVATEAPP) {
+				globals::features::upscaling.windowActive.store(a_wParam != 0, std::memory_order_relaxed);
+				if (a_wParam != 0)
+					globals::features::upscaling.windowFocused.store(true, std::memory_order_relaxed);
+			}
+			{
+				// NVIDIA Reflex latency overlay: answer the PC latency stats ping with a PCL marker.
+				auto& streamline = globals::features::upscaling.streamline;
+				const auto pclStatsMessage = streamline.GetPCLStatsWindowMessage();
+				if (pclStatsMessage != 0 && a_msg == pclStatsMessage)
+					streamline.OnPCLStatsPing();
 			}
 			return func(a_hwnd, a_msg, a_wParam, a_lParam);
 		}
@@ -1133,5 +1170,24 @@ namespace Hooks
 
 		logger::info("Hooking CreateDXGIFactory");
 		*(uintptr_t*)&ptrCreateDXGIFactory = SKSE::PatchIAT(hk_CreateDXGIFactory, "dxgi.dll", "CreateDXGIFactory");
+	}
+
+	void ReapplyEarlyHooks()
+	{
+		// RenderDoc walks every module's import table when it loads and overwrites the d3d11/dxgi
+		// entries by name, so a slot we patched earlier ends up pointing at RenderDoc and our hook
+		// never runs. Patch again on top and keep RenderDoc as the next link in the chain.
+		const auto factoryPrev = SKSE::PatchIAT(hk_CreateDXGIFactory, "dxgi.dll", "CreateDXGIFactory");
+		if (factoryPrev && factoryPrev != reinterpret_cast<uintptr_t>(&hk_CreateDXGIFactory)) {
+			*(uintptr_t*)&ptrCreateDXGIFactory = factoryPrev;
+			logger::info("Re-applied CreateDXGIFactory hook (chaining into {:#x})", factoryPrev);
+		}
+		if (!globals::features::upscaling.loaded) {
+			const auto devicePrev = SKSE::PatchIAT(hk_D3D11CreateDeviceAndSwapChain, "d3d11.dll", "D3D11CreateDeviceAndSwapChain");
+			if (devicePrev && devicePrev != reinterpret_cast<uintptr_t>(&hk_D3D11CreateDeviceAndSwapChain)) {
+				*(uintptr_t*)&ptrD3D11CreateDeviceAndSwapChain = devicePrev;
+				logger::info("Re-applied D3D11CreateDeviceAndSwapChain hook (chaining into {:#x})", devicePrev);
+			}
+		}
 	}
 }

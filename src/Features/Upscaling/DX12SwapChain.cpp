@@ -1,17 +1,113 @@
+#include "State.h"
 #include "DX12SwapChain.h"
 
 #include <FidelityFX/api/include/dx12/ffx_api_dx12.hpp>
+#include <d3dcompiler.h>
 #include <dxgi1_6.h>
 
 #include "../HDRDisplay.h"
 #include "../Upscaling.h"
 #include "FidelityFX.h"
+#include "RTX40MFG/MfgUnlock.h"
 #include "Streamline.h"
 #include "Utils/D3D.h"
+#include "Utils/FrameCosts.h"
+
+namespace
+{
+	bool IsStreamlineProxy(Streamline& a_streamline, const char* a_name, IUnknown* a_interface)
+	{
+		if (!a_streamline.UsesD3D12() || !a_streamline.slGetNativeInterface || !a_interface)
+			return false;
+
+		void* nativeInterface = nullptr;
+		if (SL_FAILED(result, a_streamline.slGetNativeInterface(a_interface, &nativeInterface))) {
+			logger::warn("[DX12SwapChain] slGetNativeInterface({}) failed: {}", a_name, magic_enum::enum_name(result));
+			return false;
+		}
+
+		const bool isProxy = nativeInterface && nativeInterface != a_interface;
+		logger::info("[DX12SwapChain] Streamline proxy check {} proxy={} interface={} native={}", a_name, isProxy, static_cast<void*>(a_interface), nativeInterface);
+		if (nativeInterface)
+			static_cast<IUnknown*>(nativeInterface)->Release();
+		return isProxy;
+	}
+
+	winrt::com_ptr<ID3DBlob> CompileEmbeddedShader(const char* a_source, const char* a_entry, const char* a_target)
+	{
+		winrt::com_ptr<ID3DBlob> shader;
+		winrt::com_ptr<ID3DBlob> errors;
+		const auto result = D3DCompile(a_source, std::strlen(a_source), nullptr, nullptr, nullptr, a_entry, a_target, D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, shader.put(), errors.put());
+		if (FAILED(result) && errors)
+			logger::warn("[DX12SwapChain] UI composite shader compile failed: {}", static_cast<const char*>(errors->GetBufferPointer()));
+		DX::ThrowIfFailed(result);
+		return shader;
+	}
+
+	// The UI buffer is drawn onto a cleared target with the game's alpha blending, which is what the
+	// FidelityFX path composites with its premultiplied-alpha flag; the same blend is used here.
+	constexpr const char* kUICompositeShader = R"(
+Texture2D hudless : register(t0);
+Texture2D ui : register(t1);
+SamplerState pointSampler : register(s0);
+
+struct PSInput
+{
+	float4 position : SV_POSITION;
+	float2 uv : TEXCOORD0;
+};
+
+PSInput VSMain(uint vertexId : SV_VertexID)
+{
+	float2 uv = float2((vertexId << 1) & 2, vertexId & 2);
+	PSInput output;
+	output.position = float4(uv * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f), 0.0f, 1.0f);
+	output.uv = uv;
+	return output;
+}
+
+float4 PSMain(PSInput input) : SV_TARGET
+{
+	const float4 scene = hudless.Sample(pointSampler, input.uv);
+	const float4 overlay = ui.Sample(pointSampler, input.uv);
+	return float4(overlay.rgb + scene.rgb * (1.0f - overlay.a), 1.0f);
+}
+)";
+}
 
 void DX12SwapChain::CreateD3D12Device(IDXGIAdapter* a_adapter)
 {
+	if (d3d12Device)
+		return;
+
 	DX::ThrowIfFailed(D3D12CreateDevice(a_adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&d3d12Device)));
+
+	auto& streamline = globals::features::upscaling.streamline;
+	proxyD3D12Device = d3d12Device;
+
+	if (streamline.UsesD3D12()) {
+		// The unlock verifies the adapter (Ada only) from this device and must patch sl.dlss_g.dll and
+		// nvngx_dlssg.dll BEFORE Streamline binds the device: the wrapper computes and caches
+		// numFramesToGenerateMax while binding, so a patch applied afterwards changes nothing this session.
+		if (MfgUnlock::IsEnabled()) {
+			MfgUnlock::ObserveD3D12Device(d3d12Device.get());
+			MfgUnlock::Rescan(true);
+		}
+
+		if (streamline.slSetD3DDevice) {
+			if (SL_FAILED(result, streamline.slSetD3DDevice(d3d12Device.get())))
+				logger::warn("[DX12SwapChain] slSetD3DDevice(D3D12) failed: {}", magic_enum::enum_name(result));
+		}
+
+		if (streamline.slUpgradeInterface) {
+			ID3D12Device* deviceForQueue = d3d12Device.get();
+			if (SL_FAILED(result, streamline.slUpgradeInterface(reinterpret_cast<void**>(&deviceForQueue)))) {
+				logger::warn("[DX12SwapChain] Could not upgrade D3D12 device for Streamline: {}", magic_enum::enum_name(result));
+			} else if (deviceForQueue && deviceForQueue != d3d12Device.get()) {
+				proxyD3D12Device.attach(deviceForQueue);
+			}
+		}
+	}
 
 	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
 	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
@@ -19,9 +115,12 @@ void DX12SwapChain::CreateD3D12Device(IDXGIAdapter* a_adapter)
 	queueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
 	queueDesc.NodeMask = 0;
 
-	DX::ThrowIfFailed(d3d12Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&commandQueue)));
+	DX::ThrowIfFailed(proxyD3D12Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&commandQueue)));
+	logger::info("[DX12SwapChain] D3D12 command queue created via {} device", proxyD3D12Device.get() == d3d12Device.get() ? "native" : "Streamline proxy");
+	if (streamline.UsesD3D12())
+		IsStreamlineProxy(streamline, "commandQueue", commandQueue.get());
 
-	for (int i = 0; i < 2; i++) {
+	for (UINT i = 0; i < kBackBufferCount; i++) {
 		DX::ThrowIfFailed(d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocators[i])));
 		DX::ThrowIfFailed(d3d12Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocators[i].get(), nullptr, IID_PPV_ARGS(&commandLists[i])));
 		commandLists[i]->Close();
@@ -65,27 +164,71 @@ void DX12SwapChain::CreateSwapChain(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC 
 	swapChainDesc.Format = negotiatedFormat;
 	swapChainDesc.SampleDesc.Count = 1;
 	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-	swapChainDesc.BufferCount = 2;
+	swapChainDesc.BufferCount = kBackBufferCount;
 	swapChainDesc.SwapEffect = a_swapChainDesc.SwapEffect;
 	swapChainDesc.Flags = a_swapChainDesc.Flags;
 
-	ffx::CreateContextDescFrameGenerationSwapChainForHwndDX12 ffxSwapChainDesc{};
+	auto& upscaling = globals::features::upscaling;
+	auto& streamline = upscaling.streamline;
+	auto& fidelityFX = upscaling.fidelityFX;
 
-	ffxSwapChainDesc.desc = &swapChainDesc;
-	ffxSwapChainDesc.dxgiFactory = dxgiFactory;
-	ffxSwapChainDesc.fullscreenDesc = nullptr;
-	ffxSwapChainDesc.gameQueue = commandQueue.get();
-	ffxSwapChainDesc.hwnd = a_swapChainDesc.OutputWindow;
-	ffxSwapChainDesc.swapchain = &swapChain;
+	swapChainIsStreamlineProxy = false;
+	outputWindow = a_swapChainDesc.OutputWindow;
 
-	auto& fidelityFX = globals::features::upscaling.fidelityFX;
+	if (useDlssgSwapChain) {
+		// DLSS-G intercepts Present on a swap chain created through the Streamline proxied factory.
+		IDXGIFactory4* factoryForSwapChain = dxgiFactory;
+		winrt::com_ptr<IDXGIFactory4> upgradedFactory;
+		if (streamline.UsesD3D12() && streamline.slUpgradeInterface) {
+			if (SL_FAILED(result, streamline.slUpgradeInterface(reinterpret_cast<void**>(&factoryForSwapChain)))) {
+				logger::warn("[DX12SwapChain] Could not upgrade DXGI factory for Streamline: {}", magic_enum::enum_name(result));
+				factoryForSwapChain = dxgiFactory;
+			}
+		}
+		if (factoryForSwapChain == dxgiFactory)
+			upgradedFactory.copy_from(dxgiFactory);
+		else
+			upgradedFactory.attach(factoryForSwapChain);
 
-	if (ffx::CreateContext(fidelityFX.swapChainContext, nullptr, ffxSwapChainDesc) != ffx::ReturnCode::Ok) {
-		logger::critical("[FidelityFX] Failed to create swap chain context!");
+		winrt::com_ptr<IDXGISwapChain1> swapChain1;
+		DX::ThrowIfFailed(upgradedFactory->CreateSwapChainForHwnd(commandQueue.get(), a_swapChainDesc.OutputWindow, &swapChainDesc, nullptr, nullptr, swapChain1.put()));
+		DX::ThrowIfFailed(swapChain1->QueryInterface(IID_PPV_ARGS(&swapChain)));
+
+		swapChainIsStreamlineProxy = IsStreamlineProxy(streamline, "swapChain", swapChain);
+		if (!swapChainIsStreamlineProxy && streamline.UsesD3D12() && streamline.slUpgradeInterface) {
+			IDXGISwapChain* upgradedSwapChain = swapChain;
+			if (SL_FAILED(result, streamline.slUpgradeInterface(reinterpret_cast<void**>(&upgradedSwapChain)))) {
+				logger::warn("[DX12SwapChain] Could not upgrade swap chain for Streamline: {}", magic_enum::enum_name(result));
+			} else if (upgradedSwapChain && upgradedSwapChain != swapChain) {
+				IDXGISwapChain4* upgradedSwapChain4 = nullptr;
+				DX::ThrowIfFailed(upgradedSwapChain->QueryInterface(IID_PPV_ARGS(&upgradedSwapChain4)));
+				upgradedSwapChain->Release();
+				swapChain->Release();
+				swapChain = upgradedSwapChain4;
+				swapChainIsStreamlineProxy = IsStreamlineProxy(streamline, "swapChain.afterUpgrade", swapChain);
+			}
+		}
+		if (!swapChainIsStreamlineProxy)
+			logger::warn("[DX12SwapChain] D3D12 swap chain is not a Streamline proxy; DLSS-G present interception will not run");
+		else
+			logger::info("[DX12SwapChain] DLSS-G swap chain created through the Streamline proxy");
+	} else {
+		ffx::CreateContextDescFrameGenerationSwapChainForHwndDX12 ffxSwapChainDesc{};
+
+		ffxSwapChainDesc.desc = &swapChainDesc;
+		ffxSwapChainDesc.dxgiFactory = dxgiFactory;
+		ffxSwapChainDesc.fullscreenDesc = nullptr;
+		ffxSwapChainDesc.gameQueue = commandQueue.get();
+		ffxSwapChainDesc.hwnd = a_swapChainDesc.OutputWindow;
+		ffxSwapChainDesc.swapchain = &swapChain;
+
+		if (ffx::CreateContext(fidelityFX.swapChainContext, nullptr, ffxSwapChainDesc) != ffx::ReturnCode::Ok) {
+			logger::critical("[FidelityFX] Failed to create swap chain context!");
+		}
 	}
 
-	DX::ThrowIfFailed(swapChain->GetBuffer(0, IID_PPV_ARGS(&swapChainBuffers[0])));
-	DX::ThrowIfFailed(swapChain->GetBuffer(1, IID_PPV_ARGS(&swapChainBuffers[1])));
+	for (UINT i = 0; i < kBackBufferCount; i++)
+		DX::ThrowIfFailed(swapChain->GetBuffer(i, IID_PPV_ARGS(&swapChainBuffers[i])));
 
 	frameIndex = swapChain->GetCurrentBackBufferIndex();
 
@@ -95,7 +238,8 @@ void DX12SwapChain::CreateSwapChain(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC 
 	// Only set HDR color space if not falling back to SDR format
 	SetColorSpace(enableHDR && !fallbackUsed);
 
-	fidelityFX.SetupFrameGeneration();
+	if (!useDlssgSwapChain)
+		fidelityFX.SetupFrameGeneration();
 }
 
 void DX12SwapChain::CreateInterop()
@@ -176,23 +320,30 @@ HRESULT DX12SwapChain::ResizeBuffers(UINT bufferCount, UINT width, UINT height, 
 	if (!swapChain)
 		return DXGI_ERROR_INVALID_CALL;
 
+	// The DLSS-G guide requires frame generation off before any window manipulation.
+	if (useDlssgSwapChain)
+		globals::features::upscaling.streamline.DisableDLSSG();
+
 	// DXGI defines zero as "preserve the current buffer count". FidelityFX's
 	// frame-generation swap-chain stores the supplied value verbatim and uses it
 	// as its replacement-buffer count, so forwarding zero leaves it with no valid
 	// source resource at the next Present.
-	const UINT effectiveBufferCount = bufferCount ? bufferCount : swapChainDesc.BufferCount;
-	if (!bufferCount)
-		logger::warn("[FidelityFX] Normalized ResizeBuffers count from 0 to {} to preserve replacement buffers", effectiveBufferCount);
-	if (effectiveBufferCount != 2) {
-		logger::error("[DX12SwapChain] Rejected unsupported resize buffer count {} (CS requires 2)", effectiveBufferCount);
-		return DXGI_ERROR_UNSUPPORTED;
+	// The proxy owns its buffer count: the game asks for its own two (or zero, meaning keep), and
+	// the real chain keeps kBackBufferCount whatever it asks.
+	const UINT effectiveBufferCount = kBackBufferCount;
+	if (bufferCount && bufferCount != kBackBufferCount) {
+		static bool loggedCount = false;
+		if (!loggedCount) {
+			loggedCount = true;
+			logger::info("[DX12SwapChain] Game asked for {} buffers on resize; the proxy keeps {}", bufferCount, kBackBufferCount);
+		}
 	}
 
-	// These references are to FidelityFX replacement buffers. They must not keep
-	// the old generation alive across the provider's resize, and must be refreshed
+	// These references are to the swap chain buffers. They must not keep
+	// the old generation alive across the resize, and must be refreshed
 	// before CS records another copy.
-	swapChainBuffers[0] = nullptr;
-	swapChainBuffers[1] = nullptr;
+	for (auto& buffer : swapChainBuffers)
+		buffer = nullptr;
 	const HRESULT result = swapChain->ResizeBuffers(effectiveBufferCount, width, height, format, flags);
 	if (FAILED(result))
 		return result;
@@ -209,18 +360,140 @@ HRESULT DX12SwapChain::ResizeBuffers(UINT bufferCount, UINT width, UINT height, 
 		RecreateWrappedResources(resizedDesc);
 	swapChainDesc = resizedDesc;
 
-	DX::ThrowIfFailed(swapChain->GetBuffer(0, IID_PPV_ARGS(swapChainBuffers[0].put())));
-	DX::ThrowIfFailed(swapChain->GetBuffer(1, IID_PPV_ARGS(swapChainBuffers[1].put())));
+	for (UINT i = 0; i < kBackBufferCount; i++)
+		DX::ThrowIfFailed(swapChain->GetBuffer(i, IID_PPV_ARGS(swapChainBuffers[i].put())));
 	frameIndex = swapChain->GetCurrentBackBufferIndex();
 	return S_OK;
 }
 
+bool DX12SwapChain::EnsureUIComposite()
+{
+	if (uiCompositePipeline && uiCompositeFormat == swapChainDesc.Format)
+		return true;
+
+	uiCompositeRootSignature = nullptr;
+	uiCompositePipeline = nullptr;
+	uiCompositeSrvHeap = nullptr;
+	uiCompositeRtvHeap = nullptr;
+	uiCompositeFormat = DXGI_FORMAT_UNKNOWN;
+
+	try {
+		D3D12_DESCRIPTOR_RANGE range{};
+		range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+		range.NumDescriptors = 2;
+		range.BaseShaderRegister = 0;
+		range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+		D3D12_ROOT_PARAMETER rootParameter{};
+		rootParameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+		rootParameter.DescriptorTable.NumDescriptorRanges = 1;
+		rootParameter.DescriptorTable.pDescriptorRanges = &range;
+		rootParameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+		D3D12_STATIC_SAMPLER_DESC sampler{};
+		sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+		sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+		sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+		sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+		sampler.ShaderRegister = 0;
+		sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+		D3D12_ROOT_SIGNATURE_DESC rootDesc{};
+		rootDesc.NumParameters = 1;
+		rootDesc.pParameters = &rootParameter;
+		rootDesc.NumStaticSamplers = 1;
+		rootDesc.pStaticSamplers = &sampler;
+
+		winrt::com_ptr<ID3DBlob> rootBlob;
+		winrt::com_ptr<ID3DBlob> rootError;
+		DX::ThrowIfFailed(D3D12SerializeRootSignature(&rootDesc, D3D_ROOT_SIGNATURE_VERSION_1, rootBlob.put(), rootError.put()));
+		DX::ThrowIfFailed(d3d12Device->CreateRootSignature(0, rootBlob->GetBufferPointer(), rootBlob->GetBufferSize(), IID_PPV_ARGS(uiCompositeRootSignature.put())));
+
+		auto vertexShader = CompileEmbeddedShader(kUICompositeShader, "VSMain", "vs_5_0");
+		auto pixelShader = CompileEmbeddedShader(kUICompositeShader, "PSMain", "ps_5_0");
+
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
+		psoDesc.pRootSignature = uiCompositeRootSignature.get();
+		psoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
+		psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
+		psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+		psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+		psoDesc.DepthStencilState.DepthEnable = FALSE;
+		psoDesc.DepthStencilState.StencilEnable = FALSE;
+		psoDesc.SampleMask = UINT_MAX;
+		psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+		psoDesc.NumRenderTargets = 1;
+		psoDesc.RTVFormats[0] = swapChainDesc.Format;
+		psoDesc.SampleDesc.Count = 1;
+		DX::ThrowIfFailed(d3d12Device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(uiCompositePipeline.put())));
+
+		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
+		srvHeapDesc.NumDescriptors = kBackBufferCount * 2;  // two SRVs per back buffer slot
+		srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+		srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+		DX::ThrowIfFailed(d3d12Device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(uiCompositeSrvHeap.put())));
+
+		D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc{};
+		rtvHeapDesc.NumDescriptors = kBackBufferCount;  // one RTV per back buffer slot
+		rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+		DX::ThrowIfFailed(d3d12Device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(uiCompositeRtvHeap.put())));
+	} catch (const std::exception& e) {
+		logger::error("[DX12SwapChain] UI composite resources could not be created: {}", e.what());
+		uiCompositeRootSignature = nullptr;
+		uiCompositePipeline = nullptr;
+		uiCompositeSrvHeap = nullptr;
+		uiCompositeRtvHeap = nullptr;
+		return false;
+	}
+
+	uiCompositeFormat = swapChainDesc.Format;
+	return true;
+}
+
+void DX12SwapChain::CompositeUI(ID3D12GraphicsCommandList* a_commandList, ID3D12Resource* a_backBuffer, ID3D12Resource* a_hudless, ID3D12Resource* a_ui, uint32_t a_slot)
+{
+	if (!EnsureUIComposite())
+		return;
+
+	const auto srvIncrement = d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	auto srvCpu = uiCompositeSrvHeap->GetCPUDescriptorHandleForHeapStart();
+	srvCpu.ptr += static_cast<SIZE_T>(a_slot) * 2 * srvIncrement;
+	auto srvGpu = uiCompositeSrvHeap->GetGPUDescriptorHandleForHeapStart();
+	srvGpu.ptr += static_cast<UINT64>(a_slot) * 2 * srvIncrement;
+
+	for (ID3D12Resource* resource : { a_hudless, a_ui }) {
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = resource->GetDesc().Format;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srvDesc.Texture2D.MipLevels = 1;
+		d3d12Device->CreateShaderResourceView(resource, &srvDesc, srvCpu);
+		srvCpu.ptr += srvIncrement;
+	}
+
+	const auto rtvIncrement = d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+	auto rtv = uiCompositeRtvHeap->GetCPUDescriptorHandleForHeapStart();
+	rtv.ptr += static_cast<SIZE_T>(a_slot) * rtvIncrement;
+	d3d12Device->CreateRenderTargetView(a_backBuffer, nullptr, rtv);
+
+	a_commandList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+	ID3D12DescriptorHeap* heaps[] = { uiCompositeSrvHeap.get() };
+	a_commandList->SetDescriptorHeaps(1, heaps);
+	a_commandList->SetGraphicsRootSignature(uiCompositeRootSignature.get());
+	a_commandList->SetPipelineState(uiCompositePipeline.get());
+	a_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	a_commandList->SetGraphicsRootDescriptorTable(0, srvGpu);
+	D3D12_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(swapChainDesc.Width), static_cast<float>(swapChainDesc.Height), 0.0f, 1.0f };
+	D3D12_RECT scissor{ 0, 0, static_cast<LONG>(swapChainDesc.Width), static_cast<LONG>(swapChainDesc.Height) };
+	a_commandList->RSSetViewports(1, &viewport);
+	a_commandList->RSSetScissorRects(1, &scissor);
+	a_commandList->DrawInstanced(3, 1, 0, 0);
+}
+
 HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 {
-	auto& upscaling = globals::features::upscaling;
-
 	// Scale UI brightness BEFORE fence sync so the D3D11 UIBrightnessCS dispatch
-	// is covered by the D3D11→D3D12 fence. Without this, FidelityFX may read
+	// is covered by the D3D11->D3D12 fence. Without this, the compositor may read
 	// uiBufferWrapped on D3D12 before the PQ encoding completes on D3D11.
 	// Only runs when HDR Display feature is loaded (UIBrightnessCS may not exist otherwise)
 	auto* hdr = globals::features::hdrDisplay.loaded ? &globals::features::hdrDisplay : nullptr;
@@ -239,6 +512,15 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		DX::ThrowIfFailed(d3d12Fence->SetEventOnCompletion(frameFenceValues[frameIndex], nullptr));
 	DX::ThrowIfFailed(commandAllocators[frameIndex]->Reset());
 	DX::ThrowIfFailed(commandLists[frameIndex]->Reset(commandAllocators[frameIndex].get(), nullptr));
+
+	if (useDlssgSwapChain)
+		return PresentDlssg(SyncInterval, Flags, isHDR);
+	return PresentFidelityFX(SyncInterval, Flags, isHDR);
+}
+
+HRESULT DX12SwapChain::PresentFidelityFX(UINT SyncInterval, UINT Flags, bool a_isHDR)
+{
+	auto& upscaling = globals::features::upscaling;
 
 	// Copy shared texture to swap chain buffer
 	{
@@ -261,15 +543,21 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		}
 	}
 
-	upscaling.fidelityFX.Present(upscaling.ShouldUseFrameGenerationThisFrame(), isHDR);
+	{
+		FrameCosts::AccumulatingScope setupScope(FrameCosts::frameGenSetupMs);
+		upscaling.fidelityFX.Present(upscaling.ShouldUseFrameGenerationThisFrame(), a_isHDR);
+	}
 
 	DX::ThrowIfFailed(commandLists[frameIndex]->Close());
 
 	ID3D12CommandList* commandListsToExecute[] = { commandLists[frameIndex].get() };
 	commandQueue->ExecuteCommandLists(1, commandListsToExecute);
 
+	auto& streamline = upscaling.streamline;
+	streamline.OnPresentStart();
 	// Present the frame
 	DX::ThrowIfFailed(swapChain->Present(SyncInterval, Flags));
+	streamline.OnPresentEnd();
 
 	// Wait for D3D12 to finish
 	fenceValue++;
@@ -285,6 +573,273 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 
 	// If VSync is disabled, use frame limiter to prevent tearing and optimise pacing
 	if (SyncInterval == 0)
+		upscaling.FrameLimiter();
+
+	return S_OK;
+}
+
+HRESULT DX12SwapChain::PresentDlssg(UINT SyncInterval, UINT Flags, bool)
+{
+	auto& upscaling = globals::features::upscaling;
+	auto& streamline = upscaling.streamline;
+	auto* commandList = commandLists[frameIndex].get();
+
+	auto hudless = swapChainBufferWrapped->resource.get();
+	auto ui = uiBufferWrapped->resource.get();
+	auto backBuffer = swapChainBuffers[frameIndex].get();
+
+	const bool frameGenerationThisFrame = upscaling.ShouldUseFrameGenerationThisFrame();
+	// While frame generation composites, the UI lives in the UI buffer and the wrapped
+	// back buffer is the HUD-less scene; otherwise the wrapped buffer already carries the UI.
+	const bool compositeUI = frameGenerationThisFrame;
+
+	// Scene (HUD-less) to the real back buffer
+	{
+		D3D12_RESOURCE_BARRIER barriers[] = {
+			CD3DX12_RESOURCE_BARRIER::Transition(hudless, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE),
+			CD3DX12_RESOURCE_BARRIER::Transition(backBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST)
+		};
+		commandList->ResourceBarrier(static_cast<UINT>(std::size(barriers)), barriers);
+	}
+	commandList->CopyResource(backBuffer, hudless);
+
+	if (compositeUI) {
+		D3D12_RESOURCE_BARRIER barriers[] = {
+			CD3DX12_RESOURCE_BARRIER::Transition(hudless, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
+			CD3DX12_RESOURCE_BARRIER::Transition(backBuffer, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_RENDER_TARGET),
+			CD3DX12_RESOURCE_BARRIER::Transition(ui, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+		};
+		commandList->ResourceBarrier(static_cast<UINT>(std::size(barriers)), barriers);
+
+		CompositeUI(commandList, backBuffer, hudless, ui, frameIndex);
+
+		D3D12_RESOURCE_BARRIER after[] = {
+			CD3DX12_RESOURCE_BARRIER::Transition(hudless, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON),
+			CD3DX12_RESOURCE_BARRIER::Transition(backBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT),
+			CD3DX12_RESOURCE_BARRIER::Transition(ui, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON)
+		};
+		commandList->ResourceBarrier(static_cast<UINT>(std::size(after)), after);
+	} else {
+		D3D12_RESOURCE_BARRIER after[] = {
+			CD3DX12_RESOURCE_BARRIER::Transition(hudless, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON),
+			CD3DX12_RESOURCE_BARRIER::Transition(backBuffer, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT)
+		};
+		commandList->ResourceBarrier(static_cast<UINT>(std::size(after)), after);
+	}
+
+	if (!loggedPresentParameters) {
+		loggedPresentParameters = true;
+		logger::info("[DX12SwapChain] Game presents with SyncInterval={} Flags=0x{:X}; swap chain flags=0x{:X}", SyncInterval, Flags, swapChainDesc.Flags);
+	}
+
+	// DLSS-G options and input tags for this frame. After a menu the conditions only have to hold
+	// for two frames before DLSS-G comes back (the reference implementation's figure). After a
+	// window event (minimise, occlusion, a failed present) the settle is longer, since re-enabling
+	// on the first frame after an alt-tab is what produced a stuck swap chain, and a resume whose
+	// first present fails doubles the wait before the next attempt instead of retrying forever.
+	const auto& settings = upscaling.settings;
+	// A latch or a stepped-down multiplier belongs to the settings it was taken under. Changing
+	// the generated-frame count or toggling frame generation is the user asking for another go.
+	if (dlssgLatchSettingGenerated != settings.dlssgGeneratedFrames || dlssgLatchSettingMode != settings.frameGenerationMode) {
+		if (dlssgFailureLatched || dlssgGeneratedFramesCap)
+			logger::info("[DX12SwapChain] Frame generation settings changed; clearing the present-failure latch and the multiplier cap");
+		dlssgLatchSettingGenerated = settings.dlssgGeneratedFrames;
+		dlssgLatchSettingMode = settings.frameGenerationMode;
+		dlssgFailureLatched = false;
+		dlssgGeneratedFramesCap = 0;
+		dlssgResumeFailures = 0;
+		dlssgPresentFailures = 0;
+	}
+	// Coming back to the foreground lifts a failure latch: the failures it counted were presents
+	// the DLSS-G presenter rejected while the game was alt-tabbed away. So does time: a latch
+	// is a pause, not a verdict on the session.
+	const bool windowActive = upscaling.windowActive.load(std::memory_order_relaxed);
+	if (windowActive && !dlssgLastWindowActive && (dlssgFailureLatched || dlssgResumeFailures)) {
+		logger::info("[DX12SwapChain] Application is in the foreground again; clearing the DLSS-G present-failure latch");
+		dlssgFailureLatched = false;
+		dlssgResumeFailures = 0;
+		dlssgPresentFailures = 0;
+	}
+	dlssgLastWindowActive = windowActive;
+	constexpr uint64_t kDlssgLatchRetryMs = 30000;
+	if (dlssgFailureLatched && GetTickCount64() - dlssgLatchedAtTick >= kDlssgLatchRetryMs) {
+		logger::info("[DX12SwapChain] Retrying DLSS-G after the {} s latch", kDlssgLatchRetryMs / 1000);
+		dlssgFailureLatched = false;
+		dlssgResumeFailures = 0;
+		dlssgPresentFailures = 0;
+	}
+	const bool windowUnavailable = presentOccluded || !upscaling.windowFocused.load(std::memory_order_relaxed) || !windowActive;
+	const bool dlssgConditions = frameGenerationThisFrame && streamline.featureDLSSG && swapChainIsStreamlineProxy &&
+	                             depthBufferShared12 && motionVectorBufferShared12 && !presentOccluded && !dlssgFailureLatched;
+	if (!dlssgConditions && (windowUnavailable || dlssgResumeFailures))
+		dlssgDroppedByWindowEvent = true;  // cleared once DLSS-G is wanted again
+	const uint32_t kDlssgResumeStableFrames = (dlssgDroppedByWindowEvent ? 30u : 2u) << std::min(dlssgResumeFailures, 4u);
+	if (dlssgConditions)
+		dlssgStableFrames = std::min(dlssgStableFrames + 1, kDlssgResumeStableFrames + 1);
+	else
+		dlssgStableFrames = 0;
+	const bool wantDLSSG = dlssgConditions && (streamline.dlssgActive || dlssgStableFrames > kDlssgResumeStableFrames);
+	if (wantDLSSG)
+		dlssgDroppedByWindowEvent = false;
+	if (!loggedDlssgWantedKnown || loggedDlssgWanted != wantDLSSG) {
+		// Log every transition with the reason, so a log alone explains why frame generation
+		// dropped out (alt-tab, a menu, occlusion, a failed present) and when it came back.
+		loggedDlssgWantedKnown = true;
+		loggedDlssgWanted = wantDLSSG;
+		std::string reason;
+		if (!wantDLSSG) {
+			if (!settings.frameGenerationMode)
+				reason += "frame generation disabled in settings; ";
+			if (!upscaling.windowFocused.load(std::memory_order_relaxed))
+				reason += "window minimised; ";
+			if (!windowActive)
+				reason += "another application is in the foreground; ";
+			if (upscaling.IsFrameGenerationBlockedByMenu())
+				reason += "full-screen menu (loading, main, map or skills); ";
+			if (presentOccluded)
+				reason += "present occluded; ";
+			if (dlssgFailureLatched)
+				reason += "latched off after repeated present failures; ";
+			if (!streamline.featureDLSSG)
+				reason += "DLSS-G feature unavailable; ";
+			if (reason.empty())
+				reason = dlssgConditions ? std::format("settling ({} of {} stable frames)", dlssgStableFrames, kDlssgResumeStableFrames) : "conditions not met";
+		}
+		logger::info("[DX12SwapChain] DLSS-G {}{}", wantDLSSG ? "resuming" : "off: ", reason);
+	}
+	bool dlssgThisFrameTagged = false;
+	{
+	FrameCosts::AccumulatingScope setupScope(FrameCosts::frameGenSetupMs);
+	bool dlssgThisFrame = false;
+	if (wantDLSSG && streamline.PrepareDLSSGPresent()) {
+		const float2 screenSize{ static_cast<float>(globals::game::graphicsState->screenWidth), static_cast<float>(globals::game::graphicsState->screenHeight) };
+		const auto renderSize = screenSize * upscaling.resolutionScale;
+		const auto renderWidth = std::max(1u, static_cast<uint32_t>(renderSize.x));
+		const auto renderHeight = std::max(1u, static_cast<uint32_t>(renderSize.y));
+
+		D3D11_TEXTURE2D_DESC mvecDesc{};
+		motionVectorBufferShared12->resource11->GetDesc(&mvecDesc);
+		D3D11_TEXTURE2D_DESC depthDesc{};
+		depthBufferShared12->resource11->GetDesc(&depthDesc);
+
+		uint32_t generatedFrames = settings.dlssgGeneratedFrames + 1;
+		if (dlssgGeneratedFramesCap)
+			generatedFrames = std::min(generatedFrames, dlssgGeneratedFramesCap);
+		if (streamline.UpdateDLSSG(true, generatedFrames, settings.dynamicMFGEnabled && !dynamicMFGBlocked, settings.dynamicMFGTargetFPS,
+				renderWidth, renderHeight, swapChainDesc.Width, swapChainDesc.Height,
+				swapChainDesc.Format, mvecDesc.Format, depthDesc.Format, swapChainDesc.BufferCount) &&
+			streamline.dlssgActive) {
+			dlssgThisFrame = streamline.TagDLSSGResources(commandList, hudless, depthBufferShared12->resource.get(), motionVectorBufferShared12->resource.get(),
+				renderWidth, renderHeight, swapChainDesc.Width, swapChainDesc.Height);
+		}
+	}
+	if (!dlssgThisFrame) {
+		streamline.DisableDLSSG();
+		if (streamline.NeedsDLSSGPresentSafety())
+			streamline.ClearDLSSGResourceTags(commandList, swapChainDesc.Width, swapChainDesc.Height);
+	}
+	dlssgThisFrameTagged = dlssgThisFrame;
+	}
+
+	DX::ThrowIfFailed(commandList->Close());
+
+	ID3D12CommandList* commandListsToExecute[] = { commandList };
+	commandQueue->ExecuteCommandLists(1, commandListsToExecute);
+
+	// Measured behaviour of the DLSS-G proxy swap chain: while frame generation is on it wants
+	// SyncInterval 0 (it paces the presents itself) and no tearing flag; while it is off, a
+	// SyncInterval 0 present is rejected with DXGI_ERROR_INVALID_CALL on every frame and only
+	// the game's own interval goes through. So the interval follows DLSS-G's state exactly,
+	// with no override during the frames right after it switches off.
+	const bool dlssgPresentSafety = streamline.NeedsDLSSGPresentSafety();
+	const bool dlssgPresenting = streamline.dlssgActive && dlssgThisFrameTagged;
+	const UINT presentSyncInterval = dlssgPresenting ? 0u : SyncInterval;
+	const UINT presentFlags = dlssgPresenting ? (Flags & ~DXGI_PRESENT_ALLOW_TEARING) : Flags;
+	if (dlssgPresenting != loggedVsyncSupport) {
+		loggedVsyncSupport = dlssgPresenting;
+		logger::info("[DX12SwapChain] Presenting with SyncInterval {} flags 0x{:X} (DLSS-G {})", presentSyncInterval, presentFlags, dlssgPresenting ? "on" : "off");
+	}
+
+	streamline.OnPresentStart();
+	const HRESULT result = swapChain->Present(presentSyncInterval, presentFlags);
+	streamline.OnPresentEnd();
+	// An occluded window (minimised, alt-tabbed away) must not keep DLSS-G running: the
+	// guide warns of deadlocks around window manipulation while frame generation is on.
+	const bool occludedNow = result == DXGI_STATUS_OCCLUDED;
+	if (occludedNow != presentOccluded) {
+		presentOccluded = occludedNow;
+		logger::info("[DX12SwapChain] Present {} occluded", occludedNow ? "became" : "no longer");
+		if (occludedNow)
+			streamline.DisableDLSSG();
+	}
+	if (FAILED(result)) {
+		const HRESULT removedReason = d3d12Device ? d3d12Device->GetDeviceRemovedReason() : S_OK;
+		++dlssgPresentFailures;
+		if (dlssgPresentFailures <= 10 || (dlssgPresentFailures % 300) == 0) {
+			logger::error("[DX12SwapChain] Present failed result=0x{:08X} d3d12Removed=0x{:08X} sync={} flags=0x{:X} frameIndex={} dlssgActive={} failures={}",
+				static_cast<uint32_t>(result), static_cast<uint32_t>(removedReason), presentSyncInterval, presentFlags, frameIndex, streamline.dlssgActive, dlssgPresentFailures);
+		}
+		// Recovery: DLSS-G off with its resources released, and a settle period before it may
+		// return. If plain presents keep failing with DLSS-G off the runtime is wedged; leave it off.
+		const uint32_t failedGenerated = streamline.currentGeneratedFrames();
+		streamline.DisableDLSSG(true);
+		dlssgStableFrames = 0;
+		if (dlssgPresenting && !windowActive) {
+			// Expected: the presenter rejects presents while another application is in front.
+			dlssgDroppedByWindowEvent = true;
+		} else if (dlssgPresenting) {
+			++dlssgResumeFailures;
+			dlssgResumeSuccessFrames = 0;
+			if (settings.dynamicMFGEnabled && !dynamicMFGBlocked && dlssgResumeFailures >= 2) {
+				dynamicMFGBlocked = true;
+				dlssgResumeFailures = 0;
+				logger::warn("[DX12SwapChain] The runtime rejects presents in dynamic MFG mode; using the fixed multiplier for the rest of this session");
+			} else if (dlssgResumeFailures >= 3 && SUCCEEDED(removedReason) && failedGenerated > 1) {
+				// The runtime accepts a lower multiplier more often than none at all: step down one
+				// generated frame and try again before giving up on frame generation.
+				dlssgGeneratedFramesCap = failedGenerated - 1;
+				dlssgResumeFailures = 0;
+				logger::warn("[DX12SwapChain] DLSS-G rejects presents at {}x; trying {}x", failedGenerated + 1, dlssgGeneratedFramesCap + 1);
+			} else if (dlssgResumeFailures >= 6 && !dlssgFailureLatched && SUCCEEDED(removedReason)) {
+				dlssgFailureLatched = true;
+				dlssgLatchedAtTick = GetTickCount64();
+				logger::error("[DX12SwapChain] DLSS-G fails on every resume; frame generation is off for 30 s or until the window or its settings change");
+			}
+		}
+		if (dlssgPresentFailures >= 60 && !dlssgFailureLatched && SUCCEEDED(removedReason)) {
+			dlssgFailureLatched = true;
+			dlssgLatchedAtTick = GetTickCount64();
+			logger::error("[DX12SwapChain] DLSS-G present keeps failing; frame generation is off for 30 s or until the window or its settings change");
+		}
+	} else if (dlssgPresentFailures) {
+		logger::info("[DX12SwapChain] Present recovered after {} failures", dlssgPresentFailures);
+		dlssgPresentFailures = 0;
+	}
+
+	if (SUCCEEDED(result) && dlssgPresenting && ++dlssgResumeSuccessFrames >= 30)
+		dlssgResumeFailures = 0;
+
+	// Wait for D3D12 to finish. This runs even after a failed present so the D3D11 side never
+	// waits on a fence value that was never signalled and the frame index keeps tracking.
+	fenceValue++;
+	DX::ThrowIfFailed(commandQueue->Signal(d3d12Fence.get(), fenceValue));
+	frameFenceValues[frameIndex] = fenceValue;
+	DX::ThrowIfFailed(d3d11Context->Wait(d3d11Fence.get(), fenceValue));
+
+	// Update the frame index (DLSS-G requires GetCurrentBackBufferIndex on its proxy each frame)
+	frameIndex = swapChain->GetCurrentBackBufferIndex();
+
+	if (FAILED(result))
+		return result;
+
+	if (dlssgPresentSafety)
+		streamline.QueryDLSSGState("post-present");
+
+	// The wrapped buffers are cleared by the present hook after the screenshot capture has read them.
+
+	// DLSS-G paces its own presents; otherwise the frame limiter keeps the swap chain in step when
+	// the game itself presents unthrottled
+	if (!dlssgPresenting && presentSyncInterval == 0)
 		upscaling.FrameLimiter();
 
 	return S_OK;

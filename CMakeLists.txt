@@ -108,6 +108,8 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/cmake/Streamline)
 find_path(DETOURS_INCLUDE_DIRS "detours/detours.h")
 find_library(DETOURS_LIBRARY detours REQUIRED)
 include(FidelityFX-SDK)
+# Extracts the DLSS 5 model into the Streamline folder before the feature globs below run.
+include(DlssNRModel)
 
 target_compile_definitions(
     ${PROJECT_NAME}
@@ -165,7 +167,36 @@ target_link_libraries(
         Microsoft::Effects11
         windowsapp
         windowscodecs
+        d3dcompiler.lib
+        # RTX 40 MFG unlock: SHA-256 through CNG and the DLSS-G provider's file version
+        bcrypt.lib
+        version.lib
 )
+
+# DLSS 5 Neural Rendering forwarder. The model refuses any caller whose module path does not contain
+# "nvngx.dll", so its create/evaluate/release go through this tiny DLL named to pass that check.
+# Source is OptiScaler's (GPL-3), verbatim. The built DLL is copied next to the Streamline runtime so
+# the feature payload picks it up; a prebuilt copy is committed for builds that skip this target.
+add_library(dlssnr_forwarder SHARED "${CMAKE_SOURCE_DIR}/tools/dlssnr_forwarder/dlssnr_forwarder.cpp")
+set_target_properties(
+    dlssnr_forwarder
+    PROPERTIES
+        OUTPUT_NAME "nvngx.dll_dlssnr"
+        PREFIX ""
+        SUFFIX ".dll"
+        INTERPROCEDURAL_OPTIMIZATION OFF
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE OFF
+)
+target_link_libraries(dlssnr_forwarder PRIVATE d3d12.lib)
+add_custom_command(
+    TARGET dlssnr_forwarder
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:dlssnr_forwarder>"
+        "${CMAKE_SOURCE_DIR}/features/Upscaling/Shaders/Upscaling/Streamline/nvngx.dll_dlssnr.dll"
+    COMMENT "Copying DLSS-NR forwarder next to the Streamline runtime"
+)
+add_dependencies(${PROJECT_NAME} dlssnr_forwarder)
 
 # devbench bridge: opt-out via -DDEVBENCH_BRIDGE=OFF. When off, the port isn't required
 # and DevBenchBridge.cpp compiles to an empty Install().

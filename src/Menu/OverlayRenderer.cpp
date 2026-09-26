@@ -1,4 +1,11 @@
 #include "OverlayRenderer.h"
+
+#include "Utils/FrameCosts.h"
+
+namespace
+{
+	int64_t uiFrameStartTicks = 0;
+}
 #include "BackgroundBlur.h"
 #include "Plugin.h"
 #include "SetupRenderer.h"
@@ -243,6 +250,7 @@ void OverlayRenderer::InitializeImGuiFrame(Menu& menu)
 	Util::UpdateImGuiInput(desc.OutputWindow, displayW, displayH);
 
 	ImGui::NewFrame();
+	uiFrameStartTicks = FrameCosts::Now();
 
 	// Detect display size change (cross-session via ini handler, mid-session via member)
 	const float2 currentDisplaySize{ displayW, displayH };
@@ -400,6 +408,8 @@ void OverlayRenderer::FinalizeImGuiFrame()
 	BackgroundBlur::RenderBackgroundBlur();
 
 	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+	if (uiFrameStartTicks)
+		FrameCosts::uiDrawMs.Set(FrameCosts::ElapsedMs(uiFrameStartTicks));
 
 }
 

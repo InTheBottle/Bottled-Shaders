@@ -28,4 +28,7 @@ namespace Hooks
 
 	/** @brief Installs early IAT hooks for D3D11 device/swapchain creation and DXGI factory, before the game initializes Direct3D. */
 	void InstallEarlyHooks();
+
+	/** @brief Re-applies the early IAT hooks after another tool (RenderDoc) rewrote the import table by name and discarded ours; chains into whatever now sits in the slot. */
+	void ReapplyEarlyHooks();
 }
