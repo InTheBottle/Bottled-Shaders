@@ -136,8 +136,6 @@ uint32_t WeatherManager::ParseHexID(const std::string& hexStr)
 		return 0;
 	}
 
-	// Runtime form IDs are compared without their load-order index (see EffectManager::UpdateCommonData),
-	// so drop it here too; otherwise any ID written with a non-zero mod index never matches
 	return static_cast<uint32_t>(std::stoul(hexStr, nullptr, 16)) & 0x00FFFFFF;
 }
 
@@ -284,7 +282,6 @@ uint32_t WeatherManager::GetWeatherIndex(uint32_t weatherID) const
 		return 0;
 	}
 
-	// LoadWeatherList only keeps sections starting with "WEATHER", e.g. WEATHER002 -> 2
 	const std::string& sectionName = it->second;
 	constexpr size_t prefixLength = sizeof("WEATHER") - 1;
 	uint32_t index = 0;

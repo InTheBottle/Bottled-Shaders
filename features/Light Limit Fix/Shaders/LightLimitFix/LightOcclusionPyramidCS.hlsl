@@ -1,13 +1,6 @@
-// Builds the depth pyramid used by light occlusion: half-resolution linear view depth with
-// LIGHT_OCCLUSION_MIP_COUNT levels, each texel holding the FARTHEST depth of its footprint.
-// A ray counts as blocked only when it is behind everything in a texel, so coarse samples never
-// invent shadows at object edges; they only let long rays skip over gaps between point samples.
-// One 16x16 group reduces a 32x32 block of full-resolution pixels to all five levels.
-
 #include "Common/FrameBuffer.hlsli"
 #include "Common/SharedData.hlsli"
 
-// 24/32-bit depth: TerrainBlending ON -> R32_FLOAT, OFF -> R24_UNORM_X8_TYPELESS (float under reverse Z)
 #if defined(TERRAIN_BLENDING)
 Texture2D<float> SceneDepthTexture : register(t0);
 #else
@@ -22,7 +15,7 @@ RWTexture2D<float> PyramidMip4 : register(u4);
 
 cbuffer LightOcclusionPyramidCB : register(b1)
 {
-	uint2 RenderSize;  // Dynamic-resolution render size in full-resolution pixels
+	uint2 RenderSize;
 	uint2 pad0;
 };
 
@@ -37,7 +30,6 @@ uint SharedIndex(uint2 coord)
 
 void WritePyramid(uint level, uint2 coord, float depth)
 {
-	// level is a compile-time constant at every call site (unrolled loop), so this folds to one store
 	if (level == 1)
 		PyramidMip1[coord] = depth;
 	else if (level == 2)
@@ -84,7 +76,6 @@ void WritePyramid(uint level, uint2 coord, float depth)
 		if (active) {
 			SharedDepths[SharedIndex(groupThreadID.xy)] = depth;
 			const uint2 coord = groupID.xy * size + groupThreadID.xy;
-			// Texels past the render area are never sampled; skip them like mip 0 does
 			if (all(coord * (2u << level) <= maxPixel))
 				WritePyramid(level, coord, depth);
 		}

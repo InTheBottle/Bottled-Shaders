@@ -10,6 +10,14 @@
 #include "../WeatherManager.h"
 #include "Globals.h"
 
+namespace
+{
+	bool IsExteriorWeatherIndoors(const std::string& separation)
+	{
+		return separation == "ExteriorWeather" && EffectManager::GetSingleton().commonData.eInteriorFactor > 0.0f;
+	}
+}
+
 void ExtendedEffect::Unload()
 {
 	weatherData.clear();
@@ -99,8 +107,6 @@ void ExtendedEffect::ApplyTimeOfDayInterpolation()
 		baseGroups[name.substr(0, name.size() - period.size())].push_back({ i, GetPeriodWeight(period) });
 	}
 
-	auto& cd = EffectManager::GetSingleton().commonData;
-
 	for (auto& [baseName, entries] : baseGroups) {
 		auto baseVarIt = variables.find(baseName);
 		if (baseVarIt == variables.end())
@@ -109,8 +115,7 @@ void ExtendedEffect::ApplyTimeOfDayInterpolation()
 		if (!baseVar || !baseVar->IsValid())
 			continue;
 
-		auto& sep = uiVariables[entries[0].index].separation;
-		if (sep == "ExteriorWeather" && cd.eInteriorFactor > 0.0f)
+		if (IsExteriorWeatherIndoors(uiVariables[entries[0].index].separation))
 			continue;
 
 		float totalWeight = 0.0f;
@@ -215,8 +220,6 @@ void ExtendedEffect::ApplyWeatherBlending(float blendFactor, uint32_t currentWea
 		try { return std::stof(s); } catch (...) { return fallback; }
 	};
 
-	const bool interior = EffectManager::GetSingleton().commonData.eInteriorFactor > 0.0f;
-
 	for (auto& uiVar : uiVariables) {
 		if (uiVar.isLabel)
 			continue;
@@ -229,8 +232,7 @@ void ExtendedEffect::ApplyWeatherBlending(float blendFactor, uint32_t currentWea
 		if (iniKey.empty())
 			continue;
 
-		// ExteriorWeather vars use their preset value indoors (still written, to undo any weather value)
-		const bool useWeather = !(interior && uiVar.separation == "ExteriorWeather");
+		const bool useWeather = !IsExteriorWeatherIndoors(uiVar.separation);
 		const WeatherValues* varCurrentValues = useWeather ? currentValues : nullptr;
 		const WeatherValues* varLastValues = useWeather ? lastValues : nullptr;
 
@@ -307,9 +309,7 @@ void ExtendedEffect::SyncWeatherVarFromUI(size_t index, uint32_t weatherID)
 	if (uiVar.type != UIVariableType::Float && !isVector)
 		return;
 
-	// Indoors an ExteriorWeather var shows its preset value, so the edit belongs to the effect ini
-	const bool interior = EffectManager::GetSingleton().commonData.eInteriorFactor > 0.0f;
-	const bool usesWeather = IsWeatherSeparated(uiVar) && !(interior && uiVar.separation == "ExteriorWeather");
+	const bool usesWeather = IsWeatherSeparated(uiVar) && !IsExteriorWeatherIndoors(uiVar.separation);
 	auto* entry = usesWeather ? WeatherManager::GetSingleton().FindWeatherEntry(weatherID) : nullptr;
 	std::string iniKey = GetVariableIniKey(uiVar);
 	if (!entry || iniKey.empty()) {

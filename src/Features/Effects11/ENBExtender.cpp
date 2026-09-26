@@ -211,7 +211,6 @@ namespace ENBExtender
 
 		std::string finalVal = defaultVal;
 		if (!iniPath.empty() && !iniSection.empty() && !uiName.empty()) {
-			// Same key Effect::GetVariableIniKey saves under, so an edited define survives recompiles
 			std::string iniKey = ann("UniqueName");
 			if (iniKey.empty())
 				iniKey = uiGroup.empty() ? uiName : (uiGroup + "." + uiName);

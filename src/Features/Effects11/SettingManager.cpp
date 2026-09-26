@@ -63,7 +63,6 @@ static bool TryParseWeatherID(const std::string& a_key, uint32_t& a_out)
 	}
 }
 
-// True if the ini defines the setting; any time-of-day key counts for time-of-day settings
 static bool IniDefinesSetting(const std::string& a_filePath, const Setting& a_setting)
 {
 	auto hasKey = [&](const std::string& key) {
@@ -608,7 +607,6 @@ void SettingManager::SaveWeatherSettings(const std::string& weatherKey, const st
 		auto definedIt = weatherDefined.find(weatherID);
 
 		for (const auto& setting : allSettings) {
-			// Only write what the weather defines; the rest belongs to enbseries.ini
 			const bool defined = definedIt != weatherDefined.end() && setting.id < definedIt->second.size() && definedIt->second[setting.id];
 			if (setting.hasWeatherSupport && defined && setting.id < weatherValues.size()) {
 				bool changed = true;
@@ -981,7 +979,6 @@ void SettingManager::LoadSettingFromFile(const std::string& filePath, const std:
 void SettingManager::SaveSettingToFile(const std::string& filePath, const std::string& section, const std::string& key, const Setting& setting)
 {
 	auto formatFloat = [](float value) -> std::string {
-		// Six decimals: presets use values finer than 0.001, and saving any time-of-day period rewrites all eight
 		char temp[64];
 		sprintf_s(temp, "%.6f", value);
 		std::string result = temp;

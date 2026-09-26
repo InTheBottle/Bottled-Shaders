@@ -386,8 +386,6 @@ bool EffectManager::ExecuteEffects(RE::BSGraphics::RenderTargetData& a_input, RE
 	auto context = globals::d3d::context;
 	auto renderer = globals::game::renderer;
 
-	// Without the copy shaders the result cannot reach a_output (e.g. a failed ReloadShaders),
-	// so leave the frame to the stock pass before touching kMAIN
 	if (!rasterizerState || !blendState || !quadVertexBuffer || !inputLayout || !renderer || !copyVertexShader || !copyPixelShader)
 		return false;
 
@@ -758,7 +756,6 @@ void EffectManager::UpdateCommonData()
 		static double timer = 0.0;
 		timer += delta;
 
-		// Wrap in double: as a float, milliseconds lose sub-frame precision after a few hours of play
 		auto modifiedTimer = static_cast<float>(std::fmod(timer * 1000.0, 16777216.0) / 16777216.0);
 
 		if (delta > 0.0f)
@@ -1204,7 +1201,6 @@ void EffectManager::ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV)
 
 void EffectManager::ReloadShaders()
 {
-	// The Create* helpers also (re)create these buffers through com_ptr::put(), which requires them to be empty
 	copyVertexShader = nullptr;
 	copyPixelShader = nullptr;
 	ditherConstantBuffer = nullptr;

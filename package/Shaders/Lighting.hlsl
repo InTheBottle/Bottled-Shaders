@@ -2612,8 +2612,6 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		float lightAngle = dot(worldNormal.xyz, normalizedLightDirection.xyz);
 
 #			if defined(DEFERRED)
-		// Vanilla lights without a shadow map light everything in range, through walls included.
-		// Faint contributions are skipped: the trace costs more than the light it would remove.
 		[branch] if (lightOcclusionEnabled && !hasShadowMap && lightAngle > 0.0 && intensityMultiplier * light.fade > LightLimitFix::LIGHT_OCCLUSION_MIN_CONTRIBUTION)
 		{
 			float3 lightVectorVS = mul((float3x3)FrameBuffer::CameraView, lightDirection);

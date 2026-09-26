@@ -24,7 +24,6 @@ bool Effect::Load()
 
 	if (!std::filesystem::exists(iniPath)) {
 		logger::info("[EFFECTS11] Could not find ini file '{}' for effect '{}', using defaults", iniPath.string(), GetName());
-		// Patches force off preset effects that clash with Community Shaders, so they apply without an ini too
 		Util::SettingsPatches::Apply(*this);
 		CaptureBaseValues();
 		return true;
@@ -489,8 +488,6 @@ Effect::TechniqueSequenceResult Effect::ExecuteTechniqueSequence(const std::stri
 		RenderPasses(techniqueInfo.technique.get(), outputRTV, passOffset);
 		passOffset += techniqueInfo.passCount;
 
-		// A technique with a RenderTarget annotation writes a side target and leaves the chain result
-		// where it was. Callers swap textures on this result, so report only chain writes.
 		if (outputRTV == a_output.rtv.get() || outputRTV == a_temp.rtv.get()) {
 			wroteChain = true;
 			targetInOutput = (outputRTV == a_output.rtv.get());

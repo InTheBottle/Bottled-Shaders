@@ -561,7 +561,6 @@ bool LightLimitFix::IsLightOcclusionActive() const
 void LightLimitFix::CompileLightOcclusionShader()
 {
 	std::vector<std::pair<const char*, const char*>> defines;
-	// TERRAIN_BLENDING switches the depth SRV type from the game's R24 depth to its R32_FLOAT copy
 	if (globals::features::terrainBlending.loaded)
 		defines.push_back({ "TERRAIN_BLENDING", "" });
 	lightOcclusionPyramidCS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\LightLimitFix\\LightOcclusionPyramidCS.hlsl", defines, "cs_5_0");
@@ -619,7 +618,6 @@ void LightLimitFix::BuildLightOcclusionPyramid()
 	data.RenderSize[1] = std::max((uint)renderSize.y, 1u);
 	lightOcclusionPyramidCB->Update(data);
 
-	// The pixel shader copy is rebound below; unbind it first so the UAV binding isn't refused
 	ID3D11ShaderResourceView* nullSrv = nullptr;
 	context->PSSetShaderResources(LIGHT_OCCLUSION_PYRAMID_SLOT, 1, &nullSrv);
 
@@ -636,7 +634,6 @@ void LightLimitFix::BuildLightOcclusionPyramid()
 	ID3D11Buffer* sharedDataBuffer = globals::state->sharedDataCB->CB();
 	context->CSSetConstantBuffers(5, 1, &sharedDataBuffer);
 
-	// Each 16x16 group reduces a 32x32 block of render pixels
 	context->CSSetShader(lightOcclusionPyramidCS, nullptr, 0);
 	context->Dispatch((data.RenderSize[0] + 31u) / 32u, (data.RenderSize[1] + 31u) / 32u, 1);
 

@@ -36,7 +36,6 @@ public:
 
 	BendSettings bendSettings;
 
-	/** @brief Long-range screen-space sun shadows for LOD beyond the shadow cascades. */
 	struct DistantSettings
 	{
 		bool Enable = true;
@@ -52,7 +51,8 @@ public:
 	static constexpr uint DistantMaxSampleCount = 32;
 	static constexpr float DistantMinRayLength = 2048.0f;
 	static constexpr float DistantMaxRayLength = 65536.0f;
-	// View depth over which distant shadows fade in, ending at the last cascade's far split
+	static constexpr float DistantMinThickness = 0.1f;
+	static constexpr float DistantMaxThickness = 2.0f;
 	static constexpr float DistantFadeLength = 1024.0f;
 
 	struct alignas(16) DistantShadowsCB
@@ -100,7 +100,6 @@ public:
 
 	ConstantBuffer* distantShadowsCB = nullptr;
 	ID3D11ComputeShader* distantShadowsCS = nullptr;
-	/** Copy of the contact shadows, read while the distant pass writes the combined result */
 	Texture2D* contactShadowsCopyTexture = nullptr;
 
 	/** @brief Creates the raymarch constant buffer, point border sampler, and shadow output texture. */
@@ -131,19 +130,8 @@ public:
 	/** @brief Dispatches the Bend SSS compute shader to generate screen-space contact shadows. */
 	void DrawShadows();
 
-	/** @brief Returns the compiled distant shadows compute shader, compiling it on first use. */
 	ID3D11ComputeShader* GetComputeDistantShadows();
-
-	/**
-	 * @brief Returns the view depth where the last shadow cascade ends.
-	 * @return The far split distance, or 0 when no sun shadow light is available.
-	 */
 	float GetShadowCascadeEndDistance();
-
-	/**
-	 * @brief Dispatches the long-range raymarch that shadows LOD beyond the shadow cascades.
-	 * @param a_hasContactShadows Whether the contact shadow pass wrote the shadow texture this frame.
-	 */
 	void DrawDistantShadows(bool a_hasContactShadows);
 
 	virtual void RestoreDefaultSettings() override;

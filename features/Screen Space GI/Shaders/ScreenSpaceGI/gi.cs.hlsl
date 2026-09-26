@@ -343,7 +343,7 @@ void CalculateGI(
 
 	// Move center pixel slightly towards camera to avoid imprecision artifacts due to depth buffer imprecision; offset depends on depth texture format used
 #ifdef REVERSE_Z
-	viewspaceZ *= 0.99999;  // FP32 working depth (see ScreenSpaceGI::SetupResources); XeGTAO's value for FP32
+	viewspaceZ *= 0.99999;
 #else
 	viewspaceZ *= 0.99920h;  // this is good for FP16 depth buffer
 #endif

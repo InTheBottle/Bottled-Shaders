@@ -50,9 +50,8 @@ void SnowCover::DrawSettings()
 	ImGui::Checkbox("Melt Snow Near Fire", &fireMeltSettings.Enabled);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text(
-			"Clears snow around nearby placed fires (campfires, braziers, hearths), found with the same\n"
-			"effect classification Effects 11 uses for fire. Spells, projectiles and impacts are ignored.\n"
-			"The %u nearest fires are used.",
+			"Clears snow around placed fires (campfires, braziers, hearths).\n"
+			"Spells, projectiles and impacts are ignored. The %u nearest fires are used.",
 			MAX_FIRE_MELT_SOURCES);
 	}
 	if (fireMeltSettings.Enabled) {
@@ -91,7 +90,6 @@ void SnowCover::DrawSettings()
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Defaults")) {
-			// Reset every value the config holds, not just wsettings, or a save mixes defaults with the previous values
 			const uint enabled = wsettings.EnableSnowCover;
 			ResetWorldConfig();
 			wsettings.EnableSnowCover = enabled;
@@ -323,7 +321,6 @@ SnowCover::PerFrame SnowCover::GetCommonBufferData()
 
 	if (fireMeltFrame.IsNewFrame())
 		UpdateFireMelt();
-	perFrame.fireMelt = fireMelt;
 
 	return perFrame;
 }
@@ -347,7 +344,6 @@ const char* GetWorldspace()
 			curr_worldspace = worldspace->GetFormEditorID();
 		}
 	}
-	// Cells and worldspaces without an editor ID have no config name
 	return (curr_worldspace && *curr_worldspace) ? curr_worldspace : "none";
 }
 
@@ -374,7 +370,6 @@ void SnowCover::ResetWorldConfig()
 void SnowCover::UpdateMapTransform()
 {
 	float2 extent = mapMax - mapMin;
-	// A zero-size map would divide by zero; fall back to the full Skyrim map extent on that axis
 	if (extent.x == 0.0f)
 		extent.x = DEFAULT_MAP_MAX.x - DEFAULT_MAP_MIN.x;
 	if (extent.y == 0.0f)
@@ -385,12 +380,10 @@ void SnowCover::UpdateMapTransform()
 
 void SnowCover::SaveConfig()
 {
-	// Save to the worldspace whose config is loaded and shown, not whatever is current by now
 	if (last_worldspace.empty() || last_worldspace == "none") {
 		status = "Not in a named worldspace or cell, nothing to save to.";
 		return;
 	}
-	// The path buffers are what the UI edits; the paths only follow them while their tree node is open
 	map_tex = std::filesystem::path(mapbuf);
 	main_tex = std::filesystem::path(tbuf);
 	alt_tex = std::filesystem::path(altbuf);
@@ -464,7 +457,6 @@ void SnowCover::Reload()
 		if (curr_worldspace == last_worldspace)
 			return;
 		last_worldspace = curr_worldspace;
-		// Start from defaults so a missing config, or keys absent from it, never carry the previous worldspace's values
 		ResetWorldConfig();
 		path = (Util::PathHelpers::GetShadersPath() / "SnowCover" / curr_worldspace).replace_extension(std::filesystem::path(".json"));
 		if (!std::filesystem::exists(path)) {
@@ -640,9 +632,6 @@ void SnowCover::RestoreDefaultSettings()
 
 bool SnowCover::IsWorldFireSource(RE::TESObjectREFR* a_ref)
 {
-	// Only fires placed in the world: campfires, braziers, hearths and fire FX are statics, lights,
-	// activators or furniture. Spell art (on actors), projectiles such as arrows and fireballs, magic
-	// hazards and enchanted weapons belong to other form types, and impact effects have no reference.
 	if (!a_ref)
 		return false;
 	auto* base = a_ref->GetObjectReference();
@@ -668,8 +657,6 @@ void SnowCover::CollectFireSource(RE::BSRenderPass* a_pass, uint32_t a_pixelDesc
 	if (fireCandidates.size() >= MAX_FIRE_MELT_CANDIDATES)
 		return;
 
-	// Same test as Effect.hlsl's EFFECTS11 isFire: additive and either soft with grayscale-to-color and -alpha,
-	// or (not soft) indexed-texture particles
 	using Flags = SIE::ShaderCache::EffectShaderFlags;
 	auto has = [&](Flags flag) { return (a_pixelDescriptor & static_cast<uint32_t>(flag)) != 0; };
 	if (!has(Flags::AddBlend) || has(Flags::SkyObject))
@@ -686,6 +673,7 @@ void SnowCover::CollectFireSource(RE::BSRenderPass* a_pass, uint32_t a_pixelDesc
 
 void SnowCover::UpdateFireMelt()
 {
+	auto& fireMelt = perFrame.fireMelt;
 	fireMelt.Count = 0;
 	fireMelt.Strength = fireMeltSettings.Strength;
 	fireMelt.RadiusScale = fireMeltSettings.RadiusScale;
@@ -698,7 +686,6 @@ void SnowCover::UpdateFireMelt()
 		};
 		std::sort(fireCandidates.begin(), fireCandidates.end(), [&](const float4& a, const float4& b) { return distanceSq(a) < distanceSq(b); });
 
-		// One fire is drawn as several effect pieces; fold pieces inside an already picked fire into it
 		for (const auto& candidate : fireCandidates) {
 			if (fireMelt.Count >= MAX_FIRE_MELT_SOURCES || distanceSq(candidate) > FIRE_MELT_MAX_DISTANCE * FIRE_MELT_MAX_DISTANCE)
 				break;

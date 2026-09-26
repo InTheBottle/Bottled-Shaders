@@ -469,11 +469,7 @@ void ScreenSpaceGI::SetupResources()
 
 		texDesc.BindFlags &= ~D3D11_BIND_RENDER_TARGET;
 		texDesc.MiscFlags &= ~D3D11_RESOURCE_MISC_GENERATE_MIPS;
-		// Linear view depth. FP16 resolves only ~8 units at 10k and ~32 at 50k, which wastes the precise
-		// float reverse-Z buffer; keep full precision there (gi.cs.hlsl picks the matching center offset).
-		auto& reverseZ = globals::features::reverseZ;
-		reverseZ.LatchBootState();
-		texDesc.Format = srvDesc.Format = uavDesc.Format = reverseZ.IsActive() ? DXGI_FORMAT_R32_FLOAT : DXGI_FORMAT_R16_FLOAT;
+		texDesc.Format = srvDesc.Format = uavDesc.Format = globals::features::reverseZ.IsActive() ? DXGI_FORMAT_R32_FLOAT : DXGI_FORMAT_R16_FLOAT;
 
 		{
 			texWorkingDepth = eastl::make_unique<Texture2D>(texDesc, "SSGI::WorkingDepth");

@@ -522,7 +522,6 @@ namespace SharedData
 		float ObjectFadeAmount;
 		uint2 pad2;
 
-		// Fires near the camera (SnowCover::FireMeltData); xyz = world position, w = radius
 		uint FireMeltCount;
 		float FireMeltStrength;
 		float FireMeltRadiusScale;

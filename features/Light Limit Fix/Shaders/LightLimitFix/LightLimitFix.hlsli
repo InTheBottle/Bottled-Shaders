@@ -340,15 +340,10 @@ namespace LightLimitFix
 		return 1.0 - occlusion * SharedData::lightLimitFixSettings.ContactShadowStrength * strengthScale;
 	}
 
-	// Light occlusion: stops lights without a shadow map from leaking through walls and objects.
-	// Traces the whole way from the shaded point to the light against a pyramid of the farthest
-	// view depth per texel (LightOcclusionPyramidCS.hlsl), picking the level that matches the step
-	// size so walls between two steps can't be skipped. Only occluders visible on screen count.
 	Texture2D<float> LightOcclusionDepthPyramid : register(t104);
 
 	static const uint LIGHT_OCCLUSION_MIP_COUNT = 5;
 
-	// Relative depth bias against self-occlusion; the float reverse-Z buffer stays precise far out
 #ifdef REVERSE_Z
 	static const float LIGHT_OCCLUSION_DEPTH_BIAS = 0.0005;
 #else
@@ -356,10 +351,8 @@ namespace LightLimitFix
 #endif
 	static const float LIGHT_OCCLUSION_MIN_BIAS = 1.0;
 
-	// Fraction of LightOcclusionMaxDistance over which occlusion fades out
 	static const float LIGHT_OCCLUSION_DISTANCE_FADE = 0.25;
 
-	// Lights contributing less than this (attenuation x fade) at a pixel are not traced
 	static const float LIGHT_OCCLUSION_MIN_CONTRIBUTION = 0.01;
 
 	float SampleLightOcclusionPyramid(float2 uv, uint level)
@@ -372,13 +365,6 @@ namespace LightLimitFix
 		return LightOcclusionDepthPyramid.Load(int3(coord, level));
 	}
 
-	/**
-	 * Visibility of a light without a shadow map, in [0, 1].
-	 * @param viewPosition Shaded point in view space.
-	 * @param noise Per-pixel noise in [0, 1) for step jitter.
-	 * @param lightVectorVS View-space vector from the shaded point to the light.
-	 * @param lightDistance Length of lightVectorVS.
-	 */
 	float LightOcclusion(float3 viewPosition, float noise, float3 lightVectorVS, float lightDistance)
 	{
 		const float maxDistance = SharedData::lightLimitFixSettings.LightOcclusionMaxDistance;
@@ -387,12 +373,9 @@ namespace LightLimitFix
 		[branch] if (strength <= 0.0)
 			return 1.0;
 
-		// Stop short of the light so the mesh it sits in (lantern, sconce, candle) doesn't block it,
-		// and skip the first stretch next to the receiver, which contact shadows already cover.
 		const float clearance = SharedData::lightLimitFixSettings.LightOcclusionClearance;
 		const float3 lightDirectionVS = lightVectorVS * rcp(max(lightDistance, 1e-3));
 		float rayLength = lightDistance - clearance;
-		// Keep the ray in front of the camera near plane
 		rayLength = min(rayLength, (viewPosition.z - CONTACT_SHADOW_MIN_RAY_DEPTH) / max(-lightDirectionVS.z, 1e-6));
 		[branch] if (rayLength <= 2.0 * clearance)
 			return 1.0;
@@ -400,13 +383,11 @@ namespace LightLimitFix
 		const ContactShadowRay ray = GetContactShadowRay(viewPosition, viewPosition + lightDirectionVS * rayLength);
 		const float2 pixelScale = FrameBuffer::DynamicResolutionParams1.xy * SharedData::BufferDim.xy;
 		const float rayPixels = length(ray.uvDelta * ray.tMax * pixelScale);
-		// The on-screen part of the ray is too short to cross anything
 		[branch] if (rayPixels < 2.0)
 			return 1.0;
 
 		const uint steps = SharedData::lightLimitFixSettings.LightOcclusionSteps;
 		const float stepPixels = rayPixels / float(steps);
-		// Mip 0 texels are 2x2 pixels; pick the level whose texels are at least one step wide
 		const uint level = (uint)clamp(ceil(log2(max(stepPixels, 1.0))) - 1.0, 0.0, float(LIGHT_OCCLUSION_MIP_COUNT - 1));
 
 		const float endDepth = viewPosition.z + lightDirectionVS.z * rayLength;
@@ -421,7 +402,6 @@ namespace LightLimitFix
 			const float stepDepth = abs(rayDepth - previousRayDepth);
 			previousRayDepth = rayDepth;
 
-			// Perspective-correct fraction of the 3D segment reached at screen parameter t
 			const float travelled = t * rayDepth / endDepth * rayLength;
 			if (travelled < clearance)
 				continue;
@@ -430,9 +410,6 @@ namespace LightLimitFix
 			if (sceneDepth <= CONTACT_SHADOW_FIRST_PERSON_MAX_DEPTH)
 				continue;
 
-			// Blocked when the ray is behind everything in the texel, by no more than an assumed
-			// surface thickness plus how far the ray moved in depth since the last step: it crossed
-			// that surface rather than passing behind a separate object in front of it.
 			const float depthDelta = rayDepth - sceneDepth;
 			const float bias = max(LIGHT_OCCLUSION_MIN_BIAS, rayDepth * LIGHT_OCCLUSION_DEPTH_BIAS);
 			const float allowed = thickness + stepDepth;

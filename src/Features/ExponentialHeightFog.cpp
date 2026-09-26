@@ -163,7 +163,6 @@ ExponentialHeightFog::Settings ExponentialHeightFog::GetCommonBufferData() const
 	ClampFollowAndHazeSettings(data);
 	data.vanillaFogDensity = 0.0f;
 
-	// The world/local map keeps its vanilla fog; height fog tuned for the world at eye level washes it out
 	if (globals::state->isMapMenuOpen) {
 		data.enabled = 0;
 		data.disableVanillaFog = 0;
@@ -592,7 +591,6 @@ void ExponentialHeightFog::Prepass()
 		return;
 	}
 
-	// Shaders ignore the fog volume on the map (see GetCommonBufferData), so skip building it
 	if (globals::state->isMapMenuOpen)
 		return;
 

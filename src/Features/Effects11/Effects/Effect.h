@@ -237,9 +237,9 @@ public:
 
 	struct TechniqueSequenceResult
 	{
-		bool executed = false;  ///< At least one technique wrote the chain output (a_output or a_temp)
-		bool inOutput = false;  ///< The chain result is in a_output
-		bool inTemp = false;    ///< The chain result is in a_temp
+		bool executed = false;
+		bool inOutput = false;
+		bool inTemp = false;
 	};
 
 	// Execute a technique sequence with ping-pong rendering

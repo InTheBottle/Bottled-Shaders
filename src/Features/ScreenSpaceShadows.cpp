@@ -78,7 +78,7 @@ void ScreenSpaceShadows::DrawSettings()
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text("%s", T(TKEY("distant_intensity_tooltip"), "Strength of distant shadows. Lower values keep some sunlight in shadowed areas."));
 
-		ImGui::SliderFloat(T(TKEY("distant_thickness"), "Distant Occluder Thickness"), &distantSettings.Thickness, 0.1f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		ImGui::SliderFloat(T(TKEY("distant_thickness"), "Distant Occluder Thickness"), &distantSettings.Thickness, DistantMinThickness, DistantMaxThickness, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text("%s", T(TKEY("distant_thickness_tooltip"), "Assumed depth of occluders relative to the distance searched. Higher values fill in mountain shadows more solidly; lower values stop thin foreground objects from casting long shadows."));
 
@@ -274,7 +274,6 @@ ID3D11ComputeShader* ScreenSpaceShadows::GetComputeDistantShadows()
 {
 	if (!distantShadowsCS) {
 		std::vector<std::pair<const char*, const char*>> defines;
-		// Same depth SRV type switch as RaymarchCS.hlsl
 		if (globals::features::terrainBlending.loaded)
 			defines.push_back({ "TERRAIN_BLENDING", "" });
 		distantShadowsCS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\ScreenSpaceShadows\\DistantShadowsCS.hlsl", defines, "cs_5_0");
@@ -305,7 +304,6 @@ void ScreenSpaceShadows::DrawDistantShadows(bool a_hasContactShadows)
 	ZoneScoped;
 	TracyD3D11Zone(globals::state->tracyCtx, "Screen Space Shadows - Distant");
 
-	// Without a known cascade end the pass would shadow pixels the shadow maps already cover
 	const float cascadeEnd = GetShadowCascadeEndDistance();
 	if (!std::isfinite(cascadeEnd) || cascadeEnd <= 0.0f)
 		return;
@@ -320,7 +318,6 @@ void ScreenSpaceShadows::DrawDistantShadows(bool a_hasContactShadows)
 	if (globals::state->frameAnnotations)
 		globals::state->BeginPerfEvent("SSS - Distant");
 
-	// The UAV can't be read back as R8G8_UNORM, so the distant pass reads the contact shadows from a copy
 	if (a_hasContactShadows)
 		context->CopyResource(contactShadowsCopyTexture->resource.get(), screenSpaceShadowsTexture->resource.get());
 
@@ -331,10 +328,10 @@ void ScreenSpaceShadows::DrawDistantShadows(bool a_hasContactShadows)
 	data.InvRenderSize = { 1.0f / renderSize.x, 1.0f / renderSize.y };
 	data.FadeLength = std::min(DistantFadeLength, cascadeEnd);
 	data.StartDistance = cascadeEnd - data.FadeLength;
-	data.MaxRayLength = std::clamp(distantSettings.MaxRayLength, DistantMinRayLength, DistantMaxRayLength);
-	data.Intensity = std::clamp(distantSettings.Intensity, 0.0f, 1.0f);
-	data.ThicknessScale = std::clamp(distantSettings.Thickness, 0.1f, 2.0f);
-	data.SampleCount = std::clamp(distantSettings.SampleCount, DistantMinSampleCount, DistantMaxSampleCount);
+	data.MaxRayLength = distantSettings.MaxRayLength;
+	data.Intensity = distantSettings.Intensity;
+	data.ThicknessScale = distantSettings.Thickness;
+	data.SampleCount = distantSettings.SampleCount;
 	data.UseContactShadows = a_hasContactShadows;
 	distantShadowsCB->Update(data);
 
@@ -393,16 +390,12 @@ void ScreenSpaceShadows::LoadSettings(json& o_json)
 	if (o_json.contains(DistantSettingsKey) && o_json[DistantSettingsKey].is_object())
 		distantSettings = o_json[DistantSettingsKey];
 
+	const DistantSettings defaults{};
+	auto sanitize = [](float value, float fallback, float lo, float hi) { return std::clamp(std::isfinite(value) ? value : fallback, lo, hi); };
 	distantSettings.SampleCount = std::clamp(distantSettings.SampleCount, DistantMinSampleCount, DistantMaxSampleCount);
-	if (!std::isfinite(distantSettings.MaxRayLength))
-		distantSettings.MaxRayLength = DistantSettings{}.MaxRayLength;
-	distantSettings.MaxRayLength = std::clamp(distantSettings.MaxRayLength, DistantMinRayLength, DistantMaxRayLength);
-	if (!std::isfinite(distantSettings.Intensity))
-		distantSettings.Intensity = DistantSettings{}.Intensity;
-	distantSettings.Intensity = std::clamp(distantSettings.Intensity, 0.0f, 1.0f);
-	if (!std::isfinite(distantSettings.Thickness))
-		distantSettings.Thickness = DistantSettings{}.Thickness;
-	distantSettings.Thickness = std::clamp(distantSettings.Thickness, 0.1f, 2.0f);
+	distantSettings.MaxRayLength = sanitize(distantSettings.MaxRayLength, defaults.MaxRayLength, DistantMinRayLength, DistantMaxRayLength);
+	distantSettings.Intensity = sanitize(distantSettings.Intensity, defaults.Intensity, 0.0f, 1.0f);
+	distantSettings.Thickness = sanitize(distantSettings.Thickness, defaults.Thickness, DistantMinThickness, DistantMaxThickness);
 }
 
 void ScreenSpaceShadows::SaveSettings(json& o_json)

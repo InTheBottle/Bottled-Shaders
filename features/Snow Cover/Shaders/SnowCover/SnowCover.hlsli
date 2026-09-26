@@ -45,8 +45,6 @@ namespace SnowCover
 		return 1 - smoothstep(fadeStart, fadeEnd, viewDist) * amount;
 	}
 
-	// Fraction of snow melted by nearby fires: full inside half the melt radius, fading out to the edge.
-	// At most 8 spheres, and no work at all when there are no fires.
 	float GetFireMelt(float3 p)
 	{
 		float melt = 0;

@@ -515,15 +515,8 @@ void Effects11::CheckCommonData()
 		const auto& commonData = effectManager.GetCommonData();
 		settingManager.SetTimeOfDayData(commonData.timeOfDay1, commonData.timeOfDay2);
 
-		// commonData.weather already holds location-mapped IDs. Weather files only apply with
-		// EnableMultipleWeathers; ID 0 is never a listed weather, so it selects enbseries.ini values.
-		const bool multipleWeathers = settingManager.GetValue<bool>(effectManager.ids.enableMultipleWeathers);
-		uint32_t currentWeatherID = multipleWeathers ? static_cast<uint32_t>(commonData.weather[0]) : 0;
-		uint32_t lastWeatherID = multipleWeathers ? static_cast<uint32_t>(commonData.weather[1]) : 0;
-		settingManager.SetWeatherBlendFactors(currentWeatherID, lastWeatherID, commonData.weather[2]);
+		settingManager.SetWeatherBlendFactors(static_cast<uint32_t>(commonData.weather[0]), static_cast<uint32_t>(commonData.weather[1]), commonData.weather[2]);
 
-		// Each lookup builds string keys and takes the settings lock; OverridePointLightColor would otherwise
-		// repeat three of them for every light in every render pass
 		pointLighting.curve = settingManager.GetInterpolatedTimeOfDayValue("PointLightingCurve", "ENVIRONMENT");
 		pointLighting.desaturation = settingManager.GetInterpolatedTimeOfDayValue("PointLightingDesaturation", "ENVIRONMENT");
 		pointLighting.intensity = settingManager.GetInterpolatedTimeOfDayValue("PointLightingIntensity", "ENVIRONMENT");
