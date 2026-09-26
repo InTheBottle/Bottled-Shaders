@@ -1,12 +1,13 @@
 ﻿#include "MenuManager.h"
 
 #include "EffectManager.h"
-#include "SettingManager.h"
-#include "TextureManager.h"
 #include "Features/Effects11.h"
+#include "Features/Effects11/SettingsPatches.h"
 #include "Features/Effects11/ShaderPatches.h"
 #include "Globals.h"
 #include "I18n/I18n.h"
+#include "SettingManager.h"
+#include "TextureManager.h"
 
 static const char* const timeOfDayNames[] = { "Dawn", "Sunrise", "Day", "Sunset", "Dusk", "Night", "InteriorDay", "InteriorNight" };
 
@@ -57,6 +58,7 @@ void MenuManager::RenderSettingsPanel()
 		settingManager.Save();
 		effectManager.Save();
 		Util::ShaderPatches::Load();
+		Util::SettingsPatches::Load();
 		settingManager.Load();
 		effectManager.Apply();
 	}
@@ -69,6 +71,7 @@ void MenuManager::RenderSettingsPanel()
 
 	if (ImGui::Button("Load & Apply")) {
 		Util::ShaderPatches::Load();
+		Util::SettingsPatches::Load();
 		settingManager.Load();
 		effectManager.Apply();
 	}

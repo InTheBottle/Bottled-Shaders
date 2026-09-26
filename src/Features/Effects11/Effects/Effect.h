@@ -125,6 +125,11 @@ public:
 
 		float vectorValue[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 
+		// Preset (non-weather) value. Weather blending writes its result into floatValue/vectorValue,
+		// so this is what a var falls back to when no weather supplies it, and what Save() persists.
+		float baseFloatValue = 0.0f;
+		float baseVectorValue[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+
 		// UI properties
 		float floatMin = 0.0f;
 		float floatMax = 1.0f;
@@ -229,8 +234,8 @@ public:
 
 	struct TechniqueSequenceResult
 	{
-		bool executed = false;
-		bool inOutput = false;
+		bool executed = false;  ///< At least one technique wrote the chain output (a_output or a_temp)
+		bool inOutput = false;  ///< The chain result is in a_output rather than a_temp
 	};
 
 	// Execute a technique sequence with ping-pong rendering
@@ -271,7 +276,11 @@ public:
 
 protected:
 	static bool IsPerComponentVector(const UIVariable& uiVar);
+	static bool HasWeatherSeparation(const UIVariable& uiVar);
 	std::string GetVariableIniKey(const UIVariable& uiVar);
+
+	/** @brief Records the current UI values as the preset values weather blending falls back to. */
+	void SnapshotBaseValues();
 
 private:
 	bool LoadFXFile();
