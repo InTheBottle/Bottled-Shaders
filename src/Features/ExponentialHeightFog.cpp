@@ -163,6 +163,13 @@ ExponentialHeightFog::Settings ExponentialHeightFog::GetCommonBufferData() const
 	ClampFollowAndHazeSettings(data);
 	data.vanillaFogDensity = 0.0f;
 
+	// The world/local map keeps its vanilla fog; height fog tuned for the world at eye level washes it out
+	if (globals::state->isMapMenuOpen) {
+		data.enabled = 0;
+		data.disableVanillaFog = 0;
+		return data;
+	}
+
 	const auto* sky = globals::game::sky;
 	const bool hasUnboundedFogRange = sky && (sky->fogNear == std::numeric_limits<float>::infinity() || sky->fogFar == std::numeric_limits<float>::infinity());
 	const float fogNear = sky ? std::max(std::isfinite(sky->fogNear) ? sky->fogNear : 0.0f, 0.0f) : 0.0f;
@@ -584,6 +591,10 @@ void ExponentialHeightFog::Prepass()
 		ReleaseVolumetricResources();
 		return;
 	}
+
+	// Shaders ignore the fog volume on the map (see GetCommonBufferData), so skip building it
+	if (globals::state->isMapMenuOpen)
+		return;
 
 	const auto cameraData = Util::GetCameraData();
 	const float volumeStart = settings.useVanillaFogSettings ? 0.0f : std::max(settings.volumetricFogStartDistance, 0.0f);
