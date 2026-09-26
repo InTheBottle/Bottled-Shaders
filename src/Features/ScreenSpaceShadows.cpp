@@ -101,9 +101,13 @@ void ScreenSpaceShadows::InvalidateRaymarchShaders()
 void ScreenSpaceShadows::ClearShaderCache()
 {
 	InvalidateRaymarchShaders();
-	if (distantShadowsCS) {
-		distantShadowsCS->Release();
-		distantShadowsCS = nullptr;
+	if (distantTraceCS) {
+		distantTraceCS->Release();
+		distantTraceCS = nullptr;
+	}
+	if (distantResolveCS) {
+		distantResolveCS->Release();
+		distantResolveCS = nullptr;
 	}
 }
 
@@ -272,17 +276,22 @@ void ScreenSpaceShadows::DrawShadows()
 	context->CSSetConstantBuffers(1, 1, &buffer);
 }
 
-ID3D11ComputeShader* ScreenSpaceShadows::GetComputeDistantShadows()
+bool ScreenSpaceShadows::CompileDistantShadows()
 {
-	if (!distantShadowsCS) {
-		std::vector<std::pair<const char*, const char*>> defines;
-		if (globals::features::terrainBlending.loaded)
-			defines.push_back({ "TERRAIN_BLENDING", "" });
-		if (globals::features::terrainShadows.loaded)
-			defines.push_back({ "TERRAIN_SHADOWS", "" });
-		distantShadowsCS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\ScreenSpaceShadows\\DistantShadowsCS.hlsl", defines, "cs_5_0");
-	}
-	return distantShadowsCS;
+	if (distantTraceCS && distantResolveCS)
+		return true;
+
+	std::vector<std::pair<const char*, const char*>> defines;
+	if (globals::features::terrainBlending.loaded)
+		defines.push_back({ "TERRAIN_BLENDING", "" });
+	if (globals::features::terrainShadows.loaded)
+		defines.push_back({ "TERRAIN_SHADOWS", "" });
+
+	if (!distantTraceCS)
+		distantTraceCS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\ScreenSpaceShadows\\DistantShadowsCS.hlsl", defines, "cs_5_0", "TraceCS");
+	if (!distantResolveCS)
+		distantResolveCS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\ScreenSpaceShadows\\DistantShadowsCS.hlsl", defines, "cs_5_0", "ResolveCS");
+	return distantTraceCS && distantResolveCS;
 }
 
 float ScreenSpaceShadows::GetShadowCascadeEndDistance()
@@ -312,8 +321,7 @@ void ScreenSpaceShadows::DrawDistantShadows(bool a_hasContactShadows)
 	if (!std::isfinite(cascadeEnd) || cascadeEnd <= 0.0f)
 		return;
 
-	auto* shader = GetComputeDistantShadows();
-	if (!shader)
+	if (!distantHalfTexture || !CompileDistantShadows())
 		return;
 
 	auto context = globals::d3d::context;
@@ -337,13 +345,9 @@ void ScreenSpaceShadows::DrawDistantShadows(bool a_hasContactShadows)
 	data.ThicknessScale = distantSettings.Thickness;
 	data.SampleCount = distantSettings.SampleCount;
 	data.UseContactShadows = a_hasContactShadows;
+	data.HalfSize[0] = ((uint)renderSize.x + 1u) >> 1;
+	data.HalfSize[1] = ((uint)renderSize.y + 1u) >> 1;
 	distantShadowsCB->Update(data);
-
-	ID3D11ShaderResourceView* srvs[2] = { Util::GetCurrentSceneDepthSRV(false), contactShadowsCopyTexture->srv.get() };
-	context->CSSetShaderResources(0, 2, srvs);
-
-	auto uav = screenSpaceShadowsTexture->uav.get();
-	context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
 
 	ID3D11Buffer* buffers[1] = { distantShadowsCB->CB() };
 	context->CSSetConstantBuffers(1, 1, buffers);
@@ -353,12 +357,27 @@ void ScreenSpaceShadows::DrawDistantShadows(bool a_hasContactShadows)
 	auto* linearSampler = globals::deferred->linearSampler;
 	context->CSSetSamplers(0, 1, &linearSampler);
 
-	context->CSSetShader(shader, nullptr, 0);
+	ID3D11ShaderResourceView* depthSrv = Util::GetCurrentSceneDepthSRV(false);
+	context->CSSetShaderResources(0, 1, &depthSrv);
+
+	ID3D11UnorderedAccessView* uav = distantHalfTexture->uav.get();
+	context->CSSetUnorderedAccessViews(1, 1, &uav, nullptr);
+	context->CSSetShader(distantTraceCS, nullptr, 0);
+	context->Dispatch((data.HalfSize[0] + 7u) >> 3, (data.HalfSize[1] + 7u) >> 3, 1);
+
+	ID3D11UnorderedAccessView* nullUav = nullptr;
+	context->CSSetUnorderedAccessViews(1, 1, &nullUav, nullptr);
+
+	ID3D11ShaderResourceView* srvs[3] = { depthSrv, contactShadowsCopyTexture->srv.get(), distantHalfTexture->srv.get() };
+	context->CSSetShaderResources(0, 3, srvs);
+
+	uav = screenSpaceShadowsTexture->uav.get();
+	context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
+	context->CSSetShader(distantResolveCS, nullptr, 0);
 	context->Dispatch(((uint)renderSize.x + 7u) >> 3, ((uint)renderSize.y + 7u) >> 3, 1);
 
-	ID3D11ShaderResourceView* nullSrvs[2]{ nullptr, nullptr };
-	context->CSSetShaderResources(0, 2, nullSrvs);
-	ID3D11UnorderedAccessView* nullUav = nullptr;
+	ID3D11ShaderResourceView* nullSrvs[3]{ nullptr, nullptr, nullptr };
+	context->CSSetShaderResources(0, 3, nullSrvs);
 	context->CSSetUnorderedAccessViews(0, 1, &nullUav, nullptr);
 	buffers[0] = nullptr;
 	context->CSSetConstantBuffers(1, 1, buffers);
@@ -479,6 +498,18 @@ void ScreenSpaceShadows::SetupResources()
 		copyDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 		contactShadowsCopyTexture = new Texture2D(copyDesc, "SSS::ContactShadowsCopy");
 		contactShadowsCopyTexture->CreateSRV(srvDesc);
+
+		D3D11_TEXTURE2D_DESC halfDesc = texDesc;
+		halfDesc.Width = (texDesc.Width + 1) / 2;
+		halfDesc.Height = (texDesc.Height + 1) / 2;
+		halfDesc.Format = DXGI_FORMAT_R16G16_FLOAT;
+		D3D11_SHADER_RESOURCE_VIEW_DESC halfSrvDesc = srvDesc;
+		halfSrvDesc.Format = halfDesc.Format;
+		D3D11_UNORDERED_ACCESS_VIEW_DESC halfUavDesc = uavDesc;
+		halfUavDesc.Format = halfDesc.Format;
+		distantHalfTexture = new Texture2D(halfDesc, "SSS::DistantHalfOcclusion");
+		distantHalfTexture->CreateSRV(halfSrvDesc);
+		distantHalfTexture->CreateUAV(halfUavDesc);
 	}
 }
 #undef I18N_KEY_PREFIX

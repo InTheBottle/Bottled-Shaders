@@ -67,6 +67,8 @@ public:
 		uint SampleCount;
 		uint UseContactShadows;
 		float pad0;
+		uint HalfSize[2];
+		float pad1[2];
 	};
 	STATIC_ASSERT_ALIGNAS_16(DistantShadowsCB);
 
@@ -99,8 +101,10 @@ public:
 	Texture2D* screenSpaceShadowsTexture = nullptr;
 
 	ConstantBuffer* distantShadowsCB = nullptr;
-	ID3D11ComputeShader* distantShadowsCS = nullptr;
+	ID3D11ComputeShader* distantTraceCS = nullptr;
+	ID3D11ComputeShader* distantResolveCS = nullptr;
 	Texture2D* contactShadowsCopyTexture = nullptr;
+	Texture2D* distantHalfTexture = nullptr;
 
 	/** @brief Creates the raymarch constant buffer, point border sampler, and shadow output texture. */
 	virtual void SetupResources() override;
@@ -130,7 +134,7 @@ public:
 	/** @brief Dispatches the Bend SSS compute shader to generate screen-space contact shadows. */
 	void DrawShadows();
 
-	ID3D11ComputeShader* GetComputeDistantShadows();
+	bool CompileDistantShadows();
 	float GetShadowCascadeEndDistance();
 	void DrawDistantShadows(bool a_hasContactShadows);
 
