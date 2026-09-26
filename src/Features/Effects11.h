@@ -5,6 +5,9 @@
 #include <memory>
 #include <winrt/base.h>
 
+#pragma warning(push)
+#pragma warning(disable: 4324)
+
 struct Effects11 : Feature
 {
 public:
@@ -196,3 +199,5 @@ private:
 		float intensity = 1.0f;
 	} pointLighting;
 };
+
+#pragma warning(pop)
