@@ -125,8 +125,8 @@ public:
 	char tbuf[256] = "";
 	char altbuf[256] = "";
 
-	float snowing_speed = 0.0f;
-	float melting_speed = 0.0f;
+	float snowing_speed = 1.0f;
+	float melting_speed = 1.0f;
 	float2 mapMin = DEFAULT_MAP_MIN;
 	float2 mapMax = DEFAULT_MAP_MAX;
 	uint MaxSummerMonth = DEFAULT_PEAK_SUMMER_MONTH;
@@ -182,6 +182,10 @@ public:
 	virtual void RestoreDefaultSettings() override;
 	void Reload();
 	void SaveConfig();
+	/** @brief Resets every per-worldspace value (world settings, seasons, map, textures) so nothing leaks between worldspace configs. */
+	void ResetWorldConfig();
+	/** @brief Derives the shader map transform from mapMin/mapMax. */
+	void UpdateMapTransform();
 
 	virtual inline void PostPostLoad() override { Hooks::Install(); }
 

@@ -73,7 +73,10 @@ void SnowCover::DrawSettings()
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Defaults")) {
-			wsettings = WorldSettings();
+			// Reset every value the config holds, not just wsettings, or a save mixes defaults with the previous values
+			const uint enabled = wsettings.EnableSnowCover;
+			ResetWorldConfig();
+			wsettings.EnableSnowCover = enabled;
 		}
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("Resets the current config to default values.");
@@ -161,10 +164,12 @@ void SnowCover::DrawSettings()
 				if (auto _tt = Util::HoverTooltipWrapper()) {
 					ImGui::Text("Path to the map texture relative to Data folder. Interpreted as grayscale.");
 				}
-				ImGui::InputFloat("Min X", &mapMin.x, 0.0f, 10.0f);
-				ImGui::InputFloat("Min Y", &mapMin.y, 0.0f, 10.0f);
-				ImGui::InputFloat("Max X", &mapMax.x, 0.0f, 10.0f);
-				ImGui::InputFloat("Max Y", &mapMax.y, 0.0f, 10.0f);
+				bool boundsChanged = ImGui::InputFloat("Min X", &mapMin.x, 0.0f, 10.0f);
+				boundsChanged |= ImGui::InputFloat("Min Y", &mapMin.y, 0.0f, 10.0f);
+				boundsChanged |= ImGui::InputFloat("Max X", &mapMax.x, 0.0f, 10.0f);
+				boundsChanged |= ImGui::InputFloat("Max Y", &mapMax.y, 0.0f, 10.0f);
+				if (boundsChanged)
+					UpdateMapTransform();
 
 				map_tex = std::filesystem::path(mapbuf);
 				ImGui::SliderFloat("Snow Map Z Scale", &wsettings.mapZscale, 0.1f, 10000.0f);
@@ -320,13 +325,53 @@ const char* GetWorldspace()
 			curr_worldspace = worldspace->GetFormEditorID();
 		}
 	}
-	return curr_worldspace;
+	// Cells and worldspaces without an editor ID have no config name
+	return (curr_worldspace && *curr_worldspace) ? curr_worldspace : "none";
+}
+
+void SnowCover::ResetWorldConfig()
+{
+	wsettings = WorldSettings{};
+	MaxSummerMonth = DEFAULT_PEAK_SUMMER_MONTH;
+	MaxWinterMonth = DEFAULT_PEAK_WINTER_MONTH;
+	SummerHeightOffset = DEFAULT_SUMMER_HEIGHT_OFFSET;
+	WinterHeightOffset = DEFAULT_WINTER_HEIGHT_OFFSET;
+	snowing_speed = 1.0f;
+	melting_speed = 1.0f;
+	mapMin = DEFAULT_MAP_MIN;
+	mapMax = DEFAULT_MAP_MAX;
+	UpdateMapTransform();
+	map_tex.clear();
+	main_tex.clear();
+	alt_tex.clear();
+	mapbuf[0] = '\0';
+	tbuf[0] = '\0';
+	altbuf[0] = '\0';
+}
+
+void SnowCover::UpdateMapTransform()
+{
+	float2 extent = mapMax - mapMin;
+	// A zero-size map would divide by zero; fall back to the full Skyrim map extent on that axis
+	if (extent.x == 0.0f)
+		extent.x = DEFAULT_MAP_MAX.x - DEFAULT_MAP_MIN.x;
+	if (extent.y == 0.0f)
+		extent.y = DEFAULT_MAP_MAX.y - DEFAULT_MAP_MIN.y;
+	wsettings.mapScale = float2(1.0) / extent;
+	wsettings.mapOffset = -mapMin * wsettings.mapScale;
 }
 
 void SnowCover::SaveConfig()
 {
-	if (last_worldspace.empty())
+	// Save to the worldspace whose config is loaded and shown, not whatever is current by now
+	if (last_worldspace.empty() || last_worldspace == "none") {
+		status = "Not in a named worldspace or cell, nothing to save to.";
 		return;
+	}
+	// The path buffers are what the UI edits; the paths only follow them while their tree node is open
+	map_tex = std::filesystem::path(mapbuf);
+	main_tex = std::filesystem::path(tbuf);
+	alt_tex = std::filesystem::path(altbuf);
 	json config = {
 		{ "AffectGrassTint", wsettings.AffectGrassTint },
 		{ "AffectTreeTint", wsettings.AffectTreeTint },
@@ -370,15 +415,22 @@ void SnowCover::SaveConfig()
 		{ "AltSpec", wsettings.AltSpec },
 	};
 
+	auto path = (Util::PathHelpers::GetShadersPath() / "SnowCover" / last_worldspace).replace_extension(std::filesystem::path(".json"));
 	try {
-		auto curr_worldspace = GetWorldspace();
-		auto path = (Util::PathHelpers::GetShadersPath() / "SnowCover" / curr_worldspace).replace_extension(std::filesystem::path(".json"));
 		std::ofstream file(path);
 		file << config.dump(4);
-	} catch (const std::system_error& e) {
-		logger::error("[Snow Cover] Error saving file: {}", e.what());
+		file.close();
+		if (!file) {
+			status = std::format("Failed to save {}", path.generic_string());
+			logger::error("[Snow Cover] Failed to write {}", path.generic_string());
+			return;
+		}
+	} catch (const std::exception& e) {
+		status = std::format("Failed to save {}", path.generic_string());
+		logger::error("[Snow Cover] Error saving {}: {}", path.generic_string(), e.what());
+		return;
 	}
-	Reload();
+	status = std::format("Saved {}", path.generic_string());
 }
 
 void SnowCover::Reload()
@@ -390,6 +442,8 @@ void SnowCover::Reload()
 		if (curr_worldspace == last_worldspace)
 			return;
 		last_worldspace = curr_worldspace;
+		// Start from defaults so a missing config, or keys absent from it, never carry the previous worldspace's values
+		ResetWorldConfig();
 		path = (Util::PathHelpers::GetShadersPath() / "SnowCover" / curr_worldspace).replace_extension(std::filesystem::path(".json"));
 		if (!std::filesystem::exists(path)) {
 			status = std::format("Config doesn't exist {}", path.generic_string());
@@ -426,8 +480,7 @@ void SnowCover::Reload()
 		WinterHeightOffset = config["WinterHeightOffset"];
 		mapMin = float2(config["MapMin"][0], config["MapMin"][1]);
 		mapMax = float2(config["MapMax"][0], config["MapMax"][1]);
-		wsettings.mapScale = float2(1.0) / (mapMax - mapMin);
-		wsettings.mapOffset = -mapMin * wsettings.mapScale;
+		UpdateMapTransform();
 		wsettings.mapZscale = config["MapZscale"];
 		wsettings.BlendSmoothness = config["BlendSmoothness"];
 		// Shipped worldspace configs predate the distance knobs; operator[] would throw on them.
@@ -515,14 +568,12 @@ void SnowCover::Reload()
 	} catch (const nlohmann::json::parse_error& e) {
 		logger::error("[Snow Cover] failed to parse {} : {}", path.generic_string(), e.what());
 		status = e.what();
-		wsettings = WorldSettings{};
-		wsettings.EnableSnowCover = false;
+		ResetWorldConfig();
 		return;
 	} catch (const nlohmann::json::exception& e) {
 		logger::error("[Snow Cover] failed to parse {} : {}", path.generic_string(), e.what());
 		status = e.what();
-		wsettings = WorldSettings{};
-		wsettings.EnableSnowCover = false;
+		ResetWorldConfig();
 		return;
 	} catch (...) {
 		logger::error("[Snow Cover] unknown error when loading a config: {}", path.generic_string());
