@@ -145,6 +145,8 @@ public:
 	/** @brief Records the pass as a fire source when its effect technique matches Effects 11's fire classification. Call from BSEffectShader::SetupGeometry. */
 	void CollectFireSource(RE::BSRenderPass* a_pass, uint32_t a_pixelDescriptor);
 	void UpdateFireMelt();
+	/** @brief True for fires placed in the world (statics, lights, activators, furniture); false for spell art, projectiles, hazards and impacts. */
+	static bool IsWorldFireSource(RE::TESObjectREFR* a_ref);
 
 	PerFrame GetCommonBufferData();
 

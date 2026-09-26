@@ -50,8 +50,9 @@ void SnowCover::DrawSettings()
 	ImGui::Checkbox("Melt Snow Near Fire", &fireMeltSettings.Enabled);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text(
-			"Clears snow around nearby fires (campfires, braziers, fire spells), found with the same\n"
-			"effect classification Effects 11 uses for fire. The %u nearest fires are used.",
+			"Clears snow around nearby placed fires (campfires, braziers, hearths), found with the same\n"
+			"effect classification Effects 11 uses for fire. Spells, projectiles and impacts are ignored.\n"
+			"The %u nearest fires are used.",
 			MAX_FIRE_MELT_SOURCES);
 	}
 	if (fireMeltSettings.Enabled) {
@@ -637,6 +638,29 @@ void SnowCover::RestoreDefaultSettings()
 	fireMeltSettings = {};
 }
 
+bool SnowCover::IsWorldFireSource(RE::TESObjectREFR* a_ref)
+{
+	// Only fires placed in the world: campfires, braziers, hearths and fire FX are statics, lights,
+	// activators or furniture. Spell art (on actors), projectiles such as arrows and fireballs, magic
+	// hazards and enchanted weapons belong to other form types, and impact effects have no reference.
+	if (!a_ref)
+		return false;
+	auto* base = a_ref->GetObjectReference();
+	if (!base)
+		return false;
+	switch (base->GetFormType()) {
+	case RE::FormType::Static:
+	case RE::FormType::MovableStatic:
+	case RE::FormType::Light:
+	case RE::FormType::Activator:
+	case RE::FormType::TalkingActivator:
+	case RE::FormType::Furniture:
+		return true;
+	default:
+		return false;
+	}
+}
+
 void SnowCover::CollectFireSource(RE::BSRenderPass* a_pass, uint32_t a_pixelDescriptor)
 {
 	if (!wsettings.EnableSnowCover || !fireMeltSettings.Enabled || !a_pass || !a_pass->geometry)
@@ -653,7 +677,7 @@ void SnowCover::CollectFireSource(RE::BSRenderPass* a_pass, uint32_t a_pixelDesc
 	const bool isFire = has(Flags::Soft) ?
 	                        (has(Flags::GrayscaleToColor) && has(Flags::GrayscaleToAlpha)) :
 	                        (has(Flags::Particles) && has(Flags::TexCoordIndex) && has(Flags::IndexedTexture));
-	if (!isFire)
+	if (!isFire || !IsWorldFireSource(a_pass->geometry->GetUserData()))
 		return;
 
 	const auto& bound = a_pass->geometry->worldBound;
