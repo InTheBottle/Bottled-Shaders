@@ -10,6 +10,11 @@ Texture2D<SCENE_DEPTH_FORMAT> SceneDepthTexture : register(t0);
 Texture2D<unorm float2> ContactShadowsTexture : register(t1);
 RWTexture2D<unorm float2> OutputTexture : register(u0);
 
+#if defined(TERRAIN_SHADOWS)
+SamplerState LinearSampler : register(s0);
+#	include "TerrainShadows/TerrainShadows.hlsli"
+#endif
+
 cbuffer DistantShadowsCB : register(b1)
 {
 	float2 RenderSize;
@@ -27,6 +32,7 @@ cbuffer DistantShadowsCB : register(b1)
 static const float MinStepLength = 32.0;
 static const float FirstStepDepthScale = 0.004;
 static const float DepthBiasScale = 0.002;
+static const float TerrainShadowSkipMargin = 64.0;
 
 float GetViewDepth(uint2 pixel)
 {
@@ -53,6 +59,11 @@ float GetViewDepth(uint2 pixel)
 	float2 uv = (dispatchID.xy + 0.5) * InvRenderSize;
 	float4 positionWS = mul(FrameBuffer::CameraViewProjInverse, float4(2.0 * float2(uv.x, 1.0 - uv.y) - 1.0, depth, 1.0));
 	positionWS.xyz /= positionWS.w;
+
+#if defined(TERRAIN_SHADOWS)
+	if (TerrainShadows::GetTerrainShadow(positionWS.xyz + FrameBuffer::CameraPosAdjust.xyz + float3(0.0, 0.0, TerrainShadowSkipMargin), LinearSampler) <= 0.0)
+		return;
+#endif
 
 	float3 lightDirection = SharedData::DirLightDirection.xyz;
 	float noise = Random::InterleavedGradientNoise(dispatchID.xy, SharedData::FrameCount);

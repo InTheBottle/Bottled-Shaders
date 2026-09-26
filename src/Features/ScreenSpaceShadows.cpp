@@ -1,7 +1,9 @@
 #include "ScreenSpaceShadows.h"
 #include "Features/ReverseZ.h"
 
+#include "Deferred.h"
 #include "Features/TerrainBlending.h"
+#include "Features/TerrainShadows.h"
 #include "I18n/I18n.h"
 #include "State.h"
 #include "Utils/D3D.h"
@@ -276,6 +278,8 @@ ID3D11ComputeShader* ScreenSpaceShadows::GetComputeDistantShadows()
 		std::vector<std::pair<const char*, const char*>> defines;
 		if (globals::features::terrainBlending.loaded)
 			defines.push_back({ "TERRAIN_BLENDING", "" });
+		if (globals::features::terrainShadows.loaded)
+			defines.push_back({ "TERRAIN_SHADOWS", "" });
 		distantShadowsCS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\ScreenSpaceShadows\\DistantShadowsCS.hlsl", defines, "cs_5_0");
 	}
 	return distantShadowsCS;
@@ -343,8 +347,11 @@ void ScreenSpaceShadows::DrawDistantShadows(bool a_hasContactShadows)
 
 	ID3D11Buffer* buffers[1] = { distantShadowsCB->CB() };
 	context->CSSetConstantBuffers(1, 1, buffers);
-	auto* sharedDataBuffer = globals::state->sharedDataCB->CB();
-	context->CSSetConstantBuffers(5, 1, &sharedDataBuffer);
+	ID3D11Buffer* sharedBuffers[2] = { globals::state->sharedDataCB->CB(), globals::state->featureDataCB->CB() };
+	context->CSSetConstantBuffers(5, 2, sharedBuffers);
+
+	auto* linearSampler = globals::deferred->linearSampler;
+	context->CSSetSamplers(0, 1, &linearSampler);
 
 	context->CSSetShader(shader, nullptr, 0);
 	context->Dispatch(((uint)renderSize.x + 7u) >> 3, ((uint)renderSize.y + 7u) >> 3, 1);
@@ -355,6 +362,8 @@ void ScreenSpaceShadows::DrawDistantShadows(bool a_hasContactShadows)
 	context->CSSetUnorderedAccessViews(0, 1, &nullUav, nullptr);
 	buffers[0] = nullptr;
 	context->CSSetConstantBuffers(1, 1, buffers);
+	ID3D11SamplerState* nullSampler = nullptr;
+	context->CSSetSamplers(0, 1, &nullSampler);
 	context->CSSetShader(nullptr, nullptr, 0);
 
 	if (globals::state->frameAnnotations)
