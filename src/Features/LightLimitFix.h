@@ -218,9 +218,15 @@ public:
 		uint LocalShadowSamples;
 		float LocalShadowFilterRadius;
 		float LocalShadowTexelSize;
-		float pad1[2];
+		uint EnableLightOcclusion;
+		uint LightOcclusionSteps;
+		float LightOcclusionMaxDistance;
+		float LightOcclusionClearance;
+		float LightOcclusionThickness;
+		float LightOcclusionStrength;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
+	static_assert(sizeof(PerFrame) == 112, "Must match LightLimitFixSettings in SharedData.hlsli");
 
 	/** @brief Populates and returns the per-frame constant buffer data for light visualization settings. */
 	PerFrame GetCommonBufferData();
@@ -414,7 +420,47 @@ public:
 		uint LocalShadowResolution = 0;
 		uint LocalShadowSamples = 8;
 		float LocalShadowFilterScale = 1.0f;
+		bool EnableLightOcclusion = true;
+		uint LightOcclusionSteps = 8;
+		float LightOcclusionMaxDistance = 2048.0f;
+		float LightOcclusionClearance = 24.0f;
+		float LightOcclusionThickness = 48.0f;
+		float LightOcclusionStrength = 1.0f;
 	};
+
+	static constexpr uint LIGHT_OCCLUSION_MIN_STEPS = 4;
+	static constexpr uint LIGHT_OCCLUSION_MAX_STEPS = 16;
+	static constexpr float LIGHT_OCCLUSION_MIN_DISTANCE = 256.0f;
+	static constexpr float LIGHT_OCCLUSION_MAX_DISTANCE = 8192.0f;
+	static constexpr float LIGHT_OCCLUSION_MAX_CLEARANCE = 128.0f;
+	static constexpr float LIGHT_OCCLUSION_MIN_THICKNESS = 4.0f;
+	static constexpr float LIGHT_OCCLUSION_MAX_THICKNESS = 256.0f;
+	/** Must match LIGHT_OCCLUSION_MIP_COUNT in LightLimitFix.hlsli and the UAV count in LightOcclusionPyramidCS.hlsl */
+	static constexpr uint LIGHT_OCCLUSION_MIP_COUNT = 5;
+	/** Pixel shader slot of the pyramid, LightOcclusionDepthPyramid in LightLimitFix.hlsli */
+	static constexpr uint LIGHT_OCCLUSION_PYRAMID_SLOT = 104;
+
+	struct alignas(16) LightOcclusionPyramidCB
+	{
+		uint RenderSize[2];
+		uint pad0[2];
+	};
+	STATIC_ASSERT_ALIGNAS_16(LightOcclusionPyramidCB);
+
+	ID3D11ComputeShader* lightOcclusionPyramidCS = nullptr;
+	ConstantBuffer* lightOcclusionPyramidCB = nullptr;
+	/** Half-resolution linear view depth, farthest per texel, LIGHT_OCCLUSION_MIP_COUNT levels */
+	eastl::unique_ptr<Texture2D> lightOcclusionPyramid = nullptr;
+	winrt::com_ptr<ID3D11UnorderedAccessView> lightOcclusionPyramidMipUAVs[LIGHT_OCCLUSION_MIP_COUNT];
+
+	/** @brief Compiles the light occlusion depth pyramid compute shader. */
+	void CompileLightOcclusionShader();
+	/** @brief Creates the light occlusion depth pyramid texture and its per-mip views. */
+	void CreateLightOcclusionResources();
+	/** @brief Builds the light occlusion depth pyramid from this frame's depth prepass. */
+	void BuildLightOcclusionPyramid();
+	/** @brief Returns whether light occlusion can run this frame. */
+	bool IsLightOcclusionActive() const;
 
 	uint clusterSize[3] = { 16 };
 

@@ -2560,6 +2560,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #			if defined(DEFERRED)
 	float contactShadowStrengthScale = 0.0;
 	const uint contactShadowSteps = LightLimitFix::GetContactShadowSteps(viewPosition.z, contactShadowStrengthScale);
+	const bool lightOcclusionEnabled = inWorld && SharedData::lightLimitFixSettings.EnableLightOcclusion && viewPosition.z < SharedData::lightLimitFixSettings.LightOcclusionMaxDistance;
 #			endif
 
 	[loop] for (uint lightIndex = 0; lightIndex < totalLightCount; lightIndex++)
@@ -2595,19 +2596,32 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		float3 normalizedLightDirection = normalize(lightDirection);
 
 		float shadowComponent = 1.0;
+		bool hasShadowMap = false;
 		[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow) {
 			shadowComponent = LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, input.WorldPosition.xyz, localShadowEye, normalizedLightDirection, localShadowSkinned, localShadowRotation);
 			lightShadow *= shadowComponent;
+			hasShadowMap = true;
 		} else if (Permutation::PixelShaderDescriptor & Permutation::LightingFlags::DefShadow) {
 			if (light.lightFlags & LightLimitFix::LightFlags::Shadow) {
 				shadowComponent = shadowColor[light.shadowLightIndex];
 				lightShadow *= shadowComponent;
+				hasShadowMap = true;
 			}
 		}
 
 		float lightAngle = dot(worldNormal.xyz, normalizedLightDirection.xyz);
 
 #			if defined(DEFERRED)
+		// Vanilla lights without a shadow map light everything in range, through walls included.
+		// Faint contributions are skipped: the trace costs more than the light it would remove.
+		[branch] if (lightOcclusionEnabled && !hasShadowMap && lightAngle > 0.0 && intensityMultiplier * light.fade > LightLimitFix::LIGHT_OCCLUSION_MIN_CONTRIBUTION)
+		{
+			float3 lightVectorVS = mul((float3x3)FrameBuffer::CameraView, lightDirection);
+			float lightOcclusion = LightLimitFix::LightOcclusion(viewPosition, screenNoise, lightVectorVS, lightDist);
+			shadowComponent *= lightOcclusion;
+			lightShadow *= lightOcclusion;
+		}
+
 		[branch] if (contactShadowSteps > 0 && shadowComponent > 0.0 && lightAngle > 0.0 && !(light.lightFlags & LightLimitFix::LightFlags::Simple))
 		{
 			float3 lightVectorVS = mul((float3x3)FrameBuffer::CameraView, lightDirection);

@@ -2,6 +2,7 @@
 #include "Effects11.h"
 #include "InverseSquareLighting.h"
 #include "LinearLighting.h"
+#include "TerrainBlending.h"
 
 #include "I18n/I18n.h"
 #include "Menu/ThemeManager.h"
@@ -30,7 +31,13 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	LocalShadowSlots,
 	LocalShadowResolution,
 	LocalShadowSamples,
-	LocalShadowFilterScale)
+	LocalShadowFilterScale,
+	EnableLightOcclusion,
+	LightOcclusionSteps,
+	LightOcclusionMaxDistance,
+	LightOcclusionClearance,
+	LightOcclusionThickness,
+	LightOcclusionStrength)
 
 static constexpr uint CLUSTER_MAX_LIGHTS = 128;
 
@@ -76,6 +83,42 @@ void LightLimitFix::DrawSettings()
 		ImGui::SliderFloat(T(TKEY("local_shadow_filter_scale"), "Shadow Filter Scale"), &settings.LocalShadowFilterScale, 0.25f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T(TKEY("local_shadow_filter_scale_tooltip"), "Scales the softening radius set by fPoissonRadiusScale in the game INI. 1.0 matches the game's own shadow-casting lights."));
+		}
+	}
+
+	ImGui::SeparatorText(T(TKEY("light_occlusion"), "Light Occlusion"));
+
+	ImGui::Checkbox(T(TKEY("enable_light_occlusion"), "Enable Light Occlusion"), &settings.EnableLightOcclusion);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("enable_light_occlusion_tooltip"),
+							  "Stops lights without a shadow map from shining through walls and objects, a vanilla limitation.\n"
+							  "Each pixel traces toward the light through the depth buffer. Only walls and objects visible on screen can block light, so light behind the camera or off screen still leaks."));
+	}
+
+	if (settings.EnableLightOcclusion) {
+		ImGui::SliderInt(T(TKEY("light_occlusion_steps"), "Occlusion Steps"), (int*)&settings.LightOcclusionSteps, LIGHT_OCCLUSION_MIN_STEPS, LIGHT_OCCLUSION_MAX_STEPS, "%d", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("light_occlusion_steps_tooltip"), "Samples per light per pixel. More steps catch thinner walls between the light and the surface at a higher GPU cost."));
+		}
+
+		ImGui::SliderFloat(T(TKEY("light_occlusion_max_distance"), "Occlusion Max Distance"), &settings.LightOcclusionMaxDistance, LIGHT_OCCLUSION_MIN_DISTANCE, LIGHT_OCCLUSION_MAX_DISTANCE, "%.0f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("light_occlusion_max_distance_tooltip"), "Distance from the camera at which light occlusion fades out completely. Lower values save GPU time."));
+		}
+
+		ImGui::SliderFloat(T(TKEY("light_occlusion_clearance"), "Light Source Clearance"), &settings.LightOcclusionClearance, 0.0f, LIGHT_OCCLUSION_MAX_CLEARANCE, "%.0f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("light_occlusion_clearance_tooltip"), "Distance around the light and the lit surface that is never treated as blocking. Raise it if lanterns, sconces or candle holders block their own light."));
+		}
+
+		ImGui::SliderFloat(T(TKEY("light_occlusion_thickness"), "Occluder Thickness"), &settings.LightOcclusionThickness, LIGHT_OCCLUSION_MIN_THICKNESS, LIGHT_OCCLUSION_MAX_THICKNESS, "%.0f", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("light_occlusion_thickness_tooltip"), "Assumed thickness of walls and objects. Higher values block light more reliably; lower values stop objects in front of a light from blocking it when the light is actually beside them."));
+		}
+
+		ImGui::SliderFloat(T(TKEY("light_occlusion_strength"), "Occlusion Strength"), &settings.LightOcclusionStrength, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("light_occlusion_strength_tooltip"), "How much blocked light is removed. Lower values leave some light leaking."));
 		}
 	}
 
@@ -199,6 +242,13 @@ LightLimitFix::PerFrame LightLimitFix::GetCommonBufferData()
 	perFrame.LocalShadowSamples = settings.LocalShadowSamples >= 8 ? 8 : (settings.LocalShadowSamples >= 4 ? 4 : 1);
 	perFrame.LocalShadowFilterRadius = filterRadius * sanitize(settings.LocalShadowFilterScale, 0.25f, 2.0f);
 	perFrame.LocalShadowTexelSize = texelSize;
+
+	perFrame.EnableLightOcclusion = IsLightOcclusionActive();
+	perFrame.LightOcclusionSteps = std::clamp(settings.LightOcclusionSteps, LIGHT_OCCLUSION_MIN_STEPS, LIGHT_OCCLUSION_MAX_STEPS);
+	perFrame.LightOcclusionMaxDistance = sanitize(settings.LightOcclusionMaxDistance, LIGHT_OCCLUSION_MIN_DISTANCE, LIGHT_OCCLUSION_MAX_DISTANCE);
+	perFrame.LightOcclusionClearance = sanitize(settings.LightOcclusionClearance, 0.0f, LIGHT_OCCLUSION_MAX_CLEARANCE);
+	perFrame.LightOcclusionThickness = sanitize(settings.LightOcclusionThickness, LIGHT_OCCLUSION_MIN_THICKNESS, LIGHT_OCCLUSION_MAX_THICKNESS);
+	perFrame.LightOcclusionStrength = sanitize(settings.LightOcclusionStrength, 0.0f, 1.0f);
 	return perFrame;
 }
 
@@ -220,6 +270,10 @@ void LightLimitFix::SetupResources()
 
 		localShadowCopyCS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\LightLimitFix\\LocalShadowCopyCS.hlsl", clusterDefines, "cs_5_0");
 		localShadowCopyCB = new ConstantBuffer(ConstantBufferDesc<LocalShadowCopyCB>());
+
+		lightOcclusionPyramidCB = new ConstantBuffer(ConstantBufferDesc<LightOcclusionPyramidCB>(), "LLF::LightOcclusionPyramidCB");
+		CompileLightOcclusionShader();
+		CreateLightOcclusionResources();
 	}
 
 	{
@@ -309,6 +363,7 @@ void LightLimitFix::SaveSettings(json& o_json)
 void LightLimitFix::LoadSettings(json& o_json)
 {
 	settings = o_json;
+	settings.LightOcclusionSteps = std::clamp(settings.LightOcclusionSteps, LIGHT_OCCLUSION_MIN_STEPS, LIGHT_OCCLUSION_MAX_STEPS);
 }
 
 void LightLimitFix::RestoreDefaultSettings()
@@ -492,7 +547,110 @@ void LightLimitFix::Prepass()
 	if (settings.EnableLocalShadows && localShadowCache)
 		BindLocalShadowResources();
 
+	if (IsLightOcclusionActive())
+		BuildLightOcclusionPyramid();
+
 	state->EndPerfEvent();
+}
+
+bool LightLimitFix::IsLightOcclusionActive() const
+{
+	return settings.EnableLightOcclusion && lightOcclusionPyramidCS && lightOcclusionPyramid && !globals::state->isMapMenuOpen;
+}
+
+void LightLimitFix::CompileLightOcclusionShader()
+{
+	std::vector<std::pair<const char*, const char*>> defines;
+	// TERRAIN_BLENDING switches the depth SRV type from the game's R24 depth to its R32_FLOAT copy
+	if (globals::features::terrainBlending.loaded)
+		defines.push_back({ "TERRAIN_BLENDING", "" });
+	lightOcclusionPyramidCS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\LightLimitFix\\LightOcclusionPyramidCS.hlsl", defines, "cs_5_0");
+}
+
+void LightLimitFix::CreateLightOcclusionResources()
+{
+	auto device = globals::d3d::device;
+	const uint width = std::max((static_cast<uint>(globals::game::graphicsState->screenWidth) + 1u) / 2u, 1u << (LIGHT_OCCLUSION_MIP_COUNT - 1));
+	const uint height = std::max((static_cast<uint>(globals::game::graphicsState->screenHeight) + 1u) / 2u, 1u << (LIGHT_OCCLUSION_MIP_COUNT - 1));
+
+	D3D11_TEXTURE2D_DESC texDesc{
+		.Width = width,
+		.Height = height,
+		.MipLevels = LIGHT_OCCLUSION_MIP_COUNT,
+		.ArraySize = 1,
+		.Format = DXGI_FORMAT_R32_FLOAT,
+		.SampleDesc = { 1, 0 },
+		.Usage = D3D11_USAGE_DEFAULT,
+		.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS,
+		.CPUAccessFlags = 0,
+		.MiscFlags = 0
+	};
+	lightOcclusionPyramid = eastl::make_unique<Texture2D>(texDesc, "LLF::LightOcclusionPyramid");
+
+	D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{
+		.Format = texDesc.Format,
+		.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+		.Texture2D = { .MostDetailedMip = 0, .MipLevels = LIGHT_OCCLUSION_MIP_COUNT }
+	};
+	lightOcclusionPyramid->CreateSRV(srvDesc);
+
+	for (uint mip = 0; mip < LIGHT_OCCLUSION_MIP_COUNT; mip++) {
+		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{
+			.Format = texDesc.Format,
+			.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D,
+			.Texture2D = { .MipSlice = mip }
+		};
+		DX::ThrowIfFailed(device->CreateUnorderedAccessView(lightOcclusionPyramid->resource.get(), &uavDesc, lightOcclusionPyramidMipUAVs[mip].put()));
+		Util::SetResourceName(lightOcclusionPyramidMipUAVs[mip].get(), "LLF::LightOcclusionPyramid Mip%u UAV", mip);
+	}
+}
+
+void LightLimitFix::BuildLightOcclusionPyramid()
+{
+	ZoneScoped;
+	TracyD3D11Zone(globals::state->tracyCtx, "LightLimitFix - Light Occlusion Pyramid");
+	globals::profiler->BeginPass("LightLimitFix::LightOcclusionPyramid");
+
+	auto context = globals::d3d::context;
+
+	const float2 renderSize = Util::ConvertToDynamic(float2{ (float)globals::game::graphicsState->screenWidth, (float)globals::game::graphicsState->screenHeight });
+	LightOcclusionPyramidCB data{};
+	data.RenderSize[0] = std::max((uint)renderSize.x, 1u);
+	data.RenderSize[1] = std::max((uint)renderSize.y, 1u);
+	lightOcclusionPyramidCB->Update(data);
+
+	// The pixel shader copy is rebound below; unbind it first so the UAV binding isn't refused
+	ID3D11ShaderResourceView* nullSrv = nullptr;
+	context->PSSetShaderResources(LIGHT_OCCLUSION_PYRAMID_SLOT, 1, &nullSrv);
+
+	ID3D11ShaderResourceView* depthSRV = Util::GetCurrentSceneDepthSRV(false);
+	context->CSSetShaderResources(0, 1, &depthSRV);
+
+	ID3D11UnorderedAccessView* uavs[LIGHT_OCCLUSION_MIP_COUNT];
+	for (uint mip = 0; mip < LIGHT_OCCLUSION_MIP_COUNT; mip++)
+		uavs[mip] = lightOcclusionPyramidMipUAVs[mip].get();
+	context->CSSetUnorderedAccessViews(0, LIGHT_OCCLUSION_MIP_COUNT, uavs, nullptr);
+
+	ID3D11Buffer* buffer = lightOcclusionPyramidCB->CB();
+	context->CSSetConstantBuffers(1, 1, &buffer);
+	ID3D11Buffer* sharedDataBuffer = globals::state->sharedDataCB->CB();
+	context->CSSetConstantBuffers(5, 1, &sharedDataBuffer);
+
+	// Each 16x16 group reduces a 32x32 block of render pixels
+	context->CSSetShader(lightOcclusionPyramidCS, nullptr, 0);
+	context->Dispatch((data.RenderSize[0] + 31u) / 32u, (data.RenderSize[1] + 31u) / 32u, 1);
+
+	context->CSSetShader(nullptr, nullptr, 0);
+	context->CSSetShaderResources(0, 1, &nullSrv);
+	ID3D11UnorderedAccessView* nullUavs[LIGHT_OCCLUSION_MIP_COUNT]{};
+	context->CSSetUnorderedAccessViews(0, LIGHT_OCCLUSION_MIP_COUNT, nullUavs, nullptr);
+	buffer = nullptr;
+	context->CSSetConstantBuffers(1, 1, &buffer);
+
+	ID3D11ShaderResourceView* pyramidSRV = lightOcclusionPyramid->srv.get();
+	context->PSSetShaderResources(LIGHT_OCCLUSION_PYRAMID_SLOT, 1, &pyramidSRV);
+
+	globals::profiler->EndPass();
 }
 
 bool LightLimitFix::IsValidLight(RE::BSLight* a_light)
@@ -532,6 +690,11 @@ void LightLimitFix::ClearShaderCache()
 		localShadowCopyCS->Release();
 		localShadowCopyCS = nullptr;
 	}
+	if (lightOcclusionPyramidCS) {
+		lightOcclusionPyramidCS->Release();
+		lightOcclusionPyramidCS = nullptr;
+	}
+	CompileLightOcclusionShader();
 	std::vector<std::pair<const char*, const char*>> clusterDefines;
 	clusterBuildingCS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\LightLimitFix\\ClusterBuildingCS.hlsl", clusterDefines, "cs_5_0");
 	clusterCullingCS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\LightLimitFix\\ClusterCullingCS.hlsl", clusterDefines, "cs_5_0");
