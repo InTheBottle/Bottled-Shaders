@@ -277,10 +277,9 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterTimeOfDaySetting("MoonGlowAmount", "SKYSCATTERING", 1.0f, 0.0f, 10.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("DustDensity", "SKYSCATTERING", 2.0f, 0.0f, 100.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("AtmosphereThickness", "SKYSCATTERING", 1.0f, 0.05f, 10.0f, 0.01f, true);
-	settingManager.RegisterTimeOfDaySetting("CloudsLightingSunMultiplier", "SKYSCATTERING", 0.35f, 0.0f, 100.0f, 0.01f, true);
-	settingManager.RegisterTimeOfDaySetting("CloudsLightingSunMinIntensity", "SKYSCATTERING", 0.55f, 0.0f, 1.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("CloudsLightingSunMultiplier", "SKYSCATTERING", 1.0f, 0.0f, 100.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("CloudsLightingSunMinIntensity", "SKYSCATTERING", 0.0f, 0.0f, 1.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("CloudsLightingMoonIntensity", "SKYSCATTERING", 1.0f, 0.0f, 10.0f, 0.01f, true);
-	settingManager.RegisterTimeOfDaySetting("CloudsLightingDensity", "SKYSCATTERING", 2.0f, 0.0f, 10.0f, 0.01f, true);
 
 	settingManager.RegisterTimeOfDaySetting("Intensity", "VOLUMETRICFOG", 1.0f, 0.0f, 30000.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("Curve", "VOLUMETRICFOG", 1.0f, 0.1f, 8.0f, 0.01f, true);

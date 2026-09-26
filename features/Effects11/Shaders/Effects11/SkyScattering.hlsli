@@ -10,12 +10,14 @@
 #	include "CloudShadows/CloudShadows.hlsli"
 #endif
 
+#if defined(CLOUDS) && defined(IBL)
+#	include "IBL/IBL.hlsli"
+#endif
+
 namespace SkyScattering
 {
 	static const float CloudLayerHeight = 2e3 / GAME_UNIT_TO_M;
 	static const float PlanetRadius = 6371e3 / GAME_UNIT_TO_M;
-	static const float CloudSelfShadowArc = 0.2;
-	static const float MaxCloudScattering = 32.0;
 
 	struct Light
 	{
@@ -39,13 +41,6 @@ namespace SkyScattering
 		return max(color, 0.0) / max(max(color.r, max(color.g, color.b)), 1e-4);
 	}
 
-	float PhaseHG(float cosTheta, float g)
-	{
-		float g2 = g * g;
-		float denom = max(1.0 + g2 - 2.0 * g * cosTheta, 1e-4);
-		return (1.0 - g2) / (denom * sqrt(denom));
-	}
-
 	float PhaseHGPeak(float cosTheta, float g)
 	{
 		float x = saturate((1.0 - g) * (1.0 - g) / max(1.0 + g * g - 2.0 * g * cosTheta, 1e-6));
@@ -64,6 +59,13 @@ namespace SkyScattering
 		return max(sunBelowHorizon, sunFadedOut);
 	}
 
+	bool UseMasser()
+	{
+		float masser = dot(max(SharedData::MasserColor.xyz, 0.0), 1.0 / 3.0) * HorizonFade(SharedData::MasserDirection.z);
+		float secunda = dot(max(SharedData::SecundaColor.xyz, 0.0), 1.0 / 3.0) * HorizonFade(SharedData::SecundaDirection.z);
+		return masser >= secunda;
+	}
+
 	Light GetLight()
 	{
 		Light light;
@@ -73,9 +75,7 @@ namespace SkyScattering
 			light.color = lerp(1.0.xxx, GetChroma(SharedData::SunColor.xyz), SharedData::enbSettings.SkyScatteringColorFromSun);
 			light.weight = sunWeight;
 		} else {
-			float masser = dot(max(SharedData::MasserColor.xyz, 0.0), 1.0 / 3.0) * HorizonFade(SharedData::MasserDirection.z);
-			float secunda = dot(max(SharedData::SecundaColor.xyz, 0.0), 1.0 / 3.0) * HorizonFade(SharedData::SecundaDirection.z);
-			bool useMasser = masser >= secunda;
+			bool useMasser = UseMasser();
 			float3 moonDirection = useMasser ? SharedData::MasserDirection.xyz : SharedData::SecundaDirection.xyz;
 			float3 moonColor = max(useMasser ? SharedData::MasserColor.xyz : SharedData::SecundaColor.xyz, 0.0);
 			float moonBrightness = max(moonColor.r, max(moonColor.g, moonColor.b));
@@ -127,11 +127,6 @@ namespace SkyScattering
 		return 1.0 - exp(-GetOpticalDepth(rayLength, viewZ));
 	}
 
-	float GetOpticalDepthFromAlpha(float alpha)
-	{
-		return -log(1.0 - clamp(alpha, 0.0, 0.98));
-	}
-
 #if defined(CLOUD_SHADOWS)
 	float GetCloudTransmittance(float3 samplePosition, float3 lightDirection, SamplerState textureSampler)
 	{
@@ -139,113 +134,111 @@ namespace SkyScattering
 		float occlusion = CloudShadows::CloudShadowsTexture.SampleLevel(textureSampler, cloudDirection, 0);
 		return 1.0 - sqrt(saturate(occlusion));
 	}
-
-	float GetCloudOpticalDepthToLight(float3 viewDirection, float3 lightDirection, float noise, SamplerState textureSampler, out float selfOpticalDepth)
-	{
-		static const uint sampleCount = 6;
-		float opticalDepth = 0.0;
-		selfOpticalDepth = 0.0;
-		[unroll] for (uint i = 0; i < sampleCount; i++)
-		{
-			float t = (float(i) + noise) / float(sampleCount);
-			float3 sampleDirection = SafeNormalize(lerp(viewDirection, lightDirection, t * t * CloudSelfShadowArc));
-			float occlusion = CloudShadows::CloudShadowsTexture.SampleLevel(textureSampler, sampleDirection, 0);
-			float sampleOpticalDepth = GetOpticalDepthFromAlpha(sqrt(saturate(occlusion)));
-			if (i == 0)
-				selfOpticalDepth = sampleOpticalDepth;
-			opticalDepth += sampleOpticalDepth;
-		}
-		return opticalDepth / float(sampleCount);
-	}
 #endif
 
-	float GetMultipleScatteringTransmittance(float opticalDepth)
+#if defined(CLOUDS)
+	static const float IsotropicPhase = 0.25 / Math::PI;
+	static const float SunIlluminance = 10.0 / Math::PI;
+
+	float PhaseHG(float cosTheta, float g)
 	{
-		return (exp(-opticalDepth) + 0.5 * exp(-0.5 * opticalDepth) + 0.25 * exp(-0.25 * opticalDepth)) / 1.75;
+		float g2 = g * g;
+		return IsotropicPhase * (1.0 - g2) / pow(abs(1.0 + g2 - 2.0 * g * cosTheta), 1.5);
 	}
 
-	float GetCloudScattering(float cosTheta, float opticalDepthToLight, float opticalDepthView)
+	float PhaseDraine(float cosTheta, float g, float alpha)
 	{
-		static const float ForwardG = 0.75;
-		static const float BackwardG = -0.2;
-		static const float ForwardWeight = 0.7;
+		float g2 = g * g;
+		float numerator = (1.0 - g2) * (1.0 + alpha * cosTheta * cosTheta);
+		float denominator = pow(abs(1.0 + g2 - 2.0 * g * cosTheta), 1.5) * (1.0 + alpha * (1.0 + 2.0 * g2) / 3.0);
+		return IsotropicPhase * numerator / denominator;
+	}
 
-		float scattering = 0.0;
-		float octaveWeight = 1.0;
-		float octaveScale = 1.0;
+	float PhaseThomasSchander(float cosTheta)
+	{
+		float p1 = cosTheta + 8.194068e-01;
+		float4 expValues = exp(float4(-6.5e+01 * cosTheta - 5.5e+01, -8.370334e+01 * p1 * p1, 7.810083e+00 * cosTheta, -4.552125e-12 * cosTheta));
+		float4 expWeights = float4(9.805233e-06, 1.388198e-01, 2.054747e-03, 2.600563e-02);
+		return dot(expValues, expWeights) * 0.25;
+	}
 
-		[unroll] for (uint octave = 0; octave < 3; octave++)
+	float GetCloudLightOcclusion(float3 viewDirection, float3 lightDirection, SamplerState textureSampler)
+	{
+		static const float3 PoissonDisc[4] = {
+			float3(0.460921, 0.615192, 0.887539),
+			float3(0.757347, 0.911008, 0.189581),
+			float3(0.548753, 0.145482, 0.0548723),
+			float3(0.90051, 0.157048, 0.623493)
+		};
+
+		float occlusion = 0.0;
+		[unroll] for (uint i = 0; i < 4; i++)
 		{
-			float lightTransmittance = exp(-opticalDepthToLight * octaveScale);
-			float viewDepth = opticalDepthView * octaveScale;
-			float viewTransmittance = exp(-viewDepth);
-			float forward = viewDepth > 1e-3 ? viewDepth * viewTransmittance / (1.0 - viewTransmittance) : 1.0;
-			float backward = 0.5 * (1.0 + viewTransmittance);
-			float phase = ForwardWeight * PhaseHG(cosTheta, ForwardG * octaveScale) * forward +
-			              (1.0 - ForwardWeight) * PhaseHG(cosTheta, BackwardG * octaveScale) * backward;
-
-			scattering += octaveWeight * lightTransmittance * phase;
-
-			octaveWeight *= 0.5;
-			octaveScale *= 0.5;
+			float3 sampleDirection = SafeNormalize(lerp(viewDirection, lightDirection, (float(i) + 0.5) / 32.0)) + (PoissonDisc[i] * 2.0 - 1.0) * 0.01;
+			if (sampleDirection.z < 0.0)
+				occlusion += -sampleDirection.z;
+#	if defined(CLOUD_SHADOWS)
+			else
+				occlusion += CloudShadows::CloudShadowsTexture.SampleLevel(textureSampler, sampleDirection, 0);
+#	endif
 		}
-
-		return scattering;
+		return saturate(occlusion * 0.25);
 	}
 
-	float3 GetCelestialCloudLighting(float3 viewDirection, float3 lightDirection, float3 lightColor, float opticalDepthView, float noise, SamplerState textureSampler, out float lightTransmittance, out float shadowTransmittance)
+	float3 RelightCloud(float3 cloudColor, float cloudAlpha, float3 viewDirection, SamplerState textureSampler)
 	{
-		float opticalDepthToLight = 0.0;
-		float selfOpticalDepth = 0.0;
-#if defined(CLOUD_SHADOWS)
-		opticalDepthToLight = GetCloudOpticalDepthToLight(viewDirection, lightDirection, noise, textureSampler, selfOpticalDepth);
-#endif
-		float density = SharedData::enbSettings.CloudsLightingDensity;
-		lightTransmittance = exp(-opticalDepthToLight * density);
-		shadowTransmittance = GetMultipleScatteringTransmittance(max(opticalDepthToLight - selfOpticalDepth, 0.0) * density);
-		return lightColor * GetCloudScattering(dot(viewDirection, lightDirection), opticalDepthToLight * density, opticalDepthView);
-	}
-
-	float3 RelightCloud(float3 cloudColor, float cloudLuminance, float alpha, float3 viewDirection, float2 screenPosition, SamplerState textureSampler, out float3 edgeTransmittance)
-	{
-		edgeTransmittance = 0.0;
-		if (alpha < 1e-3)
+		if (cloudAlpha <= 0.0)
 			return cloudColor;
 
-		float opticalDepthView = GetOpticalDepthFromAlpha(alpha) * SharedData::enbSettings.CloudsLightingDensity;
-		float noise = Random::InterleavedGradientNoise(screenPosition);
-		float3 lighting = 0.0;
-		float shade = 1.0;
-
 		float sunWeight = GetSunWeight();
-		[branch] if (sunWeight > 0.0)
-		{
-			float3 sunColor = GetChroma(SharedData::SunColor.xyz) * (sunWeight * SharedData::enbSettings.CloudsLightingSunMultiplier);
-			float shadowTransmittance;
-			lighting += GetCelestialCloudLighting(viewDirection, SafeNormalize(SharedData::SunDirection.xyz), sunColor, opticalDepthView, noise, textureSampler, edgeTransmittance.x, shadowTransmittance);
-			shade = lerp(1.0, lerp(SharedData::enbSettings.CloudsLightingSunMinIntensity, 1.0, shadowTransmittance), sunWeight);
+		float silverLiningMix = SharedData::enbSettings.CalculateCloudsEdgeFromScattering ? saturate(0.5 * SharedData::enbSettings.CloudsEdgeIntensity) : 0.0;
+		float originalMix = 1.0;
+		float relightMix;
+		float3 lightDirection;
+		float3 lightColor;
+		if (sunWeight > 0.0) {
+			relightMix = max(SharedData::enbSettings.CloudsLightingSunMultiplier, 0.0);
+			originalMix = 1.0 - 0.5 * saturate(relightMix) * sunWeight;
+			lightDirection = SafeNormalize(SharedData::SunDirection.xyz);
+			lightColor = GetChroma(SharedData::DirLightColor.xyz) * (SunIlluminance * sunWeight);
+		} else {
+			relightMix = SharedData::enbSettings.EnableCloudsLightingFromMoon ? max(SharedData::enbSettings.CloudsLightingMoonIntensity, 0.0) : 0.0;
+			silverLiningMix *= SharedData::enbSettings.CloudsEdgeMoonMultiplier;
+			lightDirection = SafeNormalize(UseMasser() ? SharedData::MasserDirection.xyz : SharedData::SecundaDirection.xyz);
+			lightColor = max(SharedData::DirLightColor.xyz, 0.0) * (GetMoonPresence() * HorizonFade(lightDirection.z));
 		}
 
-		[branch] if (SharedData::enbSettings.EnableCloudsLightingFromMoon && SharedData::enbSettings.CloudsLightingMoonIntensity > 0.0)
-		{
-			float unused;
-			float masserWeight = HorizonFade(SharedData::MasserDirection.z) * (1.0 - sunWeight);
-			[branch] if (masserWeight > 0.0 && any(SharedData::MasserColor.xyz > 0.0))
-			{
-				float3 masserColor = max(SharedData::MasserColor.xyz, 0.0) * (masserWeight * SharedData::enbSettings.CloudsLightingMoonIntensity);
-				lighting += GetCelestialCloudLighting(viewDirection, SafeNormalize(SharedData::MasserDirection.xyz), masserColor, opticalDepthView, noise, textureSampler, edgeTransmittance.y, unused);
-			}
+		[branch] if (relightMix <= 0.0) return cloudColor * originalMix;
 
-			float secundaWeight = HorizonFade(SharedData::SecundaDirection.z) * (1.0 - sunWeight);
-			[branch] if (secundaWeight > 0.0 && any(SharedData::SecundaColor.xyz > 0.0))
-			{
-				float3 secundaColor = max(SharedData::SecundaColor.xyz, 0.0) * (secundaWeight * SharedData::enbSettings.CloudsLightingMoonIntensity);
-				lighting += GetCelestialCloudLighting(viewDirection, SafeNormalize(SharedData::SecundaDirection.xyz), secundaColor, opticalDepthView, noise, textureSampler, edgeTransmittance.z, unused);
-			}
+		float cosTheta = dot(viewDirection, lightDirection);
+
+		float lightVisibility = 1.0 - GetCloudLightOcclusion(viewDirection, lightDirection, textureSampler);
+		float directVisibility = lerp(SharedData::enbSettings.CloudsLightingSunMinIntensity, 1.0, lightVisibility);
+
+		float opticalDepth = -log(max(1.0 - cloudAlpha, 1e-3));
+		float cloudPhase = lerp(PhaseThomasSchander(cosTheta), IsotropicPhase, saturate(cloudAlpha)) * Math::TAU * relightMix;
+		float forwardPhase = max(0.0, PhaseHG(cosTheta, 0.94) - IsotropicPhase) + 0.45 * max(0.0, PhaseDraine(cosTheta, 0.78, 2.0) - IsotropicPhase);
+		float silverEdgeMask = smoothstep(0.08, 0.35, cloudAlpha) * (1.0 - smoothstep(0.45, 0.85, cloudAlpha));
+		float silverScattering = 1.35 * silverEdgeMask * (1.0 - exp(-opticalDepth)) * exp(-0.5 * opticalDepth);
+		float directScattering = 0.9 * opticalDepth * exp(-0.75 * opticalDepth);
+
+		float3 relit = cloudColor * originalMix;
+		relit += cloudColor * lightColor * directVisibility * (forwardPhase * silverScattering * silverLiningMix * relightMix + cloudPhase * directScattering);
+
+#	if defined(IBL)
+		if (SharedData::iblSettings.EnableIBL) {
+			float3 cloudNormal = -viewDirection;
+			float skyVisibility = saturate(cloudNormal.z * 0.5 + 0.5) * exp(-opticalDepth);
+			float3 vanillaAmbient = Color::Ambient(max(0.0, SharedData::GetAmbient(cloudNormal)));
+			float3 iblAmbient = ImageBasedLighting::GetDiffuseIBLOccluded(vanillaAmbient, viewDirection, skyVisibility);
+			float iblFill = cloudAlpha * exp(-0.35 * opticalDepth) * lerp(0.25, 1.0, 1.0 - lightVisibility);
+			relit += cloudColor * iblAmbient * iblFill * relightMix;
 		}
+#	endif
 
-		return cloudColor * shade + cloudLuminance * min(lighting, MaxCloudScattering);
+		return relit;
 	}
+#endif
 }
 
 #endif

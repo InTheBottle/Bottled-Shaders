@@ -98,7 +98,7 @@ public:
 		float CloudsLightingMoonIntensity;
 		uint EnableCloudsLightingFromMoon;
 		uint CalculateCloudsEdgeFromScattering;
-		float CloudsLightingDensity;
+		float SkyScatteringPad0;
 	};
 	static_assert(sizeof(PerFrame) % 16 == 0);
 	static_assert(offsetof(PerFrame, EnableCloudsScattering) % 16 == 0);
