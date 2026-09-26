@@ -179,7 +179,7 @@ namespace SkyScattering
 				occlusion += -sampleDirection.z;
 #	if defined(CLOUD_SHADOWS)
 			else
-				occlusion += CloudShadows::CloudShadowsTexture.SampleLevel(textureSampler, sampleDirection, 0);
+				occlusion += CloudShadows::CloudSelfShadowTexture.SampleLevel(textureSampler, sampleDirection, 0);
 #	endif
 		}
 		return saturate(occlusion * 0.25);
@@ -219,7 +219,7 @@ namespace SkyScattering
 		float forwardScattering = SharedData::enbSettings.CloudsLightingForwardScattering;
 		float cosTheta = dot(viewDirection, lightDirection);
 
-		float lightVisibility = 1.0 - GetCloudLightOcclusion(viewDirection, lightDirection, textureSampler);
+		float lightVisibility = pow(max(1.0 - GetCloudLightOcclusion(viewDirection, lightDirection, textureSampler), 1e-6), SharedData::enbSettings.CloudsLightingDensity);
 		float directVisibility = lerp(SharedData::enbSettings.CloudsLightingSunMinIntensity, 1.0, lightVisibility);
 
 		float opticalDepth = -log(max(1.0 - cloudAlpha, 1e-3));

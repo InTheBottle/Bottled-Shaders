@@ -373,7 +373,7 @@ namespace SharedData
 		float CloudsLightingDesaturation;
 
 		float CloudsLightingForwardScattering;
-		float SkyScatteringPad0;
+		float CloudsLightingDensity;
 		float SkyScatteringPad1;
 		float SkyScatteringPad2;
 	};

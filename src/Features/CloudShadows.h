@@ -35,6 +35,7 @@ public:
 	virtual inline bool HasShaderDefine(RE::BSShader::Type) override { return true; }
 
 	bool overrideSky = false;
+	bool bindDeckSelfShadow = false;
 	/**
 	 * @brief Applies sky shader render state overrides for cloud shadow capture.
 	 *

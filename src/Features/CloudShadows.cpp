@@ -101,12 +101,19 @@ void CloudShadows::PropagateToCompletion(int side)
 
 void CloudShadows::SkyShaderHacks()
 {
+	auto context = globals::d3d::context;
+
+	if (bindDeckSelfShadow) {
+		bindDeckSelfShadow = false;
+		ID3D11ShaderResourceView* selfShadowSrv = texOcclusionChain[currentDeckForDraw]->srv.get();
+		context->PSSetShaderResources(26, 1, &selfShadowSrv);
+	}
+
 	if (!overrideSky)
 		return;
 	overrideSky = false;
 
 	auto renderer = globals::game::renderer;
-	auto context = globals::d3d::context;
 
 	auto reflections = renderer->GetRendererData().cubemapRenderTargets[RE::RENDER_TARGET_CUBEMAP::kREFLECTIONS];
 
@@ -137,6 +144,9 @@ void CloudShadows::SkyShaderHacks()
 				source, subresource, nullptr);
 		}
 
+		ID3D11ShaderResourceView* selfShadowSrv = texCubemapCloudOccCopy->srv.get();
+		context->PSSetShaderResources(26, 1, &selfShadowSrv);
+
 		rtvs[3] = occlusionChainRTVs[deck][side];
 		context->OMSetRenderTargets(4, rtvs, nullptr);
 
@@ -149,6 +159,9 @@ void CloudShadows::SkyShaderHacks()
 		context->PSSetShaderResources(17, 1, &cubemapDepth.depthSRV);
 
 		chainLastDeck[side] = deck;
+	} else {
+		ID3D11ShaderResourceView* selfShadowSrv = texOcclusionChain[currentDeckForDraw]->srv.get();
+		context->PSSetShaderResources(26, 1, &selfShadowSrv);
 	}
 
 	// rtvs[3] is ours and was never referenced, so it is excluded from the release loop.
@@ -190,11 +203,11 @@ void CloudShadows::ModifySky(RE::BSRenderPass* Pass)
 	if (deck < 0)
 		return;
 
-	if (cubeMapRenderTarget != RE::RENDER_TARGETS_CUBEMAP::kREFLECTIONS)
-		return;
-
 	currentDeckForDraw = deck;
-	overrideSky = true;
+	if (cubeMapRenderTarget == RE::RENDER_TARGETS_CUBEMAP::kREFLECTIONS)
+		overrideSky = true;
+	else
+		bindDeckSelfShadow = true;
 }
 
 void CloudShadows::ReflectionsPrepass()
@@ -263,6 +276,7 @@ void CloudShadows::SetupResources()
 				rtvDesc.Format = texDesc.Format;
 				DX::ThrowIfFailed(device->CreateRenderTargetView(texOcclusionChain[deck]->resource.get(), &rtvDesc, &occlusionChainRTVs[deck][face]));
 				Util::SetResourceName(occlusionChainRTVs[deck][face], "CloudShadows::OcclusionChain[%d] RTV[%d]", deck, face);
+				context->ClearRenderTargetView(occlusionChainRTVs[deck][face], black);
 			}
 		}
 
