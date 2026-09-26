@@ -98,12 +98,18 @@ public:
 		float CloudsLightingMoonIntensity;
 		uint EnableCloudsLightingFromMoon;
 		uint CalculateCloudsEdgeFromScattering;
+		float CloudsLightingDesaturation;
+
+		float CloudsLightingForwardScattering;
 		float SkyScatteringPad0;
+		float SkyScatteringPad1;
+		float SkyScatteringPad2;
 	};
 	static_assert(sizeof(PerFrame) % 16 == 0);
 	static_assert(offsetof(PerFrame, EnableCloudsScattering) % 16 == 0);
 	static_assert(offsetof(PerFrame, SkyScatteringColor) % 16 == 0);
 	static_assert(offsetof(PerFrame, CloudsLightingMoonIntensity) % 16 == 0);
+	static_assert(offsetof(PerFrame, CloudsLightingForwardScattering) % 16 == 0);
 
 	bool enableEffect = false;
 

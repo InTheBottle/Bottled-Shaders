@@ -85,6 +85,8 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 	data.CloudsLightingMoonIntensity = settingManager.GetInterpolatedTimeOfDayValue("CloudsLightingMoonIntensity", "SKYSCATTERING");
 	data.EnableCloudsLightingFromMoon = settingManager.GetValue<bool>("EnableCloudsLightingFromMoon", "SKYSCATTERING");
 	data.CalculateCloudsEdgeFromScattering = settingManager.GetValue<bool>("CalculateCloudsEdgeFromScattering", "SKYSCATTERING");
+	data.CloudsLightingDesaturation = std::clamp(settingManager.GetInterpolatedTimeOfDayValue("CloudsLightingDesaturation", "SKYSCATTERING"), -1.0f, 1.0f);
+	data.CloudsLightingForwardScattering = std::max(0.0f, settingManager.GetInterpolatedTimeOfDayValue("CloudsLightingForwardScattering", "SKYSCATTERING"));
 
 	data.EnableRain = IsRainEnabled();
 	data.RainMotionStretch = settingManager.GetInterpolatedTimeOfDayValue("MotionStretch", "RAIN");

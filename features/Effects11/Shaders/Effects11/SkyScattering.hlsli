@@ -185,6 +185,11 @@ namespace SkyScattering
 		return saturate(occlusion * 0.25);
 	}
 
+	float3 DesaturateCloudLight(float3 color)
+	{
+		return max(lerp(color, dot(color, 1.0 / 3.0), SharedData::enbSettings.CloudsLightingDesaturation), 0.0);
+	}
+
 	float3 RelightCloud(float3 cloudColor, float cloudAlpha, float3 viewDirection, SamplerState textureSampler)
 	{
 		if (cloudAlpha <= 0.0)
@@ -210,14 +215,16 @@ namespace SkyScattering
 
 		[branch] if (relightMix <= 0.0) return cloudColor * originalMix;
 
+		lightColor = DesaturateCloudLight(lightColor);
+		float forwardScattering = SharedData::enbSettings.CloudsLightingForwardScattering;
 		float cosTheta = dot(viewDirection, lightDirection);
 
 		float lightVisibility = 1.0 - GetCloudLightOcclusion(viewDirection, lightDirection, textureSampler);
 		float directVisibility = lerp(SharedData::enbSettings.CloudsLightingSunMinIntensity, 1.0, lightVisibility);
 
 		float opticalDepth = -log(max(1.0 - cloudAlpha, 1e-3));
-		float cloudPhase = lerp(PhaseThomasSchander(cosTheta), IsotropicPhase, saturate(cloudAlpha)) * Math::TAU * relightMix;
-		float forwardPhase = max(0.0, PhaseHG(cosTheta, 0.94) - IsotropicPhase) + 0.45 * max(0.0, PhaseDraine(cosTheta, 0.78, 2.0) - IsotropicPhase);
+		float cloudPhase = max(0.0, lerp(IsotropicPhase, lerp(PhaseThomasSchander(cosTheta), IsotropicPhase, saturate(cloudAlpha)), forwardScattering)) * Math::TAU * relightMix;
+		float forwardPhase = forwardScattering * (max(0.0, PhaseHG(cosTheta, 0.94) - IsotropicPhase) + 0.45 * max(0.0, PhaseDraine(cosTheta, 0.78, 2.0) - IsotropicPhase));
 		float silverEdgeMask = smoothstep(0.08, 0.35, cloudAlpha) * (1.0 - smoothstep(0.45, 0.85, cloudAlpha));
 		float silverScattering = 1.35 * silverEdgeMask * (1.0 - exp(-opticalDepth)) * exp(-0.5 * opticalDepth);
 		float directScattering = 0.9 * opticalDepth * exp(-0.75 * opticalDepth);
@@ -230,7 +237,7 @@ namespace SkyScattering
 			float3 cloudNormal = -viewDirection;
 			float skyVisibility = saturate(cloudNormal.z * 0.5 + 0.5) * exp(-opticalDepth);
 			float3 vanillaAmbient = Color::Ambient(max(0.0, SharedData::GetAmbient(cloudNormal)));
-			float3 iblAmbient = ImageBasedLighting::GetDiffuseIBLOccluded(vanillaAmbient, viewDirection, skyVisibility);
+			float3 iblAmbient = DesaturateCloudLight(ImageBasedLighting::GetDiffuseIBLOccluded(vanillaAmbient, viewDirection, skyVisibility));
 			float iblFill = cloudAlpha * exp(-0.35 * opticalDepth) * lerp(0.25, 1.0, 1.0 - lightVisibility);
 			relit += cloudColor * iblAmbient * iblFill * relightMix;
 		}

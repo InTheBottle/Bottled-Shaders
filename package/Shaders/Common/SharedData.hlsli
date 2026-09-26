@@ -370,7 +370,12 @@ namespace SharedData
 		float CloudsLightingMoonIntensity;
 		uint EnableCloudsLightingFromMoon;
 		uint CalculateCloudsEdgeFromScattering;
+		float CloudsLightingDesaturation;
+
+		float CloudsLightingForwardScattering;
 		float SkyScatteringPad0;
+		float SkyScatteringPad1;
+		float SkyScatteringPad2;
 	};
 	struct TerrainBlendingSettings
 	{
