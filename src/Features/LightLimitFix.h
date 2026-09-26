@@ -218,15 +218,9 @@ public:
 		uint LocalShadowSamples;
 		float LocalShadowFilterRadius;
 		float LocalShadowTexelSize;
-		uint EnableLightOcclusion;
-		uint LightOcclusionSteps;
-		float LightOcclusionMaxDistance;
-		float LightOcclusionClearance;
-		float LightOcclusionThickness;
-		float LightOcclusionStrength;
+		float pad1[2];
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
-	static_assert(sizeof(PerFrame) == 96);
 
 	/** @brief Populates and returns the per-frame constant buffer data for light visualization settings. */
 	PerFrame GetCommonBufferData();
@@ -420,40 +414,7 @@ public:
 		uint LocalShadowResolution = 0;
 		uint LocalShadowSamples = 8;
 		float LocalShadowFilterScale = 1.0f;
-		bool EnableLightOcclusion = true;
-		uint LightOcclusionSteps = 8;
-		float LightOcclusionMaxDistance = 2048.0f;
-		float LightOcclusionClearance = 24.0f;
-		float LightOcclusionThickness = 48.0f;
-		float LightOcclusionStrength = 1.0f;
 	};
-
-	static constexpr uint LIGHT_OCCLUSION_MIN_STEPS = 4;
-	static constexpr uint LIGHT_OCCLUSION_MAX_STEPS = 16;
-	static constexpr float LIGHT_OCCLUSION_MIN_DISTANCE = 256.0f;
-	static constexpr float LIGHT_OCCLUSION_MAX_DISTANCE = 8192.0f;
-	static constexpr float LIGHT_OCCLUSION_MAX_CLEARANCE = 128.0f;
-	static constexpr float LIGHT_OCCLUSION_MIN_THICKNESS = 4.0f;
-	static constexpr float LIGHT_OCCLUSION_MAX_THICKNESS = 256.0f;
-	static constexpr uint LIGHT_OCCLUSION_MIP_COUNT = 5;
-	static constexpr uint LIGHT_OCCLUSION_PYRAMID_SLOT = 104;
-
-	struct alignas(16) LightOcclusionPyramidCB
-	{
-		uint RenderSize[2];
-		uint pad0[2];
-	};
-	STATIC_ASSERT_ALIGNAS_16(LightOcclusionPyramidCB);
-
-	ID3D11ComputeShader* lightOcclusionPyramidCS = nullptr;
-	ConstantBuffer* lightOcclusionPyramidCB = nullptr;
-	eastl::unique_ptr<Texture2D> lightOcclusionPyramid = nullptr;
-	winrt::com_ptr<ID3D11UnorderedAccessView> lightOcclusionPyramidMipUAVs[LIGHT_OCCLUSION_MIP_COUNT];
-
-	void CompileLightOcclusionShader();
-	void CreateLightOcclusionResources();
-	void BuildLightOcclusionPyramid();
-	bool IsLightOcclusionActive() const;
 
 	uint clusterSize[3] = { 16 };
 

@@ -115,12 +115,7 @@ namespace SharedData
 		uint LocalShadowSamples;
 		float LocalShadowFilterRadius;
 		float LocalShadowTexelSize;
-		uint EnableLightOcclusion;
-		uint LightOcclusionSteps;
-		float LightOcclusionMaxDistance;
-		float LightOcclusionClearance;
-		float LightOcclusionThickness;
-		float LightOcclusionStrength;
+		float2 pad1;
 	};
 
 	struct WetnessEffectsSettings
