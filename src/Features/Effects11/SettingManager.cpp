@@ -287,19 +287,10 @@ void SettingManager::SetValueInternal(uint32_t id, const T& value)
 				}
 				data[id] = value;
 			}
-		} else {
-			// Fallback: update target ID only
-			auto& data = weatherData[targetWeatherID];
-			if (data.size() < allSettings.size()) {
-				auto oldSize = data.size();
-				data.resize(allSettings.size());
-				for (size_t i = oldSize; i < allSettings.size(); ++i) {
-					data[i] = allSettings[i].currentValue;
-				}
-			}
-			data[id] = value;
+			return;
 		}
-		return;
+		// No weather file backs this weather (or multiple weathers are off), so the value on screen
+		// is the enbseries.ini one; editing a weather-only copy here would never be saved.
 	}
 
 	setting.currentValue = value;
