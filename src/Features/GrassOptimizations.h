@@ -15,7 +15,7 @@ public:
 	virtual std::string GetDisplayName() override { return T("feature.grass_optimizations.name", "Grass Optimizations"); }
 	virtual inline std::string GetShortName() override { return "GrassOptimizations"; }
 	virtual inline std::string_view GetShaderDefineName() override { return "GRASS_OPTIMIZATIONS"; }
-	virtual std::string_view GetCategory() const override { return FeatureCategories::kGrass; }
+	virtual std::string_view GetCategory() const override { return FeatureCategories::kGrassAndFoliage; }
 
 	/** @brief Returns true only for the Grass shader type. */
 	bool HasShaderDefine(RE::BSShader::Type shaderType) override;

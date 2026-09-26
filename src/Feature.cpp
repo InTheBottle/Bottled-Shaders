@@ -343,13 +343,17 @@ bool Feature::ReapplyOverrideSettings()
 
 std::string Feature::GetDisplayCategory() const
 {
-	const auto category = GetCategory();
+	return TranslateCategory(GetCategory());
+}
+
+std::string Feature::TranslateCategory(std::string_view category)
+{
 	if (category == FeatureCategories::kCharacters)
 		return T("feature.category.characters", "Characters");
 	if (category == FeatureCategories::kDisplay)
 		return T("feature.category.display", "Display");
-	if (category == FeatureCategories::kGrass)
-		return T("feature.category.grass", "Grass");
+	if (category == FeatureCategories::kGrassAndFoliage)
+		return T("feature.category.grass_and_foliage", "Grass & Foliage");
 	if (category == FeatureCategories::kLandscapeAndTextures)
 		return T("feature.category.landscape_and_textures", "Landscape & Textures");
 	if (category == FeatureCategories::kLighting)
@@ -360,8 +364,10 @@ std::string Feature::GetDisplayCategory() const
 		return T("feature.category.other", "Other");
 	if (category == FeatureCategories::kPostProcessing)
 		return T("feature.category.post_processing", "Post-Processing");
-	if (category == FeatureCategories::kSky)
-		return T("feature.category.sky", "Sky");
+	if (category == FeatureCategories::kShadows)
+		return T("feature.category.shadows", "Shadows");
+	if (category == FeatureCategories::kSkyAndWeather)
+		return T("feature.category.sky_and_weather", "Sky & Weather");
 	if (category == FeatureCategories::kUtility)
 		return T("feature.category.utility", "Utility");
 	if (category == FeatureCategories::kWater)
