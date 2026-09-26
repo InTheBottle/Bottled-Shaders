@@ -6,16 +6,12 @@
 SamplerState defaultSampler : register(s0);
 
 #include "Common/ShadowSampling.hlsli"
-#include "Effects11/SkyScattering.hlsli"
 
-// Half-res target dimensions; the blur and apply passes share this layout. The run flags
-// mirror the EFFECT settings but drop to 0 when an output would add nothing this frame.
+// Half-res target dimensions; the blur and apply passes share this layout.
 cbuffer VLData : register(b1)
 {
 	int2 ScreenSize;
 	int2 ScreenSizeMin1;
-	uint RunVolumetricRays;
-	uint RunSkyScattering;
 }
 
 struct VS_OUTPUT_POST
@@ -29,7 +25,6 @@ struct PS_OUTPUT
 	float Scattering : SV_Target0;
 	// Depth this texel raymarched with; the bilateral blur + upsample weight against it.
 	float Depth : SV_Target1;
-	float SkyLitFraction : SV_Target2;
 };
 
 float GetVolumetricRaysScattering(float3 positionMS, float noise, float3 cameraOffset)
@@ -76,40 +71,6 @@ float GetVolumetricRaysScattering(float3 positionMS, float noise, float3 cameraO
 	return scattering;
 }
 
-float GetSkyLitFraction(float3 positionMS, float depth, float noise, float3 cameraOffset)
-{
-	SkyScattering::Light light = SkyScattering::GetLight();
-	if (light.weight <= 0.0)
-		return 1.0;
-
-	float3 viewDirection = SkyScattering::SafeNormalize(positionMS);
-	float rayLength = SkyScattering::GetRayLength(viewDirection, depth, positionMS);
-	float inscatterAmount = SkyScattering::GetInscatterAmount(rayLength, viewDirection.z);
-	if (inscatterAmount < 1e-4)
-		return 1.0;
-
-	const uint sampleCount = 16;
-	float lit = 0.0;
-
-	[unroll]
-	for (uint i = 0; i < sampleCount; i++) {
-		float inscatterFraction = (float(i) + noise) / float(sampleCount) * inscatterAmount;
-		float distance = SkyScattering::GetDistanceAtOpticalDepth(-log(1.0 - inscatterFraction), viewDirection.z);
-		float3 samplePos = viewDirection * distance;
-
-		float shadow = 1.0;
-#if defined(TERRAIN_SHADOWS)
-		shadow = TerrainShadows::GetTerrainShadow(samplePos + cameraOffset, LinearSampler);
-#endif
-#if defined(CLOUD_SHADOWS)
-		shadow *= SkyScattering::GetCloudTransmittance(samplePos, light.direction, LinearSampler);
-#endif
-		lit += shadow;
-	}
-
-	return lit / float(sampleCount);
-}
-
 PS_OUTPUT main(VS_OUTPUT_POST input)
 {
 	float2 uv = input.txcoord0;
@@ -123,15 +84,7 @@ PS_OUTPUT main(VS_OUTPUT_POST input)
 	float3 cameraOffset = FrameBuffer::CameraPosAdjust.xyz;
 
 	PS_OUTPUT output;
-	output.Scattering = 0.0;
+	output.Scattering = GetVolumetricRaysScattering(positionMS.xyz, noise, cameraOffset);
 	output.Depth = depth;
-	output.SkyLitFraction = 1.0;
-
-	[branch] if (RunVolumetricRays)
-		output.Scattering = GetVolumetricRaysScattering(positionMS.xyz, noise, cameraOffset);
-
-	[branch] if (RunSkyScattering)
-		output.SkyLitFraction = GetSkyLitFraction(positionMS.xyz, depth, noise, cameraOffset);
-
 	return output;
 }

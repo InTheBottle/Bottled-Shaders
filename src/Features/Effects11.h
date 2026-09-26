@@ -82,37 +82,59 @@ public:
 
 		uint EnableCloudsScattering;
 		float SkyScatteringIntensity;
-		float SkyScatteringColorFromSun;
 		float SkyScatteringShadowAmount;
+		float SkyScatteringAmount;
 
 		float3 SkyScatteringColor;
-		float SkyScatteringExtinction;
+		float SkyScatteringDustDarkening;
 
-		float SkyScatteringScaleHeight;
-		float SkyScatteringSunGlowIntensity;
-		float SkyScatteringSunGlowAnisotropy;
+		float3 SkyScatteringDustTint;
+		float SkyScatteringDustVolume;
+
+		float3 SkyScatteringSunDirection;
+		float SkyScatteringSunVisibility;
+
+		float SkyScatteringHorizonRange;
+		float SkyScatteringAtmosphereThickness;
 		float SkyScatteringAirGlowIntensity;
+		float SkyScatteringAirGlowRange;
 
-		float SkyScatteringAirGlowAnisotropy;
+		float SkyScatteringSunGlowIntensity;
+		float SkyScatteringSunGlowRange;
 		float SkyScatteringMoonGlowAmount;
-		float CloudsLightingSunMultiplier;
-		float CloudsLightingSunMinIntensity;
+		float SkyScatteringMoonGlowRange;
 
+		float SkyScatteringSunIntensity;
+		float CloudsLightingSunIntensity;
 		float CloudsLightingMoonIntensity;
 		uint EnableCloudsLightingFromMoon;
+
 		uint CalculateCloudsEdgeFromScattering;
 		float CloudsLightingDesaturation;
-
 		float CloudsLightingForwardScattering;
 		float CloudsLightingDensity;
+
+		float3 CloudsColorFilter;
+		float CloudsIntensity;
+
+		float CloudsVertexAlphaBoost;
+		float CloudsEdgeClamp;
+		float CloudsEdgeFadePower;
+		float SunBillboardTan;
+
+		float MasserBillboardTan;
+		float SecundaBillboardTan;
+		float SkyScatteringPad0;
 		float SkyScatteringPad1;
-		float SkyScatteringPad2;
 	};
 	static_assert(sizeof(PerFrame) % 16 == 0);
 	static_assert(offsetof(PerFrame, EnableCloudsScattering) % 16 == 0);
 	static_assert(offsetof(PerFrame, SkyScatteringColor) % 16 == 0);
-	static_assert(offsetof(PerFrame, CloudsLightingMoonIntensity) % 16 == 0);
-	static_assert(offsetof(PerFrame, CloudsLightingForwardScattering) % 16 == 0);
+	static_assert(offsetof(PerFrame, SkyScatteringDustTint) % 16 == 0);
+	static_assert(offsetof(PerFrame, SkyScatteringSunDirection) % 16 == 0);
+	static_assert(offsetof(PerFrame, SkyScatteringSunIntensity) % 16 == 0);
+	static_assert(offsetof(PerFrame, CloudsColorFilter) % 16 == 0);
+	static_assert(offsetof(PerFrame, MasserBillboardTan) % 16 == 0);
 
 	bool enableEffect = false;
 
@@ -126,9 +148,10 @@ public:
 	std::unique_ptr<Texture2D> vlTexA;
 	std::unique_ptr<Texture2D> vlTexB;
 	std::unique_ptr<Texture2D> vlDepthHalf;
-	std::unique_ptr<Texture2D> skyTexA;
-	std::unique_ptr<Texture2D> skyTexB;
 	std::unique_ptr<ConstantBuffer> vlBlurCB;
+
+	float3 scatteringSunColor = { 1.0f, 1.0f, 1.0f };
+	float3 scatteringSunDirection = { 0.0f, 0.0f, 1.0f };
 
 	winrt::com_ptr<ID3D11Texture2D> raindropTexture;
 	winrt::com_ptr<ID3D11ShaderResourceView> raindropSRV;
@@ -136,6 +159,7 @@ public:
 	void LoadRaindropTexture();
 
 	PerFrame GetCommonBufferData();
+	void UpdateSkyScattering(PerFrame& a_data);
 
 	virtual void DrawSettings() override;
 	virtual void SetupResources() override;

@@ -351,31 +351,50 @@ namespace SharedData
 
 		uint EnableCloudsScattering;
 		float SkyScatteringIntensity;
-		float SkyScatteringColorFromSun;
 		float SkyScatteringShadowAmount;
+		float SkyScatteringAmount;
 
 		float3 SkyScatteringColor;
-		float SkyScatteringExtinction;
+		float SkyScatteringDustDarkening;
 
-		float SkyScatteringScaleHeight;
-		float SkyScatteringSunGlowIntensity;
-		float SkyScatteringSunGlowAnisotropy;
+		float3 SkyScatteringDustTint;
+		float SkyScatteringDustVolume;
+
+		float3 SkyScatteringSunDirection;
+		float SkyScatteringSunVisibility;
+
+		float SkyScatteringHorizonRange;
+		float SkyScatteringAtmosphereThickness;
 		float SkyScatteringAirGlowIntensity;
+		float SkyScatteringAirGlowRange;
 
-		float SkyScatteringAirGlowAnisotropy;
+		float SkyScatteringSunGlowIntensity;
+		float SkyScatteringSunGlowRange;
 		float SkyScatteringMoonGlowAmount;
-		float CloudsLightingSunMultiplier;
-		float CloudsLightingSunMinIntensity;
+		float SkyScatteringMoonGlowRange;
 
+		float SkyScatteringSunIntensity;
+		float CloudsLightingSunIntensity;
 		float CloudsLightingMoonIntensity;
 		uint EnableCloudsLightingFromMoon;
+
 		uint CalculateCloudsEdgeFromScattering;
 		float CloudsLightingDesaturation;
-
 		float CloudsLightingForwardScattering;
 		float CloudsLightingDensity;
+
+		float3 CloudsColorFilter;
+		float CloudsIntensity;
+
+		float CloudsVertexAlphaBoost;
+		float CloudsEdgeClamp;
+		float CloudsEdgeFadePower;
+		float SunBillboardTan;
+
+		float MasserBillboardTan;
+		float SecundaBillboardTan;
+		float SkyScatteringPad0;
 		float SkyScatteringPad1;
-		float SkyScatteringPad2;
 	};
 	struct TerrainBlendingSettings
 	{
