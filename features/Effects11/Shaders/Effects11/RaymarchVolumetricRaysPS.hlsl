@@ -8,6 +8,16 @@ SamplerState defaultSampler : register(s0);
 #include "Common/ShadowSampling.hlsli"
 #include "Effects11/SkyScattering.hlsli"
 
+// Half-res target dimensions; the blur and apply passes share this layout. The run flags
+// mirror the EFFECT settings but drop to 0 when an output would add nothing this frame.
+cbuffer VLData : register(b1)
+{
+	int2 ScreenSize;
+	int2 ScreenSizeMin1;
+	uint RunVolumetricRays;
+	uint RunSkyScattering;
+}
+
 struct VS_OUTPUT_POST
 {
 	float4 pos : SV_POSITION;
@@ -117,10 +127,10 @@ PS_OUTPUT main(VS_OUTPUT_POST input)
 	output.Depth = depth;
 	output.SkyLitFraction = 1.0;
 
-	[branch] if (SharedData::enbSettings.EnableVolumetricRays)
+	[branch] if (RunVolumetricRays)
 		output.Scattering = GetVolumetricRaysScattering(positionMS.xyz, noise, cameraOffset);
 
-	[branch] if (SharedData::enbSettings.EnableCloudsScattering)
+	[branch] if (RunSkyScattering)
 		output.SkyLitFraction = GetSkyLitFraction(positionMS.xyz, depth, noise, cameraOffset);
 
 	return output;

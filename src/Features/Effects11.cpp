@@ -13,6 +13,7 @@
 #include "CloudShadows.h"
 #include "Deferred.h"
 #include "IBL.h"
+#include "ProceduralSun.h"
 #include "ShaderCache.h"
 #include "State.h"
 #include "TerrainShadows.h"
@@ -26,6 +27,10 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 		return {};
 
 	CheckCommonData();
+
+	const uint32_t frame = globals::state->frameCount;
+	if (perFrameCacheFrame == frame)
+		return perFrameCache;
 
 	auto& settingManager = SettingManager::GetSingleton();
 	PerFrame data{};
@@ -106,6 +111,8 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 	data.WaterFresnelMultiplier = settingManager.GetValue<float>("FresnelMultiplier", "WATER");
 	data.WaterReflectionAmount = settingManager.GetValue<float>("ReflectionAmount", "WATER");
 
+	perFrameCache = data;
+	perFrameCacheFrame = frame;
 	return data;
 }
 
@@ -597,7 +604,16 @@ bool Effects11::ReplacedTonemapperThisFrame() const
 
 bool Effects11::IsRainEnabled()
 {
-	return enableEffect && raindropSRV && SettingManager::GetSingleton().GetValue<bool>("Enable", "RAIN");
+	if (!enableEffect || !raindropSRV)
+		return false;
+
+	// Queried for every rain particle pass, so the string-keyed lookup is resolved once
+	auto& settingManager = SettingManager::GetSingleton();
+	if (rainEnabledSettingID == UINT32_MAX)
+		rainEnabledSettingID = settingManager.GetSettingID("Enable", "RAIN");
+	if (rainEnabledSettingID == UINT32_MAX)
+		return false;
+	return settingManager.GetValue<bool>(rainEnabledSettingID);
 }
 
 void Effects11::ModifyParticle(RE::BSRenderPass* Pass)
@@ -622,7 +638,6 @@ void Effects11::ModifyParticle(RE::BSRenderPass* Pass)
 	ID3D11Buffer* cbs[] = { globals::state->sharedDataCB->CB(), globals::state->featureDataCB->CB() };
 	context->VSSetConstantBuffers(5, 2, cbs);
 }
-
 
 void Effects11::ParticleShaderHacks()
 {
@@ -673,7 +688,12 @@ void Effects11::DrawVolumetricRays()
 	auto& settingManager = SettingManager::GetSingleton();
 	const bool volumetricRays = settingManager.GetValue<bool>("EnableVolumetricRays", "EFFECT");
 	const bool skyScattering = settingManager.GetValue<bool>("EnableCloudsScattering", "EFFECT");
-	if (!volumetricRays && !skyScattering)
+
+	// The apply pass scales the rays by the sun's visibility (SunColor.w), so with the sun faded
+	// out (overcast, rain, fog, night) the raymarch and blurs would only ever add black.
+	const bool runVolumetricRays = volumetricRays && ProceduralSun::GetSunVisibility() > 0.0f;
+	const bool runSkyScattering = skyScattering;
+	if (!runVolumetricRays && !runSkyScattering)
 		return;
 
 	auto& effectManager = EffectManager::GetSingleton();
@@ -803,8 +823,25 @@ void Effects11::DrawVolumetricRays()
 		vlDepthHalf->CreateRTV(depthRtvDesc);
 	}
 
+	// Shared by the raymarch, the blurs and the apply pass: half-res dimensions plus which of
+	// the two outputs are live this frame, so a skipped one is neither raymarched nor read back.
+	struct VLData
+	{
+		int32_t screenX, screenY, screenXMin1, screenYMin1;
+		uint32_t runVolumetricRays, runSkyScattering, pad0, pad1;
+	};
+	static_assert(sizeof(VLData) == 32);
+
 	if (!vlBlurCB)
-		vlBlurCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc(16), "Effects11::VLBlurCB");
+		vlBlurCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc<VLData>(), "Effects11::VLBlurCB");
+
+	VLData vlData = {
+		static_cast<int32_t>(halfDynWidth), static_cast<int32_t>(halfDynHeight),
+		static_cast<int32_t>(halfDynWidth) - 1, static_cast<int32_t>(halfDynHeight) - 1,
+		runVolumetricRays ? 1u : 0u, runSkyScattering ? 1u : 0u, 0u, 0u
+	};
+	vlBlurCB->Update(vlData);
+	ID3D11Buffer* vlDataCB = vlBlurCB->CB();
 
 	Effects11Util::D3D11ScopedPostFxBackup stateBackup;
 	stateBackup.Save(context);
@@ -837,6 +874,7 @@ void Effects11::DrawVolumetricRays()
 		context->VSSetShader(effectManager.copyVertexShader.get(), nullptr, 0);
 		context->PSSetShader(raymarchVolumetricRaysPS, nullptr, 0);
 		context->PSSetSamplers(0, 1, &sampler);
+		context->PSSetConstantBuffers(1, 1, &vlDataCB);
 
 		context->Draw(4, 0);
 
@@ -847,13 +885,6 @@ void Effects11::DrawVolumetricRays()
 	}
 
 	// Blur setup
-	struct VLData
-	{
-		int32_t screenX, screenY, screenXMin1, screenYMin1;
-	};
-	VLData vlData = { static_cast<int32_t>(halfDynWidth), static_cast<int32_t>(halfDynHeight), static_cast<int32_t>(halfDynWidth) - 1, static_cast<int32_t>(halfDynHeight) - 1 };
-	vlBlurCB->Update(vlData);
-
 	static constexpr uint32_t tgDim = 256;
 	static constexpr uint32_t blurWindow = 12;
 	static constexpr uint32_t effectiveGroupSize = tgDim - blurWindow * 2;
@@ -868,7 +899,7 @@ void Effects11::DrawVolumetricRays()
 		ID3D11UnorderedAccessView* csUAVs[1] = { destination->uav.get() };
 		context->CSSetUnorderedAccessViews(0, 1, csUAVs, nullptr);
 
-		ID3D11Buffer* csCBs[2] = { nullptr, vlBlurCB->CB() };
+		ID3D11Buffer* csCBs[2] = { nullptr, vlDataCB };
 		context->CSSetConstantBuffers(0, 2, csCBs);
 
 		context->Dispatch(groupsX, groupsY, 1);
@@ -883,11 +914,11 @@ void Effects11::DrawVolumetricRays()
 	const uint32_t blurGroupsX = (halfDynWidth + effectiveGroupSize - 1) / effectiveGroupSize;
 	const uint32_t blurGroupsY = (halfDynHeight + effectiveGroupSize - 1) / effectiveGroupSize;
 
-	if (volumetricRays) {
+	if (runVolumetricRays) {
 		blurPass(blurHCS, vlTexA.get(), vlTexB.get(), blurGroupsX, halfDynHeight, "Effects11::VolumetricRays Pass 1");
 		blurPass(blurVCS, vlTexB.get(), vlTexA.get(), halfDynWidth, blurGroupsY, "Effects11::VolumetricRays Pass 2");
 	}
-	if (skyScattering) {
+	if (runSkyScattering) {
 		blurPass(blurHCS, skyTexA.get(), skyTexB.get(), blurGroupsX, halfDynHeight, "Effects11::SkyScattering Blur H");
 		blurPass(blurVCS, skyTexB.get(), skyTexA.get(), halfDynWidth, blurGroupsY, "Effects11::SkyScattering Blur V");
 	}
@@ -926,9 +957,8 @@ void Effects11::DrawVolumetricRays()
 		context->PSSetShaderResources(0, 16, srvs);
 		context->PSSetSamplers(0, 1, &sampler);
 
-		// Half-res dimensions for the bilateral upsample.
-		ID3D11Buffer* psCB = vlBlurCB->CB();
-		context->PSSetConstantBuffers(1, 1, &psCB);
+		// Half-res dimensions for the bilateral upsample plus the live-output flags.
+		context->PSSetConstantBuffers(1, 1, &vlDataCB);
 
 		context->Draw(4, 0);
 		profiler->EndPass();

@@ -10,11 +10,14 @@ Texture2D<float> BlurredShadowTexture : register(t0);
 Texture2D<float> RaymarchDepthTexture : register(t1);
 Texture2D<float> BlurredSkyLitTexture : register(t2);
 
-// Half-res target dimensions; same layout the blur passes use.
+// Half-res target dimensions; same layout the raymarch and blur passes use. An output whose
+// run flag is 0 was not raymarched this frame, so its texture is stale and must not be applied.
 cbuffer VLData : register(b1)
 {
 	int2 ScreenSize;
 	int2 ScreenSizeMin1;
+	uint RunVolumetricRays;
+	uint RunSkyScattering;
 }
 
 struct VS_OUTPUT_POST
@@ -69,7 +72,7 @@ float4 main(VS_OUTPUT_POST input) : SV_Target0
 
 	float4 output = float4(0.0, 0.0, 0.0, 1.0);
 
-	[branch] if (SharedData::enbSettings.EnableVolumetricRays)
+	[branch] if (RunVolumetricRays)
 	{
 		float volumetricShadow = upsampled.x;
 
@@ -85,7 +88,7 @@ float4 main(VS_OUTPUT_POST input) : SV_Target0
 		output.rgb = volumetricShadow * lightColor * SharedData::enbSettings.VolumetricRaysIntensity * SharedData::SunColor.w;
 	}
 
-	[branch] if (SharedData::enbSettings.EnableCloudsScattering)
+	[branch] if (RunSkyScattering)
 	{
 		SkyScattering::Light light = SkyScattering::GetLight();
 		[branch] if (light.weight > 0.0)

@@ -182,6 +182,13 @@ public:
 private:
 	uint tonemapReplacedFrame = UINT32_MAX;  ///< frameCount when the effect chain last wrote the tonemap output
 
+	// The feature buffer is rebuilt several times per frame, so the setting lookups behind
+	// GetCommonBufferData are resolved once per frame and replayed from here.
+	PerFrame perFrameCache{};
+	uint perFrameCacheFrame = UINT32_MAX;
+
+	uint32_t rainEnabledSettingID = UINT32_MAX;  ///< RAIN:Enable, resolved on first use
+
 	struct PointLightingParams
 	{
 		float curve = 1.0f;
