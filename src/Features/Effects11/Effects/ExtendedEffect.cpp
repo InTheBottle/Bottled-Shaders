@@ -215,6 +215,8 @@ void ExtendedEffect::ApplyWeatherBlending(float blendFactor, uint32_t currentWea
 		try { return std::stof(s); } catch (...) { return fallback; }
 	};
 
+	const bool interior = EffectManager::GetSingleton().commonData.eInteriorFactor > 0.0f;
+
 	for (auto& uiVar : uiVariables) {
 		if (uiVar.isLabel)
 			continue;
@@ -227,6 +229,11 @@ void ExtendedEffect::ApplyWeatherBlending(float blendFactor, uint32_t currentWea
 		if (iniKey.empty())
 			continue;
 
+		// ExteriorWeather vars use their preset value indoors (still written, to undo any weather value)
+		const bool useWeather = !(interior && uiVar.separation == "ExteriorWeather");
+		const WeatherValues* varCurrentValues = useWeather ? currentValues : nullptr;
+		const WeatherValues* varLastValues = useWeather ? lastValues : nullptr;
+
 		switch (uiVar.type) {
 		case UIVariableType::Float:
 			{
@@ -237,8 +244,8 @@ void ExtendedEffect::ApplyWeatherBlending(float blendFactor, uint32_t currentWea
 					return safeStof(it->second, uiVar.baseFloatValue);
 				};
 
-				float currentVal = getVal(currentValues);
-				float lastVal = getVal(lastValues);
+				float currentVal = getVal(varCurrentValues);
+				float lastVal = getVal(varLastValues);
 				uiVar.floatValue = lastVal + blendFactor * (currentVal - lastVal);
 				if (uiVar.effectVariable)
 					uiVar.effectVariable->AsScalar()->SetFloat(uiVar.floatValue);
@@ -274,8 +281,8 @@ void ExtendedEffect::ApplyWeatherBlending(float blendFactor, uint32_t currentWea
 				};
 
 				float currentVals[4] = {}, lastVals[4] = {};
-				parseVec(currentValues, currentVals);
-				parseVec(lastValues, lastVals);
+				parseVec(varCurrentValues, currentVals);
+				parseVec(varLastValues, lastVals);
 
 				for (int c = 0; c < comps; ++c)
 					uiVar.vectorValue[c] = lastVals[c] + blendFactor * (currentVals[c] - lastVals[c]);
@@ -300,7 +307,10 @@ void ExtendedEffect::SyncWeatherVarFromUI(size_t index, uint32_t weatherID)
 	if (uiVar.type != UIVariableType::Float && !isVector)
 		return;
 
-	auto* entry = IsWeatherSeparated(uiVar) ? WeatherManager::GetSingleton().FindWeatherEntry(weatherID) : nullptr;
+	// Indoors an ExteriorWeather var shows its preset value, so the edit belongs to the effect ini
+	const bool interior = EffectManager::GetSingleton().commonData.eInteriorFactor > 0.0f;
+	const bool usesWeather = IsWeatherSeparated(uiVar) && !(interior && uiVar.separation == "ExteriorWeather");
+	auto* entry = usesWeather ? WeatherManager::GetSingleton().FindWeatherEntry(weatherID) : nullptr;
 	std::string iniKey = GetVariableIniKey(uiVar);
 	if (!entry || iniKey.empty()) {
 		CaptureBaseValue(uiVar);
