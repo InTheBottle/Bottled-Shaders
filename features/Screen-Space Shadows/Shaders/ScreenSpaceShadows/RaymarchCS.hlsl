@@ -56,7 +56,12 @@ cbuffer PerFrame : register(b1)
 
 	parameters.DynamicRes = DynamicRes;
 
+	// Nudges the start depth for imprecise depth buffers; the float reverse-Z buffer does not need it, and Bend recommends off
+#ifdef REVERSE_Z
+	parameters.UsePrecisionOffset = false;
+#else
 	parameters.UsePrecisionOffset = true;
+#endif
 
 	WriteScreenSpaceShadow(parameters, groupID, groupThreadID);
 }
