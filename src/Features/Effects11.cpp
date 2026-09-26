@@ -510,26 +510,31 @@ void Effects11::CheckCommonData()
 
 		enableEffect = !globals::state->IsFullScreenMenuOpen() && globals::shaderCache->IsEnabled() && settingManager.GetValue<bool>("UseEffect", "GLOBAL") && effectManager.IsPresetLoaded();
 
-		auto& weatherManager = WeatherManager::GetSingleton();
-
 		effectManager.UpdateCommonData();
 
 		const auto& commonData = effectManager.GetCommonData();
 		settingManager.SetTimeOfDayData(commonData.timeOfDay1, commonData.timeOfDay2);
 
-		uint32_t currentWeatherID = weatherManager.GetEffectiveWeatherID(static_cast<uint32_t>(commonData.weather[0]));
-		uint32_t lastWeatherID = weatherManager.GetEffectiveWeatherID(static_cast<uint32_t>(commonData.weather[1]));
+		// commonData.weather already holds location-mapped IDs. Weather files only apply with
+		// EnableMultipleWeathers; ID 0 is never a listed weather, so it selects enbseries.ini values.
+		const bool multipleWeathers = settingManager.GetValue<bool>(effectManager.ids.enableMultipleWeathers);
+		uint32_t currentWeatherID = multipleWeathers ? static_cast<uint32_t>(commonData.weather[0]) : 0;
+		uint32_t lastWeatherID = multipleWeathers ? static_cast<uint32_t>(commonData.weather[1]) : 0;
 		settingManager.SetWeatherBlendFactors(currentWeatherID, lastWeatherID, commonData.weather[2]);
+
+		// Each lookup builds string keys and takes the settings lock; OverridePointLightColor would otherwise
+		// repeat three of them for every light in every render pass
+		pointLighting.curve = settingManager.GetInterpolatedTimeOfDayValue("PointLightingCurve", "ENVIRONMENT");
+		pointLighting.desaturation = settingManager.GetInterpolatedTimeOfDayValue("PointLightingDesaturation", "ENVIRONMENT");
+		pointLighting.intensity = settingManager.GetInterpolatedTimeOfDayValue("PointLightingIntensity", "ENVIRONMENT");
 	}
 }
 
 void Effects11::OverridePointLightColor(float3& a_color)
 {
-	auto& settingManager = SettingManager::GetSingleton();
-
-	a_color = Curve(a_color, settingManager.GetInterpolatedTimeOfDayValue("PointLightingCurve", "ENVIRONMENT"));
-	a_color = Desaturation(a_color, settingManager.GetInterpolatedTimeOfDayValue("PointLightingDesaturation", "ENVIRONMENT"));
-	a_color = Intensity(a_color, settingManager.GetInterpolatedTimeOfDayValue("PointLightingIntensity", "ENVIRONMENT"));
+	a_color = Curve(a_color, pointLighting.curve);
+	a_color = Desaturation(a_color, pointLighting.desaturation);
+	a_color = Intensity(a_color, pointLighting.intensity);
 }
 
 void Effects11::OverrideAmbientLighting(DirectionalAmbientColors& DirectionalAmbientColors)
