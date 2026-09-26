@@ -24,9 +24,6 @@ bool Effect::Load()
 
 	if (!std::filesystem::exists(iniPath)) {
 		logger::info("[EFFECTS11] Could not find ini file '{}' for effect '{}', using defaults", iniPath.string(), GetName());
-		// Patches force off preset effects that clash with Community Shaders, so they apply without an ini too
-		Util::SettingsPatches::Apply(*this);
-		SnapshotBaseValues();
 		return true;
 	}
 
@@ -113,7 +110,6 @@ bool Effect::Load()
 	}
 
 	Util::SettingsPatches::Apply(*this);
-	SnapshotBaseValues();
 
 	logger::debug("[EFFECTS11] Loaded settings from '{}' for effect '{}'", iniPath.string(), GetName());
 	return true;
@@ -141,13 +137,9 @@ void Effect::Save()
 
 		std::string value;
 
-		// Weather blending overwrites the live values, so persist the preset value instead
-		const bool weatherSeparated = HasWeatherSeparation(uiVar);
-		const float* vectorValue = weatherSeparated ? uiVar.baseVectorValue : uiVar.vectorValue;
-
 		switch (uiVar.type) {
 		case UIVariableType::Float:
-			value = std::to_string(weatherSeparated ? uiVar.baseFloatValue : uiVar.floatValue);
+			value = std::to_string(uiVar.floatValue);
 			break;
 		case UIVariableType::Int:
 			value = std::to_string(uiVar.intValue);
@@ -163,7 +155,7 @@ void Effect::Save()
 				int numComponents = (uiVar.type == UIVariableType::Float2) ? 2 : (uiVar.type == UIVariableType::Float3) ? 3 : 4;
 				for (int i = 0; i < numComponents; ++i) {
 					std::string compKey = iniKey + suffixes[i];
-					std::string compValue = std::to_string(vectorValue[i]);
+					std::string compValue = std::to_string(uiVar.vectorValue[i]);
 					BOOL compResult = WritePrivateProfileStringA(section.c_str(), compKey.c_str(), compValue.c_str(), iniPath.string().c_str());
 					if (!compResult)
 						logger::warn("[EFFECTS11] Failed to write key '{}' to ini file '{}'", compKey, iniPath.string());
@@ -173,9 +165,9 @@ void Effect::Save()
 				std::ostringstream oss;
 				int numComponents = (uiVar.type == UIVariableType::Float2) ? 2 : (uiVar.type == UIVariableType::Float3) ? 3 : 4;
 
-				std::copy(vectorValue, vectorValue + numComponents - 1,
+				std::copy(uiVar.vectorValue, uiVar.vectorValue + numComponents - 1,
 					std::ostream_iterator<float>(oss, ", "));
-				oss << vectorValue[numComponents - 1];
+				oss << uiVar.vectorValue[numComponents - 1];
 
 				value = oss.str();
 			}
@@ -433,7 +425,6 @@ Effect::TechniqueSequenceResult Effect::ExecuteTechniqueSequence(const std::stri
 
 	uint32_t swapCounter = 0;
 	uint32_t passOffset = 0;
-	bool wroteChain = false;
 	bool targetInOutput = false;
 
 	ID3D11ShaderResourceView* inputSRV = nullptr;
@@ -468,21 +459,16 @@ Effect::TechniqueSequenceResult Effect::ExecuteTechniqueSequence(const std::stri
 			swapCounter++;
 		}
 
+		targetInOutput = (outputRTV == a_output.rtv.get());
+
 		if (sourceTexture && sourceTexture->IsValid())
 			sourceTexture->AsShaderResource()->SetResource(inputSRV);
 
 		RenderPasses(techniqueInfo.technique.get(), outputRTV, passOffset);
 		passOffset += techniqueInfo.passCount;
-
-		// A technique with a RenderTarget annotation writes a side target and leaves the chain result
-		// where it was. Callers swap textures on this result, so report only chain writes.
-		if (outputRTV == a_output.rtv.get() || outputRTV == a_temp.rtv.get()) {
-			wroteChain = true;
-			targetInOutput = (outputRTV == a_output.rtv.get());
-		}
 	}
 
-	return { wroteChain, targetInOutput };
+	return { true, targetInOutput };
 }
 
 void Effect::ExecuteTechnique(const std::string& techniqueName, TextureManager::Texture& output)
@@ -812,20 +798,6 @@ bool Effect::IsPerComponentVector(const UIVariable& uiVar)
 {
 	return (uiVar.type == UIVariableType::Float2 || uiVar.type == UIVariableType::Float3 || uiVar.type == UIVariableType::Float4) &&
 		uiVar.widgetType != UIWidgetType::Color;
-}
-
-bool Effect::HasWeatherSeparation(const UIVariable& uiVar)
-{
-	return !uiVar.separation.empty() && uiVar.separation != "None";
-}
-
-void Effect::SnapshotBaseValues()
-{
-	for (auto& uiVar : uiVariables) {
-		if (uiVar.type == UIVariableType::Float)
-			uiVar.baseFloatValue = uiVar.floatValue;
-		std::copy(std::begin(uiVar.vectorValue), std::end(uiVar.vectorValue), uiVar.baseVectorValue);
-	}
 }
 
 std::string Effect::GetVariableIniKey(const UIVariable& uiVar)
