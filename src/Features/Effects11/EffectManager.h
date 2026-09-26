@@ -99,8 +99,6 @@ public:
 	/** @brief Depth SRV for .fx files: the scene depth, or a standard-Z (1 - z) copy of it when Reverse Z is active. */
 	ID3D11ShaderResourceView* GetEffectDepthSRV();
 
-	void RenderEffectsList();
-
 	// Common variable data (updated once, applied to all effects)
 	struct CommonVariableData
 	{
