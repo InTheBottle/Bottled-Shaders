@@ -5,6 +5,7 @@
 #include "State.h"
 #include "TruePBR.h"
 #include "Utils/FormIdParser.h"
+#include "Utils/Game.h"
 
 struct SnowCover : Feature
 {
@@ -35,6 +36,11 @@ private:
 	static constexpr uint DEFAULT_PEAK_SUMMER_MONTH = 6;
 	static constexpr uint DEFAULT_PEAK_WINTER_MONTH = 0;
 	static constexpr uint32_t FIRST_SRV_SLOT = 38;  // t38-t44, see SnowCover.hlsli
+	static constexpr uint32_t MAX_FIRE_MELT_SOURCES = 8;       // nearest fires passed to shaders; mirrors SnowCover.hlsli
+	static constexpr uint32_t MAX_FIRE_MELT_CANDIDATES = 256;  // fire draws gathered per frame before picking the nearest
+	static constexpr float FIRE_MELT_MAX_DISTANCE = 16384.0f;  // fires further from the camera are ignored
+	static constexpr float FIRE_MELT_MIN_RADIUS = 16.0f;       // clamp for the fire effect's bound radius...
+	static constexpr float FIRE_MELT_MAX_RADIUS = 512.0f;      // ...so odd bounds cannot melt a whole area
 
 public:
 	virtual inline std::string GetName() { return "Snow Cover"; }
@@ -95,6 +101,17 @@ public:
 	// Mirrors SharedData.hlsli's SnowCoverSettings; drift corrupts every struct after it.
 	static_assert(sizeof(WorldSettings) == 144);
 
+	// Snow melt around fires, fed from the effect draws Effects 11 classifies as fire. Mirrors the end of SharedData.hlsli's SnowCoverSettings.
+	struct FireMeltData
+	{
+		uint Count = 0;
+		float Strength = 0.0f;
+		float RadiusScale = 1.0f;
+		uint pad;
+		float4 Spheres[MAX_FIRE_MELT_SOURCES];  // xyz = world position, w = effect bound radius
+	};
+	static_assert(sizeof(FireMeltData) == 16 + 16 * MAX_FIRE_MELT_SOURCES);
+
 	struct alignas(16) PerFrame
 	{
 		float Month;
@@ -104,13 +121,30 @@ public:
 
 		UserSettings settings;
 		WorldSettings wsettings;
+		FireMeltData fireMelt;
 	};
 	static_assert(sizeof(PerFrame) % 16 == 0);
-	static_assert(sizeof(PerFrame) == 176);
+	static_assert(sizeof(PerFrame) == 176 + sizeof(FireMeltData));
+
+	struct FireMeltSettings
+	{
+		bool Enabled = true;
+		float RadiusScale = 4.0f;  // melt radius as a multiple of the fire effect's bound radius
+		float Strength = 1.0f;     // 1 = bare ground at the fire, 0 = no melt
+	};
 
 	UserSettings settings;
 	WorldSettings wsettings;
+	FireMeltSettings fireMeltSettings;
 	PerFrame perFrame;
+
+	std::vector<float4> fireCandidates;  ///< Fire effect draws seen since the last buffer update
+	FireMeltData fireMelt;               ///< Nearest fires, rebuilt once per frame
+	Util::FrameChecker fireMeltFrame;
+
+	/** @brief Records the pass as a fire source when its effect technique matches Effects 11's fire classification. Call from BSEffectShader::SetupGeometry. */
+	void CollectFireSource(RE::BSRenderPass* a_pass, uint32_t a_pixelDescriptor);
+	void UpdateFireMelt();
 
 	PerFrame GetCommonBufferData();
 

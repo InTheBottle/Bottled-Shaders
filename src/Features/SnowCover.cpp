@@ -47,6 +47,23 @@ void SnowCover::DrawSettings()
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("Moves the altitude that snow appears at. For testing purposes.");
 	}
+	ImGui::Checkbox("Melt Snow Near Fire", &fireMeltSettings.Enabled);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text(
+			"Clears snow around nearby fires (campfires, braziers, fire spells), found with the same\n"
+			"effect classification Effects 11 uses for fire. The %u nearest fires are used.",
+			MAX_FIRE_MELT_SOURCES);
+	}
+	if (fireMeltSettings.Enabled) {
+		ImGui::SliderFloat("Fire Melt Radius", &fireMeltSettings.RadiusScale, 1.0f, 16.0f, "%.1fx");
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("Melt radius as a multiple of the fire's size.");
+		}
+		ImGui::SliderFloat("Fire Melt Strength", &fireMeltSettings.Strength, 0.0f, 1.0f, "%.2f");
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("How much snow is removed at the fire. 1 = bare ground.");
+		}
+	}
 	ImGui::Separator();
 	ImGui::Text("Each config applies to one worldspace or interior cell.");
 	ImGui::Text("Saved config will be applied when you enter the worldspace.");
@@ -302,6 +319,10 @@ SnowCover::PerFrame SnowCover::GetCommonBufferData()
 	perFrame.SeasonalAltitude = GetSeasonalAltitude();
 	perFrame.settings = settings;
 	perFrame.wsettings = wsettings;
+
+	if (fireMeltFrame.IsNewFrame())
+		UpdateFireMelt();
+	perFrame.fireMelt = fireMelt;
 
 	return perFrame;
 }
@@ -596,16 +617,84 @@ void SnowCover::Prepass()
 void SnowCover::LoadSettings(json& o_json)
 {
 	settings = o_json;
+	const FireMeltSettings defaults{};
+	fireMeltSettings.Enabled = o_json.value("FireMeltEnabled", defaults.Enabled);
+	fireMeltSettings.RadiusScale = std::clamp(o_json.value("FireMeltRadiusScale", defaults.RadiusScale), 1.0f, 16.0f);
+	fireMeltSettings.Strength = std::clamp(o_json.value("FireMeltStrength", defaults.Strength), 0.0f, 1.0f);
 }
 
 void SnowCover::SaveSettings(json& o_json)
 {
 	o_json = settings;
+	o_json["FireMeltEnabled"] = fireMeltSettings.Enabled;
+	o_json["FireMeltRadiusScale"] = fireMeltSettings.RadiusScale;
+	o_json["FireMeltStrength"] = fireMeltSettings.Strength;
 }
 
 void SnowCover::RestoreDefaultSettings()
 {
 	settings = {};
+	fireMeltSettings = {};
+}
+
+void SnowCover::CollectFireSource(RE::BSRenderPass* a_pass, uint32_t a_pixelDescriptor)
+{
+	if (!wsettings.EnableSnowCover || !fireMeltSettings.Enabled || !a_pass || !a_pass->geometry)
+		return;
+	if (fireCandidates.size() >= MAX_FIRE_MELT_CANDIDATES)
+		return;
+
+	// Same test as Effect.hlsl's EFFECTS11 isFire: additive and either soft with grayscale-to-color and -alpha,
+	// or (not soft) indexed-texture particles
+	using Flags = SIE::ShaderCache::EffectShaderFlags;
+	auto has = [&](Flags flag) { return (a_pixelDescriptor & static_cast<uint32_t>(flag)) != 0; };
+	if (!has(Flags::AddBlend) || has(Flags::SkyObject))
+		return;
+	const bool isFire = has(Flags::Soft) ?
+	                        (has(Flags::GrayscaleToColor) && has(Flags::GrayscaleToAlpha)) :
+	                        (has(Flags::Particles) && has(Flags::TexCoordIndex) && has(Flags::IndexedTexture));
+	if (!isFire)
+		return;
+
+	const auto& bound = a_pass->geometry->worldBound;
+	fireCandidates.push_back({ bound.center.x, bound.center.y, bound.center.z, bound.radius });
+}
+
+void SnowCover::UpdateFireMelt()
+{
+	fireMelt.Count = 0;
+	fireMelt.Strength = fireMeltSettings.Strength;
+	fireMelt.RadiusScale = fireMeltSettings.RadiusScale;
+
+	if (wsettings.EnableSnowCover && fireMeltSettings.Enabled && fireMeltSettings.Strength > 0.0f && !fireCandidates.empty()) {
+		const auto eye = Util::GetEyePosition();
+		auto distanceSq = [&](const float4& s) {
+			const float dx = s.x - eye.x, dy = s.y - eye.y, dz = s.z - eye.z;
+			return dx * dx + dy * dy + dz * dz;
+		};
+		std::sort(fireCandidates.begin(), fireCandidates.end(), [&](const float4& a, const float4& b) { return distanceSq(a) < distanceSq(b); });
+
+		// One fire is drawn as several effect pieces; fold pieces inside an already picked fire into it
+		for (const auto& candidate : fireCandidates) {
+			if (fireMelt.Count >= MAX_FIRE_MELT_SOURCES || distanceSq(candidate) > FIRE_MELT_MAX_DISTANCE * FIRE_MELT_MAX_DISTANCE)
+				break;
+			const float radius = std::clamp(candidate.w, FIRE_MELT_MIN_RADIUS, FIRE_MELT_MAX_RADIUS);
+			bool merged = false;
+			for (uint32_t i = 0; i < fireMelt.Count; ++i) {
+				auto& picked = fireMelt.Spheres[i];
+				const float dx = candidate.x - picked.x, dy = candidate.y - picked.y, dz = candidate.z - picked.z;
+				if (dx * dx + dy * dy + dz * dz <= picked.w * picked.w) {
+					picked.w = std::max(picked.w, radius);
+					merged = true;
+					break;
+				}
+			}
+			if (!merged)
+				fireMelt.Spheres[fireMelt.Count++] = { candidate.x, candidate.y, candidate.z, radius };
+		}
+	}
+
+	fireCandidates.clear();
 }
 
 void SnowCover::Hooks::BSLightingShader_SetupGeometry::thunk(RE::BSShader* This, RE::BSRenderPass* Pass, uint32_t RenderFlags)
