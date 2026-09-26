@@ -2210,7 +2210,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		endif
 #		if defined(LOD_LAND_BLEND) && defined(TRUE_PBR)
 		lodLandFadeFactor = snowFactor + (1 - snowFactor) * lodLandFadeFactor;
-		lodLandColor.rgb = lerp(lodLandColor, material.BaseColor * Color::PBRLightingScale, snowFactor);
+		lodLandColor.rgb = lerp(lodLandColor.rgb, material.BaseColor * Color::PBRLightingScale, snowFactor);
 #		endif
 	}
 #	endif  // SNOW_COVER
@@ -2561,6 +2561,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float contactShadowStrengthScale = 0.0;
 	const uint contactShadowSteps = LightLimitFix::GetContactShadowSteps(viewPosition.z, contactShadowStrengthScale);
 	const bool lightOcclusionEnabled = inWorld && SharedData::lightLimitFixSettings.EnableLightOcclusion && viewPosition.z < SharedData::lightLimitFixSettings.LightOcclusionMaxDistance;
+	const float lightOcclusionNoise = Random::InterleavedGradientNoise(input.Position.xy);
 #			endif
 
 	[loop] for (uint lightIndex = 0; lightIndex < totalLightCount; lightIndex++)
@@ -2615,7 +2616,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		[branch] if (lightOcclusionEnabled && !hasShadowMap && lightAngle > 0.0 && intensityMultiplier * light.fade > LightLimitFix::LIGHT_OCCLUSION_MIN_CONTRIBUTION)
 		{
 			float3 lightVectorVS = mul((float3x3)FrameBuffer::CameraView, lightDirection);
-			float lightOcclusion = LightLimitFix::LightOcclusion(viewPosition, screenNoise, lightVectorVS, lightDist);
+			float lightOcclusion = LightLimitFix::LightOcclusion(viewPosition, lightOcclusionNoise, lightVectorVS, lightDist);
 			shadowComponent *= lightOcclusion;
 			lightShadow *= lightOcclusion;
 		}

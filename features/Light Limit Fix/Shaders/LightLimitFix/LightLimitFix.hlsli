@@ -355,6 +355,10 @@ namespace LightLimitFix
 
 	static const float LIGHT_OCCLUSION_MIN_CONTRIBUTION = 0.01;
 
+	static const float LIGHT_OCCLUSION_ONSET_SCALE = 0.25;
+
+	static const float LIGHT_OCCLUSION_EDGE_FADE = 10.0;
+
 	float SampleLightOcclusionPyramid(float2 uv, uint level)
 	{
 		const float2 renderPixels = FrameBuffer::DynamicResolutionParams1.xy * SharedData::BufferDim.xy;
@@ -365,58 +369,66 @@ namespace LightLimitFix
 		return LightOcclusionDepthPyramid.Load(int3(coord, level));
 	}
 
+	float LightOcclusionSample(float rayDepth, float sceneDepth, float bias, float onset, float allowed)
+	{
+		if (sceneDepth <= CONTACT_SHADOW_FIRST_PERSON_MAX_DEPTH)
+			return 0.0;
+		const float depthDelta = rayDepth - sceneDepth;
+		return saturate((depthDelta - bias) / onset) * saturate((allowed - depthDelta) / (0.25 * allowed));
+	}
+
 	float LightOcclusion(float3 viewPosition, float noise, float3 lightVectorVS, float lightDistance)
 	{
 		const float maxDistance = SharedData::lightLimitFixSettings.LightOcclusionMaxDistance;
 		const float distanceFade = saturate((1.0 - viewPosition.z / maxDistance) / LIGHT_OCCLUSION_DISTANCE_FADE);
 		const float strength = SharedData::lightLimitFixSettings.LightOcclusionStrength * distanceFade;
-		[branch] if (strength <= 0.0)
-			return 1.0;
 
 		const float clearance = SharedData::lightLimitFixSettings.LightOcclusionClearance;
 		const float3 lightDirectionVS = lightVectorVS * rcp(max(lightDistance, 1e-3));
-		float rayLength = lightDistance - clearance;
-		rayLength = min(rayLength, (viewPosition.z - CONTACT_SHADOW_MIN_RAY_DEPTH) / max(-lightDirectionVS.z, 1e-6));
-		[branch] if (rayLength <= 2.0 * clearance)
-			return 1.0;
-
-		const ContactShadowRay ray = GetContactShadowRay(viewPosition, viewPosition + lightDirectionVS * rayLength);
-		const float2 pixelScale = FrameBuffer::DynamicResolutionParams1.xy * SharedData::BufferDim.xy;
-		const float rayPixels = length(ray.uvDelta * ray.tMax * pixelScale);
-		[branch] if (rayPixels < 2.0)
-			return 1.0;
-
-		const uint steps = SharedData::lightLimitFixSettings.LightOcclusionSteps;
-		const float stepPixels = rayPixels / float(steps);
-		const uint level = (uint)clamp(ceil(log2(max(stepPixels, 1.0))) - 1.0, 0.0, float(LIGHT_OCCLUSION_MIP_COUNT - 1));
-
-		const float endDepth = viewPosition.z + lightDirectionVS.z * rayLength;
-		const float thickness = SharedData::lightLimitFixSettings.LightOcclusionThickness;
+		const float rayLength = min(lightDistance - clearance, (viewPosition.z - CONTACT_SHADOW_MIN_RAY_DEPTH) / max(-lightDirectionVS.z, 1e-6));
 
 		float occlusion = 0.0;
-		float previousRayDepth = viewPosition.z;
-		[loop] for (uint i = 0; i < steps; i++)
+		[branch] if (strength > 0.0 && rayLength > 2.0 * clearance)
 		{
-			const float t = ray.tMax * (float(i) + noise) / float(steps);
-			const float rayDepth = GetContactShadowRayDepth(ray, t);
-			const float stepDepth = abs(rayDepth - previousRayDepth);
-			previousRayDepth = rayDepth;
+			const ContactShadowRay ray = GetContactShadowRay(viewPosition, viewPosition + lightDirectionVS * rayLength);
+			const float2 pixelScale = FrameBuffer::DynamicResolutionParams1.xy * SharedData::BufferDim.xy;
+			const float rayPixels = length(ray.uvDelta * ray.tMax * pixelScale);
 
-			const float travelled = t * rayDepth / endDepth * rayLength;
-			if (travelled < clearance)
-				continue;
+			[branch] if (rayPixels >= 2.0)
+			{
+				const uint steps = SharedData::lightLimitFixSettings.LightOcclusionSteps;
+				const float stepT = ray.tMax / float(steps);
+				const float levelF = clamp(log2(max(rayPixels / float(steps), 2.0)) - 1.0, 0.0, float(LIGHT_OCCLUSION_MIP_COUNT - 1));
+				const uint fineLevel = (uint)levelF;
+				const uint coarseLevel = min(fineLevel + 1, LIGHT_OCCLUSION_MIP_COUNT - 1);
+				const float levelBlend = levelF - float(fineLevel);
 
-			const float sceneDepth = SampleLightOcclusionPyramid(ray.uvOrigin + ray.uvDelta * t, level);
-			if (sceneDepth <= CONTACT_SHADOW_FIRST_PERSON_MAX_DEPTH)
-				continue;
+				const float endDepth = viewPosition.z + lightDirectionVS.z * rayLength;
+				const float thickness = SharedData::lightLimitFixSettings.LightOcclusionThickness;
 
-			const float depthDelta = rayDepth - sceneDepth;
-			const float bias = max(LIGHT_OCCLUSION_MIN_BIAS, rayDepth * LIGHT_OCCLUSION_DEPTH_BIAS);
-			const float allowed = thickness + stepDepth;
-			if (depthDelta > bias && depthDelta < allowed) {
-				occlusion = max(occlusion, saturate((depthDelta - bias) / bias));
-				if (occlusion >= 1.0)
-					break;
+				[loop] for (uint i = 0; i < steps; i++)
+				{
+					const float t = stepT * (float(i) + noise);
+					const float rayDepth = GetContactShadowRayDepth(ray, t);
+
+					const float travelled = t * rayDepth / endDepth * rayLength;
+					if (travelled < clearance)
+						continue;
+
+					const float2 uv = ray.uvOrigin + ray.uvDelta * t;
+					const float2 edgeDistance = min(uv, 1.0 - uv);
+					const float edgeFade = saturate(min(edgeDistance.x, edgeDistance.y) * LIGHT_OCCLUSION_EDGE_FADE);
+
+					const float bias = max(LIGHT_OCCLUSION_MIN_BIAS, rayDepth * LIGHT_OCCLUSION_DEPTH_BIAS);
+					const float onset = bias + LIGHT_OCCLUSION_ONSET_SCALE * thickness;
+					const float allowed = thickness + abs(rayDepth - GetContactShadowRayDepth(ray, max(t - stepT, 0.0)));
+
+					const float fineOcclusion = LightOcclusionSample(rayDepth, SampleLightOcclusionPyramid(uv, fineLevel), bias, onset, allowed);
+					const float coarseOcclusion = LightOcclusionSample(rayDepth, SampleLightOcclusionPyramid(uv, coarseLevel), bias, onset, allowed);
+					occlusion = max(occlusion, lerp(fineOcclusion, coarseOcclusion, levelBlend) * edgeFade);
+					[branch] if (occlusion >= 1.0)
+						break;
+				}
 			}
 		}
 
