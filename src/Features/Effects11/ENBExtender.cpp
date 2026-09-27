@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 #include "Features/Effects11/ShaderPatches.h"
+#include "Globals.h"
 
 namespace ENBExtender
 {
@@ -1154,4 +1155,74 @@ namespace ENBExtender
 		return S_OK;
 	}
 
+	enum class KiCompileFileIndex : uint32_t
+	{
+		None,
+		PreProcessing,
+		DepthOfField,
+		Bloom,
+		Lens,
+		Adaptation,
+		MainProcessing,
+		PostProcessing,
+		SunSprite,
+		Underwater,
+	};
+
+	using KiCompileFn = HRESULT (*)(KiCompileFileIndex, ID3DBlob**, ID3DBlob**);
+
+	static std::optional<KiCompileFileIndex> GetKiCompileFileIndex(std::string_view effectName)
+	{
+		static constexpr std::pair<std::string_view, KiCompileFileIndex> slots[] = {
+			{ "enbdepthoffield.fx", KiCompileFileIndex::DepthOfField },
+			{ "enbbloom.fx", KiCompileFileIndex::Bloom },
+			{ "enblens.fx", KiCompileFileIndex::Lens },
+			{ "enbadaptation.fx", KiCompileFileIndex::Adaptation },
+			{ "enbeffect.fx", KiCompileFileIndex::MainProcessing },
+			{ "enbeffectpostpass.fx", KiCompileFileIndex::PostProcessing },
+		};
+		for (const auto& [name, index] : slots)
+			if (name == effectName)
+				return index;
+		return std::nullopt;
+	}
+
+	bool IsEncryptedSource(std::string_view source)
+	{
+		return source.starts_with("KIEFX");
+	}
+
+	bool CreateEncryptedEffect(const std::string& effectName, winrt::com_ptr<ID3DX11Effect>& effect, std::string& error)
+	{
+		auto index = GetKiCompileFileIndex(effectName);
+		if (!index) {
+			error = fmt::format("Encrypted effect '{}' has no ENB Extender compile slot", effectName);
+			return false;
+		}
+
+		auto* module = GetModuleHandleW(L"KiENBExtender");
+		auto compile = module ? reinterpret_cast<KiCompileFn>(GetProcAddress(module, "ENBExt_Compile")) : nullptr;
+		if (!compile) {
+			error = "Encrypted preset: requires KiLoader and ENB Extender (KiENBExtender.dll)";
+			return false;
+		}
+
+		winrt::com_ptr<ID3DBlob> code, errors;
+		HRESULT hr = compile(*index, code.put(), errors.put());
+		if (FAILED(hr) || !code) {
+			if (errors) {
+				auto* text = static_cast<const char*>(errors->GetBufferPointer());
+				error.assign(text, strnlen(text, errors->GetBufferSize()));
+			}
+			if (error.empty())
+				error = fmt::format("ENB Extender compile failed ({:#x})", static_cast<uint32_t>(hr));
+			return false;
+		}
+
+		if (FAILED(D3DX11CreateEffectFromMemory(code->GetBufferPointer(), code->GetBufferSize(), 0, globals::d3d::device, effect.put()))) {
+			error = "Failed to create effect from ENB Extender output";
+			return false;
+		}
+		return true;
+	}
 }
