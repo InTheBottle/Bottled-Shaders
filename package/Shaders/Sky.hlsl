@@ -358,12 +358,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 #		if defined(EFFECTS11_CELESTIAL_EXTINCTION)
 	[branch] if (SharedData::enbSettings.Enable && SharedData::enbSettings.EnableCloudsScattering && !(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsSun))
-	{
-		float3 celestialTransmittance = SkyScattering::GetCelestialTransmittance(normalize(input.WorldPosition.xyz));
-		float transmittancePeak = max(celestialTransmittance.r, max(celestialTransmittance.g, celestialTransmittance.b));
-		psout.Color.xyz *= celestialTransmittance / max(transmittancePeak, 1e-4);
-		psout.Color.w *= transmittancePeak;
-	}
+		psout.Color *= SkyScattering::GetCelestialExtinction(normalize(input.WorldPosition.xyz));
 #		endif
 
 #	else
