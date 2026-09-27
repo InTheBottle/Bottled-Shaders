@@ -840,6 +840,8 @@
     "feature.extended_materials.key_feature_5": "Height-based texture blending",
     "feature.extended_materials.name": "Extended Materials",
     "feature.extended_materials.parallax": "Parallax",
+    "feature.extended_materials.parallax_quality": "Parallax Quality",
+    "feature.extended_materials.parallax_quality_tooltip": "Scales how many height samples parallax takes per pixel, on meshes and terrain. 1.00x is the default. Higher values reduce stepping and slicing at grazing angles at extra GPU cost; lower values are faster but show more stepping.",
     "feature.extended_materials.soft_shadows": "Approximate Soft Shadows",
     "feature.extended_translucency.alpha_mode_anisotropic_fabric": "3 - Anisotropic Fabric",
     "feature.extended_translucency.alpha_mode_disabled": "0 - Disabled",

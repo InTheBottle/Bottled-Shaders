@@ -53,9 +53,6 @@ public:
 		float LightSpriteCurve;
 		float pad1;
 
-		float LightSpriteCurve;
-		float pad1[3];
-
 		float ParticleIntensity;
 		float ParticleLightingInfluence;
 		float ParticleAmbientInfluence;
