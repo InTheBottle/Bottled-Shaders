@@ -22,6 +22,7 @@
 #include "Feature.h"
 #include "FeatureIssues.h"
 #include "FeatureVersions.h"
+#include "Features/LightLimitFix/ShadowDiagnostics.h"
 #include "Features/RenderDoc.h"
 #include "Features/Upscaling.h"
 #include "I18n/I18n.h"
@@ -1026,6 +1027,8 @@ void Menu::ProcessInputEventQueue()
 				};
 				// RenderDoc's capture key is a single, unmodified key; only consider it on key-up.
 				if (!combosOnly && globals::features::renderDoc.HandleCaptureHotkey(key))
+					return true;
+				if (!combosOnly && LocalShadowDiagnostics::HandleHotkey(key))
 					return true;
 				for (const auto& ka : keyActions) {
 					const bool isCombo = ka.settingKey.size() > 1;
