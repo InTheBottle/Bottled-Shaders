@@ -83,6 +83,12 @@ public:
 		None
 	};
 
+	/**
+	 * @brief Gets the world-space direction towards a sun or moon, preferring the one Sky Sync computed this frame.
+	 * @param sky The sky whose root rotation maps Sky Sync's directions into world space.
+	 * @param caster The celestial body to query; must not be Caster::None.
+	 * @return The unit direction, or straight up (0,0,1) if none is available.
+	 */
 	RE::NiPoint3 GetCelestialDirection(const RE::Sky* sky, Caster caster) const;
 
 	/**
@@ -155,7 +161,6 @@ private:
 	inline static RE::NiPoint3* gSunPosition = nullptr;
 	inline static RE::BSVolumetricLightingRenderData* gVolumetricLighting = nullptr;
 
-	bool moonAndStarsLoaded = false;
 	RE::TESObjectCELL* currentCell = nullptr;
 	bool currentCellInterior = false;
 	RE::TESWorldSpace* currentCellWorldspace = nullptr;
@@ -165,7 +170,7 @@ private:
 	bool immediateTransitionReady = false;
 
 	float4 colors[3] = {};
-	RE::NiPoint3 celestialDirections[3] = {};
+	RE::NiPoint3 rawDirections[3] = {};  // sky-local, before shadow elevation locking; zero when not computed this frame
 	float currentDim = 1.0f;
 	bool sunSetting = false;
 	bool sunRising = false;

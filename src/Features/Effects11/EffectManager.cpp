@@ -377,21 +377,18 @@ void EffectManager::RegisterSettings()
 
 	ids.brightness = settingManager.GetSettingID("Brightness", "COLORCORRECTION");
 	ids.gammaCurve = settingManager.GetSettingID("GammaCurve", "COLORCORRECTION");
+
+	ids.enableRain = settingManager.GetSettingID("Enable", "RAIN");
 }
 
 void EffectManager::ExecuteEffect(EffectBase& a_effect, uint32_t enableSettingID)
 {
-	if (!a_effect.IsCompiled())
-		return;
-
-	if (enableSettingID != 0xFFFFFFFF && !SettingManager::GetSingleton().GetValue<bool>(enableSettingID))
+	if (!WillEffectRun(a_effect, enableSettingID))
 		return;
 
 	a_effect.profiler = globals::profiler;
 #ifdef ENABLE_ENB_EXTENDER
-	a_effect.ApplyWeatherBlending(commonData.weather[2],
-		static_cast<uint32_t>(commonData.weather[0]),
-		static_cast<uint32_t>(commonData.weather[1]));
+	a_effect.ApplyWeatherBlending(commonData.weather[2], currentWeatherID, previousWeatherID);
 	a_effect.ApplyTimeOfDayInterpolation();
 #endif
 	UpdateCommonVariablesForEffect(a_effect);
@@ -701,6 +698,7 @@ void EffectManager::CreateCopyShaders()
 		return;
 
 	winrt::com_ptr<ID3DBlob> psBlob;
+	errorBlob = nullptr;  // Holds any vertex shader warnings, and put() requires an empty pointer
 	hr = D3DCompile(pixelShaderSource.data(), pixelShaderSource.size(), "CopyPS.hlsl", nullptr, nullptr,
 		"main", "ps_5_0", 0, 0, psBlob.put(), errorBlob.put());
 
@@ -769,6 +767,7 @@ void EffectManager::CreateColorCorrectionShader()
 void EffectManager::UpdateCommonData()
 {
 	commonData = {};
+	currentWeatherID = previousWeatherID = 0;
 
 	auto sky = globals::game::sky;
 
@@ -781,8 +780,10 @@ void EffectManager::UpdateCommonData()
 
 		auto modifiedTimer = static_cast<float>(std::fmod(timer * 1000.0, 16777216.0) / 16777216.0);
 
+		// Exponential smoothing with a ~0.5s time constant so Timer.y doesn't jitter per frame
+		static constexpr float fpsSmoothingRate = 2.0f;
 		if (delta > 0.0f)
-			averageFps += (1.0f / delta - averageFps) * std::clamp(delta * 2.0f, 0.0f, 1.0f);
+			averageFps += (1.0f / delta - averageFps) * std::clamp(delta * fpsSmoothingRate, 0.0f, 1.0f);
 
 		commonData.timer[0] = modifiedTimer;
 		commonData.timer[1] = averageFps;
@@ -808,16 +809,15 @@ void EffectManager::UpdateCommonData()
 			uint32_t currentID = sky->currentWeather ? stripPluginIndex(sky->currentWeather->formID) : 0;
 			uint32_t lastID = lastWeather ? stripPluginIndex(lastWeather->formID) : 0;
 
-			uint32_t effectiveCurrentID = weatherManager.GetEffectiveWeatherID(currentID);
-			uint32_t effectiveLastID = weatherManager.GetEffectiveWeatherID(lastID);
-
-			commonData.weather[0] = static_cast<float>(effectiveCurrentID);
-			commonData.weather[1] = static_cast<float>(effectiveLastID);
+			currentWeatherID = weatherManager.GetEffectiveWeatherID(currentID);
+			previousWeatherID = weatherManager.GetEffectiveWeatherID(lastID);
+			commonData.weather[0] = static_cast<float>(currentWeatherID);
+			commonData.weather[1] = static_cast<float>(previousWeatherID);
 			commonData.weather[2] = sky->currentWeatherPct;
 			commonData.weather[3] = sky->currentGameHour;
 
-			commonData.enbWeather[0] = static_cast<float>(weatherManager.GetWeatherIndex(effectiveCurrentID));
-			commonData.enbWeather[1] = static_cast<float>(weatherManager.GetWeatherIndex(effectiveLastID));
+			commonData.enbWeather[0] = static_cast<float>(weatherManager.GetWeatherIndex(currentWeatherID));
+			commonData.enbWeather[1] = static_cast<float>(weatherManager.GetWeatherIndex(previousWeatherID));
 			commonData.enbWeather[2] = commonData.weather[2];
 			commonData.enbWeather[3] = commonData.weather[3];
 		}

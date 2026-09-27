@@ -306,7 +306,8 @@ public:
 	bool isLoadingMenuOpen = false;
 	bool isMapMenuOpen = false;
 	bool isStatsMenuOpen = false;
-	bool flatWorldMapLoaded = false;
+	bool flatWorldMapLoaded = false;  ///< FlatMapMarkersSSE is loaded, which flat world map mods (e.g. FWMF) rely on
+	/** @brief The map menu is open while a flat world map mod is installed. */
 	bool IsFlatWorldMapOpen() const { return isMapMenuOpen && flatWorldMapLoaded; }
 	/**
 	 * @brief Checks whether the main menu or loading menu is cached as open.
@@ -325,6 +326,7 @@ public:
 	}
 	/** @brief Full-screen menus drawing their own art, which must not be graded by post-process effects. */
 	bool IsFullScreenMenuOpen() const { return IsMainOrLoadingMenuOpen() || isStatsMenuOpen || IsFlatWorldMapOpen(); }
+	/** @brief The main menu, a loading screen or the flat world map is open. */
 	bool IsMainLoadingOrFlatMapOpen() const { return IsMainOrLoadingMenuOpen() || IsFlatWorldMapOpen(); }
 	/** @brief A menu is rendering its own scene instead of the gameplay view, so scene-adaptive state must not track it. */
 	bool IsMenuSceneOpen() const { return IsFullScreenMenuOpen() || isMapMenuOpen; }

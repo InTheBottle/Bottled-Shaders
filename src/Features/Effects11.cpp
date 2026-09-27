@@ -8,7 +8,6 @@
 #include "Effects11/EffectManager.h"
 #include "Effects11/PresetManager.h"
 #include "Effects11/SettingManager.h"
-#include "Effects11/WeatherManager.h"
 
 #include "CloudShadows.h"
 #include "Deferred.h"
@@ -262,8 +261,7 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 
 	CheckCommonData();
 
-	const uint32_t frame = globals::state->frameCount;
-	if (perFrameCacheFrame == frame)
+	if (!perFrameCacheChecker.IsNewFrame())
 		return perFrameCache;
 
 	auto& settingManager = SettingManager::GetSingleton();
@@ -330,7 +328,6 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 	data.WaterReflectionAmount = settingManager.GetValue<float>("ReflectionAmount", "WATER");
 
 	perFrameCache = data;
-	perFrameCacheFrame = frame;
 	return data;
 }
 
@@ -543,11 +540,13 @@ void Effects11::OverrideWeather(RE::Sky* a_sky)
 
 		auto dirLightColorF3 = NiToF3(dirLightColor);
 
+		// A near-zero scale would blow up the divide below, so treat it as unset
+		static constexpr float minSunlightScale = 1e-3f;
 		float sunlightScale = 1.0f;
 		auto imageSpaceManager = globals::game::imageSpaceManager;
 		if (imageSpaceManager) {
 			const float rawSunlightScale = imageSpaceManager->GetRuntimeData().data.baseData.hdr.sunlightScale;
-			sunlightScale = rawSunlightScale > 1e-3f ? rawSunlightScale : 1.0f;
+			sunlightScale = rawSunlightScale > minSunlightScale ? rawSunlightScale : 1.0f;
 		}
 		dirLightColorF3 *= sunlightScale;
 
@@ -734,7 +733,7 @@ void Effects11::CheckCommonData()
 		const auto& commonData = effectManager.GetCommonData();
 		settingManager.SetTimeOfDayData(commonData.timeOfDay1, commonData.timeOfDay2);
 
-		settingManager.SetWeatherBlendFactors(static_cast<uint32_t>(commonData.weather[0]), static_cast<uint32_t>(commonData.weather[1]), commonData.weather[2]);
+		settingManager.SetWeatherBlendFactors(effectManager.currentWeatherID, effectManager.previousWeatherID, commonData.weather[2]);
 
 		pointLighting.curve = settingManager.GetInterpolatedTimeOfDayValue("PointLightingCurve", "ENVIRONMENT");
 		pointLighting.desaturation = settingManager.GetInterpolatedTimeOfDayValue("PointLightingDesaturation", "ENVIRONMENT");
@@ -814,16 +813,8 @@ bool Effects11::ReplacedTonemapperThisFrame() const
 
 bool Effects11::IsRainEnabled()
 {
-	if (!enableEffect || !raindropSRV)
-		return false;
-
-	// Queried for every rain particle pass, so the string-keyed lookup is resolved once
-	auto& settingManager = SettingManager::GetSingleton();
-	if (rainEnabledSettingID == UINT32_MAX)
-		rainEnabledSettingID = settingManager.GetSettingID("Enable", "RAIN");
-	if (rainEnabledSettingID == UINT32_MAX)
-		return false;
-	return settingManager.GetValue<bool>(rainEnabledSettingID);
+	// Queried for every rain particle pass, so the cached id skips the string-keyed lookup
+	return enableEffect && raindropSRV && SettingManager::GetSingleton().GetValue<bool>(EffectManager::GetSingleton().ids.enableRain);
 }
 
 void Effects11::ModifyParticle(RE::BSRenderPass* Pass)

@@ -1109,11 +1109,11 @@ void State::UpdateSharedData([[maybe_unused]] bool a_inWorld, [[maybe_unused]] b
 		}
 
 		if (auto sky = globals::game::sky) {
-			// Process sun
 			const auto& skySync = globals::features::skySync;
 
+			// Process sun
 			if (auto sun = sky->sun; sun && sun->root && sky->root) {
-				auto sunDirection = skySync.GetCelestialDirection(sky, SkySync::Caster::Sun);
+				const auto sunDirection = skySync.GetCelestialDirection(sky, SkySync::Caster::Sun);
 				data.SunDirection = { sunDirection.x, sunDirection.y, sunDirection.z, 0.0f };
 
 				if (sun->sunBase) {
