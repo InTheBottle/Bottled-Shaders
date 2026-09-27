@@ -264,6 +264,14 @@ PS_OUTPUT main(PS_INPUT input)
 				SharedData::proceduralSunSettings.haloIntensity,
 				proceduralSunColor,
 				sunCoverage);
+
+#			if defined(CLOUD_SHADOWS)
+			float cloudExtinction = SharedData::proceduralSunSettings.cloudExtinction * sunCoverage;
+			[branch] if (cloudExtinction > 0.0) {
+				float capturedCloudOcclusion = CloudShadows::CloudShadowsTexture.SampleLevel(SampBaseSampler, viewDirection, 0).x;
+				proceduralSunColor *= ProceduralSun::GetCloudTransmission(capturedCloudOcclusion, cloudExtinction);
+			}
+#			endif
 		}
 
 		baseColor.xyz = proceduralSunColor;
@@ -344,38 +352,6 @@ PS_OUTPUT main(PS_INPUT input)
 
 		psout.Color.xyz = SkyScattering::ShadeCloud(cloudColor, cloudTextureAlpha, cloudTextureGray, viewDirection, SampBaseSampler) + skyScale * min(SharedData::enbSettings.CloudsIntensity, 1.0);
 		psout.Color.w = saturate(input.Color.w * baseColor.w * (1.0 + baseColor.w * SharedData::enbSettings.CloudsVertexAlphaBoost));
-	}
-#			endif
-
-#			if defined(CLOUDS) && defined(DEFERRED) && defined(PROCEDURAL_SUN)
-	float cloudExtinction = SharedData::proceduralSunSettings.cloudExtinction * SharedData::proceduralSunSettings.sunVisibility;
-	[branch] if (SharedData::proceduralSunSettings.enabled && cloudExtinction > 0.0 &&
-		(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InWorld)) {
-		float cloudSunCosTheta = dot(normalize(input.WorldPosition.xyz), SharedData::SunDirection.xyz);
-		float influenceCos = ProceduralSun::GetInfluenceCos(
-			SharedData::proceduralSunSettings.sunDiskCos,
-			SharedData::proceduralSunSettings.haloEnabled,
-			SharedData::proceduralSunSettings.sunHaloCos,
-			SharedData::proceduralSunSettings.haloIntensity);
-
-		[branch] if (cloudSunCosTheta > influenceCos) {
-			float sunMask;
-			float sunProfile;
-			ProceduralSun::EvaluateCloudExtinction(
-				cloudSunCosTheta,
-				SharedData::proceduralSunSettings.sunDiskCos,
-				SharedData::proceduralSunSettings.edgeSoftness,
-				SharedData::proceduralSunSettings.diskIntensity,
-				SharedData::proceduralSunSettings.haloEnabled,
-				SharedData::proceduralSunSettings.sunHaloCos,
-				SharedData::proceduralSunSettings.haloIntensity,
-				SharedData::proceduralSunSettings.haloFalloff,
-				sunMask,
-				sunProfile);
-			float sunLuminance = sunProfile * ProceduralSun::GetSunLuminance(SharedData::SunColor);
-			float sunShare = sunLuminance / max(sunLuminance + Color::RGBToLuminance(max(psout.Color.xyz, 0.0)), 1e-5);
-			psout.Color = ProceduralSun::ApplyCloudExtinction(psout.Color, 1.0 + cloudExtinction * sunMask, sunShare);
-		}
 	}
 #			endif
 #		endif
