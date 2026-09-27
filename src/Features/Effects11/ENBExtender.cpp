@@ -1225,4 +1225,141 @@ namespace ENBExtender
 		}
 		return true;
 	}
+
+	static std::string NormalizeIniKey(std::string_view key)
+	{
+		std::string normalized;
+		normalized.reserve(key.size());
+		for (size_t i = 0; i < key.size(); ++i) {
+			if (key[i] == ' ' && i + 1 < key.size() && key[i + 1] == '.')
+				continue;
+			normalized += key[i];
+			if (key[i] == '.' && i + 1 < key.size() && key[i + 1] == ' ')
+				++i;
+		}
+		return normalized;
+	}
+
+	static std::unordered_set<std::string> ReadIniSectionKeys(const std::filesystem::path& iniPath, const std::string& section)
+	{
+		std::unordered_set<std::string> keys;
+		std::ifstream file(iniPath);
+		std::string line;
+		bool inSection = false;
+		while (std::getline(file, line)) {
+			Trim(line, " \t\r");
+			if (line.empty() || line[0] == ';')
+				continue;
+			if (line[0] == '[') {
+				auto close = line.find(']');
+				inSection = close != std::string::npos && _stricmp(line.substr(1, close - 1).c_str(), section.c_str()) == 0;
+				continue;
+			}
+			auto eq = line.find('=');
+			if (!inSection || eq == std::string::npos)
+				continue;
+			std::string key = line.substr(0, eq);
+			Trim(key);
+			if (!key.empty())
+				keys.insert(NormalizeIniKey(key));
+		}
+		return keys;
+	}
+
+	static std::vector<std::string> CollectGroupScopes(Effect& effect)
+	{
+		std::vector<std::string> scopes{ std::string{} };
+		D3DX11_EFFECT_DESC effectDesc;
+		if (FAILED(effect.effect->GetDesc(&effectDesc)))
+			return scopes;
+
+		std::vector<std::string> groupStack;
+		for (UINT i = 0; i < effectDesc.GlobalVariables; ++i) {
+			auto* variable = effect.effect->GetVariableByIndex(i);
+			D3DX11_EFFECT_TYPE_DESC typeDesc;
+			if (!variable || !variable->IsValid() || FAILED(variable->GetType()->GetDesc(&typeDesc)))
+				continue;
+			if (typeDesc.Class != D3D_SVC_OBJECT || typeDesc.Type != D3D_SVT_STRING)
+				continue;
+
+			if (IsTruthy(effect.GetUIAnnotation(variable, "UIGroupBegin"))) {
+				std::string groupName = GetStringVariableValue(variable);
+				if (groupName.empty())
+					groupName = effect.GetUIAnnotation(variable, "UIGroup");
+				if (groupName.empty())
+					continue;
+				groupStack.push_back(groupName);
+			} else if (IsTruthy(effect.GetUIAnnotation(variable, "UIGroupEnd")) && !groupStack.empty()) {
+				groupStack.pop_back();
+			} else {
+				continue;
+			}
+			scopes.push_back(BuildGroupPath(groupStack));
+		}
+		return scopes;
+	}
+
+	void ResolveCompiledGroups(Effect& effect, const std::filesystem::path& iniPath)
+	{
+		auto keys = ReadIniSectionKeys(iniPath, effect.GetName());
+		auto scopes = CollectGroupScopes(effect);
+		if (keys.empty() || scopes.size() < 2)
+			return;
+
+		std::vector<Effect::UIVariable*> vars;
+		for (auto& uiVar : effect.uiVariables)
+			if (!uiVar.isLabel && !uiVar.isDefine && !uiVar.isTopLevel && uiVar.group.empty() && uiVar.uniqueName.empty() && uiVar.effectVariable)
+				vars.push_back(&uiVar);
+		if (vars.empty())
+			return;
+
+		std::unordered_map<std::string, uint32_t> scopeIds;
+		std::vector<uint32_t> scopeIdOf(scopes.size());
+		std::vector<const std::string*> uniqueScopes;
+		for (size_t j = 0; j < scopes.size(); ++j) {
+			auto [it, inserted] = scopeIds.try_emplace(scopes[j], static_cast<uint32_t>(uniqueScopes.size()));
+			if (inserted)
+				uniqueScopes.push_back(&it->first);
+			scopeIdOf[j] = it->second;
+		}
+
+		const size_t n = vars.size(), m = scopes.size(), u = uniqueScopes.size();
+		std::vector<uint8_t> cost(n * u);
+		for (size_t i = 0; i < n; ++i) {
+			for (size_t s = 0; s < u; ++s) {
+				const auto& scope = *uniqueScopes[s];
+				auto key = NormalizeIniKey(scope.empty() ? vars[i]->displayName : scope + "." + vars[i]->displayName);
+				bool found = keys.contains(key) || keys.contains(key + "X");
+				cost[i * u + s] = found ? (scope.empty() ? 1 : 0) : 4;
+			}
+		}
+
+		std::vector<uint32_t> total(m), next(m);
+		std::vector<uint32_t> from(n * m);
+		for (size_t j = 0; j < m; ++j)
+			total[j] = cost[scopeIdOf[j]];
+		for (size_t i = 1; i < n; ++i) {
+			uint32_t best = UINT32_MAX, bestJ = 0;
+			for (size_t j = 0; j < m; ++j) {
+				if (total[j] < best) {
+					best = total[j];
+					bestJ = static_cast<uint32_t>(j);
+				}
+				next[j] = best + cost[i * u + scopeIdOf[j]];
+				from[i * m + j] = bestJ;
+			}
+			std::swap(total, next);
+		}
+
+		size_t j = std::min_element(total.begin(), total.end()) - total.begin();
+		size_t matched = 0;
+		for (size_t i = n; i-- > 0;) {
+			vars[i]->group = scopes[j];
+			if (cost[i * u + scopeIdOf[j]] < 4)
+				++matched;
+			j = from[i * m + j];
+		}
+
+		logger::info("[ENBEXTENDER] Recovered groups for encrypted '{}': {}/{} parameters matched '{}'", effect.GetName(), matched, n, iniPath.filename().string());
+	}
 }

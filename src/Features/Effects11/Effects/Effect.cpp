@@ -351,6 +351,7 @@ bool Effect::LoadFXFile()
 			return false;
 		}
 		ReflectCompiledEffect();
+		ENBExtender::ResolveCompiledGroups(*this, filePath.parent_path() / (GetName() + ".ini"));
 		logger::info("[EFFECTS11] Loaded encrypted FX file through ENB Extender: {}", filePath.string());
 		return true;
 	}
