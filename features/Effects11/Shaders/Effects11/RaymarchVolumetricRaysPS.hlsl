@@ -50,6 +50,7 @@ float GetVolumetricRaysScattering(float3 positionMS, float noise, float3 cameraO
 
 #if defined(TERRAIN_SHADOWS)
 		shadow = TerrainShadows::GetTerrainShadow(samplePos + cameraOffset, LinearSampler);
+		shadow *= TerrainShadows::GetLODShadow(samplePos + cameraOffset, LinearSampler);
 #endif
 
 #if defined(CLOUD_SHADOWS)

@@ -62,6 +62,8 @@ struct ReverseZ : Feature
 	[[nodiscard]] ID3D11DepthStencilState* GetReversedState(ID3D11DepthStencilState* a_state);
 	[[nodiscard]] ID3D11RasterizerState* GetReversedRasterizerState(ID3D11RasterizerState* a_state);
 
+	static void SetHookPassthrough(bool a_passthrough);
+
 private:
 	bool bootLatched = false;
 	bool activeThisBoot = false;

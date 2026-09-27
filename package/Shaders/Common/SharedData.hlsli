@@ -96,7 +96,14 @@ namespace SharedData
 		float2 ZRange;
 		float2 Offset;
 		float ZBlur;
-		float3 pad0;
+		float LODShadowStrength;
+		float LODShadowResolution;
+		float pad0;
+		float4 LODShadowAxisX;
+		float4 LODShadowAxisY;
+		float4 LODShadowAxisZ;
+		float4 LODShadowCascades[3];
+		float4 LODShadowDepthBias;
 	};
 
 	struct LightLimitFixSettings
