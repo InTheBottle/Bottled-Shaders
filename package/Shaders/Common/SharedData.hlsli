@@ -79,6 +79,11 @@ namespace SharedData
 		bool EnableShadows;
 		bool EnableParallaxWarpingFix;
 		float ParallaxQuality;
+		bool EnableNormalMapShadows;
+
+		float NormalMapShadowHeightScale;
+		float NormalMapShadowLength;
+		float NormalMapShadowHardness;
 		uint pad0;
 	};
 
