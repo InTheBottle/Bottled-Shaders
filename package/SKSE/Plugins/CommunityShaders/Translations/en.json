@@ -3113,8 +3113,6 @@
     "menu.settings.skip_clear_cache_dialogue": "Skip Clear Cache Dialogue",
     "menu.settings.skip_clear_cache_dialogue_tooltip": "When checked, the shader cache will be cleared immediately without asking for confirmation.",
     "menu.settings.skip_compilation_key": "Skip Compilation Key:",
-    "menu.settings.skip_unchanged_shaders": "Skip Unchanged Shaders",
-    "menu.settings.skip_unchanged_shaders_tooltip": "When enabled, each shader is recompiled from source only if its .hlsl file is newer than the cached .bin on disk. Shaders whose source has not changed are loaded directly from the disk cache, avoiding the full startup compilation cost. Useful for iterative testing: change a shader file and only that shader is rebuilt. Requires 'Enable Disk Cache' to be active.",
     "menu.settings.status": "Status",
     "menu.settings.tab_bar_border_size": "Tab Bar Border Size",
     "menu.settings.tab_behavior": "Behavior",

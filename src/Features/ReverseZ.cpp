@@ -229,32 +229,6 @@ void ReverseZ::DataLoaded()
 	LatchBootState();
 }
 
-bool ReverseZ::ValidateCache(CSimpleIniA& a_ini)
-{
-	if (!Feature::ValidateCache(a_ini))
-		return false;
-
-	LatchBootState();
-	const bool cached = a_ini.GetBoolValue(GetShortName().c_str(), "ReverseZActive", false);
-	if (cached != activeThisBoot) {
-		logger::info("Reverse Z state changed; invalidating shader cache");
-		return false;
-	}
-	if (a_ini.GetLongValue(GetShortName().c_str(), "UtilityDefines", 0) != kUtilityDefinesRevision) {
-		logger::info("Reverse Z utility shader defines changed; invalidating shader cache");
-		return false;
-	}
-	return true;
-}
-
-void ReverseZ::WriteDiskCacheInfo(CSimpleIniA& a_ini)
-{
-	Feature::WriteDiskCacheInfo(a_ini);
-	LatchBootState();
-	a_ini.SetBoolValue(GetShortName().c_str(), "ReverseZActive", activeThisBoot);
-	a_ini.SetLongValue(GetShortName().c_str(), "UtilityDefines", kUtilityDefinesRevision);
-}
-
 void ReverseZ::SetupDepthTargets()
 {
 	LatchBootState();

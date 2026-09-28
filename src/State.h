@@ -150,18 +150,6 @@ public:
 	void SaveTheme();
 
 	/**
-	 * @brief Validates the disk shader cache against all loaded features.
-	 * @param a_ini The cache INI to validate against.
-	 * @return True if all feature cache entries are still valid.
-	 */
-	bool ValidateCache(CSimpleIniA& a_ini);
-	/**
-	 * @brief Writes each feature's cache metadata into the disk cache INI.
-	 * @param a_ini The cache INI to write into.
-	 */
-	void WriteDiskCacheInfo(CSimpleIniA& a_ini);
-
-	/**
 	 * @brief Sets the global log level and flushes on that level.
 	 * @param a_level The spdlog severity level to apply.
 	 */
