@@ -84,7 +84,7 @@ namespace SharedData
 		float NormalMapShadowHeightScale;
 		float NormalMapShadowLength;
 		float NormalMapShadowHardness;
-		uint pad0;
+		uint HeightMapShadowMode;
 	};
 
 	struct CubemapCreatorSettings

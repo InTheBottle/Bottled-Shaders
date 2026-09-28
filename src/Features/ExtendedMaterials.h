@@ -41,7 +41,7 @@ struct ExtendedMaterials : Feature
 		float NormalMapShadowHeightScale = 1.0f;
 		float NormalMapShadowLength = 0.05f;
 		float NormalMapShadowHardness = 10.0f;
-		uint pad{};
+		uint HeightMapShadowMode = 0;
 	};
 	STATIC_ASSERT_ALIGNAS_16(Settings);
 	static_assert(sizeof(Settings) == 48);
