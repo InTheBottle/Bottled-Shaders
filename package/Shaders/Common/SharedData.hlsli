@@ -591,6 +591,20 @@ namespace SharedData
 		float3 pad;
 	};
 
+	struct HairBacklightingSettings
+	{
+		uint Enable;
+		float Strength;
+		float ScatterWidth;
+		float EdgeFalloff;
+		float InteriorGlow;
+		float Absorption;
+		float DarkBoost;
+		float DarkThreshold;
+		float HeadOcclusion;
+		uint3 pad;
+	};
+
 	cbuffer FeatureData : register(b6)
 	{
 		GrassLightingSettings grassLightingSettings;
@@ -619,6 +633,7 @@ namespace SharedData
 		PostProcessingSettings postProcessingSettings;
 		VolumetricLightingSettings volumetricLightingSettings;
 		HorizonFixSettings horizonFixSettings;
+		HairBacklightingSettings hairBacklightingSettings;
 	};
 
 	Texture2D<float4> DepthTexture : register(t17);
