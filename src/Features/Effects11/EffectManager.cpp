@@ -419,13 +419,18 @@ bool EffectManager::ExecuteEffects(RE::BSGraphics::RenderTargetData& a_input, RE
 
 	// Effects sample kMAIN as TextureOriginal, so mirror any other input into it
 	auto& textureOriginal = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
-	if (&a_input != &textureOriginal && a_input.SRV && textureOriginal.RTV) {
+	const bool sameTexture = a_input.texture && a_input.texture == textureOriginal.texture;
+	if (&a_input != &textureOriginal && !sameTexture && a_input.SRV && textureOriginal.RTV) {
+		const bool haveTextures = a_input.texture && textureOriginal.texture;
 		D3D11_TEXTURE2D_DESC srcDesc{}, dstDesc{};
-		if (a_input.texture && textureOriginal.texture) {
+		if (haveTextures) {
 			a_input.texture->GetDesc(&srcDesc);
 			textureOriginal.texture->GetDesc(&dstDesc);
 		}
-		if (a_input.texture && textureOriginal.texture && srcDesc.Format == dstDesc.Format && srcDesc.Width == dstDesc.Width && srcDesc.Height == dstDesc.Height && srcDesc.SampleDesc.Count == dstDesc.SampleDesc.Count) {
+		const bool layoutsMatch = srcDesc.Format == dstDesc.Format && srcDesc.Width == dstDesc.Width && srcDesc.Height == dstDesc.Height &&
+		                          srcDesc.MipLevels == dstDesc.MipLevels && srcDesc.ArraySize == dstDesc.ArraySize &&
+		                          srcDesc.SampleDesc.Count == dstDesc.SampleDesc.Count && srcDesc.SampleDesc.Quality == dstDesc.SampleDesc.Quality;
+		if (haveTextures && layoutsMatch) {
 			context->CopyResource(textureOriginal.texture, a_input.texture);
 		} else {
 			CopyTexture(a_input.SRV, textureOriginal.RTV, false);

@@ -733,7 +733,7 @@ PostProcessing::Settings PostProcessing::GetCommonBufferData()
 void PostProcessing::Prepass()
 {
 	if (!pendingSettings.empty()) {
-		logger::info("Processing pending post processing settings...");
+		logger::debug("Processing pending post processing settings...");
 		ProcessSettings(pendingSettings);
 		pendingSettings = {};
 	}
