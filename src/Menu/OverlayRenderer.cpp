@@ -307,7 +307,9 @@ void OverlayRenderer::RenderShaderCompilationStatus(const std::function<const ch
 
 	uint32_t effectFailed = EffectManager::GetSingleton().IsInitialized() ? EffectManager::GetSingleton().GetFailedEffectCount() : 0;
 
-	if (shaderCache->IsCompiling()) {
+	bool showProgress = shaderCache->IsCompiling() && (!shaderCache->backgroundCompilation || shaderCache->IsShowBackgroundOverlay());
+
+	if (showProgress) {
 		ImGui::SetNextWindowPos(ImVec2(pos, pos));
 		if (!ImGui::Begin("ShaderCompilationInfo", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings)) {
 			ImGui::End();

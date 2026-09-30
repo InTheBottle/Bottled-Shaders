@@ -124,6 +124,9 @@ void MessageHandler(SKSE::MessagingInterface::Message* message)
 					std::this_thread::sleep_for(100ms);
 				}
 
+				// The boot compile pass is over.
+				shaderCache->SetBackgroundCompilation(true);
+
 				if (globals::game::quitGame) {
 					logger::info("Game was closed, skipping feature DataLoaded methods");
 					break;
