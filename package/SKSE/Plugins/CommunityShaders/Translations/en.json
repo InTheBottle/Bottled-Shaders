@@ -3150,6 +3150,8 @@
     "menu.settings.shader_fast": "Fast (<2s)",
     "menu.settings.shader_slow": "Slow (2-8s)",
     "menu.settings.shader_very_slow": "Very slow (>=8s)",
+    "menu.settings.show_background_compile_overlay": "Show Background Compile Overlay",
+    "menu.settings.show_background_compile_overlay_tooltip": "Shows a progress popup when a shader not seen during the initial loading-screen compile is compiled during gameplay.",
     "menu.settings.skip_clear_cache_dialogue": "Skip Clear Cache Dialogue",
     "menu.settings.skip_clear_cache_dialogue_tooltip": "When checked, the shader cache will be cleared immediately without asking for confirmation.",
     "menu.settings.skip_compilation_key": "Skip Compilation Key:",
