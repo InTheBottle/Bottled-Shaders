@@ -544,7 +544,7 @@ namespace
 		                        DirectX::GetWICCodec(DirectX::WIC_CODEC_BMP);
 		return SUCCEEDED(DirectX::SaveToWICFile(
 			*saveImage,
-			DirectX::WIC_FLAGS_NONE,
+			DirectX::WIC_FLAGS_FORCE_SRGB,
 			codec,
 			outputPath.c_str()));
 	}
