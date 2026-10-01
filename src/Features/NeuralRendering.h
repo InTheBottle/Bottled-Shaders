@@ -417,14 +417,6 @@ struct NeuralRendering : Feature
 	virtual void DataLoaded() override;
 	virtual void PostPostLoad() override;
 
-	/**
-	 * @brief Migrate legacy neuralRendering* keys from Upscaling when no Neural Rendering section exists.
-	 * Called before features load; stale keys disappear on the next save.
-	 *
-	 * @param a_root The whole settings JSON.
-	 */
-	static void MigrateLegacyUpscalingSettings(json& a_root);
-
 	// ---- Backend (NGX Feature 18) ----
 
 	/**

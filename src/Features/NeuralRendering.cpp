@@ -1292,57 +1292,7 @@ void NeuralRendering::SaveSettings(json& o_json)
 
 void NeuralRendering::LoadSettings(json& o_json)
 {
-	// Record key presence before deserialization for settings migration.
-	const bool hasPreset = o_json.is_object() && o_json.contains("preset");
-	const bool hasShowAdvanced = o_json.is_object() && o_json.contains("showAdvanced");
-	const bool hasBandStrengths = o_json.is_object() &&
-	                              (o_json.contains("broadLuminosity") || o_json.contains("detailLuminosity"));
-	float legacyLuminosity = 1.0f;
-	bool hasLegacyLuminosity = false;
-	if (o_json.is_object()) {
-		if (const auto entry = o_json.find("luminosityStrength");
-			entry != o_json.end() && entry->is_number()) {
-			legacyLuminosity = entry->get<float>();
-			hasLegacyLuminosity = true;
-		}
-	}
-	// The same split per category, keyed by each block's JSON name (kCategoryKeys).
-	std::array<std::optional<float>, kMaterialCategoryCount> legacyCategoryLuminosity{};
-	if (o_json.is_object()) {
-		for (std::size_t index = 0; index < kMaterialCategoryCount; ++index) {
-			const auto block = o_json.find(kCategoryKeys[index]);
-			if (block == o_json.end() || !block->is_object() || block->contains("broadLuminosity") ||
-				block->contains("detailLuminosity"))
-				continue;
-			if (const auto entry = block->find("luminosityStrength"); entry != block->end() && entry->is_number())
-				legacyCategoryLuminosity[index] = entry->get<float>();
-		}
-	}
-
 	settings = o_json;
-
-	// A category block written before the split carried one luminosityStrength; Broad = Detail
-	// = that value is the same edit, exactly as for the global pair below.
-	{
-		const auto categories = CategorySettings();
-		for (std::size_t index = 0; index < kMaterialCategoryCount; ++index) {
-			if (legacyCategoryLuminosity[index]) {
-				categories[index]->broadLuminosity = *legacyCategoryLuminosity[index];
-				categories[index]->detailLuminosity = *legacyCategoryLuminosity[index];
-			}
-		}
-	}
-
-	// Preserve legacy luminosity by assigning it to both bands; omit the old key on save.
-	if (hasLegacyLuminosity && !hasBandStrengths) {
-		settings.broadLuminosity = legacyLuminosity;
-		settings.detailLuminosity = legacyLuminosity;
-	}
-
-	// A config from before presets existed keeps every value it stored; it is labelled Full and,
-	// wherever it differs, "Full (modified)". Nobody's look changes silently on upgrade.
-	if (!hasPreset)
-		settings.preset = static_cast<uint>(Preset::kFull);
 
 	{
 		auto values = CapturePresetValues();
@@ -1365,10 +1315,6 @@ void NeuralRendering::LoadSettings(json& o_json)
 		logger::info("[NeuralRendering] Preset '{}' no longer exists; keeping its values", settings.userPreset);
 		settings.userPreset.clear();
 	}
-
-	// Keep Advanced visible for migrated settings that differ from Full.
-	if (!hasShowAdvanced)
-		settings.showAdvanced = !MatchesPreset(static_cast<Preset>(settings.preset));
 }
 
 void NeuralRendering::RestoreDefaultSettings()
@@ -1378,30 +1324,6 @@ void NeuralRendering::RestoreDefaultSettings()
 	settings.showAdvanced = false;
 }
 
-void NeuralRendering::MigrateLegacyUpscalingSettings(json& a_root)
-{
-	const std::string name = globals::features::neuralRendering.GetName();
-	if (!a_root.is_object() || a_root.contains(name))
-		return;
-	auto upscaling = a_root.find(globals::features::upscaling.GetName());
-	if (upscaling == a_root.end() || !upscaling->is_object())
-		return;
-
-	constexpr std::string_view kLegacyPrefix = "neuralRendering";
-	json migrated = json::object();
-	for (const auto& [key, value] : upscaling->items()) {
-		if (key.size() <= kLegacyPrefix.size() || !key.starts_with(kLegacyPrefix))
-			continue;
-		std::string newKey = key.substr(kLegacyPrefix.size());
-		newKey[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(newKey[0])));
-		migrated[newKey] = value;
-	}
-	if (migrated.empty())
-		return;
-
-	logger::info("[NeuralRendering] Migrated {} legacy settings from the Upscaling section", migrated.size());
-	a_root[name] = std::move(migrated);
-}
 // Lifecycle and hooks
 
 void NeuralRendering::DataLoaded()
