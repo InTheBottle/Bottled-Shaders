@@ -2331,7 +2331,8 @@ void NeuralRendering::ServiceComparison(bool a_framePhaseStart)
 			                        IsAvailable() &&
 			                        globals::features::screenshotFeature.loaded;
 			if (!canCompare) {
-				ShowHUDMessageDeferred("Neural Rendering comparison needs DLSS active and Frame Generation off");
+				ShowHUDMessageDeferred(T("feature.neural_rendering.comparison_requirements",
+					"Neural Rendering comparison needs DLSS active and Frame Generation off"));
 				return;
 			}
 
@@ -2371,7 +2372,8 @@ void NeuralRendering::ServiceComparison(bool a_framePhaseStart)
 		settings.enabled = compareUserSetting;  // restore
 		RequestHistoryReset();
 		compareStep = 0;
-		ShowHUDMessageDeferred("Saved Neural Rendering comparison to Data/DLSS 5 Screenshots");
+		ShowHUDMessageDeferred(T("feature.neural_rendering.comparison_saved",
+			"Saved Neural Rendering comparison to Data/DLSS 5 Screenshots"));
 		break;
 	default:
 		break;
