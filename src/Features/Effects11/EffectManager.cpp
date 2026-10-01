@@ -1231,6 +1231,7 @@ void EffectManager::ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV)
 
 void EffectManager::ReloadShaders()
 {
+	// The Create* helpers also (re)create these buffers through com_ptr::put(), which requires them to be empty
 	copyVertexShader = nullptr;
 	copyPixelShader = nullptr;
 	ditherConstantBuffer = nullptr;
