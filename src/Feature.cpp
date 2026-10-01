@@ -26,6 +26,7 @@
 #include "Features/LightLimitFix.h"
 #include "Features/LinearLighting.h"
 #include "Features/PerformanceOverlay.h"
+#include "Features/NeuralRendering.h"
 #include "Features/PostProcessing.h"
 #include "Features/RemoteControl.h"
 #include "Features/RenderDoc.h"
@@ -237,6 +238,8 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::skin,
 		&globals::features::snowCover,
 		&globals::features::footstepParticles,
+		// Local (non-Bottle) features follow.
+		&globals::features::neuralRendering,
 		&globals::features::hairBacklighting
 	};
 

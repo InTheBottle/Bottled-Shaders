@@ -9,6 +9,7 @@
 #include "Features/DynamicCubemaps.h"
 #include "Features/Effects11.h"
 #include "Features/IBL.h"
+#include "Features/NeuralRendering.h"
 #include "Features/ReverseZ.h"
 #include "Features/ScreenSpaceGI.h"
 #include "Features/Skylighting.h"
@@ -448,6 +449,12 @@ void Deferred::EndDeferred()
 
 	DeferredPasses();  // Perform deferred passes and composite forward buffers
 
+	// Forward lighting draws still tag Neural Rendering categories into Masks2
+	// (see NeuralRendering::RestoreCategories); hand it back clean now
+	// that the composite has consumed the decal-blended AO.
+	if (globals::features::neuralRendering.loaded)
+		globals::features::neuralRendering.RestoreCategories();
+
 	stateUpdateFlags.set(RE::BSGraphics::ShaderFlags::DIRTY_RENDERTARGET);  // Run OMSetRenderTargets again
 
 	deferredPass = false;
@@ -690,6 +697,12 @@ void Deferred::Hooks::Main_RenderWorld_BlendedDecals::thunk(RE::BSShaderAccumula
 		if (terrainBlending.loaded && terrainBlending.settings.Enabled) {
 			terrainBlending.RenderTerrainBlendingPasses();
 		}
+
+		// Snapshot Masks2's material categories now, before the blended decals
+		// below alpha-blend into it and corrupt the packed category bits.
+		auto& neuralRendering = globals::features::neuralRendering;
+		if (neuralRendering.loaded)
+			neuralRendering.CaptureCategories();
 	}
 
 	// Deferred blended decals

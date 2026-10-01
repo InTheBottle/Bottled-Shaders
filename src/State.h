@@ -268,7 +268,18 @@ public:
 		AdditiveLighting = 1 << 6,
 		IsEye = 1 << 7,
 		NoSnow = 1 << 8,
-		NoFoliageTint = 1 << 9
+		NoFoliageTint = 1 << 9,
+		// Set by NeuralRendering::SetupGeometryCategory when the drawn
+		// geometry belongs to a humanoid (ActorTypeNPC) actor. Skin, hair and
+		// eyes are claimed by their own permutations first, so this only
+		// resolves to armor, clothing and weapons - see
+		// NeuralRenderingCategories::Equipment.
+		IsHumanoidActor = 1u << 31,
+		// Set by NeuralRendering::SetupGeometryCategory when the drawn
+		// geometry belongs to a hair or facial-hair head part of its actor,
+		// whatever shader type the piece was authored with - see
+		// NeuralRenderingCategories::Hair.
+		IsHair = 1u << 30
 	};
 
 	/** @brief Bitflags describing extra feature-specific properties related to terrain displacement and material models. */

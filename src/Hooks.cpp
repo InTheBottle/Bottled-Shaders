@@ -17,6 +17,7 @@
 #include "Features/HDRDisplay.h"
 #include "Features/InteriorSun.h"
 #include "Features/LightLimitFix.h"
+#include "Features/NeuralRendering.h"
 #include "Features/PostProcessing.h"
 #include "Features/ReverseZ.h"
 #include "Features/ScreenshotFeature.h"
@@ -364,8 +365,16 @@ namespace PostProcessingExtensions
 
 			// Effects11 replaces the pass outright; when it does, the vanilla call is skipped
 			// and HandlePostProcessing fixes up the render-target state the pass would have set.
-			if (state->HandlePostProcessing(input, output))
+			if (state->HandlePostProcessing(input, output)) {
+				auto& neuralRendering = globals::features::neuralRendering;
+				if (neuralRendering.loaded) {
+					// The vanilla pass did not run, so there is no ISHDR exposure/grading to replicate.
+					neuralRendering.CaptureDisplayTransform(nullptr);
+					// Effects11 already wrote its finished, tonemapped frame into `output`.
+					neuralRendering.ApplyFinishedImage(output);
+				}
 				return;
+			}
 
 			// Post Processing runs its pipeline into kMAIN/kMAIN_COPY, then lets the vanilla
 			// pass run so ISHDR can take its POSTPROCESS passthrough branch. It also runs when
@@ -375,6 +384,15 @@ namespace PostProcessingExtensions
 				postProcessing.PreProcess(input);
 
 			func(a1, a2, a3, a4, a5);
+
+			// Capture vanilla grading for next frame's Neural Rendering proxy.
+			auto& neuralRendering = globals::features::neuralRendering;
+			if (neuralRendering.loaded)
+				neuralRendering.CaptureDisplayTransform(a5);
+
+			// Neural Rendering consumes the finished output after either vanilla or Post Processing tone mapping.
+			if (neuralRendering.loaded)
+				neuralRendering.ApplyFinishedImage(output);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
