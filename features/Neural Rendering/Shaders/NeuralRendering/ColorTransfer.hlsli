@@ -1,10 +1,9 @@
 #ifndef UPSCALING_NEURALRENDERING_COLORTRANSFER
 #define UPSCALING_NEURALRENDERING_COLORTRANSFER
 
-// Display-referred proxy encoding and linear-light enhancement transfer. Apply model/proxy differences
-// to original color without inverse tone mapping. Encode compensates color jitter; guide lookups
-// compensate relative guide jitter. See docs/development/neural-rendering.md for the color-domain
-// contract.
+// Display-referred proxy encoding and linear-light enhancement transfer. Model/proxy differences are
+// applied to the original color without inverse tone mapping. Encode compensates color jitter; guide
+// lookups compensate relative guide jitter.
 
 static const float3 kNeuralLuma = float3(0.2126, 0.7152, 0.0722);
 static const float kNeuralRatioFloor = 1.0 / 512.0;
@@ -33,11 +32,11 @@ static const float kNeuralSceneGamma = 2.2;
 
 // TransferParams.ProxyCurve values; keep in sync with NeuralRendering::ProxyCurve.
 static const uint kNeuralProxyDisplayMatched = 0;  // The ISHDR replica, or the ACES fallback.
-static const uint kNeuralProxyNeutwo = 1;          // Exposed scene linear through Open Shaders' Neutwo curve.
-static const uint kNeuralProxyLegacy = 2;          // 5947cf63: per-channel Reinhard, unexposed.
+static const uint kNeuralProxyNeutwo = 1;          // Exposed scene linear through the RenoDX Neutwo curve.
+static const uint kNeuralProxyLegacy = 2;          // Per-channel Reinhard, unexposed.
 
 // How the proxy is encoded for the model, and therefore how its answer is read back.
-static const uint kNeuralModelSpaceSrgb = 0;     // Piecewise sRGB, as Open Shaders and 5947cf63 used.
+static const uint kNeuralModelSpaceSrgb = 0;     // Piecewise sRGB.
 static const uint kNeuralModelSpaceGamma22 = 1;  // Plain 2.2, what the displayed frame actually carries.
 
 // TransferParams.DebugFlags bits.
@@ -207,8 +206,7 @@ float NeuralAcesFilmic(float x)
 }
 
 /**
- * Open Shaders' NeutwoEncode: c / sqrt(peak^2 + 1), a hue-preserving exposed alternative when grading
- * cannot be captured.
+  * RenoDX Neutwo: c / sqrt(peak^2 + 1), a hue-preserving curve for exposed scene linear.
  */
 float3 NeuralNeutwo(float3 c)
 {
@@ -277,10 +275,10 @@ float NeuralHighlightRolloff(float peak, float white)
  */
 float3 EncodeNeuralSceneCurve(float3 linearColor, float exposure, NeuralDisplayTransform display)
 {
-	// 5947cf63 exactly: per-channel Reinhard on the raw buffer, no exposure, no grading.
+	// Per-channel Reinhard on the raw buffer: no exposure, no grading.
 	if (display.proxyCurve == kNeuralProxyLegacy)
 		return linearColor / (1.0 + linearColor);
-	// Open Shaders' NeutwoEncode: one hue-preserving scale driven by the peak channel.
+	// RenoDX Neutwo: one hue-preserving scale driven by the peak channel.
 	if (display.proxyCurve == kNeuralProxyNeutwo)
 		return NeuralNeutwo(linearColor * exposure);
 	return ApplyNeuralDisplayTransformExposed(max(linearColor, 0.0) * exposure, display);
@@ -456,9 +454,7 @@ float3 SampleNeuralSourceAreaMinify(Texture2D<float4> source, float2 position, f
 		NeuralCubicAxis(position.y, weightY, indexY);
 
 	int2 maxIndex = int2(activeSize) - 1;
-	// First tap seeds the neighbourhood range; every tap (including the
-	// zero-weight pads, which only duplicate an already-sampled texel) folds
-	// into it unconditionally below, so no sentinel infinity literal is needed.
+	// The first tap seeds the neighbourhood range; every tap, including zero-weight pads, folds into it.
 	float3 result = 0.0;
 	float3 neighbourhoodMin = source.Load(int3(clamp(indexX[0], 0, maxIndex.x), clamp(indexY[0], 0, maxIndex.y), 0)).rgb;
 	float3 neighbourhoodMax = neighbourhoodMin;

@@ -177,8 +177,7 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex : SV_Gro
 		categoryHueGuardAmount /= max(totalTapWeight, 1e-5);
 	}
 
-	// Category controls shape the local result first. The existing global sliders
-	// remain a final multiplier over every category.
+	// Category controls shape the local result; the global sliders multiply on top.
 	float editWeight = categoryTransferStrength * TransferStrength;
 	// Fade stale edits where reprojected content differs. Match proxy exposure for comparison; undo it for
 	// scene-domain debug views.
@@ -193,15 +192,12 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex : SV_Gro
 			editWeight *= answerOnScreen ? NeuralStaleEditWeight(proxy, original, ColorDomain, modelSpace, display) : 0.0;
 	}
 	if (DepthAwareResolve != 0 && all(GuideSize > 0)) {
-		// Left fractional (not rounded to a texel) so NeuralSilhouetteWeight can
-		// bilinearly blend across the guide/active resolution mismatch instead of
-		// aliasing on thin silhouettes.
+		// Left fractional so NeuralSilhouetteWeight can blend across the guide/active resolution mismatch.
 		float2 guideTexel = NeuralGuidePosition(dispatchThreadID.xy, GuideSize, ActiveSize, GuideJitterOffset);
 		editWeight *= NeuralSilhouetteWeight(GuideDepth, LinearClampSampler, guideTexel, GuideSize);
 	}
 
-	// The band split is sampled at the same (possibly reprojected) model position as the
-	// answer it belongs to, so a reused answer carries its own band data with it.
+	// Sample the band split at the same (possibly reprojected) model position as the answer.
 	NeuralResolveInputs resolveInputs;
 	resolveInputs.modelColor = model;
 	resolveInputs.proxyColor = proxy;
@@ -240,8 +236,7 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex : SV_Gro
 		DestinationColor[dispatchThreadID.xy] = NeuralBandDebugColor(resolveDebug.highBand, displayExposure, ColorDomain, original.a);
 		return;
 	}
-	// "Show Guard Clamping": tint the pixels the guard caught, leaving the rest of the frame
-	// readable underneath so it is obvious *what* is being clamped.
+	// Tint the pixels the guard clamped, leaving the rest of the frame readable.
 	if ((DebugFlags & kNeuralDebugGuardClamp) != 0 && resolveDebug.clamped != 0) {
 		float3 marker = resolveDebug.clamped > 0 ? float3(1.0, 0.0, 0.0) : float3(0.0, 0.3, 1.0);
 		if (ColorDomain != kNeuralColorDomainDisplayGamma)

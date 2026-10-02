@@ -318,8 +318,7 @@ struct PS_OUTPUT
 	float4 Diffuse: SV_Target0;
 	float4 MotionVectors: SV_Target1;
 	float4 NormalGlossiness: SV_Target2;
-	// Neural Rendering material category. Only bound (by NeuralRendering) for the
-	// forward lighting draws that follow the deferred pass; unbound otherwise.
+	// Neural Rendering material category; bound only for forward lighting draws after the deferred pass.
 	float4 Masks2: SV_Target7;
 };
 #endif
@@ -3284,14 +3283,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	psout.NormalGlossiness.w = stochasticBlend;
 #	endif  // defined(DEFERRED)
 
-	// Neural Rendering material category, packed into the low bits of Masks2
-	// next to vertex AO (stored as 1 - vertexAO so the cleared default of 0
-	// means no occlusion for pixels that never write this target). This runs
-	// for every lighting draw, not only the deferred ones: alpha-blended
-	// geometry such as hair strands and hairline scalps is sorted and drawn
-	// forward after the deferred pass, and NeuralRendering binds Masks2 back to
-	// SV_Target7 for exactly those draws (BSBatchRenderer_RenderPassImmediately)
-	// so hair reads as Hair instead of exposing the face or background beneath.
+	// Material category, packed into the low bits of Masks2 next to vertex AO (stored as 1 - vertexAO so
+	// the cleared 0 means no occlusion). Runs for every lighting draw: forward-sorted geometry such as
+	// hair writes it through the Masks2 binding set up by NeuralRendering.
 	uint neuralRenderingCategory = NeuralRenderingCategories::EverythingElse;
 #	if defined(FACEGEN) || defined(FACEGEN_RGB_TINT)
 	neuralRenderingCategory = NeuralRenderingCategories::Skin;
@@ -3304,24 +3298,14 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	elif defined(LANDSCAPE) || defined(LODLANDSCAPE) || defined(LODLANDNOISE)
 	neuralRenderingCategory = NeuralRenderingCategories::Landscape;
 #	else
-	// Most eyes never compile the EYE technique above: vanilla renders their
-	// shine through the ENVMAP technique instead, distinguished only by the
-	// material's kEnvironmentMap feature plus an "eye" geometry name. That
-	// case can only be resolved at runtime, not by a technique #define.
-	// VanillaFresnel::IsEyePass (VanillaFresnel.cpp) already does this
-	// resolution for its own per-pixel Fresnel override and records the
-	// result in Permutation::ExtraFlags::IsEye; reuse it here before falling
-	// through to the humanoid/creature classification below, or these eyes
-	// get counted as Equipment or Skin instead.
+	// Most eyes render through ENVMAP rather than EYE and are only identifiable at runtime;
+	// VanillaFresnel::IsEyePass resolves them into ExtraFlags::IsEye.
 	if (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsEye) {
 		neuralRenderingCategory = NeuralRenderingCategories::Eyes;
 	} else if (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsHumanoidActor) {
-		// Everything on a humanoid actor that the branches above did not
-		// claim is Equipment: armor, clothing and wielded weapons. Bare skin
-		// (body as well as face) uses the skin-tint permutations and is
-		// already Skin by the time this runs. IsHumanoidActor is set per
-		// pass by NeuralRendering::SetupGeometryCategory, so this
-		// also catches rigid (non-SKINNED) weapons, shields and helmets.
+		// Whatever a humanoid actor's earlier branches did not claim is Equipment: armor, clothing and
+		// weapons, including rigid (non-SKINNED) ones. IsHumanoidActor is set by
+		// NeuralRendering::SetupGeometryCategory.
 		neuralRenderingCategory = NeuralRenderingCategories::Equipment;
 	}
 #		if defined(SKINNED)
@@ -3331,26 +3315,15 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		endif
 #	endif
 #	if !defined(HAIR)
-	// Hair pieces are often not authored with the hair-tint shader type:
-	// hairlines, braids and loose strands commonly use the default or skin-tint
-	// type, so the HAIR technique alone leaves them as Equipment, Skin or
-	// Everything Else, while wigs worn as equipment carry hair-tint authoring
-	// without any head part. NeuralRendering resolves both at runtime
-	// (SetupGeometryCategory) and that wins over the
-	// technique-derived classification above.
+	// Hairlines, braids and strands are often not authored with the hair-tint shader type, and wigs carry
+	// it without a head part. NeuralRendering resolves both at runtime (SetupGeometryCategory) and that
+	// wins over the technique above.
 	if (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsHair)
 		neuralRenderingCategory = NeuralRenderingCategories::Hair;
 #	endif
-	// Masks2 takes the draw's own alpha blend state (Deferred::OverrideBlendStates
-	// mirrors RT0 onto every deferred target; the game's forward blend states do
-	// the same), and a lerp of two packed values scrambles the discrete category
-	// in the low bits: a hairline strand at alpha < 0.5 over the face rounds back
-	// to Skin, and any AO difference between the two surfaces leaves an arbitrary
-	// category behind. Blend it with the same stochastic 0/1 coverage the normals
-	// use, so a pixel holds one surface's exact AO and category; the per-frame
-	// dither still averages to the old AO lerp under DLSS/TAA, and DecodeColorCS's
-	// tent filter turns it back into a coverage-weighted mix of the category
-	// strengths.
+	// Masks2 follows the draw's alpha blend, and lerping packed values scrambles the category bits. Use
+	// the stochastic 0/1 coverage the normals use so a pixel holds one surface's AO and category;
+	// DecodeColorCS's tent filter recovers a coverage-weighted mix.
 	float masks2Coverage = (screenNoise * screenNoise) < psout.Diffuse.w ? 1.0 : 0.0;
 	psout.Masks2 = float4(NeuralRenderingCategories::Pack(1.0 - vertexAO, neuralRenderingCategory), 0, 0, masks2Coverage);
 

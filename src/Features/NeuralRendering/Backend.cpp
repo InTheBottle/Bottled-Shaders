@@ -850,8 +850,7 @@ struct NeuralRenderingBackend::State
 		                    std::ranges::all_of(inputs.display.tint, [](float value) { return std::isfinite(value); }) &&
 		                    std::isfinite(inputs.display.postProcessExposureScale) &&
 		                    std::ranges::all_of(inputs.display.postProcessAdaptationRange, [](float value) { return std::isfinite(value); });
-		// Per-category hue guard needs the material category on every pixel, so unlike the
-		// old opt-in per-category strengths this guide is now unconditionally required.
+		// The per-category hue guard needs the material category on every pixel.
 		if (inputs.colorIn && inputs.colorOut && inputs.depth && inputs.depthSRV && inputs.motionVectors &&
 			inputs.materialCategoriesSRV && distinct && finite && inputs.width && inputs.height)
 			return true;
@@ -985,7 +984,7 @@ struct NeuralRenderingBackend::State
 		desiredTuning.skinStructureStrength = inputs.skinStructureStrength;
 		desiredTuning.style = inputs.style;
 		desiredTuning.useAutoMask = inputs.automaticMask;
-		desiredTuning.uiCorrection = false;  // Cav's Unity Shaders never runs Neural Rendering after the UI composite.
+		desiredTuning.uiCorrection = false;  // Neural Rendering never runs after the UI composite.
 		if (SettleTuning(desiredTuning)) {
 			if (!interop.WaitForIdle())
 				return LatchFailure("tuning change", interop.LastError());
@@ -1045,9 +1044,7 @@ struct NeuralRenderingBackend::State
 		transferParams.workSize[1] = modelHeight;
 		transferParams.guideSize[0] = guideWidth;
 		transferParams.guideSize[1] = guideHeight;
-		// Silhouette fading only addresses the bilinear upsample of a reduced-
-		// resolution edit; at native scale there is nothing to bleed, so leave the
-		// resolve exactly as before (the proxy likewise bypasses at 1.0).
+		// Silhouette fading only addresses the bilinear upsample of a reduced-resolution edit; none at native scale.
 		const bool modelBelowNative = modelWidth < colorWidth || modelHeight < colorHeight;
 		transferParams.depthAwareResolve = inputs.depthAwareResolve && modelBelowNative ? 1u : 0u;
 		transferParams.staleAnswer = skipFrame ? 1u : 0u;

@@ -180,8 +180,7 @@ namespace
 		SanitizeFloat(a_values.detailLuminosity, 1.0f, 0.0f, 2.0f);
 		SanitizeFloat(a_values.bandRadius, 8.0f, 2.0f, 32.0f);
 		SanitizeFloat(a_values.maxRatio, 2.0f, 1.0f, 8.0f);
-		// Out of range (including the retired HDR Linear, 3) falls back to the proxy the default
-		// preset uses.
+		// Out of range falls back to the default preset's proxy.
 		if (a_values.proxyCurve >= static_cast<uint>(ProxyCurve::kCount))
 			a_values.proxyCurve = static_cast<uint>(ProxyCurve::kDisplayMatched);
 		for (auto& category : a_values.categories) {
@@ -1301,7 +1300,7 @@ void NeuralRendering::LoadSettings(json& o_json)
 	}
 	if (settings.resolutionMode > 1)
 		settings.resolutionMode = 1;
-	// Scales above native (model supersampling) are no longer offered; a saved one runs at native.
+	// Scales above native are not offered; a saved one runs at native.
 	SanitizeFloat(settings.resolutionScale, 1.0f, 0.25f, 1.0f);
 	SanitizeFloat(settings.resolutionScaleX, 1.0f, 0.25f, 1.0f);
 	SanitizeFloat(settings.resolutionScaleY, 1.0f, 0.25f, 1.0f);
@@ -1534,7 +1533,7 @@ void NeuralRendering::ResolveUpscaledFrame(Texture2D* a_upscaled)
 			resourcesActive = true;
 			auto renderer = globals::game::renderer;
 			auto& depth = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN];
-			// The category snapshot (opaque categories captured before decals, forward categories added after), not the live Masks2 - see CaptureCategories.
+			// The category snapshot, not the live Masks2 (see CaptureCategories).
 			auto* materialCategoriesSRV = materialCategoriesSnapshot ? materialCategoriesSnapshot->srv.get() : nullptr;
 			auto& motionVector = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMOTION_VECTOR];
 			// After the upscaler the colour input is display resolution, but depth and
@@ -1653,9 +1652,8 @@ void NeuralRendering::CaptureCategories()
 	// from a frame that never reached Main_PostProcessing.
 	forwardCaptureActive = false;
 
-	// Only paid for when Neural Rendering can actually consume it: DLSS-only.
-	// The decode shader always samples the category texture now, since each
-	// category's hue guard toggle needs to know which material a pixel is.
+	// Needed only when Neural Rendering can consume it (DLSS only). The decode always samples categories
+	// for the per-category hue guard.
 	if (!settings.enabled)
 		return;
 	if (!IsDLSSActive())
@@ -1962,7 +1960,7 @@ bool NeuralRendering::EvaluateFinishedImage(ID3D11Texture2D* a_colorIn, ID3D11Sh
 		return false;
 	}
 
-	// The category snapshot (opaque categories captured before decals, forward categories added after), not the live Masks2 - see CaptureCategories.
+	// The category snapshot, not the live Masks2 (see CaptureCategories).
 	auto* materialCategoriesSRV = materialCategoriesSnapshot ? materialCategoriesSnapshot->srv.get() : nullptr;
 
 	// Color is resolved at display resolution; depth, motion, and categories remain jittered at render

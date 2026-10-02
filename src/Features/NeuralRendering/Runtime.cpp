@@ -423,7 +423,7 @@ namespace NeuralRenderingNGX
 		if (writablePath.empty()) {
 			wchar_t tempPath[MAX_PATH]{};
 			GetTempPathW(MAX_PATH, tempPath);
-			writablePath = std::filesystem::path(tempPath) / L"OpenShaders-NGX";
+			writablePath = std::filesystem::path(tempPath) / L"BottledShaders-NGX";
 		}
 		std::error_code error;
 		std::filesystem::create_directories(writablePath, error);
@@ -532,9 +532,7 @@ namespace NeuralRenderingNGX
 			parameters->Set("DLSSNR.SkinStructureStrength", tuning.skinStructureStrength);
 			parameters->Set("DLSSNR.UseAutoMask", tuning.useAutoMask ? 1u : 0u);
 			parameters->Set("DLSSNR.UICorrection", tuning.uiCorrection ? 1u : 0u);
-			// No creation flags and no HDR/SDR/auto-exposure selectors: setting the ones the
-			// other DLSS-NR projects use made no difference to the answer (see
-			// docs/development/neural-rendering.md, "Creation contract").
+			// No creation flags or HDR/SDR/auto-exposure selectors: setting them made no difference to the answer.
 			NVSDK_NGX_Handle* handle = nullptr;
 			ngxResult_ = static_cast<std::uint32_t>(create(commandList, kFeatureDlssNr, parameters, &handle));
 			if (ngxResult_ != NVSDK_NGX_Result_Success || !handle) {
