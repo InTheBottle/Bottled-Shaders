@@ -78,7 +78,13 @@ namespace SharedData
 		bool EnableHeightBlending;
 		bool EnableShadows;
 		bool EnableParallaxWarpingFix;
-		uint2 pad0;
+		float ParallaxQuality;
+		bool EnableNormalMapShadows;
+
+		float NormalMapShadowHeightScale;
+		float NormalMapShadowLength;
+		float NormalMapShadowHardness;
+		uint HeightMapShadowMode;
 	};
 
 	struct CubemapCreatorSettings
@@ -95,6 +101,15 @@ namespace SharedData
 		float3 Scale;
 		float2 ZRange;
 		float2 Offset;
+		float ZBlur;
+		float LODShadowStrength;
+		float LODShadowResolution;
+		float pad0;
+		float4 LODShadowAxisX;
+		float4 LODShadowAxisY;
+		float4 LODShadowAxisZ;
+		float4 LODShadowCascades[3];
+		float4 LODShadowDepthBias;
 	};
 
 	struct LightLimitFixSettings
@@ -106,15 +121,14 @@ namespace SharedData
 		uint EnableContactShadows;
 		uint ContactShadowMaxSteps;
 		float ContactShadowMaxDistance;
-		float ContactShadowStride;
-		float ContactShadowThickness;
-		float ContactShadowDepthFade;
+		float ContactShadowLength;
+		float ContactShadowDepthThickness;
 		float ContactShadowStrength;
 		uint EnableLocalShadows;
 		uint LocalShadowSamples;
 		float LocalShadowFilterRadius;
 		float LocalShadowTexelSize;
-		float pad1;
+		float2 pad1;
 	};
 
 	struct WetnessEffectsSettings
@@ -196,7 +210,8 @@ namespace SharedData
 
 		float cloudExtinction;
 		float sunVisibility;
-		float2 pad0;
+		float radianceLimit;
+		float pad0;
 	};
 
 	struct LODBlendingSettings
@@ -316,7 +331,8 @@ namespace SharedData
 
 		uint UseProceduralGradientWeights;
 		float ProceduralGradientWeightCurve;
-		float2 pad1;
+		float LightSpriteCurve;
+		float pad1;
 
 		float ParticleIntensity;
 		float ParticleLightingInfluence;
@@ -325,7 +341,7 @@ namespace SharedData
 
 		uint EnableVolumetricRays;
 		float VolumetricRaysIntensity;
-		float VolumetricRaysExtinction;
+		float VolumetricRaysDensity;
 		float VolumetricRaysSkyColorAmount;
 
 		float VolumetricRaysDesaturation;
@@ -348,26 +364,76 @@ namespace SharedData
 
 		uint EnableCloudsScattering;
 		float SkyScatteringIntensity;
-		float SkyScatteringColorFromSun;
 		float SkyScatteringShadowAmount;
+		float SkyScatteringAmount;
 
 		float3 SkyScatteringColor;
-		float SkyScatteringExtinction;
+		float SkyScatteringDustDarkening;
 
-		float SkyScatteringScaleHeight;
-		float SkyScatteringSunGlowIntensity;
-		float SkyScatteringSunGlowAnisotropy;
+		float3 SkyScatteringDustTint;
+		float SkyScatteringDustVolume;
+
+		float3 SkyScatteringSunDirection;
+		float SkyScatteringSunVisibility;
+
+		float SkyScatteringHorizonRange;
+		float SkyScatteringAtmosphereThickness;
 		float SkyScatteringAirGlowIntensity;
+		float SkyScatteringAirGlowRange;
 
-		float SkyScatteringAirGlowAnisotropy;
+		float SkyScatteringSunGlowIntensity;
+		float SkyScatteringSunGlowRange;
 		float SkyScatteringMoonGlowAmount;
-		float CloudsLightingSunMultiplier;
-		float CloudsLightingSunMinIntensity;
+		float SkyScatteringMoonGlowRange;
 
+		float SkyScatteringSunIntensity;
+		float CloudsLightingSunIntensity;
 		float CloudsLightingMoonIntensity;
 		uint EnableCloudsLightingFromMoon;
+
 		uint CalculateCloudsEdgeFromScattering;
+		float CloudsLightingDesaturation;
+		float CloudsLightingForwardScattering;
 		float CloudsLightingDensity;
+
+		float3 CloudsColorFilter;
+		float CloudsIntensity;
+
+		float CloudsVertexAlphaBoost;
+		float CloudsEdgeClamp;
+		float CloudsEdgeFadePower;
+		float SunBillboardTan;
+
+		float MasserBillboardTan;
+		float SecundaBillboardTan;
+		float SkyScatteringPad0;
+		float SkyScatteringPad1;
+
+		float3 VolumetricFogColorFilter;
+		float VolumetricFogIntensity;
+
+		float VolumetricFogCurve;
+		float VolumetricFogOpacity;
+		float VolumetricFogShadowAmount;
+		uint VolumetricFogEnableLighting;
+
+		float3 VolumetricRaysSkyColor;
+		float VolumetricRaysPad0;
+
+		float StarsCurve;
+		float StarsIntensity;
+		float MoonCurve;
+		uint EnableAnimatedStars;
+
+		float StarsAnimationTime;
+		float StarsAnimationDensity;
+		float StarsAnimationIntensity;
+		float AuroraIntensity;
+
+		float AuroraCurve;
+		uint FixBlackCrush;
+		float NightSkyPad0;
+		float NightSkyPad1;
 	};
 	struct TerrainBlendingSettings
 	{
@@ -411,7 +477,20 @@ namespace SharedData
 		float volumetricSampleJitterMultiplier;
 		float volumetricUpsampleJitterMultiplier;
 		float volumetricLocalLightScatteringIntensity;
-		float2 pad0;
+		uint useVanillaFogSettings;
+		float vanillaFogMaxOpacity;
+		float vanillaFogDensity;
+		float vanillaFogNear;
+		float vanillaFogFar;
+		float vanillaFogPower;
+		float vanillaFogStrength;
+		float3 pad0;
+		float4 vanillaFogNearColor;
+		float4 vanillaFogFarColor;
+		float fogLightingInfluence;
+		float distanceHazeMaxOpacity;
+		float distanceHazeStartDistance;
+		float distanceHazeFadeDistance;
 	};
 
 	struct TruePBRSettings
@@ -500,6 +579,12 @@ namespace SharedData
 		float ObjectFadeEnd;
 		float ObjectFadeAmount;
 		uint2 pad2;
+
+		uint FireMeltCount;
+		float FireMeltStrength;
+		float FireMeltRadiusScale;
+		uint pad3;
+		float4 FireMeltSpheres[8];
 	};
 
 	struct PostProcessingSettings
@@ -513,6 +598,26 @@ namespace SharedData
 		float GodRayGain;
 		float GodRayExponent;
 		float2 pad0;
+	};
+
+	struct HorizonFixSettings
+	{
+		float farWaterDistance;
+		float3 pad;
+	};
+
+	struct HairBacklightingSettings
+	{
+		uint Enable;
+		float Strength;
+		float ScatterWidth;
+		float EdgeFalloff;
+		float InteriorGlow;
+		float Absorption;
+		float DarkBoost;
+		float DarkThreshold;
+		float HeadOcclusion;
+		uint3 pad;
 	};
 
 	cbuffer FeatureData : register(b6)
@@ -542,6 +647,8 @@ namespace SharedData
 		SnowCoverSettings snowCoverSettings;
 		PostProcessingSettings postProcessingSettings;
 		VolumetricLightingSettings volumetricLightingSettings;
+		HorizonFixSettings horizonFixSettings;
+		HairBacklightingSettings hairBacklightingSettings;
 	};
 
 	Texture2D<float4> DepthTexture : register(t17);

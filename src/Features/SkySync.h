@@ -14,7 +14,7 @@ public:
 	virtual std::string GetDisplayName() override { return T("feature.sky_sync.name", "Sky Sync"); }
 	virtual inline std::string GetShortName() override { return "SkySync"; }
 	virtual inline std::string GetFeatureModLink() override { return MakeNexusModURL(MOD_ID); }
-	virtual std::string_view GetCategory() const override { return FeatureCategories::kSky; }
+	virtual std::string_view GetCategory() const override { return FeatureCategories::kSkyAndWeather; }
 
 	/** @brief Returns a description and list of key features for the UI summary. */
 	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
@@ -83,7 +83,26 @@ public:
 		None
 	};
 
+	/**
+	 * @brief Gets the world-space direction towards a sun or moon, preferring the one Sky Sync computed this frame.
+	 * @param sky The sky whose root rotation maps Sky Sync's directions into world space.
+	 * @param caster The celestial body to query; must not be Caster::None.
+	 * @return The unit direction, or straight up (0,0,1) if none is available.
+	 */
 	RE::NiPoint3 GetCelestialDirection(const RE::Sky* sky, Caster caster) const;
+
+	/**
+	 * @brief Moon picked by the "Moon light source" setting (Masser, Secunda, or the brighter visible one).
+	 * @return Caster::Masser or Caster::Secunda, or Caster::None when the chosen moon is hidden or faded out.
+	 */
+	Caster GetMoonLightCaster(const RE::Sky* sky) const;
+
+	/**
+	 * @brief Gets the world-space direction towards the current shadow caster, without the minimum shadow elevation clamp.
+	 * @param sky The sky whose root rotation maps Sky Sync's directions into world space.
+	 * @return The unit direction, or nullopt if Sky Sync did not update the caster this frame.
+	 */
+	std::optional<RE::NiPoint3> GetCelestialLightDirection(const RE::Sky* sky) const;
 
 private:
 	enum class CellFlagExt : uint16_t
@@ -115,6 +134,8 @@ private:
 	{
 		RE::NiPoint3 currentDir = { 0.0f, 0.0f, 1.0f };
 		RE::NiPoint3 startDir = { 0.0f, 0.0f, 1.0f };
+		RE::NiPoint3 celestialDir = { 0.0f, 0.0f, 1.0f };  // currentDir before elevation locking
+		RE::NiPoint3 startCelestialDir = { 0.0f, 0.0f, 1.0f };
 		Caster target = Caster::Sun;
 		Caster previousTarget = Caster::Sun;
 		float fadeTimer = 0.0f;
@@ -132,6 +153,8 @@ private:
 		static void SetElevation(RE::NiPoint3& dir, float elevRadians);
 		static void ClampDirection(RE::NiPoint3& dir);
 		static float ComputeVLFactor(const RE::NiPoint3& current, const RE::NiPoint3& target);
+		/** @brief Linearly interpolates two directions by @p t and renormalizes the result. */
+		static RE::NiPoint3 LerpDirection(const RE::NiPoint3& from, const RE::NiPoint3& to, float t);
 		void Reset();
 	};
 
@@ -148,8 +171,8 @@ private:
 
 	inline static RE::NiPoint3* gSunPosition = nullptr;
 	inline static RE::BSVolumetricLightingRenderData* gVolumetricLighting = nullptr;
+	inline static RE::Setting* gSunAlphaTransTime = nullptr;
 
-	bool moonAndStarsLoaded = false;
 	RE::TESObjectCELL* currentCell = nullptr;
 	bool currentCellInterior = false;
 	RE::TESWorldSpace* currentCellWorldspace = nullptr;
@@ -159,7 +182,7 @@ private:
 	bool immediateTransitionReady = false;
 
 	float4 colors[3] = {};
-	RE::NiPoint3 celestialDirections[3] = {};
+	RE::NiPoint3 rawDirections[3] = {};  // sky-local, before shadow elevation locking; zero when not computed this frame
 	float currentDim = 1.0f;
 	bool sunSetting = false;
 	bool sunRising = false;
@@ -177,6 +200,9 @@ private:
 	void SetSkyRotation(const RE::Sky* sky, RE::TESObjectCELL* cell);
 
 	void ProcessSun(const RE::Sky* sky, RE::NiPoint3 dirs[], float intensities[]);
+
+	/** @brief Zeroes the sun disc and glare alpha outside vanilla's sun fade window, whose exclusive bounds leave them opaque at the exact end hours. */
+	static void HideSunOutsideFadeWindow(const RE::Sky* sky);
 
 	void ProcessMoon(const RE::Sky* sky, Caster type, RE::NiPoint3 dirs[], float intensities[]);
 

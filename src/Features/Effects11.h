@@ -5,13 +5,17 @@
 #include <memory>
 #include <winrt/base.h>
 
+// C4324: the aligned PerFrame cache member pads the struct
+#pragma warning(push)
+#pragma warning(disable: 4324)
+
 struct Effects11 : Feature
 {
 public:
 	virtual inline std::string GetName() override { return "Effects11"; }
 	virtual inline std::string GetShortName() override { return "Effects11"; }
 	virtual inline std::string GetDisplayName() override { return "Effects 11"; }
-	virtual std::string_view GetCategory() const override { return "Post-Processing"; }
+	virtual std::string_view GetCategory() const override { return FeatureCategories::kPostProcessing; }
 	virtual inline std::string_view GetShaderDefineName() override { return "EFFECTS11"; }
 	virtual inline bool HasShaderDefine(RE::BSShader::Type) override { return true; }
 
@@ -46,7 +50,8 @@ public:
 
 		uint UseProceduralGradientWeights;
 		float ProceduralGradientWeightCurve;
-		float pad1[2];
+		float LightSpriteCurve;
+		float pad1;
 
 		float ParticleIntensity;
 		float ParticleLightingInfluence;
@@ -55,7 +60,7 @@ public:
 
 		uint EnableVolumetricRays;
 		float VolumetricRaysIntensity;
-		float VolumetricRaysExtinction;
+		float VolumetricRaysDensity;
 		float VolumetricRaysSkyColorAmount;
 
 		float VolumetricRaysDesaturation;
@@ -78,31 +83,88 @@ public:
 
 		uint EnableCloudsScattering;
 		float SkyScatteringIntensity;
-		float SkyScatteringColorFromSun;
 		float SkyScatteringShadowAmount;
+		float SkyScatteringAmount;
 
 		float3 SkyScatteringColor;
-		float SkyScatteringExtinction;
+		float SkyScatteringDustDarkening;
 
-		float SkyScatteringScaleHeight;
-		float SkyScatteringSunGlowIntensity;
-		float SkyScatteringSunGlowAnisotropy;
+		float3 SkyScatteringDustTint;
+		float SkyScatteringDustVolume;
+
+		float3 SkyScatteringSunDirection;
+		float SkyScatteringSunVisibility;
+
+		float SkyScatteringHorizonRange;
+		float SkyScatteringAtmosphereThickness;
 		float SkyScatteringAirGlowIntensity;
+		float SkyScatteringAirGlowRange;
 
-		float SkyScatteringAirGlowAnisotropy;
+		float SkyScatteringSunGlowIntensity;
+		float SkyScatteringSunGlowRange;
 		float SkyScatteringMoonGlowAmount;
-		float CloudsLightingSunMultiplier;
-		float CloudsLightingSunMinIntensity;
+		float SkyScatteringMoonGlowRange;
 
+		float SkyScatteringSunIntensity;
+		float CloudsLightingSunIntensity;
 		float CloudsLightingMoonIntensity;
 		uint EnableCloudsLightingFromMoon;
+
 		uint CalculateCloudsEdgeFromScattering;
+		float CloudsLightingDesaturation;
+		float CloudsLightingForwardScattering;
 		float CloudsLightingDensity;
+
+		float3 CloudsColorFilter;
+		float CloudsIntensity;
+
+		float CloudsVertexAlphaBoost;
+		float CloudsEdgeClamp;
+		float CloudsEdgeFadePower;
+		float SunBillboardTan;
+
+		float MasserBillboardTan;
+		float SecundaBillboardTan;
+		float SkyScatteringPad0;
+		float SkyScatteringPad1;
+
+		float3 VolumetricFogColorFilter;
+		float VolumetricFogIntensity;
+
+		float VolumetricFogCurve;
+		float VolumetricFogOpacity;
+		float VolumetricFogShadowAmount;
+		uint VolumetricFogEnableLighting;
+
+		float3 VolumetricRaysSkyColor;
+		float VolumetricRaysPad0;
+
+		float StarsCurve;
+		float StarsIntensity;
+		float MoonCurve;
+		uint EnableAnimatedStars;
+
+		float StarsAnimationTime;
+		float StarsAnimationDensity;
+		float StarsAnimationIntensity;
+		float AuroraIntensity;
+
+		float AuroraCurve;
+		uint FixBlackCrush;
+		float NightSkyPad0;
+		float NightSkyPad1;
 	};
 	static_assert(sizeof(PerFrame) % 16 == 0);
+	static_assert(offsetof(PerFrame, StarsCurve) % 16 == 0);
+	static_assert(offsetof(PerFrame, VolumetricFogColorFilter) % 16 == 0);
+	static_assert(offsetof(PerFrame, VolumetricRaysSkyColor) % 16 == 0);
 	static_assert(offsetof(PerFrame, EnableCloudsScattering) % 16 == 0);
 	static_assert(offsetof(PerFrame, SkyScatteringColor) % 16 == 0);
-	static_assert(offsetof(PerFrame, CloudsLightingMoonIntensity) % 16 == 0);
+	static_assert(offsetof(PerFrame, SkyScatteringDustTint) % 16 == 0);
+	static_assert(offsetof(PerFrame, SkyScatteringSunDirection) % 16 == 0);
+	static_assert(offsetof(PerFrame, SkyScatteringSunIntensity) % 16 == 0);
+	static_assert(offsetof(PerFrame, CloudsColorFilter) % 16 == 0);
+	static_assert(offsetof(PerFrame, MasserBillboardTan) % 16 == 0);
 
 	bool enableEffect = false;
 
@@ -116,9 +178,17 @@ public:
 	std::unique_ptr<Texture2D> vlTexA;
 	std::unique_ptr<Texture2D> vlTexB;
 	std::unique_ptr<Texture2D> vlDepthHalf;
-	std::unique_ptr<Texture2D> skyTexA;
-	std::unique_ptr<Texture2D> skyTexB;
 	std::unique_ptr<ConstantBuffer> vlBlurCB;
+
+	ID3D11PixelShader* sunRaysMaskPS = nullptr;
+	ID3D11PixelShader* sunRaysBlurPS = nullptr;
+	ID3D11PixelShader* sunRaysCompositePS = nullptr;
+	std::unique_ptr<Texture2D> sunRaysTexA;
+	std::unique_ptr<Texture2D> sunRaysTexB;
+	std::unique_ptr<ConstantBuffer> sunRaysCB;
+
+	float3 scatteringSunColor = { 1.0f, 1.0f, 1.0f };
+	float3 scatteringSunDirection = { 0.0f, 0.0f, 1.0f };
 
 	winrt::com_ptr<ID3D11Texture2D> raindropTexture;
 	winrt::com_ptr<ID3D11ShaderResourceView> raindropSRV;
@@ -126,6 +196,7 @@ public:
 	void LoadRaindropTexture();
 
 	PerFrame GetCommonBufferData();
+	void UpdateSkyScattering(PerFrame& a_data);
 
 	virtual void DrawSettings() override;
 	virtual void SetupResources() override;
@@ -136,6 +207,9 @@ public:
 	void ToggleEnabled();
 
 	void DrawVolumetricRays();
+
+	/** @brief Draws the ENB [RAYS] screen-space sun (or Masser) shafts additively onto the main target. */
+	void DrawSunRays();
 
 	void OnSkyUpdateColors(RE::Sky* a_sky);
 	void OverrideWeather(RE::Sky* a_sky);
@@ -150,6 +224,8 @@ public:
 
 	__declspec(noinline) void ModifyParticle(RE::BSRenderPass* Pass);
 	void ParticleShaderHacks();
+	/** @brief True when the effect is on, the raindrop texture loaded, and RAIN "Enable" is set. */
+	bool IsRainEnabled();
 
 	/**
 	 * @brief Whether Effects11 wants to replace the vanilla tonemap this frame.
@@ -172,5 +248,22 @@ public:
 	bool ReplacedTonemapperThisFrame() const;
 
 private:
+	bool EnsureScatteringBlendState();
+	bool EnsureSunRaysResources(uint32_t a_width, uint32_t a_height);
+
 	uint tonemapReplacedFrame = UINT32_MAX;  ///< frameCount when the effect chain last wrote the tonemap output
+
+	/** @brief Point light settings, resolved once per frame in CheckCommonData since OverridePointLightColor runs per light. */
+	struct PointLightingParams
+	{
+		float curve = 1.0f;
+		float desaturation = 0.0f;
+		float intensity = 1.0f;
+	} pointLighting;
+
+	// The feature buffer is rebuilt several times per frame, so GetCommonBufferData's lookups are replayed from here
+	PerFrame perFrameCache{};
+	Util::FrameChecker perFrameCacheChecker;
 };
+
+#pragma warning(pop)

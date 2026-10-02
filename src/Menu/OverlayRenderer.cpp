@@ -21,6 +21,7 @@ namespace
 #include "CSEditor/EditorWindow.h"
 #include "Feature.h"
 #include "FeatureIssues.h"
+#include "Features/Effects11/Editor/Effects11Editor.h"
 #include "Features/Effects11/EffectManager.h"
 #include "Features/RenderDoc.h"
 #include "Globals.h"
@@ -159,8 +160,21 @@ void OverlayRenderer::RenderOverlay(
 {
 	processInputEventQueue();
 
+	// ImGui only takes game input while a CS window owns it. Otherwise status overlays
+	// (compile progress, performance overlay) would react to gameplay clicks and keys, and
+	// keys held while flying the editor camera would leak into the editor's widgets.
+	auto& io = ImGui::GetIO();
+	const bool acceptsInput = !menu.IsPreviewFlying() && menu.ShouldSwallowInput();
+	io.SetAppAcceptingEvents(acceptsInput);
+	if (!acceptsInput) {
+		io.ClearEventsQueue();
+		io.ClearInputKeys();
+		io.ClearInputMouse();
+		io.WantSetMousePos = false;
+		ImGui::ClearActiveID();
+	}
+
 	if (ShouldSkipRendering()) {
-		auto& io = ImGui::GetIO();
 		io.ClearInputKeys();
 		io.ClearEventsQueue();
 		s_windowOverlapAlpha.clear();
@@ -180,13 +194,21 @@ void OverlayRenderer::RenderOverlay(
 			editorWindow->ExitPreviewMode();
 	}
 	editorWindow->UpdateOpenState();
+
+	// The Effects 11 editor, the CS Editor and the Bottled Shaders menu are exclusive
+	auto& effects11Editor = Effects11Editor::GetSingleton();
+	if (effects11Editor.IsOpen() && (editorWindow->open || menu.IsEnabled))
+		effects11Editor.Close(false);
+
 	if (editorWindow->open) {
 		bool flying = editorWindow->IsPreviewFlying();
-		auto& io = ImGui::GetIO();
 		io.MouseDrawCursor = !flying;
 		if (flying)
 			io.MousePos = { -FLT_MAX, -FLT_MAX };  // prevent hover/tooltips during active flying
 		editorWindow->Draw();
+	} else if (effects11Editor.IsOpen()) {
+		ImGui::GetIO().MouseDrawCursor = true;
+		effects11Editor.Draw();
 	} else if (menu.IsEnabled || SetupRenderer::ShouldShowFirstTimeSetup()) {
 		ImGui::GetIO().MouseDrawCursor = true;
 		if (menu.IsEnabled) {
@@ -216,6 +238,7 @@ bool OverlayRenderer::ShouldSkipRendering()
 	return !(shaderCache->IsCompiling() ||
 			 Menu::GetSingleton()->IsEnabled ||
 			 EditorWindow::GetSingleton()->open ||
+			 Effects11Editor::GetSingleton().IsOpen() ||
 			 abTestingManager->IsEnabled() ||
 			 (failed && !hide) ||
 			 effectFailed ||
@@ -259,6 +282,7 @@ void OverlayRenderer::InitializeImGuiFrame(Menu& menu)
 			menu.lastDisplaySize.x, menu.lastDisplaySize.y, currentDisplaySize.x, currentDisplaySize.y);
 		menu.resetLayout = true;
 		EditorWindow::GetSingleton()->resetLayout = true;
+		Effects11Editor::GetSingleton().RequestLayoutReset();
 	}
 	menu.lastDisplaySize = currentDisplaySize;
 
@@ -291,7 +315,9 @@ void OverlayRenderer::RenderShaderCompilationStatus(const std::function<const ch
 
 	uint32_t effectFailed = EffectManager::GetSingleton().IsInitialized() ? EffectManager::GetSingleton().GetFailedEffectCount() : 0;
 
-	if (shaderCache->IsCompiling()) {
+	bool showProgress = shaderCache->IsCompiling() && (!shaderCache->backgroundCompilation || shaderCache->IsShowBackgroundOverlay());
+
+	if (showProgress) {
 		ImGui::SetNextWindowPos(ImVec2(pos, pos));
 		if (!ImGui::Begin("ShaderCompilationInfo", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings)) {
 			ImGui::End();

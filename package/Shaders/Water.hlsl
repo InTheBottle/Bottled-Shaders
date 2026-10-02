@@ -898,7 +898,8 @@ float GetFresnelValue(float3 normal, float3 viewDirection)
 	float viewAngle = 1 - saturate(dot(-viewDirection, actualNormal));
 
 	if (SharedData::enbSettings.EnableWater) {
-		float fresnelRI = pow(abs(FresnelRI.x), SharedData::enbSettings.WaterFresnelMultiplier);
+		float fresnelExponent = SharedData::enbSettings.WaterFresnelMultiplier;
+		float fresnelRI = fresnelExponent != 0.0 ? pow(abs(FresnelRI.x), fresnelExponent) : 1.0;
 		float fresnel = (1 - fresnelRI) * pow(viewAngle, 5) + fresnelRI;
 		fresnel = lerp(SharedData::enbSettings.WaterFresnelMin, SharedData::enbSettings.WaterFresnelMax, fresnel);
 		return fresnel * SharedData::enbSettings.WaterReflectionAmount;
@@ -1171,6 +1172,13 @@ PS_OUTPUT main(PS_INPUT input)
 
 	diffuseOutput.refractionDiffuseColor = dirColor + ambientColor;
 
+#				if !defined(UNDERWATER)
+	if (SharedData::enbSettings.EnableWater) {
+		float3 dirScatter = saturate(dot(normal.xyz, SharedData::DirLightDirection.xyz) * 0.5 + 0.5) * saturate(dot(viewDirection.xyz, SharedData::DirLightDirection.xyz) * 0.5 + 0.5) * SharedData::DirLightColor.xyz;
+		diffuseOutput.refractionDiffuseColor += DeepColor.xyz * dirScatter * surfaceShadow * SharedData::enbSettings.WaterSunLightingMultiplier;
+	}
+#				endif
+
 	float3 diffuseColor = lerp(diffuseOutput.refractionColor, diffuseOutput.refractionDiffuseColor, diffuseOutput.refractionMul);
 
 	depthControl = DepthControl * (distanceMul - 1) + 1;
@@ -1184,11 +1192,14 @@ PS_OUTPUT main(PS_INPUT input)
 	if (LightLimitFix::GetClusterIndex(screenUV, viewPosition.z, clusterIndex)) {
 		lightCount = LightLimitFix::lightGrid[clusterIndex].lightCount;
 		uint lightOffset = LightLimitFix::lightGrid[clusterIndex].offset;
+		const bool localShadows = inWorld && !(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection) && SharedData::lightLimitFixSettings.EnableLocalShadows;
+		const float2x2 localShadowRotation = LightLimitFix::GetShadowRotationMatrix(Random::InterleavedGradientNoise(input.HPosition.xy, SharedData::FrameCount));
 		[loop] for (uint i = 0; i < lightCount; i++)
 		{
 			uint clusteredLightIndex = LightLimitFix::lightList[lightOffset + i];
 			LightLimitFix::Light light = LightLimitFix::lights[clusteredLightIndex];
-			if (LightLimitFix::IsLightIgnored(light) || light.lightFlags & LightLimitFix::LightFlags::ShadowCaster) {
+			const bool localShadow = localShadows && (light.lightFlags & LightLimitFix::LightFlags::LocalShadow);
+			if (LightLimitFix::IsLightIgnored(light) || ((light.lightFlags & LightLimitFix::LightFlags::ShadowCaster) && !localShadow)) {
 				continue;
 			}
 
@@ -1204,12 +1215,18 @@ PS_OUTPUT main(PS_INPUT input)
 
 			float3 normalizedLightDirection = normalize(lightDirection);
 
+			float lightShadow = 1.0;
+			[branch] if (localShadow)
+			{
+				lightShadow = LightLimitFix::GetLocalShadow(DepthSampler, light.localShadowIndex, input.WPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, normalizedLightDirection, false, localShadowRotation);
+			}
+
 			float3 H = normalize(normalizedLightDirection - viewDirection);
 			float HdotN = saturate(dot(H, normal));
 
 			const bool isPointLightLinear = light.lightFlags & LightLimitFix::LightFlags::Linear;
 			float3 lightColor = Color::PointLight(light.color.xyz, isPointLightLinear) * pow(HdotN, FresnelRI.z) * light.fade;
-			specularLighting += lightColor * intensityMultiplier;
+			specularLighting += lightColor * intensityMultiplier * lightShadow;
 		}
 	}
 	specularColor += specularLighting * 3;
@@ -1230,11 +1247,8 @@ PS_OUTPUT main(PS_INPUT input)
 
 	float3 sunColor = GetSunColor(normal, viewDirection, input.WPosition.xyz) * surfaceShadow;
 
-	if (SharedData::enbSettings.EnableWater) {
-		float3 dirScatter = saturate(dot(normal.xyz, SharedData::DirLightDirection.xyz) * 0.5 + 0.5) * saturate(dot(viewDirection.xyz, SharedData::DirLightDirection.xyz) * 0.5 + 0.5) * SharedData::DirLightColor.xyz;
-		diffuseOutput.refractionDiffuseColor += DeepColor.xyz * dirScatter * surfaceShadow * SharedData::enbSettings.WaterSunLightingMultiplier;
+	if (SharedData::enbSettings.EnableWater)
 		sunColor *= SharedData::enbSettings.WaterSunSpecularMultiplier;
-	}
 
 #					if defined(VC)
 	float specularFraction = lerp(1, fresnel * diffuseOutput.refractionMul, distanceBlendFactor);

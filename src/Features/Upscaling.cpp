@@ -1548,8 +1548,14 @@ void Upscaling::ClearShaderCache()
 	upscaleVS = nullptr;                 // com_ptr automatically releases
 }
 
-void Upscaling::CopySharedD3D12Resources()
+bool Upscaling::CopySharedD3D12Resources()
 {
+	// Frame generation must not run on inputs that were never copied this frame.
+	auto* vs = GetUpscaleVS();
+	auto* ps = copyDepthToSharedBufferPS.get();
+	if (!vs || !ps || !dx12SwapChain.motionVectorBufferShared12 || !dx12SwapChain.depthBufferShared12)
+		return false;
+
 	ZoneScoped;
 	TracyD3D11Zone(globals::state->tracyCtx, "Upscaling - Copy Shared D3D12 Resources");
 	globals::state->BeginPerfEvent("Copy Shared D3D12 Resources");
@@ -1582,7 +1588,7 @@ void Upscaling::CopySharedD3D12Resources()
 		context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 		// Set up vertex shader
-		context->VSSetShader(GetUpscaleVS(), nullptr, 0);
+		context->VSSetShader(vs, nullptr, 0);
 
 		// Set up rasterizer and blend states
 		context->RSSetState(upscaleRasterizerState.get());
@@ -1596,7 +1602,7 @@ void Upscaling::CopySharedD3D12Resources()
 		ID3D11RenderTargetView* rtvs[1] = { dx12SwapChain.depthBufferShared12->rtv };
 		context->OMSetRenderTargets(ARRAYSIZE(rtvs), rtvs, nullptr);
 
-		context->PSSetShader(copyDepthToSharedBufferPS.get(), nullptr, 0);
+		context->PSSetShader(ps, nullptr, 0);
 
 		globals::profiler->BeginPass("Upscaling::CopyDepthD3D12");
 		context->Draw(3, 0);
@@ -1612,6 +1618,7 @@ void Upscaling::CopySharedD3D12Resources()
 	context->VSSetShader(nullptr, nullptr, 0);
 
 	globals::state->EndPerfEvent();
+	return true;
 }
 
 void UpdateCameraData()
@@ -1659,11 +1666,13 @@ void Upscaling::FrameLimiter()
 	if (d3d12SwapChainActive) {
 		// While DLSS-G presents, its presenter owns the flip queue and paces the generated frames
 		// against it. A second waiter on the same latency event starves that wait (the reference
-		// implementation measured 30 ms timeouts), so the wait only runs while generation is off.
+		// implementation measured 30 ms timeouts), so the wait only runs while generation is off,
+		// and it is bounded so a lost signal cannot hang the render thread.
 		if (!streamline.dlssgActive) {
 			HANDLE waitableObject = GetFrameLatencyWaitableObject();
+			static constexpr DWORD kFrameLatencyWaitTimeoutMs = 1000;
 			if (waitableObject)
-				WaitForSingleObject(waitableObject, INFINITE);
+				WaitForSingleObject(waitableObject, kFrameLatencyWaitTimeoutMs);
 		}
 
 		if (settings.frameLimitMode) {
@@ -1787,7 +1796,7 @@ bool Upscaling::IsFrameGenerationBlockedByMenu() const
 	return !settings.frameGenerationAllowInMenus && state->IsFullScreenMenuOpen();
 }
 
-bool Upscaling::ShouldUseFrameGenerationThisFrame() const
+bool Upscaling::ShouldPrepareFrameGeneration() const
 {
 	// DLSS-G must be off while the window is minimised; FSR FG is left alone there since it
 	// never had that constraint.
@@ -1803,6 +1812,11 @@ uint32_t Upscaling::GetFrameGenerationMultiplier() const
 	if (activeFrameGenIsDLSSG)
 		return std::max(1u, streamline.GetDLSSGPresentedMultiplier());
 	return 2;
+}
+
+bool Upscaling::ShouldUseFrameGenerationThisFrame() const
+{
+	return frameGenerationPrepared;
 }
 
 bool Upscaling::IsUpscalingActive() const
@@ -2317,11 +2331,15 @@ void Upscaling::Main_PostProcessing::thunk(RE::ImageSpaceManager* a_this, uint32
 	auto& upscaling = globals::features::upscaling;
 	auto upscaleMethod = upscaling.GetUpscaleMethod();
 
-	if (upscaling.ShouldUseFrameGenerationThisFrame()) {
+	// Decide frame generation once per frame, here, and hold that decision through Present.
+	// Re-evaluating at Present let loading transitions flip the answer in between, so Present
+	// interpolated with inputs that were never copied and flashed a stale frame.
+	upscaling.frameGenerationPrepared = false;
+	if (upscaling.ShouldPrepareFrameGeneration()) {
 		auto& postProcessing = globals::features::postProcessing;
 		if (postProcessing.loaded)
 			postProcessing.ClearBorderMotionVectorsForFrameGen();
-		upscaling.CopySharedD3D12Resources();
+		upscaling.frameGenerationPrepared = upscaling.CopySharedD3D12Resources();
 	}
 
 	if (upscaleMethod != UpscaleMethod::kNONE && upscaleMethod != UpscaleMethod::kTAA)

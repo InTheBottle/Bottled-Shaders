@@ -81,10 +81,6 @@ namespace BackgroundBlur
 		winrt::com_ptr<ID3D11ShaderResourceView> cachedSourceSRV;
 		ID3D11Texture2D* cachedSourceTexture = nullptr;  // raw pointer for cache invalidation check
 
-		// Frozen copy of the HDR world buffer, captured once when a persistent vanilla menu is open
-		winrt::com_ptr<ID3D11Texture2D> frozenSceneTexture;
-		bool wasPersistentMenuOpen = false;
-
 		UINT textureWidth = 0;
 		UINT textureHeight = 0;
 		UINT downsampledWidth = 0;
@@ -139,36 +135,6 @@ namespace BackgroundBlur
 		{
 			auto* state = globals::state;
 			return state && state->IsMainOrLoadingMenuOpen(globals::game::ui);
-		}
-
-		bool IsPersistentVanillaMenuOpen()
-		{
-			auto* ui = globals::game::ui;
-			return ui && ui->GameIsPaused();
-		}
-
-		// (Re)captures frozenSceneTexture from source; caller must hold resourceMutex
-		void CaptureFrozenScene(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* source)
-		{
-			frozenSceneTexture = nullptr;
-
-			D3D11_TEXTURE2D_DESC desc;
-			source->GetDesc(&desc);
-			desc.BindFlags = 0;
-			desc.Usage = D3D11_USAGE_DEFAULT;
-			desc.CPUAccessFlags = 0;
-			desc.MiscFlags = 0;
-
-			if (FAILED(device->CreateTexture2D(&desc, nullptr, frozenSceneTexture.put())))
-				return;
-			Util::SetResourceName(frozenSceneTexture.get(), "BackgroundBlur::FrozenScene");
-
-			context->CopyResource(frozenSceneTexture.get(), source);
-		}
-
-		void ReleaseFrozenScene()
-		{
-			frozenSceneTexture = nullptr;
 		}
 
 		bool IsStartupMenuBlurSourceReady(SIE::ShaderCache* shaderCache)
@@ -375,7 +341,7 @@ namespace BackgroundBlur
 		textureFormat = format;
 	}
 
-	void PerformBlur(ID3D11Texture2D* sourceTexture, ID3D11ShaderResourceView* sourceSRV, ID3D11RenderTargetView* targetRTV, ImVec2 menuMin, ImVec2 menuMax, float cornerRadius, ID3D11ShaderResourceView* uiBufferSRV = nullptr, ID3D11RenderTargetView* uiBufferRTV = nullptr, bool allowUIBufferClear = true)
+	void PerformBlur(ID3D11Texture2D* sourceTexture, ID3D11ShaderResourceView* sourceSRV, ID3D11RenderTargetView* targetRTV, ImVec2 menuMin, ImVec2 menuMax, float cornerRadius, ID3D11ShaderResourceView* uiBufferSRV = nullptr, ID3D11RenderTargetView* uiBufferRTV = nullptr)
 	{
 		std::lock_guard<std::mutex> lock(resourceMutex);
 
@@ -520,7 +486,7 @@ namespace BackgroundBlur
 		context->PSSetShaderResources(0, 1, &nullSRV);
 
 		// Clear UI buffer where blur was drawn (prevents HUD showing through)
-		if (uiBufferRTV && allowUIBufferClear) {
+		if (uiBufferRTV) {
 			context->OMSetRenderTargets(1, &uiBufferRTV, nullptr);
 			context->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
 
@@ -565,9 +531,6 @@ namespace BackgroundBlur
 
 		cachedSourceSRV = nullptr;
 		cachedSourceTexture = nullptr;
-
-		ReleaseFrozenScene();
-		wasPersistentMenuOpen = false;
 
 		enabled = false;
 		initialized = false;
@@ -632,18 +595,6 @@ namespace BackgroundBlur
 			currentRTV = hdr->hdrTexture->rtv;
 
 			uiBuffer = GetHDRUIBufferViews(*hdr, upscaling);
-
-			bool persistentMenuOpen = IsPersistentVanillaMenuOpen() && !hdr->IsSceneFreshForPresent();
-			if (persistentMenuOpen && !wasPersistentMenuOpen) {
-				CaptureFrozenScene(device, context, currentTexture.get());
-			} else if (!persistentMenuOpen) {
-				ReleaseFrozenScene();
-			}
-			wasPersistentMenuOpen = persistentMenuOpen;
-
-			if (persistentMenuOpen && frozenSceneTexture) {
-				context->CopyResource(currentTexture.get(), frozenSceneTexture.get());
-			}
 		} else if (useUpscalingBackbuffer) {
 			// When D3D12 swap chain is active, get all resources in one call
 			auto res = upscaling.GetBlurResources();
@@ -702,12 +653,11 @@ namespace BackgroundBlur
 			hdr->SnapshotCleanScene();
 		}
 
-		const bool allowUIBufferClear = !IsPersistentVanillaMenuOpen();
 		// CS editor mode: single fullscreen blur pass (better perf than per-window)
 		if (csEditorActive) {
 			ImVec2 screenMin = { 0, 0 };
 			ImVec2 screenMax = { static_cast<float>(texDesc.Width), static_cast<float>(texDesc.Height) };
-			PerformBlur(currentTexture.get(), sourceSRV, currentRTV.get(), screenMin, screenMax, 0.0f, uiBuffer.srv, uiBuffer.rtv, allowUIBufferClear);
+			PerformBlur(currentTexture.get(), sourceSRV, currentRTV.get(), screenMin, screenMax, 0.0f, uiBuffer.srv, uiBuffer.rtv);
 			return;
 		}
 
@@ -758,7 +708,7 @@ namespace BackgroundBlur
 
 			// Perform blur for this window area with rounded corners
 			// Pass UI buffer SRV/RTV for compositing and clearing during upscaling gameplay
-			PerformBlur(currentTexture.get(), sourceSRV, currentRTV.get(), windowMin, windowMax, cornerRadius, uiBuffer.srv, uiBuffer.rtv, allowUIBufferClear);
+			PerformBlur(currentTexture.get(), sourceSRV, currentRTV.get(), windowMin, windowMax, cornerRadius, uiBuffer.srv, uiBuffer.rtv);
 		}
 	}
 

@@ -19,6 +19,7 @@
 #include "Features/Skin.h"
 #include "Features/SkySync.h"
 #include "Features/Skylighting.h"
+#include "Features/SnowCover.h"
 #include "Features/TerrainBlending.h"
 #include "Features/TerrainHelper.h"
 #include "Features/Upscaling.h"
@@ -55,6 +56,7 @@ void State::UpdateLightingShaderPermutation(RE::BSRenderPass* a_pass)
 void State::UpdateSkyShaderPermutation(RE::BSRenderPass* a_pass)
 {
 	permutationData.ExtraShaderDescriptor &= ~static_cast<uint32_t>(State::ExtraShaderDescriptors::IsSun);
+	permutationData.ExtraShaderDescriptor &= ~static_cast<uint32_t>(State::ExtraShaderDescriptors::IsMoon);
 
 	if (!a_pass || !a_pass->shaderProperty)
 		return;
@@ -63,6 +65,41 @@ void State::UpdateSkyShaderPermutation(RE::BSRenderPass* a_pass)
 	if (skyProperty->uiSkyObjectType == RE::BSSkyShaderProperty::SkyObject::SO_SUN ||
 		skyProperty->uiSkyObjectType == RE::BSSkyShaderProperty::SkyObject::SO_SUN_GLARE) {
 		permutationData.ExtraShaderDescriptor |= static_cast<uint32_t>(State::ExtraShaderDescriptors::IsSun);
+	}
+	if (skyProperty->uiSkyObjectType == RE::BSSkyShaderProperty::SkyObject::SO_MOON) {
+		permutationData.ExtraShaderDescriptor |= static_cast<uint32_t>(State::ExtraShaderDescriptors::IsMoon);
+	}
+
+	// The glare VS fades itself by scene depth coverage around the sun
+	if (skyProperty->uiSkyObjectType == RE::BSSkyShaderProperty::SkyObject::SO_SUN_GLARE) {
+		auto* context = globals::d3d::context;
+		ID3D11Buffer* buffers[] = { permutationCB->CB(), sharedDataCB->CB() };
+		context->VSSetConstantBuffers(4, static_cast<UINT>(std::size(buffers)), buffers);
+		// The sky draws with the z-prepass copy as its DSV, which would null an SRV of it; kMAIN holds the same depth
+		auto* depthSRV = globals::game::renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN].depthSRV;
+		context->VSSetShaderResources(17, 1, &depthSRV);
+	}
+}
+
+void State::UpdateEffectShaderPermutation(RE::BSRenderPass* a_pass)
+{
+	constexpr auto isAurora = static_cast<uint32_t>(ExtraShaderDescriptors::IsAurora);
+	permutationData.ExtraShaderDescriptor &= ~isAurora;
+
+	if (!a_pass || !a_pass->geometry)
+		return;
+	if (!(currentVertexDescriptor & static_cast<uint32_t>(SIE::ShaderCache::EffectShaderFlags::SkyObject)))
+		return;
+
+	const auto sky = globals::game::sky;
+	if (!sky || !sky->auroraRoot)
+		return;
+
+	for (const RE::NiAVObject* node = a_pass->geometry; node; node = node->parent) {
+		if (node == sky->auroraRoot.get()) {
+			permutationData.ExtraShaderDescriptor |= isAurora;
+			return;
+		}
 	}
 }
 
@@ -567,8 +604,8 @@ void State::SaveToJson(nlohmann::json& settings)
 	json general;
 	general["Enable Shaders"] = shaderCache->IsEnabled();
 	general["Enable Disk Cache"] = shaderCache->IsDiskCache();
-	general["Skip Unchanged Shaders"] = shaderCache->IsSkipUnchangedShaders();
 	general["Enable Async"] = shaderCache->IsAsync();
+	general["Show Background Compile Overlay"] = shaderCache->IsShowBackgroundOverlay();
 	general["Language"] = I18n::GetSingleton()->GetCurrentLocale();
 
 	settings["General"] = general;
@@ -649,10 +686,10 @@ void State::LoadFromJson(nlohmann::json& settings)
 			shaderCache->SetEnabled(general["Enable Shaders"]);
 		if (general.contains("Enable Disk Cache") && general["Enable Disk Cache"].is_boolean())
 			shaderCache->SetDiskCache(general["Enable Disk Cache"]);
-		if (general.contains("Skip Unchanged Shaders") && general["Skip Unchanged Shaders"].is_boolean())
-			shaderCache->SetSkipUnchangedShaders(general["Skip Unchanged Shaders"]);
 		if (general.contains("Enable Async") && general["Enable Async"].is_boolean())
 			shaderCache->SetAsync(general["Enable Async"]);
+		if (general.contains("Show Background Compile Overlay") && general["Show Background Compile Overlay"].is_boolean())
+			shaderCache->SetShowBackgroundOverlay(general["Show Background Compile Overlay"]);
 
 		// Load i18n locale preference
 		if (general.contains("Language") && general["Language"].is_string()) {
@@ -721,20 +758,6 @@ void State::Save(ConfigMode a_configMode)
 	}
 }
 
-bool State::ValidateCache(CSimpleIniA& a_ini)
-{
-	bool valid = true;
-	for (auto* feature : Feature::GetFeatureList())
-		valid = valid && feature->ValidateCache(a_ini);
-	return valid;
-}
-
-void State::WriteDiskCacheInfo(CSimpleIniA& a_ini)
-{
-	for (auto* feature : Feature::GetFeatureList())
-		feature->WriteDiskCacheInfo(a_ini);
-}
-
 void State::SetLogLevel(spdlog::level::level_enum a_level)
 {
 	logLevel = a_level;
@@ -782,9 +805,8 @@ std::vector<std::pair<std::string, std::string>>* State::GetDefines()
 
 bool State::ShaderEnabled(const RE::BSShader::Type a_type)
 {
-	auto index = magic_enum::enum_integer(a_type) + 1;
-	if (index < sizeof(enabledClasses)) {
-		return enabledClasses[index];
+	if (a_type > RE::BSShader::Type::None && a_type < RE::BSShader::Type::Total) {
+		return enabledClasses[magic_enum::enum_integer(a_type) - 1];
 	}
 	return false;
 }
@@ -936,6 +958,28 @@ void State::ModifyShaderLookup(const RE::BSShader& a_shader, uint& a_vertexDescr
 									   (uint32_t)SIE::ShaderCache::LightingShaderFlags::DefShadow |
 									   (uint32_t)SIE::ShaderCache::LightingShaderFlags::CharacterLight |
 									   (uint32_t)SIE::ShaderCache::LightingShaderFlags::BaseObjectIsSnow);
+
+				{
+					uint32_t technique = 0x3F & (a_pixelDescriptor >> 24);
+					if (technique != (uint32_t)SIE::ShaderCache::LightingShaderTechniques::LODLand &&
+						technique != (uint32_t)SIE::ShaderCache::LightingShaderTechniques::LODLandNoise &&
+						technique != (uint32_t)SIE::ShaderCache::LightingShaderTechniques::LODObjects &&
+						technique != (uint32_t)SIE::ShaderCache::LightingShaderTechniques::LODObjectHD)
+						a_pixelDescriptor &= ~((uint32_t)SIE::ShaderCache::LightingShaderFlags::Specular |
+											   (uint32_t)SIE::ShaderCache::LightingShaderFlags::SoftLighting |
+											   (uint32_t)SIE::ShaderCache::LightingShaderFlags::RimLighting |
+											   (uint32_t)SIE::ShaderCache::LightingShaderFlags::BackLighting);
+
+					if (globals::features::snowCover.loaded &&
+						(a_pixelDescriptor & (uint32_t)SIE::ShaderCache::LightingShaderFlags::TruePbr) &&
+						!(a_pixelDescriptor & (uint32_t)SIE::ShaderCache::LightingShaderFlags::Skinned) &&
+						technique != (uint32_t)SIE::ShaderCache::LightingShaderTechniques::Facegen &&
+						technique != (uint32_t)SIE::ShaderCache::LightingShaderTechniques::FacegenRGBTint &&
+						technique != (uint32_t)SIE::ShaderCache::LightingShaderTechniques::Hair &&
+						technique != (uint32_t)SIE::ShaderCache::LightingShaderTechniques::Eye)
+						a_pixelDescriptor &= ~(uint32_t)SIE::ShaderCache::LightingShaderFlags::AnisoLighting;
+				}
+
 				if (a_pixelDescriptor & (uint32_t)SIE::ShaderCache::LightingShaderFlags::AdditionalAlphaMask) {
 					a_pixelDescriptor |= (uint32_t)SIE::ShaderCache::LightingShaderFlags::DoAlphaTest;
 					a_pixelDescriptor &= ~(uint32_t)SIE::ShaderCache::LightingShaderFlags::AdditionalAlphaMask;
@@ -1114,11 +1158,11 @@ void State::UpdateSharedData([[maybe_unused]] bool a_inWorld, [[maybe_unused]] b
 		}
 
 		if (auto sky = globals::game::sky) {
-			// Process sun
 			const auto& skySync = globals::features::skySync;
 
+			// Process sun
 			if (auto sun = sky->sun; sun && sun->root && sky->root) {
-				auto sunDirection = skySync.GetCelestialDirection(sky, SkySync::Caster::Sun);
+				const auto sunDirection = skySync.GetCelestialDirection(sky, SkySync::Caster::Sun);
 				data.SunDirection = { sunDirection.x, sunDirection.y, sunDirection.z, 0.0f };
 
 				if (sun->sunBase) {

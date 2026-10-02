@@ -15,6 +15,7 @@
 #include "Features/GrassCollision.h"
 #include "Features/GrassLighting.h"
 #include "Features/GrassOptimizations.h"
+#include "Features/HairBacklighting.h"
 #include "Features/HDRDisplay.h"
 #include "Features/HairSpecular.h"
 #include "Features/HorizonFix.h"
@@ -182,48 +183,6 @@ void Feature::Save(json& o_json)
 	SaveSettings(o_json[GetName()]);
 }
 
-bool Feature::ValidateCache(CSimpleIniA& a_ini)
-{
-	auto name = GetName();
-	auto ini_name = GetShortName();
-
-	logger::info("Validating {}", name);
-
-	auto enabledInCache = a_ini.GetBoolValue(ini_name.c_str(), "Enabled", false);
-	if (enabledInCache && !loaded) {
-		logger::info("Feature was uninstalled");
-		return false;
-	}
-	if (!enabledInCache && loaded) {
-		logger::info("Feature was installed");
-		return false;
-	}
-
-	if (loaded) {
-		auto versionInCache = a_ini.GetValue(ini_name.c_str(), "Version");
-		if (!versionInCache) {
-			logger::info("No cached version found. Installed {}", version);
-			return false;
-		}
-		if (strcmp(versionInCache, version.c_str()) != 0) {
-			logger::info("Change in version detected. Installed {} but {} in Disk Cache", version, versionInCache);
-			return false;
-		} else {
-			logger::info("Installed version and cached version match.");
-		}
-	}
-
-	logger::info("Cached feature is valid");
-	return true;
-}
-
-void Feature::WriteDiskCacheInfo(CSimpleIniA& a_ini)
-{
-	auto ini_name = GetShortName();
-	a_ini.SetBoolValue(ini_name.c_str(), "Enabled", loaded);
-	a_ini.SetValue(ini_name.c_str(), "Version", version.c_str());
-}
-
 /**
  * @brief Provides access to the registry of all known features.
  * @return A constant reference to the vector of all known feature instances.
@@ -277,7 +236,8 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::postProcessing,
 		&globals::features::skin,
 		&globals::features::snowCover,
-		&globals::features::footstepParticles
+		&globals::features::footstepParticles,
+		&globals::features::hairBacklighting
 	};
 
 	return features;
@@ -328,14 +288,27 @@ bool Feature::ReapplyOverrideSettings()
 	// Get base settings and apply overrides fresh
 	json featureJson;
 	SaveSettings(featureJson);
+	json previousJson = featureJson;  // LoadSettings takes a non-const reference
 
 	// Apply overrides to the settings (without user customizations)
 	size_t appliedCount = overrideManager->ReapplyFeatureOverrides(featureName, featureJson);
 
 	if (appliedCount > 0) {
-		// Load the override settings back into the feature
-		LoadSettings(featureJson);
-		return true;
+		// Load the override settings back into the feature. A malformed override throws from
+		// LoadSettings, possibly after some fields were already applied, so restore the previous values.
+		try {
+			LoadSettings(featureJson);
+			return true;
+		} catch (const std::exception& e) {
+			logger::warn("Failed to reapply override settings for {}, keeping previous settings. Error: {}", featureName, e.what());
+			try {
+				LoadSettings(previousJson);
+			} catch (...) {
+				logger::warn("Failed to restore previous settings for {}, using default.", featureName);
+				RestoreDefaultSettings();
+			}
+			return false;
+		}
 	}
 
 	return false;
@@ -343,13 +316,17 @@ bool Feature::ReapplyOverrideSettings()
 
 std::string Feature::GetDisplayCategory() const
 {
-	const auto category = GetCategory();
+	return TranslateCategory(GetCategory());
+}
+
+std::string Feature::TranslateCategory(std::string_view category)
+{
 	if (category == FeatureCategories::kCharacters)
 		return T("feature.category.characters", "Characters");
 	if (category == FeatureCategories::kDisplay)
 		return T("feature.category.display", "Display");
-	if (category == FeatureCategories::kGrass)
-		return T("feature.category.grass", "Grass");
+	if (category == FeatureCategories::kGrassAndFoliage)
+		return T("feature.category.grass_and_foliage", "Grass & Foliage");
 	if (category == FeatureCategories::kLandscapeAndTextures)
 		return T("feature.category.landscape_and_textures", "Landscape & Textures");
 	if (category == FeatureCategories::kLighting)
@@ -360,8 +337,10 @@ std::string Feature::GetDisplayCategory() const
 		return T("feature.category.other", "Other");
 	if (category == FeatureCategories::kPostProcessing)
 		return T("feature.category.post_processing", "Post-Processing");
-	if (category == FeatureCategories::kSky)
-		return T("feature.category.sky", "Sky");
+	if (category == FeatureCategories::kShadows)
+		return T("feature.category.shadows", "Shadows");
+	if (category == FeatureCategories::kSkyAndWeather)
+		return T("feature.category.sky_and_weather", "Sky & Weather");
 	if (category == FeatureCategories::kUtility)
 		return T("feature.category.utility", "Utility");
 	if (category == FeatureCategories::kWater)

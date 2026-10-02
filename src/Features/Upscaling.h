@@ -137,6 +137,8 @@ public:
 	bool rtx40MFGUnlockBoot = false;     ///< Unlock setting as read at device creation (the setting needs a restart)
 	std::atomic<bool> windowFocused{ true };  ///< False while the window is minimised; frame generation pauses
 	std::atomic<bool> windowActive{ true };   ///< False while another application is in the foreground (WM_ACTIVATEAPP); the DLSS-G presenter rejects presents then
+	// Set by Main_PostProcessing when frame-generation inputs were copied; cleared after Present.
+	bool frameGenerationPrepared = false;
 
 	// Timing and scaling
 	double refreshRate = 0.0f;
@@ -149,6 +151,9 @@ public:
 
 	/** @brief True for menus that must run without frame generation (loading, main menu, and the map/skills menus unless allowed). */
 	bool IsFrameGenerationBlockedByMenu() const;
+	/** @brief Returns whether settings, window and menu state permit preparing frame-generation inputs this frame. */
+	bool ShouldPrepareFrameGeneration() const;
+	/** @brief Returns the frame-generation decision made in post-processing, held until the frame is presented. */
 	bool ShouldUseFrameGenerationThisFrame() const;
 	float GetFrameGenerationFrameTime() const;
 	/** @brief Presented frames per rendered frame: DLSS-G's reported multiplier, or 2 for FSR. 1 when off. */
@@ -249,7 +254,8 @@ public:
 	 */
 	std::atomic<bool> pendingDLSSReset{ false };
 
-	void CopySharedD3D12Resources();
+	/** @brief Copies depth and motion vectors for frame generation; returns false if its shaders or shared buffers are unavailable. */
+	bool CopySharedD3D12Resources();
 	void PostDisplay();
 	void PerformUpscaling();
 	void UpscaleDepth();

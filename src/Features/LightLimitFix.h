@@ -101,20 +101,19 @@ public:
 	STATIC_ASSERT_ALIGNAS_16(LightData);
 
 	static constexpr uint32_t SHADOW_MASK_CHANNEL_COUNT = 4;
-	static constexpr uint32_t ENGINE_SHADOW_SLOTS = 4;
+	static constexpr uint32_t ENGINE_LOCAL_SHADOW_CASTERS = 3;
 	static constexpr uint32_t ENGINE_SHADOW_MAP_SLICES = 8;
 	static constexpr uint32_t MIN_LOCAL_SHADOW_SLOTS = 4;
 	static constexpr uint32_t MAX_LOCAL_SHADOW_SLOTS = 64;
 	static constexpr uint64_t LOCAL_SHADOW_MAX_CACHE_BYTES = 2048ull * 1024ull * 1024ull;
-	static constexpr uint32_t LOCAL_SHADOW_FADE_FRAMES = 8;
 	static constexpr uint32_t LOCAL_SHADOW_SWEEP_INTERVAL = 30;
 	static constexpr uint32_t LOCAL_SHADOW_EVICT_AGE = 120;
 	static constexpr uint32_t LOCAL_SHADOW_REJECT_MAX_FRAMES = 120;
 	static constexpr uint32_t LOCAL_SHADOW_CAMERA_HOLD_FRAMES = 60;
-	static constexpr uint32_t LOCAL_SHADOW_GEOM_REHASH_INTERVAL = 4;
-	static constexpr uint32_t LOCAL_SHADOW_CLEAN_REFRESH_FRAMES = 300;
+	static constexpr uint32_t LOCAL_SHADOW_UNCACHED_GRACE_FRAMES = 8;
 	static constexpr uint32_t LOCAL_SHADOW_STATIC_STARVE_FRAMES = 60;
-	static constexpr float LOCAL_SHADOW_STARVED_SCORE = 500.0f;
+	static constexpr float LOCAL_SHADOW_AGE_URGENCY = 64.0f;
+	static constexpr float LOCAL_SHADOW_ACTOR_SCORE = 1000.0f;
 	static constexpr uint32_t LOCAL_SHADOW_TYPE_SPOT = 0;
 	static constexpr uint32_t LOCAL_SHADOW_TYPE_HEMISPHERE = 1;
 	static constexpr uint32_t LOCAL_SHADOW_TYPE_OMNI = 2;
@@ -149,10 +148,10 @@ public:
 		RE::NiLight* niLight = nullptr;
 		int32_t slice = -1;
 		uint32_t lastSeenFrame = 0;
+		uint32_t firstSeenFrame = 0;
 		uint32_t lastEvaluatedFrame = 0;
 		uint32_t lastEligibleFrame = 0;
 		uint32_t lastRenderedFrame = 0;
-		uint32_t assignedFrame = 0;
 		uint32_t rejectUntilFrame = 0;
 		uint32_t rejectStreak = 0;
 		RE::NiPoint3 position{};
@@ -160,20 +159,13 @@ public:
 		RE::NiMatrix3 rotation{};
 		RE::NiMatrix3 renderedRotation{};
 		float radius = 0.0f;
-		float radiusAnchor = -1.0f;
+		float importance = 0.0f;
 		float score = -1.0f;
 		float actorImportance = 0.0f;
 		float actorSpeed = 0.0f;
 		float intervalEma = 1.0f;
-		uint64_t contentHash = 0;
-		uint64_t renderedContentHash = 0;
-		uint64_t cachedGeomHash = 0;
-		uint32_t cachedGeomFrame = 0;
-		uint32_t cachedGeomCount = 0;
-		uint32_t skinnedCasters = 0;
 		bool hidden = false;
 		bool dynamic = false;
-		bool starved = false;
 		float4x4 shadowProj{};
 		float4 shadowParams{};
 		float4 shadowParams2{};
@@ -221,15 +213,14 @@ public:
 		uint EnableContactShadows;
 		uint ContactShadowMaxSteps;
 		float ContactShadowMaxDistance;
-		float ContactShadowStride;
-		float ContactShadowThickness;
-		float ContactShadowDepthFade;
+		float ContactShadowLength;
+		float ContactShadowDepthThickness;
 		float ContactShadowStrength;
 		uint EnableLocalShadows;
 		uint LocalShadowSamples;
 		float LocalShadowFilterRadius;
 		float LocalShadowTexelSize;
-		float pad1;
+		float pad1[2];
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
 
@@ -338,7 +329,7 @@ public:
 	ankerl::unordered_dense::map<RE::FormID, RE::NiPoint3> localShadowActorHistoryNext;
 	eastl::vector<LocalShadowData> localShadowUpload;
 	bool localShadowSelecting = false;
-	bool localShadowSunActive = false;
+	bool shadowDistanceRaised = false;
 	uint32_t localShadowFrame = 0;
 	RE::NiPoint3 localShadowCameraPosition{};
 
@@ -367,6 +358,7 @@ public:
 	 * Runs before the engine selects its (at most four) shadow-casting lights.
 	 */
 	void ScheduleLocalShadowCasters();
+	void MatchShadowDistanceToLightFade(bool a_enable);
 	/**
 	 * @brief Records the engine's own range test for a caster and hides casters not scheduled this frame.
 	 * @param a_light The shadow light being evaluated by the engine.
@@ -382,8 +374,10 @@ public:
 	void EnsureLocalShadowResources(ID3D11Texture2D* a_engineShadowMaps);
 	/** @brief Releases the cache resources and forgets every slice assignment. */
 	void ReleaseLocalShadowResources();
-	/** @brief Finds a free cache slice or evicts the least recently rendered caster. */
+	/** @brief Finds a free cache slice or reclaims the least recently rendered reclaimable one; an actor-lit caster may take the least important static caster's slice. */
 	int32_t AcquireLocalShadowSlice(RE::BSShadowLight* a_light, uint32_t a_frame);
+	/** @brief True when taking a slice from this owner cannot remove a shadow that is on screen. */
+	static bool IsLocalShadowSliceReclaimable(const LocalShadowCaster* a_owner, uint32_t a_frame);
 	/** @brief Looks up the tracked caster entry for a light, or nullptr. */
 	LocalShadowCaster* FindLocalShadowCaster(RE::BSShadowLight* a_light);
 	/** @brief Flags a light as an engine shadow-mask light only when it owns one of the four mask channels. */
@@ -415,16 +409,15 @@ public:
 		bool EnableContactShadows = true;
 		uint ContactShadowMaxSteps = 4;
 		float ContactShadowMaxDistance = 1024.0f;
-		float ContactShadowStride = 2.0f;
-		float ContactShadowThickness = 0.2f;
-		float ContactShadowDepthFade = 0.05f;
+		float ContactShadowLength = 8.0f;
+		float ContactShadowDepthThickness = 16.0f;
 		float ContactShadowStrength = 1.0f;
 		bool EnableLocalShadows = true;
 		uint LocalShadowSlots = 16;
 		uint LocalShadowResolution = 0;
 		uint LocalShadowSamples = 8;
 		float LocalShadowFilterScale = 1.0f;
-		float LocalShadowBiasScale = 0.25f;
+		bool LogShadowDiagnostics = false;
 	};
 
 	uint clusterSize[3] = { 16 };

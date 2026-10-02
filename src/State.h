@@ -150,18 +150,6 @@ public:
 	void SaveTheme();
 
 	/**
-	 * @brief Validates the disk shader cache against all loaded features.
-	 * @param a_ini The cache INI to validate against.
-	 * @return True if all feature cache entries are still valid.
-	 */
-	bool ValidateCache(CSimpleIniA& a_ini);
-	/**
-	 * @brief Writes each feature's cache metadata into the disk cache INI.
-	 * @param a_ini The cache INI to write into.
-	 */
-	void WriteDiskCacheInfo(CSimpleIniA& a_ini);
-
-	/**
 	 * @brief Sets the global log level and flushes on that level.
 	 * @param a_level The spdlog severity level to apply.
 	 */
@@ -280,7 +268,9 @@ public:
 		AdditiveLighting = 1 << 6,
 		IsEye = 1 << 7,
 		NoSnow = 1 << 8,
-		NoFoliageTint = 1 << 9
+		NoFoliageTint = 1 << 9,
+		IsAurora = 1 << 10,
+		IsMoon = 1 << 11
 	};
 
 	/** @brief Bitflags describing extra feature-specific properties related to terrain displacement and material models. */
@@ -306,6 +296,9 @@ public:
 	bool isLoadingMenuOpen = false;
 	bool isMapMenuOpen = false;
 	bool isStatsMenuOpen = false;
+	bool flatWorldMapLoaded = false;  ///< FlatMapMarkersSSE is loaded, which flat world map mods (e.g. FWMF) rely on
+	/** @brief The map menu is open while a flat world map mod is installed. */
+	bool IsFlatWorldMapOpen() const { return isMapMenuOpen && flatWorldMapLoaded; }
 	/**
 	 * @brief Checks whether the main menu or loading menu is cached as open.
 	 * @returns true if either the main menu or loading menu is open, false otherwise.
@@ -322,7 +315,9 @@ public:
 		       (ui && (ui->IsMenuOpen(RE::MainMenu::MENU_NAME) || ui->IsMenuOpen(RE::LoadingMenu::MENU_NAME)));
 	}
 	/** @brief Full-screen menus drawing their own art, which must not be graded by post-process effects. */
-	bool IsFullScreenMenuOpen() const { return IsMainOrLoadingMenuOpen() || isStatsMenuOpen; }
+	bool IsFullScreenMenuOpen() const { return IsMainOrLoadingMenuOpen() || isStatsMenuOpen || IsFlatWorldMapOpen(); }
+	/** @brief The main menu, a loading screen or the flat world map is open. */
+	bool IsMainLoadingOrFlatMapOpen() const { return IsMainOrLoadingMenuOpen() || IsFlatWorldMapOpen(); }
 	/** @brief A menu is rendering its own scene instead of the gameplay view, so scene-adaptive state must not track it. */
 	bool IsMenuSceneOpen() const { return IsFullScreenMenuOpen() || isMapMenuOpen; }
 	/** @brief Gameplay is paused or suspended behind a menu. Cached menus are kept explicit in case a mod clears kPausesGame. */
@@ -342,6 +337,7 @@ public:
 	 * @param a_pass The render pass to inspect.
 	 */
 	void UpdateSkyShaderPermutation(RE::BSRenderPass* a_pass);
+	void UpdateEffectShaderPermutation(RE::BSRenderPass* a_pass);
 	/**
 	 * @brief Checks whether directional shadows are available for the current scene.
 	 * @returns true if directional shadows are present, false otherwise.

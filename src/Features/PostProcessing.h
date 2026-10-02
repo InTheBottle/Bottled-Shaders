@@ -42,6 +42,7 @@ struct PostProcessing : Feature
 		return t == RE::BSShader::Type::ImageSpace;
 	};
 	virtual std::string_view GetCategory() const override { return FeatureCategories::kPostProcessing; }
+	virtual bool IsDisabledByDefault() const override { return true; }
 	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
 	{
 		return {

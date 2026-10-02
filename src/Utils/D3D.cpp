@@ -1,6 +1,7 @@
 #include "D3D.h"
 
 #include "Features/ReverseZ.h"
+#include "Deferred.h"
 #include "Features/TerrainBlending.h"
 #include "ShaderCache.h"
 #include "State.h"
@@ -9,22 +10,27 @@
 #include <DirectXTex.h>
 #include <d3dcompiler.h>
 #include <mutex>
+#include <unordered_set>
 
 namespace Util
 {
 
 	ID3D11ShaderResourceView* GetCurrentSceneDepthSRV(bool prefer16bit)
 	{
+		auto renderer = globals::game::renderer;
+		if (!renderer)
+			return nullptr;
+		auto& zPrepassCopy = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kPOST_ZPREPASS_COPY];
+		if (globals::deferred && globals::deferred->sceneDepthFinal)
+			return zPrepassCopy.depthSRV;
+
 		auto& tb = globals::features::terrainBlending;
 		if (tb.loaded && tb.settings.Enabled) {
 			auto* srv = prefer16bit ? (tb.blendedDepthTexture16 ? tb.blendedDepthTexture16->srv.get() : nullptr) : (tb.blendedDepthTexture ? tb.blendedDepthTexture->srv.get() : nullptr);
 			if (srv)
 				return srv;
 		}
-		auto renderer = globals::game::renderer;
-		if (renderer)
-			return renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kPOST_ZPREPASS_COPY].depthSRV;
-		return nullptr;
+		return zPrepassCopy.depthSRV;
 	}
 
 	ID3D11ShaderResourceView* GetSRVFromRTV(const ID3D11RenderTargetView* a_rtv)
@@ -107,6 +113,19 @@ namespace Util
 		Resource->SetPrivateData(WKPDID_D3DDebugObjectNameT, len, buffer);
 	}
 
+	// Per-frame getters would otherwise retry a failed compile every frame.
+	namespace
+	{
+		std::mutex shaderCompileFailuresMutex;
+		std::unordered_set<std::string> shaderCompileFailures;
+	}
+
+	void ClearShaderCompileFailures()
+	{
+		std::lock_guard lock(shaderCompileFailuresMutex);
+		shaderCompileFailures.clear();
+	}
+
 	ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const std::vector<std::pair<const char*, const char*>>& Defines, const char* ProgramType, const char* Program)
 	{
 		auto device = globals::d3d::device;
@@ -141,6 +160,8 @@ namespace Util
 			macros.push_back({ "PSHADER", "" });
 		else if (!_stricmp(ProgramType, "vs_5_0"))
 			macros.push_back({ "VSHADER", "" });
+		else if (!_stricmp(ProgramType, "gs_5_0"))
+			macros.push_back({ "GEOMETRYSHADER", "" });
 		else if (!_stricmp(ProgramType, "hs_5_0"))
 			macros.push_back({ "HULLSHADER", "" });
 		else if (!_stricmp(ProgramType, "ds_5_0"))
@@ -174,13 +195,26 @@ namespace Util
 		ID3DBlob* shaderBlob;
 		ID3DBlob* shaderErrors;
 
+		const auto failureKey = std::format("{}|{}|{}|{}|{}", str, ProgramType, Program, flags, DefinesToString(macros));
+		{
+			std::lock_guard lock(shaderCompileFailuresMutex);
+			if (shaderCompileFailures.contains(failureKey))
+				return nullptr;
+		}
+		const auto recordFailure = [&]() {
+			std::lock_guard lock(shaderCompileFailuresMutex);
+			shaderCompileFailures.insert(failureKey);
+		};
+
 		if (!std::filesystem::exists(FilePath)) {
 			logger::error("Failed to compile shader; {} does not exist", str);
+			recordFailure();
 			return nullptr;
 		}
 		logger::debug("Compiling {} with {}", str, DefinesToString(macros));
 		if (FAILED(D3DCompileFromFile(FilePath, macros.data(), &include, Program, ProgramType, flags, 0, &shaderBlob, &shaderErrors))) {
 			logger::warn("Shader compilation failed:\n\n{}", shaderErrors ? static_cast<char*>(shaderErrors->GetBufferPointer()) : "Unknown error");
+			recordFailure();
 			return nullptr;
 		}
 		if (shaderErrors)
@@ -198,6 +232,10 @@ namespace Util
 				logger::error("CreateVertexShader failed for {}: {:#x} (device removed reason {:#x})", str, static_cast<uint32_t>(hr), static_cast<uint32_t>(device->GetDeviceRemovedReason()));
 				return nullptr;
 			}
+			return regShader;
+		} else if (!_stricmp(ProgramType, "gs_5_0")) {
+			ID3D11GeometryShader* regShader;
+			DX::ThrowIfFailed(device->CreateGeometryShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &regShader));
 			return regShader;
 		} else if (!_stricmp(ProgramType, "hs_5_0")) {
 			ID3D11HullShader* regShader;

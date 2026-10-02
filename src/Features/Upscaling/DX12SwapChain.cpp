@@ -280,7 +280,9 @@ void DX12SwapChain::RecreateWrappedResources(const DXGI_SWAP_CHAIN_DESC1& desc)
 	swapChainBufferWrapped = newSwapChainBuffer.release();
 	uiBufferWrapped = newUiBuffer.release();
 
-	ClearWrappedBuffers();
+	const float clearColor[4]{};
+	d3d11Context->ClearRenderTargetView(swapChainBufferWrapped->rtv, clearColor);
+	d3d11Context->ClearRenderTargetView(uiBufferWrapped->rtv, clearColor);
 }
 
 DXGISwapChainProxy* DX12SwapChain::GetSwapChainProxy()
@@ -566,9 +568,15 @@ HRESULT DX12SwapChain::PresentFidelityFX(UINT SyncInterval, UINT Flags, bool a_i
 	// Update the frame index
 	frameIndex = swapChain->GetCurrentBackBufferIndex();
 
+	float clearColor[4]{ 0, 0, 0, 0 };
+	d3d11Context->ClearRenderTargetView(uiBufferWrapped->rtv, clearColor);
+
 	// If VSync is disabled, use frame limiter to prevent tearing and optimise pacing
 	if (SyncInterval == 0)
 		upscaling.FrameLimiter();
+
+	// The next frame decides frame generation again in Main_PostProcessing.
+	upscaling.frameGenerationPrepared = false;
 
 	return S_OK;
 }
@@ -824,18 +832,26 @@ HRESULT DX12SwapChain::PresentDlssg(UINT SyncInterval, UINT Flags, bool)
 	// Update the frame index (DLSS-G requires GetCurrentBackBufferIndex on its proxy each frame)
 	frameIndex = swapChain->GetCurrentBackBufferIndex();
 
-	if (FAILED(result))
+	if (FAILED(result)) {
+		upscaling.frameGenerationPrepared = false;
 		return result;
+	}
 
 	if (dlssgPresentSafety)
 		streamline.QueryDLSSGState("post-present");
 
-	// The wrapped buffers are cleared by the present hook after the screenshot capture has read them.
+	// Only the UI buffer is cleared here, as on the FidelityFX path: the scene buffer is fully
+	// overwritten every frame, and the screenshot capture in the present hook reads it afterwards.
+	float clearColor[4]{ 0, 0, 0, 0 };
+	d3d11Context->ClearRenderTargetView(uiBufferWrapped->rtv, clearColor);
 
 	// DLSS-G paces its own presents; otherwise the frame limiter keeps the swap chain in step when
 	// the game itself presents unthrottled
 	if (!dlssgPresenting && presentSyncInterval == 0)
 		upscaling.FrameLimiter();
+
+	// The next frame decides frame generation again in Main_PostProcessing.
+	upscaling.frameGenerationPrepared = false;
 
 	return S_OK;
 }
@@ -1094,18 +1110,6 @@ void DX12SwapChain::SetColorSpace(bool enableHDR)
 		swapChain->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
 		logger::info("[DX12SwapChain] Set color space to SDR (sRGB)");
 	}
-}
-
-void DX12SwapChain::ClearWrappedBuffers()
-{
-	if (!d3d11Context)
-		return;
-
-	float clearColor[4]{ 0, 0, 0, 0 };
-	if (swapChainBufferWrapped && swapChainBufferWrapped->rtv)
-		d3d11Context->ClearRenderTargetView(swapChainBufferWrapped->rtv, clearColor);
-	if (uiBufferWrapped && uiBufferWrapped->rtv)
-		d3d11Context->ClearRenderTargetView(uiBufferWrapped->rtv, clearColor);
 }
 
 DX12SwapChain::BlurResources DX12SwapChain::GetBlurResources() const

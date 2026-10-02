@@ -56,6 +56,7 @@ virtual const void* GetSettingsBlob() const { return nullptr; }
 	virtual std::string GetShortName() = 0;
 	virtual std::string GetDisplayName() { return GetName(); }
 	std::string GetDisplayCategory() const;
+	static std::string TranslateCategory(std::string_view category);
 	virtual std::string GetFeatureModLink() { return ""; }
 	virtual std::string_view GetShaderDefineName() { return ""; }
 
@@ -152,6 +153,7 @@ public:
 	 * Whether the feature will show up in the GUI menu
 	 */
 	virtual bool IsInMenu() const { return true; }
+	virtual bool HasSettings() const { return true; }
 
 	/**
 	 * Whether to print the INI version missing message when this feature is unloaded
@@ -276,19 +278,6 @@ public:
 	 * @return Vector of constraints this feature currently imposes (empty if none)
 	 */
 	virtual std::vector<FeatureConstraints::Constraint> GetActiveConstraints() const { return {}; }
-
-	/**
-	 * @brief Validates this feature's disk-cache entry against current install state.
-	 * @param a_ini The cache INI to read from.
-	 * @return True if the cache entry matches the current feature version and load state.
-	 */
-	virtual bool ValidateCache(CSimpleIniA& a_ini);
-
-	/**
-	 * @brief Writes this feature's version and enabled state into the disk-cache INI.
-	 * @param a_ini The cache INI to write to.
-	 */
-	virtual void WriteDiskCacheInfo(CSimpleIniA& a_ini);
 
 	/** @brief Invalidates any cached compiled shaders owned by this feature. */
 	virtual void ClearShaderCache() {}

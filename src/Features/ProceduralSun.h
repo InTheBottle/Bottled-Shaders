@@ -33,7 +33,8 @@ struct ProceduralSun : Feature
 
 		float cloudExtinction;
 		float sunVisibility;
-		float pad[2] = {};
+		float radianceLimit;
+		float pad = 0.0f;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrameData);
 	static_assert(sizeof(PerFrameData) == 48);
@@ -47,7 +48,7 @@ struct ProceduralSun : Feature
 	/** @brief Returns the shader configuration name. */
 	virtual inline std::string GetShortName() override { return "ProceduralSun"; }
 	/** @brief Returns the menu category. */
-	virtual std::string_view GetCategory() const override { return FeatureCategories::kSky; }
+	virtual std::string_view GetCategory() const override { return FeatureCategories::kSkyAndWeather; }
 	/** @brief Returns the shader permutation define. */
 	virtual inline std::string_view GetShaderDefineName() override { return "PROCEDURAL_SUN"; }
 	/** @brief Enables the feature define for sky shaders. */
@@ -77,4 +78,5 @@ struct ProceduralSun : Feature
 	PerFrameData GetCommonBufferData() const;
 
 	static float GetSunVisibility();
+	static float GetMainTargetRadianceLimit();
 };

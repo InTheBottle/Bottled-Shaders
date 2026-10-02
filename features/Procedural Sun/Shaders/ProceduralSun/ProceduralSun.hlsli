@@ -70,35 +70,30 @@ namespace ProceduralSun
 		sunColor = premultipliedSun / max(sunCoverage, 1e-5f);
 	}
 
-	float EvaluateCloudExtinctionMask(float cosTheta, float sunDiskCos, float edgeSoftness, bool haloEnabled, float sunHaloCos, float haloIntensity, float haloFalloff)
+	float4 ToAdditiveBlend(float4 color, float radianceLimit)
 	{
-		float3 limbDarkening;
-		float discCoverage;
-		EvaluateDisc(cosTheta, sunDiskCos, edgeSoftness, limbDarkening, discCoverage);
+		float3 emitted = max(color.xyz, 0.0f) * saturate(color.w);
+		float peak = max(emitted.x, max(emitted.y, emitted.z));
+		if (peak <= 0.0f)
+			return 0.0f;
 
-		float haloProfile = 0.0f;
-		if (haloEnabled && haloIntensity > 0.0f)
-			haloProfile = saturate(EvaluateHalo(cosTheta, sunDiskCos, sunHaloCos, haloFalloff));
-
-		return max(discCoverage, haloProfile);
+		float alpha = clamp(peak / max(radianceLimit, 1.0f), 1.0f / 256.0f, 1.0f);
+		return float4(emitted / alpha, alpha);
 	}
 
-	float4 ApplyCloudExtinction(float4 cloudColor, float opticalDepthScale)
+	float GetCloudTransmission(float capturedCloudOcclusion, float opticalDepthScale)
 	{
-		float alpha = cloudColor.w;
-		if (opticalDepthScale <= 1.0f || alpha <= 0.0f || alpha >= 1.0f)
-			return cloudColor;
-
-		float extinctAlpha = 1.0f - pow(1.0f - alpha, opticalDepthScale);
-		return float4(cloudColor.xyz * (alpha / extinctAlpha), extinctAlpha);
+		float cloudOpacity = saturate(capturedCloudOcclusion);
+		if (opticalDepthScale <= 0.0f || cloudOpacity <= 0.0f)
+			return 1.0f;
+		return pow(saturate(1.0f - cloudOpacity), opticalDepthScale);
 	}
 
 	float GetGlareCloudTransmission(float capturedCloudOcclusion, float extinction)
 	{
-		float cloudOpacity = sqrt(saturate(capturedCloudOcclusion));
-		if (extinction <= 0.0f || cloudOpacity <= 0.0f)
+		if (extinction <= 0.0f)
 			return 1.0f;
-		return pow(saturate(1.0f - cloudOpacity), 1.0f + 0.5f * extinction);
+		return GetCloudTransmission(capturedCloudOcclusion, 1.0f + 0.5f * extinction);
 	}
 }
 

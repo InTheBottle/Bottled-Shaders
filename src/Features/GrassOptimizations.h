@@ -15,7 +15,7 @@ public:
 	virtual std::string GetDisplayName() override { return T("feature.grass_optimizations.name", "Grass Optimizations"); }
 	virtual inline std::string GetShortName() override { return "GrassOptimizations"; }
 	virtual inline std::string_view GetShaderDefineName() override { return "GRASS_OPTIMIZATIONS"; }
-	virtual std::string_view GetCategory() const override { return FeatureCategories::kGrass; }
+	virtual std::string_view GetCategory() const override { return FeatureCategories::kGrassAndFoliage; }
 
 	/** @brief Returns true only for the Grass shader type. */
 	bool HasShaderDefine(RE::BSShader::Type shaderType) override;
@@ -172,6 +172,9 @@ public:
 	ID3D11DeviceContext1* ctx1 = nullptr;
 
 	ID3D11ComputeShader* cullCS = nullptr;
+	// Set on a failed GetCullCS() compile so the per-frame caller doesn't retry the compile and
+	// re-log the failure every frame; cleared by ClearShaderCache() to allow a retry.
+	bool cullCSFailed = false;
 
 	std::unique_ptr<ConstantBuffer> cullParamsCB;
 	// Slotted per-bucket constants bound via CSSetConstantBuffers1: one 256-byte slot per visible

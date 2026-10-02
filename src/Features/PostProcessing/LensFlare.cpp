@@ -357,6 +357,7 @@ void LensFlare::CreateFFTTextures(uint resolution)
 
 void LensFlare::ClearShaderCache()
 {
+	outputReady = false;
 	BumpShaderGeneration();
 	const auto shaderPtrs = std::array{
 		&thresholdCS, &ghostHaloCS, &blurDownCS, &blurUpCS, &mixCS,
@@ -373,7 +374,7 @@ void LensFlare::ClearShaderCache()
 			}
 	}
 
-	globals::shaderCache->ClearStandaloneComputeCache(L"PostProcessing/LensFlare");
+	globals::shaderCache->InvalidateShaderSources();
 	CompileComputeShaders();
 }
 
@@ -819,6 +820,7 @@ void LensFlare::Draw(TextureInfo& inout_tex)
 		context->CSSetShader(mixCS.get(), nullptr, 0);
 		context->Dispatch((fullW + 7) >> 3, (fullH + 7) >> 3, 1);
 		resetViews();
+		outputReady = true;
 	}
 
 	// Cleanup

@@ -85,6 +85,10 @@ void MessageHandler(SKSE::MessagingInterface::Message* message)
 				EngineFix::InstallOnPostPostLoadFixes();
 				FrameAnnotations::OnPostPostLoad();
 
+				globals::state->flatWorldMapLoaded = GetModuleHandleW(L"FlatMapMarkersSSE.dll") != nullptr;
+				if (globals::state->flatWorldMapLoaded)
+					logger::info("FlatMapMarkersSSE detected, Effects11, Post Processing and Linear Lighting are disabled on the world map");
+
 				auto shaderCache = globals::shaderCache;
 
 				// Run feature PostPostLoad() first so features can disable themselves if needed
@@ -93,8 +97,7 @@ void MessageHandler(SKSE::MessagingInterface::Message* message)
 				// Register scene settings event handler (Interior Only transitions)
 				SceneSettingsManager::MenuOpenCloseEventHandler::Register();
 
-				// Now validate disk cache after features have had a chance to modify their state
-				shaderCache->ValidateDiskCache();
+				shaderCache->RemoveLegacyDiskCache();
 
 				if (shaderCache->UseFileWatcher())
 					shaderCache->StartFileWatcher();
@@ -121,13 +124,16 @@ void MessageHandler(SKSE::MessagingInterface::Message* message)
 					std::this_thread::sleep_for(100ms);
 				}
 
+				// The boot compile pass is over.
+				shaderCache->SetBackgroundCompilation(true);
+
 				if (globals::game::quitGame) {
 					logger::info("Game was closed, skipping feature DataLoaded methods");
 					break;
 				}
 
 				if (shaderCache->IsDiskCache()) {
-					shaderCache->WriteDiskCacheInfo();
+					shaderCache->TrimDiskCache();
 				}
 
 				Feature::ForEachLoadedFeature("DataLoaded", [](Feature* feature) { feature->DataLoaded(); });

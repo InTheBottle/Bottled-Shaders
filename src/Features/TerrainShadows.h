@@ -4,6 +4,7 @@
 #include <filesystem>
 
 #include "Buffer.h"
+#include "Features/TerrainShadows/LODShadowMap.h"
 
 /** @brief Adds heightmap-based terrain shadow casting that updates dynamically with sun position. */
 struct TerrainShadows : public Feature
@@ -14,7 +15,7 @@ public:
 	/** @brief Returns the short identifier name. */
 	virtual inline std::string GetShortName() override { return "TerrainShadows"; }
 	virtual inline std::string_view GetShaderDefineName() override { return "TERRAIN_SHADOWS"; }
-	virtual std::string_view GetCategory() const override { return FeatureCategories::kLandscapeAndTextures; }
+	virtual std::string_view GetCategory() const override { return FeatureCategories::kShadows; }
 	/** @brief Returns a description and list of key features for the UI summary. */
 	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
 	{
@@ -31,7 +32,11 @@ public:
 	struct Settings
 	{
 		bool EnableTerrainShadow = true;
+		bool EnableLODShadow = true;
+		uint32_t LODShadowResolution = 2048;
 	} settings;
+
+	LODShadowMap lodShadowMap;
 
 	bool needPrecompute = false;
 	uint shadowUpdateIdx = 0;
@@ -67,6 +72,15 @@ public:
 		float3 Scale;
 		float2 ZRange;
 		float2 Offset;
+		float ZBlur;  // world-space half-width of the shadow transition
+		float LODShadowStrength;
+		float LODShadowResolution;
+		float pad0;
+		float4 LODShadowAxisX;
+		float4 LODShadowAxisY;
+		float4 LODShadowAxisZ;
+		float4 LODShadowCascades[LODShadowMap::kCascadeCount];
+		float4 LODShadowDepthBias;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
 

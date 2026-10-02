@@ -7,6 +7,7 @@
 #include <DirectXTex.h>
 #include <pystring/pystring.h>
 
+#include "Features/SkySync.h"
 #include "I18n/I18n.h"
 #include "State.h"
 #include "Util.h"
@@ -135,7 +136,28 @@ namespace
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	TerrainShadows::Settings,
-	EnableTerrainShadow)
+	EnableTerrainShadow,
+	EnableLODShadow,
+	LODShadowResolution)
+
+namespace
+{
+	constexpr uint32_t kLODShadowResolutions[] = { 1024, 2048, 4096 };
+
+	int GetLODShadowResolutionIndex(uint32_t a_requested)
+	{
+		if (a_requested <= kLODShadowResolutions[0])
+			return 0;
+		if (a_requested >= kLODShadowResolutions[2])
+			return 2;
+		return 1;
+	}
+
+	uint32_t GetLODShadowResolution(uint32_t a_requested)
+	{
+		return kLODShadowResolutions[GetLODShadowResolutionIndex(a_requested)];
+	}
+}
 
 void TerrainShadows::PostPostLoad()
 {
@@ -184,6 +206,15 @@ void TerrainShadows::DrawSettings()
 {
 	ImGui::Checkbox(T(TKEY("enable_terrain_shadow"), "Enable Terrain Shadow"), &settings.EnableTerrainShadow);
 
+	ImGui::Checkbox(T(TKEY("enable_lod_shadow"), "Enable LOD Shadows"), &settings.EnableLODShadow);
+	Util::HelpMarker(T(TKEY("enable_lod_shadow_tooltip"), "Distant object, tree and terrain LOD shadows, captured from the water reflection cubemap.\nOnly updates while the game renders water reflections nearby."));
+	if (settings.EnableLODShadow) {
+		static constexpr const char* resolutionNames[] = { "1024", "2048", "4096" };
+		int resolutionIndex = GetLODShadowResolutionIndex(settings.LODShadowResolution);
+		if (ImGui::Combo(T(TKEY("lod_shadow_resolution"), "LOD Shadow Resolution"), &resolutionIndex, resolutionNames, IM_ARRAYSIZE(resolutionNames)))
+			settings.LODShadowResolution = kLODShadowResolutions[resolutionIndex];
+	}
+
 	if (ImGui::CollapsingHeader(T(TKEY("debug"), "Debug"))) {
 		std::string curr_worldspace = "N/A";
 		std::string curr_worldspace_name = "N/A";
@@ -197,6 +228,7 @@ void TerrainShadows::DrawSettings()
 		}
 		ImGui::Text(fmt::format("Current worldspace: {} ({})", curr_worldspace, curr_worldspace_name).c_str());
 		ImGui::Text(fmt::format("Has height map: {}", heightmaps.contains(curr_worldspace)).c_str());
+		lodShadowMap.DrawStatus();
 
 		ImGui::Separator();
 
@@ -219,6 +251,11 @@ void TerrainShadows::DrawSettings()
 			}
 			ImGui::TreePop();
 		}
+
+		if (ImGui::TreeNode(T(TKEY("lod_shadow_cascades"), "LOD Shadow Cascades"))) {
+			lodShadowMap.DrawDebugView();
+			ImGui::TreePop();
+		}
 	}
 }
 
@@ -229,6 +266,7 @@ void TerrainShadows::ClearShaderCache()
 		shadowUpdateProgram = nullptr;
 	}
 
+	lodShadowMap.ClearShaderCache();
 	CompileComputeShaders();
 }
 
@@ -317,6 +355,8 @@ void TerrainShadows::SetupResources()
 	}
 
 	CompileComputeShaders();
+
+	LODShadowMap::InstallHooks();
 }
 
 void TerrainShadows::CompileComputeShaders()
@@ -346,11 +386,27 @@ TerrainShadows::PerFrame TerrainShadows::GetCommonBufferData()
 	};
 
 	if (isHeightmapReady) {
+		// One heightmap step of light descent, so the z blur spans about two texels in xy.
+		constexpr float zBlurSteps = 1.0f;
 		auto invScale = cachedHeightmap->pos1 - cachedHeightmap->pos0;
 		data.Scale = float3(1.f, 1.f, 1.f) / invScale;
-		data.Offset = -cachedHeightmap->pos0 * float2{ data.Scale.x, data.Scale.y };
+		// Texel centres lie on terrain vertices anchored at the south-west corner.
+		const float2 halfTexel = { 0.5f / texHeightMap->desc.Width, -0.5f / texHeightMap->desc.Height };
+		data.Offset = float2(-cachedHeightmap->pos0 * float2{ data.Scale.x, data.Scale.y }) + halfTexel;
 		data.ZRange = cachedHeightmap->zRange;
+		const float stepDescent = -0.5f * (shadowUpdateCBData.LightDeltaZ.x + shadowUpdateCBData.LightDeltaZ.y) * (data.ZRange.y - data.ZRange.x);
+		data.ZBlur = stepDescent * zBlurSteps;
 	}
+
+	const auto& lodShadow = lodShadowMap.GetReceiverData();
+	data.LODShadowStrength = lodShadow.strength;
+	data.LODShadowResolution = lodShadow.resolution;
+	data.LODShadowAxisX = lodShadow.axisX;
+	data.LODShadowAxisY = lodShadow.axisY;
+	data.LODShadowAxisZ = lodShadow.axisZ;
+	for (uint32_t cascade = 0; cascade < LODShadowMap::kCascadeCount; ++cascade)
+		data.LODShadowCascades[cascade] = lodShadow.cascades[cascade];
+	data.LODShadowDepthBias = lodShadow.depthBias;
 
 	return data;
 }
@@ -509,7 +565,12 @@ bool TerrainShadows::UpdateShadow(bool a_refreshImmediately)
 	if (a_refreshImmediately)
 		shadowUpdateIdx = 0;
 	if (shadowUpdateIdx == 0) {
-		const auto worldDirection = sunLight->GetWorldDirection();
+		// Sky Sync clamps the sun light's elevation, which would cast sunset terrain shadows from too high
+		const auto celestialDirection = globals::features::skySync.GetCelestialLightDirection(globals::game::sky);
+		auto worldDirection = celestialDirection ? -*celestialDirection : sunLight->GetWorldDirection();
+		// A sun below the horizon keeps grazing, since the flip below would cast from the opposite side
+		if (celestialDirection)
+			worldDirection.z = std::min(worldDirection.z, 0.0f);
 		float3 dirLightDir = { worldDirection.x, worldDirection.y, worldDirection.z };
 		if (dirLightDir.z > 0)
 			dirLightDir = -dirLightDir;
@@ -517,34 +578,36 @@ bool TerrainShadows::UpdateShadow(bool a_refreshImmediately)
 		// in UV
 		float3 invScale = cachedHeightmap->pos1 - cachedHeightmap->pos0;
 		invScale.z = cachedHeightmap->zRange.y - cachedHeightmap->zRange.x;
-		float3 dirLightPxDir = dirLightDir / invScale;
-		dirLightPxDir.x *= width;
-		dirLightPxDir.y *= height;
+		float2 dirLightPxDir = { dirLightDir.x / invScale.x * width, dirLightDir.y / invScale.y * height };
+		if (dirLightPxDir.x == 0.f && dirLightPxDir.y == 0.f)
+			dirLightPxDir = float2(1.f, 0.f);
 
-		float stepMult;
 		if (abs(dirLightPxDir.x) >= abs(dirLightPxDir.y)) {
-			stepMult = 1.f / abs(dirLightPxDir.x);
 			edgePxCoord = dirLightPxDir.x > 0 ? 0 : (width - 1);
 			signDir = dirLightPxDir.x > 0 ? 1 : -1;
+			dirLightPxDir.y /= abs(dirLightPxDir.x);
+			dirLightPxDir.x = static_cast<float>(signDir);
 			maxUpdates = (width + updateLength - 1) >> logUpdateLength;
 		} else {
-			stepMult = 1.f / abs(dirLightPxDir.y);
 			edgePxCoord = dirLightPxDir.y > 0 ? 0 : height - 1;
 			signDir = dirLightPxDir.y > 0 ? 1 : -1;
+			dirLightPxDir.x /= abs(dirLightPxDir.y);
+			dirLightPxDir.y = static_cast<float>(signDir);
 			maxUpdates = (height + updateLength - 1) >> logUpdateLength;
 		}
-		dirLightPxDir *= stepMult;
 
-		shadowUpdateCBData.LightPxDir = { dirLightPxDir.x, dirLightPxDir.y };
+		shadowUpdateCBData.LightPxDir = dirLightPxDir;
 
 		// soft shadow angles
 		float lenUV = float2{ dirLightDir.x, dirLightDir.y }.Length();
 		float dirLightAngle = atan2(-dirLightDir.z, lenUV);
 		float shadowSofteningRadiusAngle = RE::NI_PI / 180.f;
-		float upperAngle = std::max(0.f, dirLightAngle - shadowSofteningRadiusAngle);
-		float lowerAngle = std::min(RE::NI_HALF_PI - 1e-2f, dirLightAngle + shadowSofteningRadiusAngle);
+		float maxAngle = RE::NI_HALF_PI - 1e-2f;
+		float upperAngle = std::clamp(dirLightAngle - shadowSofteningRadiusAngle, 0.f, maxAngle);
+		float lowerAngle = std::clamp(dirLightAngle + shadowSofteningRadiusAngle, 0.f, maxAngle);
+		float stepLength = float2{ dirLightPxDir.x * invScale.x / width, dirLightPxDir.y * invScale.y / height }.Length();
 
-		shadowUpdateCBData.LightDeltaZ = -(lenUV / invScale.z * stepMult) * float2{ std::tan(upperAngle), std::tan(lowerAngle) };
+		shadowUpdateCBData.LightDeltaZ = -(stepLength / invScale.z) * float2{ std::tan(upperAngle), std::tan(lowerAngle) };
 	}
 
 	shadowUpdateCBData.PxSize = { 1.f / texHeightMap->desc.Width, 1.f / texHeightMap->desc.Height };
@@ -591,17 +654,22 @@ bool TerrainShadows::UpdateShadow(bool a_refreshImmediately)
 
 void TerrainShadows::ReflectionsPrepass()
 {
-	if (texShadowHeight) {
-		auto context = globals::d3d::context;
+	auto context = globals::d3d::context;
 
+	if (texShadowHeight) {
 		std::array<ID3D11ShaderResourceView*, 1> srvs = { texShadowHeight->srv.get() };
 		context->PSSetShaderResources(60, (uint)srvs.size(), srvs.data());
 		context->CSSetShaderResources(60, (uint)srvs.size(), srvs.data());
 	}
+
+	lodShadowMap.Bind(context);
 }
 
 void TerrainShadows::EarlyPrepass()
 {
+	lodShadowMap.Update(settings.EnableLODShadow, GetLODShadowResolution(settings.LODShadowResolution));
+	lodShadowMap.Bind(globals::d3d::context);
+
 	LoadHeightmap();
 
 	const auto requestedRefreshGeneration = Util::GetCompletedCelestialTransitionGeneration();
