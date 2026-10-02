@@ -68,8 +68,8 @@ namespace NeuralRenderingNGX
 		Runtime& operator=(const Runtime&) = delete;
 
 		/**
-		 * @brief Load the supported 310.8.x runtime series and its identity exports. On success Status() is
-		 * Ready.
+		 * @brief Load a runtime exposing the required D3D12 and identity exports. The file version is
+		 * diagnostic; initialization and feature creation establish compatibility. On success Status() is Ready.
 		 *
 		 * @param explicitPath Optional DLL path, or a directory containing the DLL.
 		 *                     When empty the Streamline plugin folders under Data are searched.
@@ -78,8 +78,8 @@ namespace NeuralRenderingNGX
 		bool Probe(const std::filesystem::path& explicitPath = {});
 
 		/**
-		 * @brief Initialize NGX and allocate parameters from the resident core. Probe if needed; reinitialize
-		 * when the device changes.
+		 * @brief Initialize the resident NGX core and the NR snippet, using parameters allocated by the core.
+		 * Probe if needed; reinitialize when the device changes.
 		 *
 		 * @param device The D3D12 device the feature will be evaluated on.
 		 * @param dataPath Writable directory for NGX logs/caches; a temporary folder is used when empty.
@@ -199,6 +199,7 @@ namespace NeuralRenderingNGX
 		std::string detail_;
 		bool hasFeatureRequirements_ = false;
 		bool featureRequirementsLogged_ = false;
+		bool snippetInitialized_ = false;
 		std::uint32_t ngxResult_ = 0;
 		std::uint32_t applicationId_ = 0;
 		std::uint32_t apiVersion_ = 0;
