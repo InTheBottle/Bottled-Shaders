@@ -1,3 +1,7 @@
+// Interop and runtime plumbing derived in part from YtzyFvra/skyrim-community-shaders
+// (feature/dlssnr-vr), GPL-3.0-or-later. Model-resolution scaling follows xenmods/DLSSNR-Cost-Scaler
+// (MIT, see Shaders/NeuralRendering/DLSSNR-Cost-Scaler.MIT.LICENSE).
+
 #include "Backend.h"
 
 #include "D3D12Interop.h"

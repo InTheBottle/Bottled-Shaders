@@ -489,7 +489,8 @@ float2 NeuralGuidePosition(uint2 colorPixel, uint2 guideSize, uint2 activeSize, 
 }
 
 /**
- * DLSSNR-Cost-Scaler depth-aware silhouette weighting. Bilinear cross samples avoid guide-resolution
+ * Depth-aware silhouette weighting from xenmods/DLSSNR-Cost-Scaler (MIT, see
+ * DLSSNR-Cost-Scaler.MIT.LICENSE). Bilinear cross samples avoid guide-resolution
  * stepping; convert Reverse Z to conventional depth before measuring relative discontinuities. Strong
  * edges fade the edit toward one quarter.
  *
