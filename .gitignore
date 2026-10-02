@@ -12,3 +12,6 @@ shadertoolsconfig.json
 .claude/settings.local.json
 
 tools/__pycache__/
+
+# NVIDIA driver file for DLSS 5 neural rendering (165 MB); supplied by the user, never committed
+features/Upscaling/Shaders/Upscaling/Streamline/nvngx_dlssnr.dll

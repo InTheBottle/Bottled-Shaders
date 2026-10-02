@@ -1,7 +1,9 @@
 // RenderDoc feature implementation providing in-application graphics debugging capabilities
 #include "Features/RenderDoc.h"
 
+#include "Features/Upscaling.h"
 #include "Globals.h"
+#include "Hooks.h"
 #include "Utils/FileSystem.h"
 #include "Utils/Format.h"
 // Include additional core headers required by the feature implementation
@@ -137,6 +139,12 @@ void RenderDoc::Load()
 
 	// Initialize capture count tracking
 	lastCaptureCount = renderDocApi->GetNumCaptures();
+
+	// renderdoc.dll rewrote the game's import table when it loaded, dropping the device and
+	// factory hooks installed before it. Put them back so upscaling initialises as usual.
+	Hooks::ReapplyEarlyHooks();
+	if (globals::features::upscaling.loaded)
+		globals::features::upscaling.ReapplyDeviceHook();
 
 	logger::info("[RenderDoc] Successfully initialized");
 }
