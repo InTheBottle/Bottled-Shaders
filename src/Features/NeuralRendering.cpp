@@ -838,7 +838,7 @@ void NeuralRendering::DrawSettings()
 
 	ImGui::SliderFloat(T(TKEY("intensity"), "NR Intensity"), &settings.intensity, 0.0f, 2.0f, "%.2f");
 	if (auto _tt = Util::HoverTooltipWrapper()) {
-		ImGui::TextUnformatted(T(TKEY("intensity_tooltip"), "Adjust the overall enhancement intensity. Changes apply when the slider settles."));
+		ImGui::TextUnformatted(T(TKEY("intensity_tooltip"), "Adjust the overall enhancement intensity. Changes apply on the next Neural Rendering evaluation."));
 	}
 
 	// Runtime-only comparison controls.

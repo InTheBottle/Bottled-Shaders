@@ -300,8 +300,8 @@ struct NeuralRendering : Feature
 	static const PresetValues& GetPreset(Preset a_preset);
 
 	/**
-	 * @brief Apply preset values and record the selection. The backend recreates the feature after latched
-	 * tuning settles.
+	 * @brief Apply preset values and record the selection. Artistic tuning updates on the next evaluation;
+	 * model-raster changes follow the backend's resolution debounce.
 	 */
 	void ApplyPreset(Preset a_preset);
 

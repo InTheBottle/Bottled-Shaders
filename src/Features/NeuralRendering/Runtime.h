@@ -12,8 +12,8 @@ struct ID3D12Resource;
 namespace NeuralRenderingNGX
 {
 	/**
-	 * @brief Feature 18 DLSSNR.* tuning parameters, latched at creation and supplied by Neural Rendering
-	 * settings.
+	 * @brief Feature 18 DLSSNR.* tuning parameters supplied from current Neural Rendering settings on
+	 * every evaluation. Style changes require a temporal reset, not feature recreation.
 	 */
 	struct Tuning
 	{
@@ -24,10 +24,6 @@ namespace NeuralRenderingNGX
 		std::uint32_t style = 3;
 		bool useAutoMask = true;
 		bool uiCorrection = false;
-
-		/// Every field here is latched at feature-create time (see Execute()), so
-		/// this is how Execute() notices a slider changed and rebuilds the feature.
-		friend bool operator==(const Tuning&, const Tuning&) = default;
 	};
 
 	/** @brief Result of recording the private DLSS-SR residual pass. */

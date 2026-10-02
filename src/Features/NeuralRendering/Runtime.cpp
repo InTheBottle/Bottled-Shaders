@@ -548,8 +548,8 @@ namespace NeuralRenderingNGX
 			parameters->Set("CreationNodeMask", 1u);
 			parameters->Set("VisibilityNodeMask", 1u);
 
-			// Tuning is latched at creation. The backend drains and resets the feature before applying settled
-			// changes.
+			// The render preset is creation-time state. Initial tuning is also supplied for compatibility
+			// with the private Feature 18 interface; evaluation writes below are the live tuning path.
 			parameters->Set("DLSSNR.Hint.Render.Preset", 0u);
 			parameters->Set("DLSSNR.Intensity", tuning.intensity);
 			parameters->Set("DLSSNR.Style", tuning.style);

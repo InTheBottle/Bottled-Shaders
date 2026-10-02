@@ -88,8 +88,6 @@ namespace
 	/// Stable frames required before rebuilding the model raster; avoids draining the queue on each slider
 	/// step.
 	constexpr std::uint32_t kModelRasterDebounceFrames = 12;
-	/// Stable frames required before recreating the feature for changed tuning.
-	constexpr std::uint32_t kTuningDebounceFrames = 12;
 	/// Effectively disables the shader ratio clamp without a separate enabled flag.
 	constexpr float kNeuralRatioGuardDisabledValue = 1.0e6f;
 
@@ -262,18 +260,14 @@ struct NeuralRenderingBackend::State
 	std::uint32_t requestedModelHeight = 0;
 	std::uint32_t requestedModelStableFrames = 0;
 
-	/// Requested tuning and debounce count versus tuning latched into the live feature.
-	NeuralRenderingNGX::Tuning requestedTuning{};
-	NeuralRenderingNGX::Tuning appliedTuning{};
-	std::uint32_t requestedTuningStableFrames = 0;
-	bool tuningInitialized = false;
-
 	/// Counts Run() calls; odd frames are skipped in alternating-frame mode.
 	std::uint64_t evaluateFrameIndex = 0;
 	/// evaluateFrameIndex of the last frame Feature 18 actually ran on (zero: none since
 	/// the resources were built). Tells an evaluation how many frames of motion the
 	/// model's temporal history has to bridge.
 	std::uint64_t lastEvaluatedFrameIndex = 0;
+	/// Style supplied to the last successful Feature 18 evaluation; valid when lastEvaluatedFrameIndex is nonzero.
+	std::uint32_t previousEvaluatedStyle = 0;
 
 	bool loggedProbeFailure = false;
 	bool loggedInvalidInputs = false;
@@ -374,34 +368,6 @@ struct NeuralRenderingBackend::State
 		if (allocated && activeUnchanged && requestedModelStableFrames < kModelRasterDebounceFrames)
 			return { color.desc.Width, color.desc.Height };
 		return { desiredWidth, desiredHeight };
-	}
-
-	/**
-	 * @brief Report a settled tuning change once. The caller must drain the interop queue, reset the
-	 * feature, and update appliedTuning before recreation.
-	 *
-	 * @return True exactly once per settled change; the caller must then drain
-	 *         the interop queue, call Runtime::ResetFeature(), and update
-	 *         appliedTuning - never release the handle without draining first.
-	 */
-	bool SettleTuning(const NeuralRenderingNGX::Tuning& desired)
-	{
-		if (!(desired == requestedTuning)) {
-			requestedTuning = desired;
-			requestedTuningStableFrames = 0;
-		} else if (requestedTuningStableFrames < kTuningDebounceFrames) {
-			++requestedTuningStableFrames;
-		}
-		if (!tuningInitialized) {
-			tuningInitialized = true;
-			appliedTuning = requestedTuning;
-			return false;
-		}
-		if (requestedTuningStableFrames >= kTuningDebounceFrames && !(requestedTuning == appliedTuning)) {
-			appliedTuning = requestedTuning;
-			return true;
-		}
-		return false;
 	}
 
 	/**
@@ -896,8 +862,14 @@ struct NeuralRenderingBackend::State
 			context->CopySubresourceRegion(motionVectors.resource11.Get(), 0, 0, 0, 0, inputs.motionVectors, 0, &motionBox);
 		}
 
-		// Run() has settled tuning and reset the feature if recreation is needed.
-		const NeuralRenderingNGX::Tuning& tuning = appliedTuning;
+		NeuralRenderingNGX::Tuning tuning;
+		tuning.intensity = inputs.intensity;
+		tuning.localToneStrength = inputs.localToneStrength;
+		tuning.localStructureStrength = inputs.localStructureStrength;
+		tuning.skinStructureStrength = inputs.skinStructureStrength;
+		tuning.style = inputs.style;
+		tuning.useAutoMask = inputs.automaticMask;
+		tuning.uiCorrection = false;  // Neural Rendering never runs after the UI composite.
 
 		ID3D12GraphicsCommandList* commandList = nullptr;
 		if (!interop.BeginD3D12(&commandList) || !commandList)
@@ -979,24 +951,9 @@ struct NeuralRenderingBackend::State
 			lastColorInput = inputs.colorIn;
 		}
 
-		// Tuning is latched at creation. Drain the GPU queue before resetting the feature for a settled
-		// change.
-		NeuralRenderingNGX::Tuning desiredTuning;
-		desiredTuning.intensity = inputs.intensity;
-		desiredTuning.localToneStrength = inputs.localToneStrength;
-		desiredTuning.localStructureStrength = inputs.localStructureStrength;
-		desiredTuning.skinStructureStrength = inputs.skinStructureStrength;
-		desiredTuning.style = inputs.style;
-		desiredTuning.useAutoMask = inputs.automaticMask;
-		desiredTuning.uiCorrection = false;  // Neural Rendering never runs after the UI composite.
-		if (SettleTuning(desiredTuning)) {
-			if (!interop.WaitForIdle())
-				return LatchFailure("tuning change", interop.LastError());
-			NeuralRenderingNGX::Runtime::Instance().ResetFeature();
-			separateResetPending = true;
-			separateResidualReady = false;
+		// A new style invalidates temporal history and must not be deferred by alternating-frame skips.
+		if (lastEvaluatedFrameIndex != 0 && inputs.style != previousEvaluatedStyle)
 			resetPending = true;
-		}
 
 		// Skipped frames reuse the previous proxy/answer pair through motion reprojection. Always evaluate
 		// after resets, raster changes, failures, or without motion guides.
@@ -1132,6 +1089,7 @@ struct NeuralRenderingBackend::State
 					modelWidth, modelHeight, guideWidth, guideHeight, bridgedSkip ? 2.0f : 1.0f))
 				return false;
 			lastEvaluatedFrameIndex = evaluateFrameIndex;
+			previousEvaluatedStyle = inputs.style;
 
 			// Prepare log luminance and edit stops once per evaluation, then filter the edit horizontally and
 			// vertically.
@@ -1433,6 +1391,7 @@ struct NeuralRenderingBackend::State
 		requestedModelStableFrames = 0;
 		evaluateFrameIndex = 0;
 		lastEvaluatedFrameIndex = 0;
+		previousEvaluatedStyle = 0;
 
 		loggedInvalidInputs = false;
 		loggedShaderFailure = false;
