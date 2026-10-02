@@ -144,7 +144,6 @@ public:
 		int sourceOrder = INT_MAX;
 		bool isLabel = false;
 		bool isReadOnly = false;
-		bool isPatched = false;
 		bool isDefine = false;
 		bool isHidden = false;
 		bool isTopLevel = false;
