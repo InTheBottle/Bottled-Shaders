@@ -138,8 +138,24 @@ public:
 
 		float3 VolumetricRaysSkyColor;
 		float VolumetricRaysPad0;
+
+		float StarsCurve;
+		float StarsIntensity;
+		float MoonCurve;
+		uint EnableAnimatedStars;
+
+		float StarsAnimationTime;
+		float StarsAnimationDensity;
+		float StarsAnimationIntensity;
+		float AuroraIntensity;
+
+		float AuroraCurve;
+		uint FixBlackCrush;
+		float NightSkyPad0;
+		float NightSkyPad1;
 	};
 	static_assert(sizeof(PerFrame) % 16 == 0);
+	static_assert(offsetof(PerFrame, StarsCurve) % 16 == 0);
 	static_assert(offsetof(PerFrame, VolumetricFogColorFilter) % 16 == 0);
 	static_assert(offsetof(PerFrame, VolumetricRaysSkyColor) % 16 == 0);
 	static_assert(offsetof(PerFrame, EnableCloudsScattering) % 16 == 0);

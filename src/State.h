@@ -268,7 +268,9 @@ public:
 		AdditiveLighting = 1 << 6,
 		IsEye = 1 << 7,
 		NoSnow = 1 << 8,
-		NoFoliageTint = 1 << 9
+		NoFoliageTint = 1 << 9,
+		IsAurora = 1 << 10,
+		IsMoon = 1 << 11
 	};
 
 	/** @brief Bitflags describing extra feature-specific properties related to terrain displacement and material models. */
@@ -335,6 +337,7 @@ public:
 	 * @param a_pass The render pass to inspect.
 	 */
 	void UpdateSkyShaderPermutation(RE::BSRenderPass* a_pass);
+	void UpdateEffectShaderPermutation(RE::BSRenderPass* a_pass);
 	/**
 	 * @brief Checks whether directional shadows are available for the current scene.
 	 * @returns true if directional shadows are present, false otherwise.
