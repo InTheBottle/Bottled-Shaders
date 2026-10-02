@@ -93,7 +93,7 @@ void ENBEffect::UpdateEffectVariables()
 	auto bindTextureIfEnabled = [&](uint32_t settingID, const char* shaderVar, const char* textureName) {
 		ID3D11ShaderResourceView* srv = nullptr;
 		if (settingID != 0xFFFFFFFF && settingManager.GetValue<bool>(settingID)) {
-			auto* texture = textureManager.FindCommonTexture(textureName);
+			auto* texture = GetCachedCommonTexture(textureName);
 			srv = texture ? texture->srv.get() : nullptr;
 		}
 		SetShaderResourceVariable(shaderVar, srv);
@@ -104,6 +104,4 @@ void ENBEffect::UpdateEffectVariables()
 
 	const char* adaptationTexName = (textureManager.GetTextureSwap() & 1) ? "TextureAdaptation" : "TextureAdaptationSwap";
 	bindTextureIfEnabled(idEnableAdaptation, "TextureAdaptation", adaptationTexName);
-
-	SetShaderResourceVariable("TextureOriginal", globals::game::renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN].SRV);
 }

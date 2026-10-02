@@ -269,6 +269,8 @@ public:
 		IsEye = 1 << 7,
 		NoSnow = 1 << 8,
 		NoFoliageTint = 1 << 9,
+		IsAurora = 1 << 10,
+		IsMoon = 1 << 11,
 		// Humanoid (ActorTypeNPC) geometry, set by NeuralRendering::SetupGeometryCategory.
 		IsHumanoidActor = 1u << 31,
 		// Hair or facial-hair head part, set by NeuralRendering::SetupGeometryCategory.
@@ -339,6 +341,7 @@ public:
 	 * @param a_pass The render pass to inspect.
 	 */
 	void UpdateSkyShaderPermutation(RE::BSRenderPass* a_pass);
+	void UpdateEffectShaderPermutation(RE::BSRenderPass* a_pass);
 	/**
 	 * @brief Checks whether directional shadows are available for the current scene.
 	 * @returns true if directional shadows are present, false otherwise.

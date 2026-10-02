@@ -1066,14 +1066,13 @@ void LightLimitFix::AddParticleLightsToBuffer(eastl::vector<LightData>& a_lights
 
 		LightData light{};
 		constexpr float invPI = 1.f / std::numbers::pi_v<float>;
-		light.color.x = pl.color.red;
-		light.color.y = pl.color.green;
-		light.color.z = pl.color.blue;
+		light.color.x = pl.color.red * invPI;
+		light.color.y = pl.color.green * invPI;
+		light.color.z = pl.color.blue * invPI;
+		light.color *= pl.color.alpha;
 
 		if (effects11.enableEffect)
 			effects11.OverridePointLightColor(light.color);
-
-		light.color *= invPI * pl.color.alpha;
 
 		light.radius = pl.radius * 0.5f;
 

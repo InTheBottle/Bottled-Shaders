@@ -80,6 +80,8 @@ namespace Permutation
 		static const uint IsEye = (1 << 7);
 		static const uint NoSnow = (1 << 8);
 		static const uint NoFoliageTint = (1 << 9);
+		static const uint IsAurora = (1 << 10);
+		static const uint IsMoon = (1 << 11);
 		// Allocated downward from bit 31; keep in sync with State::ExtraShaderDescriptors (State.h).
 		// Geometry of a humanoid (ActorTypeNPC) actor; see NeuralRenderingCategories::Equipment.
 		static const uint IsHumanoidActor = (1u << 31);
