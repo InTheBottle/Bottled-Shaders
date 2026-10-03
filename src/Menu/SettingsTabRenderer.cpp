@@ -513,6 +513,30 @@ void SettingsTabRenderer::RenderKeybindingsTab(
 			state.settingEffects11EditorKey,
 			"Change##Effects11Editor");
 
+		Util::InputComboWidget(
+			T("menu.settings.neural_rendering_toggle_key", "Neural Rendering Toggle Key:"),
+			settings.NeuralRenderingToggleKey,
+			state.settingNeuralRenderingToggleKey,
+			"Change##NeuralRenderingToggle");
+
+		Util::InputComboWidget(
+			T("menu.settings.neural_rendering_compare_key", "Neural Rendering Compare Screenshot Key:"),
+			settings.NeuralRenderingCompareKey,
+			state.settingNeuralRenderingCompareKey,
+			"Change##NeuralRenderingCompare");
+
+		Util::InputComboWidget(
+			T("menu.settings.neural_rendering_scale_up_key", "Neural Rendering Scale Up Key:"),
+			settings.NeuralRenderingScaleUpKey,
+			state.settingNeuralRenderingScaleUpKey,
+			"Change##NeuralRenderingScaleUp");
+
+		Util::InputComboWidget(
+			T("menu.settings.neural_rendering_scale_down_key", "Neural Rendering Scale Down Key:"),
+			settings.NeuralRenderingScaleDownKey,
+			state.settingNeuralRenderingScaleDownKey,
+			"Change##NeuralRenderingScaleDown");
+
 		ImGui::EndTabItem();
 	}
 }

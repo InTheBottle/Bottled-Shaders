@@ -348,11 +348,13 @@ namespace
 	}
 
 	// Picks the capture source:
-	//   HDR + CS menu open -> clean HDR composite (no UI, no menu blur).
+	//   HDR + (CS menu open or forceCleanNoUI) -> clean HDR composite (no UI, no menu blur).
 	//   HDR enabled        -> swap-chain back buffer after ApplyHDR (PQ HDR10 / PQ float).
 	//   otherwise          -> kFRAMEBUFFER (tonemapped UNORM).
 	// forCapture: post-blur screenshot uses the snapshot; pre-blur preview uses hdrTexture.
-	CaptureSource SelectCaptureSource(winrt::com_ptr<ID3D11Texture2D>& holder, bool forCapture)
+	// forceCleanNoUI: caller guarantees this runs before the game UI is drawn (e.g. the Neural
+	//   Rendering comparison capture from Main_PostProcessing) and wants a frame with no HUD.
+	CaptureSource SelectCaptureSource(winrt::com_ptr<ID3D11Texture2D>& holder, bool forCapture, bool forceCleanNoUI = false)
 	{
 		CaptureSource src;
 		auto* renderer = globals::game::renderer;
@@ -364,7 +366,7 @@ namespace
 		if (IsFlatHdrScreenshotCapture()) {
 			// Recompose from the clean scene with no UI buffer.
 			auto& hdr = globals::features::hdrDisplay;
-			if (Menu::GetSingleton()->IsEnabled && hdr.outputTexture && hdr.outputTexture->srv) {
+			if ((forceCleanNoUI || Menu::GetSingleton()->IsEnabled) && hdr.outputTexture && hdr.outputTexture->srv) {
 				ID3D11ShaderResourceView* sceneSRV =
 					(forCapture && hdr.IsCleanSceneCaptureFresh()) ? hdr.cleanSceneCapture->srv.get() :
 																	 (hdr.hdrTexture ? hdr.hdrTexture->srv.get() : nullptr);
@@ -774,6 +776,12 @@ void ScreenshotFeature::ProcessCaptureRequest()
 	}
 }
 
+std::filesystem::path ScreenshotFeature::NeuralRenderingComparisonPath(const std::string& timestamp, const char* suffix)
+{
+	// Extension is appended in Capture() once the capture format is known.
+	return std::filesystem::path("Data/DLSS 5 Screenshots") / ("CS_" + timestamp + suffix);
+}
+
 void ScreenshotFeature::EnsureWorkerThread()
 {
 	if (screenshotWorker.joinable()) {
@@ -876,7 +884,7 @@ void ScreenshotFeature::ShowInGameNotification(std::string message)
 	});
 }
 
-void ScreenshotFeature::Capture()
+void ScreenshotFeature::Capture(std::filesystem::path overridePath, bool forceCleanNoUI)
 {
 	auto device = globals::d3d::device;
 	auto context = globals::d3d::context;
@@ -885,7 +893,7 @@ void ScreenshotFeature::Capture()
 		return;
 
 	winrt::com_ptr<ID3D11Texture2D> sourceTextureKeepAlive;
-	const auto src = SelectCaptureSource(sourceTextureKeepAlive, /*forCapture=*/true);
+	const auto src = SelectCaptureSource(sourceTextureKeepAlive, /*forCapture=*/true, forceCleanNoUI);
 	logger::debug("Capturing from {}", src.description);
 
 	if (!src.texture) {
@@ -902,7 +910,8 @@ void ScreenshotFeature::Capture()
 	uint32_t copyW = srcDesc.Width;
 	uint32_t copyH = srcDesc.Height;
 
-	if (applyCropToScreenshot) {
+	// Clean no-UI captures (Neural Rendering comparison) are always full-frame.
+	if (applyCropToScreenshot && !forceCleanNoUI) {
 		auto region = subrect.GetPixelRegion(srcDesc.Width, srcDesc.Height);
 		copyX = region.x;
 		copyY = region.y;
@@ -957,8 +966,14 @@ void ScreenshotFeature::Capture()
 	screenshot.saveAsHdrPng = saveAsHdrPng;
 	screenshot.saveAsSdrPng = saveAsSdrPng;
 	screenshot.hdrPngBitDepth = static_cast<int>(hdrPngBitDepth);
-	screenshot.outputPath = BuildScreenshotPath(screenshotPath, saveAsHdrPng || saveAsSdrPng);
-	screenshot.copyToClipboard = copyToClipboard;
+	if (overridePath.empty()) {
+		screenshot.outputPath = BuildScreenshotPath(screenshotPath, saveAsHdrPng || saveAsSdrPng);
+		screenshot.copyToClipboard = copyToClipboard;
+	} else {
+		overridePath.replace_extension(saveAsHdrPng || saveAsSdrPng ? ".png" : ".bmp");
+		screenshot.outputPath = ResolveToAbsoluteGamePath(overridePath);
+		screenshot.copyToClipboard = false;
+	}
 	EnqueueScreenshot(std::move(screenshot));
 }
 #undef I18N_KEY_PREFIX

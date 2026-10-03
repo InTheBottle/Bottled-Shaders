@@ -1,0 +1,1451 @@
+// Interop and runtime plumbing derived in part from YtzyFvra/skyrim-community-shaders
+// (feature/dlssnr-vr), GPL-3.0-or-later. Model-resolution scaling follows xenmods/DLSSNR-Cost-Scaler
+// (MIT, see Shaders/NeuralRendering/DLSSNR-Cost-Scaler.MIT.LICENSE).
+
+#include "Backend.h"
+
+#include "D3D12Interop.h"
+#include "Runtime.h"
+
+#include "Globals.h"
+#include "State.h"
+#include "Utils/D3D.h"
+
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <cmath>
+#include <iterator>
+#include <utility>
+#include <vector>
+
+#include <d3d11.h>
+#include <d3d12.h>
+#include <dxgi.h>
+#include <winrt/base.h>
+
+#include <algorithm>
+#include <initializer_list>
+
+namespace
+{
+	/// Shared by every transfer pass (register b0); mirrored by NeuralRendering/TransferParams.hlsli.
+	struct alignas(16) TransferParams
+	{
+		float jitterOffset[2]{};  ///< Sub-pixel projection offset of the colour raster, in render pixels.
+		float colorStrength = 1.0f;
+		float transferStrength = 1.0f;        ///< Overall edit weight; one reproduces the model's change exactly.
+		std::uint32_t activeSize[2]{};        ///< Colour/output active region, in colour texels.
+		std::uint32_t workSize[2]{};          ///< Model raster; the shared colour/output textures are this size.
+		std::uint32_t guideSize[2]{};         ///< Depth guide active region, in guide texels.
+		std::uint32_t depthAwareResolve = 0;  ///< Non-zero: fade the edit across depth silhouettes in the decode.
+		std::uint32_t staleAnswer = 0;        ///< Non-zero: the decode reprojects the previous frame's answer.
+		std::uint32_t hueGuardMask = 0;       ///< Bit i set: category i (NeuralRendering::MaterialCategory) hue-guards its chroma change.
+		float guideJitterOffset[2]{};         ///< Projection offset of the guide rasters relative to the colour raster, in guide texels.
+		std::uint32_t colorDomain = 0;        ///< NeuralRendering::ColorDomain: how the colour input is encoded.
+		float categoryColorStrengths[8]{ 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+		float categoryTransferStrengths[8]{ 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+		float categoryBroadLuminosity[8]{ 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+		float categoryDetailLuminosity[8]{ 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+		// Display transform of the scene-linear proxy (ColorTransfer.hlsli, MakeNeuralDisplayTransform).
+		float displayParam[4]{};                              ///< x vanilla grading on/off, y ISHDR Param.y, z ISHDR Param.z.
+		float displayCinematic[4]{ 1.0f, 0.0f, 1.0f, 1.0f };  ///< ISHDR Cinematic.
+		float displayTint[4]{ 1.0f, 1.0f, 1.0f, 0.0f };       ///< ISHDR Tint.
+		float displayExposure[4]{ 0.0f, 0.18f, 0.0f, 1.0f };  ///< x Post Processing exposure on/off, y scale, zw range.
+		/// Multiplier on the smooth luminance band.
+		float broadLuminosity = 1.0f;
+		std::uint32_t debugCategoryView = 0;  ///< Non-zero: the decode renders the classified category, not the model's edit.
+		float maxRatio = 2.0f;                ///< Two-sided guard on the model/proxy luminance ratio (1/maxRatio..maxRatio).
+		std::uint32_t rawModelOutput = 0;     ///< Non-zero: the decode writes Feature 18's answer directly (Finished Image diagnostic).
+		float highlightWhite = 0.0f;          ///< Display gamma: display peak for the HDR highlight shoulder; 0 = none.
+		float wipePosition = -1.0f;           ///< Split-screen comparison split (fraction of the width); negative = off.
+		std::uint32_t proxyCurve = 0;         ///< NeuralRendering::ProxyCurve: how the scene-linear proxy is built.
+		std::uint32_t debugFlags = 0;         ///< kNeuralDebug* bits (ColorTransfer.hlsli).
+		/// x Detail Luminosity, y band radius in model texels, z band data present, w spare.
+		float bandParams[4]{ 1.0f, 8.0f, 0.0f, 0.0f };
+	};
+	static_assert(sizeof(TransferParams) == 304);
+
+	/// kNeuralDebug* in ColorTransfer.hlsli; keep the two in sync.
+	constexpr std::uint32_t kDebugFlagGuardClamp = 1u << 0;
+	constexpr std::uint32_t kDebugFlagBroadBand = 1u << 1;
+	constexpr std::uint32_t kDebugFlagDetailBand = 1u << 2;
+	constexpr std::uint32_t kDebugFlagStats = 1u << 4;
+
+	/// DebugStats slots, matching DecodeColorCS's RWStructuredBuffer<uint>.
+	constexpr std::uint32_t kDebugStatClampedSamples = 0;
+	constexpr std::uint32_t kDebugStatSamples = 1;
+	constexpr std::uint32_t kDebugStatPeakBits = 2;
+	constexpr std::uint32_t kDebugStatCount = 4;
+	/// Frames the staged readback trails the GPU by, so a Map never waits on it.
+	constexpr std::size_t kDebugReadbackFrames = 3;
+
+	constexpr float kMinimumResolutionScale = 0.25f;
+	/// Native resolution is the maximum model scale.
+	constexpr float kMaximumResolutionScale = 1.0f;
+	/// Feature 18 is not created below this per-axis extent.
+	constexpr std::uint32_t kMinimumModelExtent = 64;
+	/// Stable frames required before rebuilding the model raster; avoids draining the queue on each slider
+	/// step.
+	constexpr std::uint32_t kModelRasterDebounceFrames = 12;
+	/// Effectively disables the shader ratio clamp without a separate enabled flag.
+	constexpr float kNeuralRatioGuardDisabledValue = 1.0e6f;
+
+	/**
+	 * @brief Scaled model extent, rounded to even texels and floored at kMinimumModelExtent. Scale one
+	 * preserves the active extent.
+	 */
+	std::uint32_t ScaledExtent(std::uint32_t active, float scale)
+	{
+		scale = std::clamp(scale, kMinimumResolutionScale, kMaximumResolutionScale);
+		if (std::abs(scale - 1.0f) < 0.005f)
+			return active;
+		const auto scaled = static_cast<std::uint32_t>(std::lround(static_cast<double>(active) * scale)) & ~1u;
+		return std::max(scaled, kMinimumModelExtent);
+	}
+
+	constexpr const wchar_t* kEncodeColorPath = L"Data\\Shaders\\NeuralRendering\\EncodeColorCS.hlsl";
+	constexpr const wchar_t* kDecodeColorPath = L"Data\\Shaders\\NeuralRendering\\DecodeColorCS.hlsl";
+	constexpr const wchar_t* kPrepareToneDataPath = L"Data\\Shaders\\NeuralRendering\\PrepareToneDataCS.hlsl";
+	constexpr const wchar_t* kFilterToneDataPath = L"Data\\Shaders\\NeuralRendering\\FilterToneDataCS.hlsl";
+	constexpr const wchar_t* kCopyDepthGuidePath = L"Data\\Shaders\\NeuralRendering\\CopyDepthGuideCS.hlsl";
+	constexpr const wchar_t* kEncodeResidualPath = L"Data\\Shaders\\NeuralRendering\\EncodeResidualCS.hlsl";
+	constexpr const wchar_t* kApplyResidualPath = L"Data\\Shaders\\NeuralRendering\\ApplyResidualCS.hlsl";
+
+	bool GetTextureDesc(ID3D11Resource* resource, D3D11_TEXTURE2D_DESC& desc)
+	{
+		winrt::com_ptr<ID3D11Texture2D> texture;
+		if (!resource || FAILED(resource->QueryInterface(IID_PPV_ARGS(texture.put()))))
+			return false;
+		texture->GetDesc(&desc);
+		return true;
+	}
+
+	/**
+	 * @brief Build a single-mip shared texture at the active extent, excluding padded source margins from
+	 * model history.
+	 */
+	D3D11_TEXTURE2D_DESC MakeSharedDesc(const D3D11_TEXTURE2D_DESC& source, DXGI_FORMAT format, UINT bindFlags,
+		UINT width, UINT height)
+	{
+		auto desc = source;
+		desc.Width = width;
+		desc.Height = height;
+		desc.Format = format;
+		desc.MipLevels = 1;
+		desc.ArraySize = 1;
+		desc.SampleDesc.Count = 1;
+		desc.SampleDesc.Quality = 0;
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = bindFlags;
+		desc.CPUAccessFlags = 0;
+		desc.MiscFlags = 0;
+		return desc;
+	}
+
+	bool Matches(const NeuralRenderingNGX::SharedTexture& texture, const D3D11_TEXTURE2D_DESC& desc)
+	{
+		return texture.resource11 && texture.resource12 &&
+		       texture.desc.Width == desc.Width && texture.desc.Height == desc.Height &&
+		       texture.desc.Format == desc.Format;
+	}
+}
+
+struct NeuralRenderingBackend::State
+{
+	NeuralRenderingNGX::D3D12Interop interop;
+
+	NeuralRenderingNGX::SharedTexture color;
+	NeuralRenderingNGX::SharedTexture depth;
+	NeuralRenderingNGX::SharedTexture motionVectors;
+	NeuralRenderingNGX::SharedTexture output;
+	NeuralRenderingNGX::SharedTexture residualInput;
+	NeuralRenderingNGX::SharedTexture residualOutput;
+	NeuralRenderingNGX::SharedTexture residualExposure;
+
+	winrt::com_ptr<ID3D11ComputeShader> encodeColorCS;
+	winrt::com_ptr<ID3D11ComputeShader> decodeColorCS;
+	winrt::com_ptr<ID3D11ComputeShader> copyDepthGuideCS;
+	winrt::com_ptr<ID3D11ComputeShader> encodeResidualCS;
+	winrt::com_ptr<ID3D11ComputeShader> applyResidualCS;
+	winrt::com_ptr<ID3D11ComputeShader> prepareToneDataCS;
+	winrt::com_ptr<ID3D11ComputeShader> filterToneDataHorizontalCS;
+	winrt::com_ptr<ID3D11ComputeShader> filterToneDataVerticalCS;
+	winrt::com_ptr<ID3D11Buffer> transferParamsCB;
+	/// Linear clamp sampler for the jitter-compensating resample in both colour passes.
+	winrt::com_ptr<ID3D11SamplerState> linearClampSampler;
+	bool encodeColorAttempted = false;
+	bool decodeColorAttempted = false;
+	bool copyDepthGuideAttempted = false;
+	bool encodeResidualAttempted = false;
+	bool applyResidualAttempted = false;
+	bool prepareToneDataAttempted = false;
+	bool filterToneDataHorizontalAttempted = false;
+	bool filterToneDataVerticalAttempted = false;
+
+	/**
+	 * D3D11 band scratch: toneData stores log proxy luminance and edit stops; horizontal filtering writes
+	 * toneScratch, vertical filtering writes back to toneData.
+	 */
+	winrt::com_ptr<ID3D11Texture2D> toneData;
+	winrt::com_ptr<ID3D11ShaderResourceView> toneDataSRV;
+	winrt::com_ptr<ID3D11UnorderedAccessView> toneDataUAV;
+	winrt::com_ptr<ID3D11Texture2D> toneScratch;
+	winrt::com_ptr<ID3D11ShaderResourceView> toneScratchSRV;
+	winrt::com_ptr<ID3D11UnorderedAccessView> toneScratchUAV;
+	std::uint32_t toneWidth = 0;
+	std::uint32_t toneHeight = 0;
+	/// True once the band passes have written data for the live model raster; cleared whenever
+	/// the textures are (re)built, so the first decode after a resize never reads noise.
+	bool toneDataValid = false;
+	bool loggedToneFailure = false;
+
+	/**
+	 * Staged statistics ring read kDebugReadbackFrames later without blocking the GPU.
+	 */
+	winrt::com_ptr<ID3D11Buffer> debugStats;
+	winrt::com_ptr<ID3D11UnorderedAccessView> debugStatsUAV;
+	std::array<winrt::com_ptr<ID3D11Buffer>, kDebugReadbackFrames> debugStaging;
+	std::array<bool, kDebugReadbackFrames> debugStagingPending{};
+	std::size_t debugStagingSlot = 0;
+	NeuralRenderingBackend::DebugReadback debugReadback{};
+
+	/// SRV over the Feature 18 output, consumed by the colour decode pass.
+	winrt::com_ptr<ID3D11ShaderResourceView> outputSRV;
+	/// SRV over the encoded model input, so the decode pass compares the answer
+	/// against the exact proxy the model was given rather than a re-encode.
+	winrt::com_ptr<ID3D11ShaderResourceView> colorSRV;
+	/// SRV over the private DLSS-SR output carrier, consumed after the game's main SR pass.
+	winrt::com_ptr<ID3D11ShaderResourceView> residualOutputSRV;
+	/// SRV over the render-resolution NR result used to form the signed carrier.
+	winrt::com_ptr<ID3D11ShaderResourceView> editedColorSRV;
+	ID3D11Resource* editedColorSRVSource = nullptr;
+	/// SRV over the caller's colour input, cached against the resource it was created from.
+	winrt::com_ptr<ID3D11ShaderResourceView> colorInSRV;
+	ID3D11Resource* colorInSRVSource = nullptr;
+	/// SRV over the game's clean main-SR result. This is kept separate from colorInSRV
+	/// because Separate Upscaling reads both resources every frame.
+	winrt::com_ptr<ID3D11ShaderResourceView> cleanColorSRV;
+	ID3D11Resource* cleanColorSRVSource = nullptr;
+	/// UAV over the caller's colour destination, cached against the resource it was created from.
+	winrt::com_ptr<ID3D11UnorderedAccessView> colorOutUAV;
+	ID3D11Resource* colorOutUAVSource = nullptr;
+	/// Colour source used on the preceding frame. A change means the model moved
+	/// between pre- and post-upscale domains and its temporal history is invalid.
+	ID3D11Resource* lastColorInput = nullptr;
+
+	bool probeAttempted = false;
+	bool probeSucceeded = false;
+	bool failureLatched = false;
+	bool featureAvailable = false;
+	bool resetPending = true;
+	bool separateResetPending = true;
+	bool separateResidualReady = false;
+	std::uint32_t separateOutputWidth = 0;
+	std::uint32_t separateOutputHeight = 0;
+	std::uint32_t separateQualityMode = UINT_MAX;
+	std::uint32_t separatePreset = UINT_MAX;
+
+	/// Last color and guide extents; changes invalidate temporal history.
+	std::uint32_t lastActiveWidth = 0;
+	std::uint32_t lastActiveHeight = 0;
+	std::uint32_t lastGuideWidth = 0;
+	std::uint32_t lastGuideHeight = 0;
+	std::uint32_t lastModelWidth = 0;
+	std::uint32_t lastModelHeight = 0;
+
+	/// Model raster the caller most recently asked for and how many consecutive
+	/// frames it has been asked for; see SettleModelRaster.
+	std::uint32_t requestedModelWidth = 0;
+	std::uint32_t requestedModelHeight = 0;
+	std::uint32_t requestedModelStableFrames = 0;
+
+	/// Counts Run() calls; odd frames are skipped in alternating-frame mode.
+	std::uint64_t evaluateFrameIndex = 0;
+	/// evaluateFrameIndex of the last frame Feature 18 actually ran on (zero: none since
+	/// the resources were built). Tells an evaluation how many frames of motion the
+	/// model's temporal history has to bridge.
+	std::uint64_t lastEvaluatedFrameIndex = 0;
+	/// Style supplied to the last successful Feature 18 evaluation; valid when lastEvaluatedFrameIndex is nonzero.
+	std::uint32_t previousEvaluatedStyle = 0;
+
+	bool loggedProbeFailure = false;
+	bool loggedInvalidInputs = false;
+	bool loggedShaderFailure = false;
+	bool loggedViewFailure = false;
+
+	~State()
+	{
+		// Do not call Destroy(): the Runtime singleton is already destroyed at process exit. Interop releases
+		// its own device.
+		interop.WaitForIdle();
+		ReleaseGpuResources();
+	}
+
+	bool Available()
+	{
+		if (!probeAttempted) {
+			probeAttempted = true;
+			probeSucceeded = NeuralRenderingNGX::Runtime::Instance().Probe();
+			if (!probeSucceeded && !loggedProbeFailure) {
+				loggedProbeFailure = true;
+				logger::warn("[NeuralRendering] Runtime unavailable (status={} detail={}); install a compatible nvngx_dlssnr.dll to enable Neural Rendering.",
+					NeuralRenderingNGX::ToString(NeuralRenderingNGX::Runtime::Instance().Status()),
+					NeuralRenderingNGX::Runtime::Instance().Detail());
+			}
+		}
+		return probeSucceeded;
+	}
+
+	bool LatchFailure(const char* operation, HRESULT error)
+	{
+		failureLatched = true;
+		featureAvailable = false;
+		logger::error("[NeuralRendering] {} failed hr/ngx=0x{:08X} status={} detail={}",
+			operation, static_cast<std::uint32_t>(error),
+			NeuralRenderingNGX::ToString(NeuralRenderingNGX::Runtime::Instance().Status()),
+			NeuralRenderingNGX::Runtime::Instance().Detail());
+		return false;
+	}
+
+	ID3D11ComputeShader* GetShader(winrt::com_ptr<ID3D11ComputeShader>& slot, bool& attempted,
+		const wchar_t* path, const char* label,
+		const std::vector<std::pair<const char*, const char*>>& defines = {})
+	{
+		if (!attempted) {
+			attempted = true;
+			slot.attach(static_cast<ID3D11ComputeShader*>(Util::CompileShader(path, defines, "cs_5_0")));
+			if (slot)
+				Util::SetResourceName(slot.get(), "NeuralRendering::%s", label);
+			else if (!loggedShaderFailure) {
+				loggedShaderFailure = true;
+				logger::error("[NeuralRendering] Failed to compile {}; Neural Rendering is disabled.", label);
+			}
+		}
+		return slot.get();
+	}
+
+	bool InitializeInterop(ID3D11Device* device, ID3D11DeviceContext* context)
+	{
+		winrt::com_ptr<IDXGIDevice> dxgiDevice;
+		winrt::com_ptr<IDXGIAdapter> adapter;
+		HRESULT result = device->QueryInterface(IID_PPV_ARGS(dxgiDevice.put()));
+		if (SUCCEEDED(result))
+			result = dxgiDevice->GetAdapter(adapter.put());
+		if (FAILED(result) || !interop.Initialize(adapter.get(), device, context))
+			return LatchFailure("D3D12 interop initialization", FAILED(result) ? result : interop.LastError());
+		return true;
+	}
+
+	bool InitializeRuntime()
+	{
+		auto& runtime = NeuralRenderingNGX::Runtime::Instance();
+		if (!runtime.Probe() || !runtime.Initialize(interop.Device()))
+			return LatchFailure("runtime initialization", static_cast<HRESULT>(runtime.NgxResult()));
+		logger::info("[NeuralRendering] Runtime initialized version={} appId=0x{:08X} api=0x{:X}",
+			runtime.Version(), runtime.ApplicationId(), runtime.ApiVersion());
+		return true;
+	}
+
+	/**
+	 * @brief Debounce model-raster changes. Adopt immediately before allocation or when the active color
+	 * extent changes; otherwise wait kModelRasterDebounceFrames.
+	 *
+	 * @return The model raster to run this frame.
+	 */
+	std::pair<std::uint32_t, std::uint32_t> SettleModelRaster(std::uint32_t desiredWidth, std::uint32_t desiredHeight,
+		std::uint32_t activeWidth, std::uint32_t activeHeight)
+	{
+		if (desiredWidth != requestedModelWidth || desiredHeight != requestedModelHeight) {
+			requestedModelWidth = desiredWidth;
+			requestedModelHeight = desiredHeight;
+			requestedModelStableFrames = 0;
+		} else if (requestedModelStableFrames < kModelRasterDebounceFrames) {
+			++requestedModelStableFrames;
+		}
+		const bool allocated = color.resource11 && output.resource11;
+		const bool activeUnchanged = activeWidth == lastActiveWidth && activeHeight == lastActiveHeight;
+		if (allocated && activeUnchanged && requestedModelStableFrames < kModelRasterDebounceFrames)
+			return { color.desc.Width, color.desc.Height };
+		return { desiredWidth, desiredHeight };
+	}
+
+	/**
+	 * @brief Creates or validates compact shared textures at the model and guide extents.
+	 * @param modelWidth Model raster width the colour/output textures are allocated at.
+	 * @param modelHeight Model raster height.
+	 * @return False only when the descriptions cannot be read or a shared texture cannot be created.
+	 */
+	bool EnsureResources(const FrameInputs& inputs, std::uint32_t modelWidth, std::uint32_t modelHeight)
+	{
+		D3D11_TEXTURE2D_DESC colorSource{};
+		D3D11_TEXTURE2D_DESC depthSource{};
+		D3D11_TEXTURE2D_DESC motionSource{};
+		if (!GetTextureDesc(inputs.colorIn, colorSource) || !GetTextureDesc(inputs.depth, depthSource) ||
+			!GetTextureDesc(inputs.motionVectors, motionSource))
+			return false;
+
+		constexpr UINT sharedFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+		const auto colorDesc = MakeSharedDesc(colorSource, colorSource.Format, sharedFlags, modelWidth, modelHeight);
+		const auto outputDesc = MakeSharedDesc(colorSource, colorSource.Format, sharedFlags, modelWidth, modelHeight);
+		const auto depthDesc = MakeSharedDesc(depthSource, DXGI_FORMAT_R32_FLOAT, sharedFlags,
+			inputs.guideWidth, inputs.guideHeight);
+		const auto motionDesc = MakeSharedDesc(motionSource, motionSource.Format, sharedFlags,
+			inputs.guideWidth, inputs.guideHeight);
+
+		if (Matches(color, colorDesc) && Matches(output, outputDesc) &&
+			Matches(depth, depthDesc) && Matches(motionVectors, motionDesc) && outputSRV && colorSRV)
+			return true;
+
+		// Active extents changed (a resolution, placement, or display-mode change). Everything
+		// downstream of the allocation - including the NGX feature handle - is stale.
+		if (!interop.WaitForIdle())
+			return false;
+		NeuralRenderingNGX::Runtime::Instance().ResetFeature();
+		separateResetPending = true;
+		separateResidualReady = false;
+		color = {};
+		depth = {};
+		motionVectors = {};
+		output = {};
+		outputSRV = nullptr;
+		colorSRV = nullptr;
+
+		if (!interop.CreateSharedTexture(colorDesc, color, "NeuralRendering::Color") ||
+			!interop.CreateSharedTexture(outputDesc, output, "NeuralRendering::Output") ||
+			!interop.CreateSharedTexture(depthDesc, depth, "NeuralRendering::DepthGuide") ||
+			!interop.CreateSharedTexture(motionDesc, motionVectors, "NeuralRendering::MotionVectors"))
+			return false;
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = outputDesc.Format;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MostDetailedMip = 0;
+		srvDesc.Texture2D.MipLevels = 1;
+		if (FAILED(globals::d3d::device->CreateShaderResourceView(output.resource11.Get(), &srvDesc, outputSRV.put())))
+			return false;
+		Util::SetResourceName(outputSRV.get(), "NeuralRendering::Output SRV");
+		srvDesc.Format = colorDesc.Format;
+		if (FAILED(globals::d3d::device->CreateShaderResourceView(color.resource11.Get(), &srvDesc, colorSRV.put())))
+			return false;
+		Util::SetResourceName(colorSRV.get(), "NeuralRendering::Color SRV");
+
+		resetPending = true;
+		logger::info("[NeuralRendering] Shared resources allocated model={}x{} (active {}x{}) depth={}x{} motion={}x{}",
+			colorDesc.Width, colorDesc.Height, inputs.width, inputs.height,
+			depthDesc.Width, depthDesc.Height, motionDesc.Width, motionDesc.Height);
+		return true;
+	}
+
+	/** @brief Allocate the signed carrier, its private-SR output, and fixed unit exposure. */
+	bool EnsureSeparateResources(const FrameInputs& inputs)
+	{
+		D3D11_TEXTURE2D_DESC colorSource{};
+		if (!GetTextureDesc(inputs.colorIn, colorSource) || !inputs.outputWidth || !inputs.outputHeight)
+			return false;
+
+		constexpr UINT sharedFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+		const auto inputDesc = MakeSharedDesc(colorSource, DXGI_FORMAT_R16G16B16A16_FLOAT,
+			sharedFlags, inputs.width, inputs.height);
+		const auto outputDesc = MakeSharedDesc(colorSource, DXGI_FORMAT_R16G16B16A16_FLOAT,
+			sharedFlags, inputs.outputWidth, inputs.outputHeight);
+		const auto exposureDesc = MakeSharedDesc(colorSource, DXGI_FORMAT_R32_FLOAT, sharedFlags, 1, 1);
+		if (Matches(residualInput, inputDesc) && Matches(residualOutput, outputDesc) &&
+			Matches(residualExposure, exposureDesc) && residualOutputSRV)
+			return true;
+
+		if (!interop.WaitForIdle())
+			return false;
+		NeuralRenderingNGX::Runtime::Instance().ResetSuperResolutionFeature();
+		residualInput = {};
+		residualOutput = {};
+		residualExposure = {};
+		residualOutputSRV = nullptr;
+		separateResidualReady = false;
+
+		if (!interop.CreateSharedTexture(inputDesc, residualInput, "NeuralRendering::ResidualInput") ||
+			!interop.CreateSharedTexture(outputDesc, residualOutput, "NeuralRendering::ResidualOutput") ||
+			!interop.CreateSharedTexture(exposureDesc, residualExposure, "NeuralRendering::ResidualExposure"))
+			return false;
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = outputDesc.Format;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MostDetailedMip = 0;
+		srvDesc.Texture2D.MipLevels = 1;
+		if (FAILED(globals::d3d::device->CreateShaderResourceView(
+				residualOutput.resource11.Get(), &srvDesc, residualOutputSRV.put())))
+			return false;
+		Util::SetResourceName(residualOutputSRV.get(), "NeuralRendering::ResidualOutput SRV");
+
+		const float unitExposure[4]{ 1.0f, 0.0f, 0.0f, 0.0f };
+		globals::d3d::context->ClearUnorderedAccessViewFloat(residualExposure.uav11.Get(), unitExposure);
+		separateResetPending = true;
+		separateOutputWidth = inputs.outputWidth;
+		separateOutputHeight = inputs.outputHeight;
+		logger::info("[NeuralRendering] Separate residual resources allocated {}x{} -> {}x{}",
+			inputs.width, inputs.height, inputs.outputWidth, inputs.outputHeight);
+		return true;
+	}
+
+	/**
+	 * @brief Allocate private D3D11 band scratch. On failure, disable the split for this session and
+	 * resolve without band data.
+	 *
+	 * @return False when the textures are unavailable; the caller must then leave the band
+	 *         data flagged absent.
+	 */
+	bool EnsureToneResources(std::uint32_t modelWidth, std::uint32_t modelHeight)
+	{
+		if (toneData && toneScratch && toneWidth == modelWidth && toneHeight == modelHeight)
+			return true;
+		if (loggedToneFailure)
+			return false;
+
+		toneData = nullptr;
+		toneDataSRV = nullptr;
+		toneDataUAV = nullptr;
+		toneScratch = nullptr;
+		toneScratchSRV = nullptr;
+		toneScratchUAV = nullptr;
+		toneWidth = 0;
+		toneHeight = 0;
+		toneDataValid = false;
+		if (!modelWidth || !modelHeight)
+			return false;
+
+		D3D11_TEXTURE2D_DESC desc{};
+		desc.Width = modelWidth;
+		desc.Height = modelHeight;
+		desc.MipLevels = 1;
+		desc.ArraySize = 1;
+		// Half precision resolves about 0.01 stops, far finer than the edit it carries.
+		desc.Format = DXGI_FORMAT_R16G16_FLOAT;
+		desc.SampleDesc.Count = 1;
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+
+		auto* device = globals::d3d::device;
+		const auto create = [&](winrt::com_ptr<ID3D11Texture2D>& texture,
+								winrt::com_ptr<ID3D11ShaderResourceView>& srv,
+								winrt::com_ptr<ID3D11UnorderedAccessView>& uav, const char* name) {
+			if (FAILED(device->CreateTexture2D(&desc, nullptr, texture.put())))
+				return false;
+			Util::SetResourceName(texture.get(), "NeuralRendering::%s", name);
+			D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+			srvDesc.Format = desc.Format;
+			srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+			srvDesc.Texture2D.MipLevels = 1;
+			if (FAILED(device->CreateShaderResourceView(texture.get(), &srvDesc, srv.put())))
+				return false;
+			Util::SetResourceName(srv.get(), "NeuralRendering::%s SRV", name);
+			D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+			uavDesc.Format = desc.Format;
+			uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+			if (FAILED(device->CreateUnorderedAccessView(texture.get(), &uavDesc, uav.put())))
+				return false;
+			Util::SetResourceName(uav.get(), "NeuralRendering::%s UAV", name);
+			return true;
+		};
+
+		if (!create(toneData, toneDataSRV, toneDataUAV, "ToneData") ||
+			!create(toneScratch, toneScratchSRV, toneScratchUAV, "ToneScratch")) {
+			loggedToneFailure = true;
+			logger::warn("[NeuralRendering] Broad/Detail Luminosity disabled: band textures could not be created at {}x{}",
+				modelWidth, modelHeight);
+			toneData = nullptr;
+			toneDataSRV = nullptr;
+			toneDataUAV = nullptr;
+			toneScratch = nullptr;
+			toneScratchSRV = nullptr;
+			toneScratchUAV = nullptr;
+			return false;
+		}
+
+		toneWidth = modelWidth;
+		toneHeight = modelHeight;
+		return true;
+	}
+
+	/** @brief Allocates the debug statistics buffer and its readback ring on first use. */
+	bool EnsureDebugStats()
+	{
+		if (debugStats && debugStatsUAV)
+			return true;
+
+		auto* device = globals::d3d::device;
+		D3D11_BUFFER_DESC desc{};
+		desc.ByteWidth = kDebugStatCount * sizeof(std::uint32_t);
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+		desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+		desc.StructureByteStride = sizeof(std::uint32_t);
+		if (FAILED(device->CreateBuffer(&desc, nullptr, debugStats.put()))) {
+			debugStats = nullptr;
+			return false;
+		}
+		Util::SetResourceName(debugStats.get(), "NeuralRendering::DebugStats");
+
+		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+		uavDesc.Format = DXGI_FORMAT_UNKNOWN;
+		uavDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+		uavDesc.Buffer.NumElements = kDebugStatCount;
+		if (FAILED(device->CreateUnorderedAccessView(debugStats.get(), &uavDesc, debugStatsUAV.put()))) {
+			debugStats = nullptr;
+			debugStatsUAV = nullptr;
+			return false;
+		}
+		Util::SetResourceName(debugStatsUAV.get(), "NeuralRendering::DebugStats UAV");
+
+		D3D11_BUFFER_DESC stagingDesc{};
+		stagingDesc.ByteWidth = desc.ByteWidth;
+		stagingDesc.Usage = D3D11_USAGE_STAGING;
+		stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+		for (auto& staging : debugStaging) {
+			if (FAILED(device->CreateBuffer(&stagingDesc, nullptr, staging.put()))) {
+				debugStats = nullptr;
+				debugStatsUAV = nullptr;
+				for (auto& slot : debugStaging)
+					slot = nullptr;
+				return false;
+			}
+			Util::SetResourceName(staging.get(), "NeuralRendering::DebugStats Readback");
+		}
+		debugStagingPending.fill(false);
+		debugStagingSlot = 0;
+		return true;
+	}
+
+	/**
+	 * @brief Read the oldest staging slot without waiting, queue current statistics, then clear counters
+	 * for the next decode.
+	 */
+	void ServiceDebugReadback(ID3D11DeviceContext* context, bool enabled)
+	{
+		if (!enabled) {
+			debugReadback = {};
+			debugStagingPending.fill(false);
+			return;
+		}
+		if (!EnsureDebugStats())
+			return;
+
+		auto& slot = debugStaging[debugStagingSlot];
+		if (debugStagingPending[debugStagingSlot]) {
+			D3D11_MAPPED_SUBRESOURCE mapped{};
+			if (SUCCEEDED(context->Map(slot.get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped)) && mapped.pData) {
+				const auto* values = static_cast<const std::uint32_t*>(mapped.pData);
+				const auto samples = values[kDebugStatSamples];
+				debugReadback.guardClampedPercent = samples ?
+				                                        100.0f * static_cast<float>(values[kDebugStatClampedSamples]) / static_cast<float>(samples) :
+				                                        0.0f;
+				debugReadback.modelPeakLuminance = std::bit_cast<float>(values[kDebugStatPeakBits]);
+				debugReadback.valid = samples != 0;
+				context->Unmap(slot.get(), 0);
+				debugStagingPending[debugStagingSlot] = false;
+			}
+		}
+
+		// Take this frame's counters before clearing them for the decode that follows.
+		context->CopyResource(slot.get(), debugStats.get());
+		debugStagingPending[debugStagingSlot] = true;
+		debugStagingSlot = (debugStagingSlot + 1) % kDebugReadbackFrames;
+
+		const UINT clearValues[4]{ 0, 0, 0, 0 };
+		context->ClearUnorderedAccessViewUint(debugStatsUAV.get(), clearValues);
+	}
+
+	ID3D11ShaderResourceView* GetColorInSRV(ID3D11Device* device, ID3D11Resource* resource)
+	{
+		if (colorInSRV && colorInSRVSource == resource)
+			return colorInSRV.get();
+
+		colorInSRV = nullptr;
+		colorInSRVSource = nullptr;
+
+		D3D11_TEXTURE2D_DESC desc{};
+		if (!GetTextureDesc(resource, desc))
+			return nullptr;
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = desc.Format;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MostDetailedMip = 0;
+		srvDesc.Texture2D.MipLevels = 1;
+		if (FAILED(device->CreateShaderResourceView(resource, &srvDesc, colorInSRV.put()))) {
+			colorInSRV = nullptr;
+			if (!loggedViewFailure) {
+				loggedViewFailure = true;
+				logger::error("[NeuralRendering] Could not create a shader resource view over the colour input (format={}); Neural Rendering is disabled.", static_cast<int>(desc.Format));
+			}
+			return nullptr;
+		}
+		Util::SetResourceName(colorInSRV.get(), "NeuralRendering::ColorIn SRV");
+		colorInSRVSource = resource;
+		return colorInSRV.get();
+	}
+
+	ID3D11ShaderResourceView* GetEditedColorSRV(ID3D11Device* device, ID3D11Resource* resource)
+	{
+		if (editedColorSRV && editedColorSRVSource == resource)
+			return editedColorSRV.get();
+		editedColorSRV = nullptr;
+		editedColorSRVSource = nullptr;
+
+		D3D11_TEXTURE2D_DESC desc{};
+		if (!GetTextureDesc(resource, desc))
+			return nullptr;
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = desc.Format;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MostDetailedMip = 0;
+		srvDesc.Texture2D.MipLevels = 1;
+		if (FAILED(device->CreateShaderResourceView(resource, &srvDesc, editedColorSRV.put())))
+			return nullptr;
+		Util::SetResourceName(editedColorSRV.get(), "NeuralRendering::EditedColor SRV");
+		editedColorSRVSource = resource;
+		return editedColorSRV.get();
+	}
+
+	ID3D11ShaderResourceView* GetCleanColorSRV(ID3D11Device* device, ID3D11Resource* resource)
+	{
+		if (cleanColorSRV && cleanColorSRVSource == resource)
+			return cleanColorSRV.get();
+		cleanColorSRV = nullptr;
+		cleanColorSRVSource = nullptr;
+
+		D3D11_TEXTURE2D_DESC desc{};
+		if (!GetTextureDesc(resource, desc))
+			return nullptr;
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = desc.Format;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MostDetailedMip = 0;
+		srvDesc.Texture2D.MipLevels = 1;
+		if (FAILED(device->CreateShaderResourceView(resource, &srvDesc, cleanColorSRV.put())))
+			return nullptr;
+		Util::SetResourceName(cleanColorSRV.get(), "NeuralRendering::CleanColor SRV");
+		cleanColorSRVSource = resource;
+		return cleanColorSRV.get();
+	}
+
+	ID3D11UnorderedAccessView* GetColorOutUAV(ID3D11Device* device, ID3D11Resource* resource)
+	{
+		if (colorOutUAV && colorOutUAVSource == resource)
+			return colorOutUAV.get();
+
+		colorOutUAV = nullptr;
+		colorOutUAVSource = nullptr;
+
+		D3D11_TEXTURE2D_DESC desc{};
+		if (!GetTextureDesc(resource, desc))
+			return nullptr;
+
+		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+		uavDesc.Format = desc.Format;
+		uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+		uavDesc.Texture2D.MipSlice = 0;
+		if (FAILED(device->CreateUnorderedAccessView(resource, &uavDesc, colorOutUAV.put()))) {
+			colorOutUAV = nullptr;
+			if (!loggedViewFailure) {
+				loggedViewFailure = true;
+				logger::error("[NeuralRendering] Could not create an unordered access view over the colour output (format={}); Neural Rendering is disabled.", static_cast<int>(desc.Format));
+			}
+			return nullptr;
+		}
+		Util::SetResourceName(colorOutUAV.get(), "NeuralRendering::ColorOut UAV");
+		colorOutUAVSource = resource;
+		return colorOutUAV.get();
+	}
+
+	/// Most SRVs any transfer pass binds (DecodeColorCS: t0-t8).
+	static constexpr std::size_t kMaxTransferSources = 9;
+	/// The colour destination, plus the decode's optional debug-stats buffer.
+	static constexpr std::size_t kMaxTransferDestinations = 2;
+
+	/**
+	 * Runs one compute pass over the given extent with @p sources bound from t0 upwards, and
+	 * unbinds everything afterwards.
+	 *
+	 * @param destination u0. @param statistics u1, or null when the pass writes no statistics.
+	 */
+	static void DispatchTransfer(ID3D11DeviceContext* context, ID3D11ComputeShader* shader,
+		std::initializer_list<ID3D11ShaderResourceView*> sources,
+		ID3D11UnorderedAccessView* destination,
+		ID3D11Buffer* constants, ID3D11SamplerState* sampler,
+		std::uint32_t width, std::uint32_t height,
+		ID3D11UnorderedAccessView* statistics = nullptr)
+	{
+		ID3D11ShaderResourceView* boundSources[kMaxTransferSources]{};
+		std::copy_n(sources.begin(), std::min(sources.size(), kMaxTransferSources), boundSources);
+		ID3D11UnorderedAccessView* boundDestinations[kMaxTransferDestinations]{ destination, statistics };
+		context->CSSetShader(shader, nullptr, 0);
+		context->CSSetShaderResources(0, static_cast<UINT>(kMaxTransferSources), boundSources);
+		context->CSSetUnorderedAccessViews(0, static_cast<UINT>(kMaxTransferDestinations), boundDestinations, nullptr);
+		context->CSSetConstantBuffers(0, 1, &constants);
+		context->CSSetSamplers(0, 1, &sampler);
+		context->Dispatch((width + 7) / 8, (height + 7) / 8, 1);
+
+		ID3D11ShaderResourceView* nullSRVs[kMaxTransferSources]{};
+		ID3D11UnorderedAccessView* nullUAVs[kMaxTransferDestinations]{};
+		ID3D11Buffer* nullCB = nullptr;
+		ID3D11SamplerState* nullSampler = nullptr;
+		context->CSSetShaderResources(0, static_cast<UINT>(std::size(nullSRVs)), nullSRVs);
+		context->CSSetUnorderedAccessViews(0, static_cast<UINT>(std::size(nullUAVs)), nullUAVs, nullptr);
+		context->CSSetConstantBuffers(0, 1, &nullCB);
+		context->CSSetSamplers(0, 1, &nullSampler);
+		context->CSSetShader(nullptr, nullptr, 0);
+	}
+
+	bool ValidateInputs(const FrameInputs& inputs)
+	{
+		const bool distinct = inputs.colorIn != inputs.colorOut && inputs.colorIn != inputs.depth &&
+		                      inputs.colorIn != inputs.motionVectors && inputs.colorOut != inputs.depth &&
+		                      inputs.colorOut != inputs.motionVectors && inputs.depth != inputs.motionVectors;
+		const bool finite = std::isfinite(inputs.intensity) && std::isfinite(inputs.colorStrength) &&
+		                    std::isfinite(inputs.transferStrength) && std::isfinite(inputs.broadLuminosity) &&
+		                    std::isfinite(inputs.detailLuminosity) && std::isfinite(inputs.bandRadius) &&
+		                    std::isfinite(inputs.maxRatio) && std::isfinite(inputs.highlightWhite) &&
+		                    std::isfinite(inputs.wipePosition) &&
+		                    std::isfinite(inputs.jitterOffsetX) && std::isfinite(inputs.jitterOffsetY) &&
+		                    std::isfinite(inputs.resolutionScaleX) && std::isfinite(inputs.resolutionScaleY) &&
+		                    std::isfinite(inputs.localToneStrength) &&
+		                    std::isfinite(inputs.localStructureStrength) && std::isfinite(inputs.skinStructureStrength) &&
+		                    std::ranges::all_of(inputs.categoryColorStrengths, [](float value) { return std::isfinite(value); }) &&
+		                    std::ranges::all_of(inputs.categoryTransferStrengths, [](float value) { return std::isfinite(value); }) &&
+		                    std::ranges::all_of(inputs.categoryBroadLuminosity, [](float value) { return std::isfinite(value); }) &&
+		                    std::ranges::all_of(inputs.categoryDetailLuminosity, [](float value) { return std::isfinite(value); }) &&
+		                    std::ranges::all_of(inputs.display.param, [](float value) { return std::isfinite(value); }) &&
+		                    std::ranges::all_of(inputs.display.cinematic, [](float value) { return std::isfinite(value); }) &&
+		                    std::ranges::all_of(inputs.display.tint, [](float value) { return std::isfinite(value); }) &&
+		                    std::isfinite(inputs.display.postProcessExposureScale) &&
+		                    std::ranges::all_of(inputs.display.postProcessAdaptationRange, [](float value) { return std::isfinite(value); });
+		// The per-category hue guard needs the material category on every pixel.
+		if (inputs.colorIn && inputs.colorOut && inputs.depth && inputs.depthSRV && inputs.motionVectors &&
+			inputs.materialCategoriesSRV && distinct && finite && inputs.width && inputs.height)
+			return true;
+
+		if (!loggedInvalidInputs) {
+			loggedInvalidInputs = true;
+			logger::warn("[NeuralRendering] Invalid or aliased D3D11 resources/settings; Neural Rendering evaluation was skipped.");
+		}
+		return false;
+	}
+
+	/**
+	 * @brief Encode color and guides and submit Feature 18; failures latch. The caller decodes the result.
+	 *
+	 * @param motionFrames Frames elapsed since the model's previous evaluation; the
+	 *        one-frame game motion vectors are scaled by it (see Run).
+	 */
+	bool EvaluateModel(const FrameInputs& inputs, ID3D11DeviceContext* context,
+		ID3D11ComputeShader* encodeShader, ID3D11ComputeShader* guideShader, ID3D11ShaderResourceView* colorInView,
+		std::uint32_t modelWidth, std::uint32_t modelHeight, std::uint32_t guideWidth, std::uint32_t guideHeight,
+		float motionFrames)
+	{
+		// Encode onto the unjittered model grid; decode maps the edit back to the source raster. Adaptation
+		// inputs may be null.
+		DispatchTransfer(context, encodeShader,
+			{ colorInView, inputs.display.vanillaAdaptationSRV, inputs.display.postProcessAdaptationSRV },
+			color.uav11.Get(), transferParamsCB.get(), linearClampSampler.get(), modelWidth, modelHeight);
+		DispatchTransfer(context, guideShader, { inputs.depthSRV }, depth.uav11.Get(),
+			nullptr, nullptr, guideWidth, guideHeight);
+
+		// A held frame (Frame Hold) is the same image every evaluation, so it has no motion:
+		// hand the model zero vectors rather than the live frame's, which describe a scene
+		// that has moved on.
+		if (inputs.staticMotion) {
+			const float zeroMotion[4]{};
+			context->ClearUnorderedAccessViewFloat(motionVectors.uav11.Get(), zeroMotion);
+		} else {
+			const D3D11_BOX motionBox{ 0, 0, 0, guideWidth, guideHeight, 1 };
+			context->CopySubresourceRegion(motionVectors.resource11.Get(), 0, 0, 0, 0, inputs.motionVectors, 0, &motionBox);
+		}
+
+		NeuralRenderingNGX::Tuning tuning;
+		tuning.intensity = inputs.intensity;
+		tuning.localToneStrength = inputs.localToneStrength;
+		tuning.localStructureStrength = inputs.localStructureStrength;
+		tuning.skinStructureStrength = inputs.skinStructureStrength;
+		tuning.style = inputs.style;
+		tuning.useAutoMask = inputs.automaticMask;
+		tuning.uiCorrection = false;  // Neural Rendering never runs after the UI composite.
+
+		ID3D12GraphicsCommandList* commandList = nullptr;
+		if (!interop.BeginD3D12(&commandList) || !commandList)
+			return LatchFailure("BeginD3D12", interop.LastError());
+
+		ID3D12Resource* resources[4]{
+			color.resource12.Get(), depth.resource12.Get(),
+			motionVectors.resource12.Get(), output.resource12.Get()
+		};
+		D3D12_RESOURCE_BARRIER barriers[4]{};
+		for (std::size_t index = 0; index < std::size(barriers); ++index) {
+			barriers[index].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			barriers[index].Transition.pResource = resources[index];
+			barriers[index].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+			barriers[index].Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+			barriers[index].Transition.StateAfter = index == 3 ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS :
+			                                                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+		}
+		commandList->ResourceBarrier(static_cast<UINT>(std::size(barriers)), barriers);
+
+		// Convert normalized motion to guide pixels, scaled by frames since evaluation. Resource subrects
+		// already account for model/guide resolution differences.
+		const bool executed = NeuralRenderingNGX::Runtime::Instance().Execute(commandList,
+			color.resource12.Get(), depth.resource12.Get(), motionVectors.resource12.Get(), output.resource12.Get(),
+			modelWidth, modelHeight, guideWidth, guideHeight, output.desc.Width, output.desc.Height,
+			static_cast<float>(guideWidth) * motionFrames, static_cast<float>(guideHeight) * motionFrames,
+			tuning, inputs.reset || resetPending, inputs.depthInverted);
+
+		for (auto& barrier : barriers)
+			std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);
+		commandList->ResourceBarrier(static_cast<UINT>(std::size(barriers)), barriers);
+
+		if (!interop.EndD3D12())
+			return LatchFailure("EndD3D12", interop.LastError());
+		if (!executed)
+			return LatchFailure("Feature 18 execution", static_cast<HRESULT>(NeuralRenderingNGX::Runtime::Instance().NgxResult()));
+		return true;
+	}
+
+	bool Run(const FrameInputs& inputs, ID3D11Device* device, ID3D11DeviceContext* context)
+	{
+		++evaluateFrameIndex;
+		if (!interop.IsInitialized() && !InitializeInterop(device, context))
+			return false;
+		if (NeuralRenderingNGX::Runtime::Instance().Status() != NeuralRenderingNGX::RuntimeStatus::Initialized &&
+			!InitializeRuntime())
+			return false;
+		// Allocate shared color at the scaled active extent and guides at their own extent; exclude padded
+		// game-target margins.
+		const std::uint32_t colorWidth = inputs.width;
+		const std::uint32_t colorHeight = inputs.height;
+		const std::uint32_t desiredModelWidth = ScaledExtent(colorWidth, inputs.resolutionScaleX);
+		const std::uint32_t desiredModelHeight = ScaledExtent(colorHeight, inputs.resolutionScaleY);
+		const auto [modelWidth, modelHeight] = SettleModelRaster(desiredModelWidth, desiredModelHeight, colorWidth, colorHeight);
+
+		if (!EnsureResources(inputs, modelWidth, modelHeight))
+			return LatchFailure("shared resource creation", interop.LastError());
+
+		const std::uint32_t guideSrcWidth = inputs.guideWidth ? inputs.guideWidth : inputs.width;
+		const std::uint32_t guideSrcHeight = inputs.guideHeight ? inputs.guideHeight : inputs.height;
+		const std::uint32_t guideWidth = std::min({ guideSrcWidth, depth.desc.Width, motionVectors.desc.Width });
+		const std::uint32_t guideHeight = std::min({ guideSrcHeight, depth.desc.Height, motionVectors.desc.Height });
+		if (!colorWidth || !colorHeight || !guideWidth || !guideHeight || !modelWidth || !modelHeight)
+			return false;
+
+		if (colorWidth != lastActiveWidth || colorHeight != lastActiveHeight ||
+			guideWidth != lastGuideWidth || guideHeight != lastGuideHeight ||
+			modelWidth != lastModelWidth || modelHeight != lastModelHeight) {
+			resetPending = true;
+			lastActiveWidth = colorWidth;
+			lastActiveHeight = colorHeight;
+			lastGuideWidth = guideWidth;
+			lastGuideHeight = guideHeight;
+			lastModelWidth = modelWidth;
+			lastModelHeight = modelHeight;
+		}
+		if (inputs.colorIn != lastColorInput) {
+			resetPending = true;
+			lastColorInput = inputs.colorIn;
+		}
+
+		// A new style invalidates temporal history and must not be deferred by alternating-frame skips.
+		if (lastEvaluatedFrameIndex != 0 && inputs.style != previousEvaluatedStyle)
+			resetPending = true;
+
+		// Skipped frames reuse the previous proxy/answer pair through motion reprojection. Always evaluate
+		// after resets, raster changes, failures, or without motion guides.
+		const bool skipFrame = inputs.alternateFrames && inputs.motionVectorsSRV && !inputs.staticMotion &&
+		                       featureAvailable && !resetPending && !inputs.reset && (evaluateFrameIndex % 2) == 1;
+
+		auto* encodeShader = GetShader(encodeColorCS, encodeColorAttempted, kEncodeColorPath, "EncodeColorCS");
+		auto* decodeShader = GetShader(decodeColorCS, decodeColorAttempted, kDecodeColorPath, "DecodeColorCS");
+		auto* guideShader = GetShader(copyDepthGuideCS, copyDepthGuideAttempted, kCopyDepthGuidePath, "CopyDepthGuideCS");
+		auto* colorInView = GetColorInSRV(device, inputs.colorIn);
+		auto* colorOutView = GetColorOutUAV(device, inputs.colorOut);
+		if (!encodeShader || !decodeShader || !guideShader || !colorInView || !colorOutView ||
+			!color.uav11 || !depth.uav11 || !outputSRV || !colorSRV)
+			return false;
+		if (!transferParamsCB) {
+			D3D11_BUFFER_DESC desc{};
+			desc.ByteWidth = sizeof(TransferParams);
+			desc.Usage = D3D11_USAGE_DEFAULT;
+			desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+			const auto result = device->CreateBuffer(&desc, nullptr, transferParamsCB.put());
+			if (FAILED(result))
+				return LatchFailure("transfer constant-buffer creation", result);
+			Util::SetResourceName(transferParamsCB.get(), "NeuralRendering::TransferParams");
+		}
+		if (!linearClampSampler) {
+			D3D11_SAMPLER_DESC desc{};
+			desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+			desc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+			desc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+			desc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+			desc.MaxLOD = D3D11_FLOAT32_MAX;
+			const auto result = device->CreateSamplerState(&desc, linearClampSampler.put());
+			if (FAILED(result))
+				return LatchFailure("transfer sampler creation", result);
+			Util::SetResourceName(linearClampSampler.get(), "NeuralRendering::LinearClampSampler");
+		}
+		// Color jitter is zero after upscaling; reject offsets beyond one pixel.
+		TransferParams transferParams;
+		transferParams.jitterOffset[0] = std::abs(inputs.jitterOffsetX) <= 1.0f ? inputs.jitterOffsetX : 0.0f;
+		transferParams.jitterOffset[1] = std::abs(inputs.jitterOffsetY) <= 1.0f ? inputs.jitterOffsetY : 0.0f;
+		// Guide jitter is relative to color. Reject non-finite offsets and offsets beyond one guide texel.
+		transferParams.guideJitterOffset[0] = std::abs(inputs.guideJitterOffsetX) <= 1.0f ? inputs.guideJitterOffsetX : 0.0f;
+		transferParams.guideJitterOffset[1] = std::abs(inputs.guideJitterOffsetY) <= 1.0f ? inputs.guideJitterOffsetY : 0.0f;
+		transferParams.colorStrength = std::clamp(inputs.colorStrength, 0.0f, 2.0f);
+		transferParams.transferStrength = std::clamp(inputs.transferStrength, 0.0f, 2.0f);
+		transferParams.activeSize[0] = colorWidth;
+		transferParams.activeSize[1] = colorHeight;
+		transferParams.workSize[0] = modelWidth;
+		transferParams.workSize[1] = modelHeight;
+		transferParams.guideSize[0] = guideWidth;
+		transferParams.guideSize[1] = guideHeight;
+		// Silhouette fading only addresses the bilinear upsample of a reduced-resolution edit; none at native scale.
+		const bool modelBelowNative = modelWidth < colorWidth || modelHeight < colorHeight;
+		transferParams.depthAwareResolve = inputs.depthAwareResolve && modelBelowNative ? 1u : 0u;
+		transferParams.staleAnswer = skipFrame ? 1u : 0u;
+		// Only 0 (scene linear) and 1 (display gamma) exist; anything else falls back to the
+		// original scene-linear behaviour rather than an undefined shader branch.
+		transferParams.colorDomain = inputs.colorDomain <= 2u ? inputs.colorDomain : 0u;
+		transferParams.proxyCurve = inputs.proxyCurve <= 2u ? inputs.proxyCurve : 0u;
+		// Display transform of the scene-linear proxy. A stage whose GPU input is missing is
+		// switched off here rather than left to read an unbound slot.
+		const auto& display = inputs.display;
+		transferParams.displayParam[0] = display.vanillaGrading && display.vanillaAdaptationSRV ? 1.0f : 0.0f;
+		transferParams.displayParam[1] = display.param[1];
+		transferParams.displayParam[2] = display.param[2];
+		transferParams.displayParam[3] = 0.0f;
+		std::copy_n(display.cinematic, 4, transferParams.displayCinematic);
+		std::copy_n(display.tint, 4, transferParams.displayTint);
+		transferParams.displayExposure[0] = display.postProcessExposure && display.postProcessAdaptationSRV ? 1.0f : 0.0f;
+		transferParams.displayExposure[1] = display.postProcessExposureScale;
+		transferParams.displayExposure[2] = display.postProcessAdaptationRange[0];
+		transferParams.displayExposure[3] = display.postProcessAdaptationRange[1];
+		// Skip band textures and passes when every category has equal effective Broad and Detail strengths.
+		transferParams.broadLuminosity = std::clamp(inputs.broadLuminosity, 0.0f, 2.0f);
+		transferParams.bandParams[0] = std::clamp(inputs.detailLuminosity, 0.0f, 2.0f);
+		transferParams.bandParams[1] = std::clamp(inputs.bandRadius, 2.0f, 32.0f);
+		bool bandsSeparated = false;
+		for (std::size_t index = 0; index < inputs.categoryBroadLuminosity.size(); ++index) {
+			transferParams.categoryBroadLuminosity[index] = std::clamp(inputs.categoryBroadLuminosity[index], 0.0f, 2.0f);
+			transferParams.categoryDetailLuminosity[index] = std::clamp(inputs.categoryDetailLuminosity[index], 0.0f, 2.0f);
+			bandsSeparated |= std::abs(transferParams.broadLuminosity * transferParams.categoryBroadLuminosity[index] -
+									   transferParams.bandParams[0] * transferParams.categoryDetailLuminosity[index]) > 1e-4f;
+		}
+		const bool toneReady = bandsSeparated && EnsureToneResources(modelWidth, modelHeight) &&
+		                       GetShader(prepareToneDataCS, prepareToneDataAttempted, kPrepareToneDataPath, "PrepareToneDataCS") &&
+		                       GetShader(filterToneDataHorizontalCS, filterToneDataHorizontalAttempted,
+								   kFilterToneDataPath, "FilterToneDataCS") &&
+		                       GetShader(filterToneDataVerticalCS, filterToneDataVerticalAttempted,
+								   kFilterToneDataPath, "FilterToneDataCS Vertical", { { "VERTICAL", "1" } });
+		if (!bandsSeparated)
+			toneDataValid = false;
+		// The decode may only read the band textures once a pass has actually filled them for
+		// this raster; a skipped (alternating) frame keeps the previous evaluation's data.
+		transferParams.bandParams[2] = toneReady && (toneDataValid || !skipFrame) ? 1.0f : 0.0f;
+
+		std::uint32_t debugFlags = 0;
+		if (inputs.debugGuardClamp)
+			debugFlags |= kDebugFlagGuardClamp;
+		// Only meaningful while the bands are genuinely separated, and mutually exclusive.
+		if (transferParams.bandParams[2] > 0.5f && inputs.debugBroadBand)
+			debugFlags |= kDebugFlagBroadBand;
+		else if (transferParams.bandParams[2] > 0.5f && inputs.debugDetailBand)
+			debugFlags |= kDebugFlagDetailBand;
+		const bool collectStats = inputs.measureModelPeak || inputs.debugGuardClamp;
+		ServiceDebugReadback(context, collectStats);
+		if (collectStats && debugStatsUAV)
+			debugFlags |= kDebugFlagStats;
+		transferParams.debugFlags = debugFlags;
+		// Clamp enabled ratio limits to at least one; otherwise send an effectively unbounded limit.
+		transferParams.maxRatio = inputs.ratioGuardEnabled ? std::clamp(inputs.maxRatio, 1.0f, 8.0f) : kNeuralRatioGuardDisabledValue;
+		std::uint32_t hueGuardMask = 0;
+		for (std::size_t index = 0; index < inputs.categoryColorStrengths.size(); ++index) {
+			transferParams.categoryColorStrengths[index] = std::clamp(inputs.categoryColorStrengths[index], 0.0f, 2.0f);
+			transferParams.categoryTransferStrengths[index] = std::clamp(inputs.categoryTransferStrengths[index], 0.0f, 2.0f);
+			if (inputs.categoryHueGuard[index])
+				hueGuardMask |= (1u << index);
+		}
+		transferParams.hueGuardMask = hueGuardMask;
+		transferParams.debugCategoryView = inputs.debugCategoryView ? 1u : 0u;
+		transferParams.rawModelOutput = inputs.rawModelOutput ? 1u : 0u;
+		// Only meaningful for a finished frame on an HDR target; the shader ignores
+		// anything at or below one (no headroom) and the scene-linear domain.
+		transferParams.highlightWhite = transferParams.colorDomain == 1u ? std::clamp(inputs.highlightWhite, 0.0f, 100.0f) : 0.0f;
+		transferParams.wipePosition = inputs.wipePosition >= 0.0f ? std::min(inputs.wipePosition, 1.0f) : -1.0f;
+		context->UpdateSubresource(transferParamsCB.get(), 0, nullptr, &transferParams, 0, 0);
+
+		if (!skipFrame) {
+			// Extrapolate motion only across a single alternating-frame skip, never across resets or longer gaps.
+			const bool historyValid = !resetPending && !inputs.reset && lastEvaluatedFrameIndex != 0;
+			const bool bridgedSkip = inputs.alternateFrames && historyValid &&
+			                         evaluateFrameIndex - lastEvaluatedFrameIndex == 2;
+			if (!EvaluateModel(inputs, context, encodeShader, guideShader, colorInView,
+					modelWidth, modelHeight, guideWidth, guideHeight, bridgedSkip ? 2.0f : 1.0f))
+				return false;
+			lastEvaluatedFrameIndex = evaluateFrameIndex;
+			previousEvaluatedStyle = inputs.style;
+
+			// Prepare log luminance and edit stops once per evaluation, then filter the edit horizontally and
+			// vertically.
+			if (transferParams.bandParams[2] > 0.5f) {
+				globals::state->BeginPerfEvent("NeuralRendering::ToneBands");
+				DispatchTransfer(context, prepareToneDataCS.get(), { colorSRV.get(), outputSRV.get() },
+					toneDataUAV.get(), transferParamsCB.get(), linearClampSampler.get(), modelWidth, modelHeight);
+				DispatchTransfer(context, filterToneDataHorizontalCS.get(), { toneDataSRV.get() },
+					toneScratchUAV.get(), transferParamsCB.get(), linearClampSampler.get(), modelWidth, modelHeight);
+				DispatchTransfer(context, filterToneDataVerticalCS.get(), { toneScratchSRV.get() },
+					toneDataUAV.get(), transferParamsCB.get(), linearClampSampler.get(), modelWidth, modelHeight);
+				globals::state->EndPerfEvent();
+				toneDataValid = true;
+			}
+		}
+
+		// Apply the model/proxy edit to the untouched source. Depth guides silhouette fading; motion
+		// reprojects stale answers.
+		DispatchTransfer(context, decodeShader,
+			{ outputSRV.get(), colorInView, colorSRV.get(), inputs.depthSRV, inputs.materialCategoriesSRV,
+				inputs.display.vanillaAdaptationSRV, inputs.display.postProcessAdaptationSRV, inputs.motionVectorsSRV,
+				transferParams.bandParams[2] > 0.5f ? toneDataSRV.get() : nullptr },
+			colorOutView, transferParamsCB.get(), linearClampSampler.get(), colorWidth, colorHeight,
+			(transferParams.debugFlags & kDebugFlagStats) != 0 ? debugStatsUAV.get() : nullptr);
+
+		resetPending = false;
+		featureAvailable = true;
+		return true;
+	}
+
+	bool PrepareSeparate(const FrameInputs& inputs)
+	{
+		separateResidualReady = false;
+		if (!inputs.outputWidth || !inputs.outputHeight || inputs.outputWidth < inputs.width ||
+			inputs.outputHeight < inputs.height || !inputs.superResolutionMotionVectors)
+			return false;
+
+		// Write render-resolution NR to scratch, leaving the main DLSS input unchanged.
+		if (!Evaluate(inputs))
+			return false;
+
+		auto* device = globals::d3d::device;
+		auto* context = globals::d3d::context;
+		if (!device || !context)
+			return false;
+
+		ID3D11RenderTargetView* savedRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT]{};
+		ID3D11DepthStencilView* savedDSV = nullptr;
+		context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, &savedDSV);
+		context->OMSetRenderTargets(0, nullptr, nullptr);
+
+		const auto restoreTargets = [&]() {
+			context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, savedDSV);
+			for (auto*& rtv : savedRTVs) {
+				if (rtv)
+					rtv->Release();
+			}
+			if (savedDSV)
+				savedDSV->Release();
+		};
+
+		if (!EnsureSeparateResources(inputs)) {
+			restoreTargets();
+			return LatchFailure("separate residual resource creation", interop.LastError());
+		}
+		if (separateQualityMode != inputs.superResolutionQualityMode ||
+			separatePreset != inputs.superResolutionPreset) {
+			// NGX feature handles may still be referenced by earlier command lists.
+			// Drain before releasing/recreating the private history on a live setting change.
+			if (!interop.WaitForIdle()) {
+				restoreTargets();
+				return LatchFailure("private DLSS SR settings rebuild", interop.LastError());
+			}
+			NeuralRenderingNGX::Runtime::Instance().ResetSuperResolutionFeature();
+			separateQualityMode = inputs.superResolutionQualityMode;
+			separatePreset = inputs.superResolutionPreset;
+			separateResetPending = true;
+		}
+
+		auto* encodeShader = GetShader(encodeResidualCS, encodeResidualAttempted,
+			kEncodeResidualPath, "EncodeResidualCS");
+		auto* originalView = GetColorInSRV(device, inputs.colorIn);
+		auto* editedView = GetEditedColorSRV(device, inputs.colorOut);
+		if (!encodeShader || !originalView || !editedView || !residualInput.uav11) {
+			restoreTargets();
+			return false;
+		}
+
+		// Encode d=(NR-original) into 0.5 + 0.5*d/(1+abs(d)). The carrier is
+		// deliberately independent from both scene colour histories.
+		DispatchTransfer(context, encodeShader, { originalView, editedView },
+			residualInput.uav11.Get(), nullptr, nullptr, inputs.width, inputs.height);
+
+		// Private SR uses depth-dilated DLSS motion with unit scale; Feature 18 uses raw game vectors.
+		const D3D11_BOX motionBox{ 0, 0, 0, inputs.guideWidth, inputs.guideHeight, 1 };
+		context->CopySubresourceRegion(motionVectors.resource11.Get(), 0, 0, 0, 0,
+			inputs.superResolutionMotionVectors, 0, &motionBox);
+
+		ID3D12GraphicsCommandList* commandList = nullptr;
+		if (!interop.BeginD3D12(&commandList) || !commandList) {
+			restoreTargets();
+			return LatchFailure("separate residual BeginD3D12", interop.LastError());
+		}
+
+		ID3D12Resource* resources[5]{
+			residualInput.resource12.Get(), depth.resource12.Get(), motionVectors.resource12.Get(),
+			residualExposure.resource12.Get(), residualOutput.resource12.Get()
+		};
+		D3D12_RESOURCE_BARRIER barriers[5]{};
+		for (std::size_t index = 0; index < std::size(barriers); ++index) {
+			barriers[index].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			barriers[index].Transition.pResource = resources[index];
+			barriers[index].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+			barriers[index].Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+			barriers[index].Transition.StateAfter = index == 4 ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS :
+			                                                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+		}
+		commandList->ResourceBarrier(static_cast<UINT>(std::size(barriers)), barriers);
+
+		const auto result = NeuralRenderingNGX::Runtime::Instance().ExecuteSuperResolution(commandList,
+			residualInput.resource12.Get(), depth.resource12.Get(), motionVectors.resource12.Get(),
+			residualExposure.resource12.Get(), residualOutput.resource12.Get(),
+			inputs.width, inputs.height, inputs.outputWidth, inputs.outputHeight,
+			inputs.jitterOffsetX, inputs.jitterOffsetY,
+			1.0f, 1.0f,
+			globals::game::deltaTime ? *globals::game::deltaTime * 1000.0f : 16.6667f,
+			inputs.superResolutionQualityMode, inputs.superResolutionPreset,
+			inputs.reset || separateResetPending, inputs.depthInverted);
+
+		for (auto& barrier : barriers)
+			std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);
+		commandList->ResourceBarrier(static_cast<UINT>(std::size(barriers)), barriers);
+		const bool submitted = interop.EndD3D12();
+		restoreTargets();
+		if (!submitted)
+			return LatchFailure("separate residual EndD3D12", interop.LastError());
+		if (result == NeuralRenderingNGX::SuperResolutionResult::Failed)
+			return LatchFailure("private DLSS SR execution",
+				static_cast<HRESULT>(NeuralRenderingNGX::Runtime::Instance().NgxResult()));
+		if (result == NeuralRenderingNGX::SuperResolutionResult::Created) {
+			logger::info("[NeuralRendering] Private DLSS SR created; clean main-SR frame retained during initialization");
+			return false;
+		}
+
+		separateResetPending = false;
+		separateResidualReady = true;
+		return true;
+	}
+
+	bool ResolveSeparate(ID3D11Resource* cleanColor, ID3D11Resource* colorOut,
+		std::uint32_t width, std::uint32_t height)
+	{
+		if (!separateResidualReady || !cleanColor || !colorOut || cleanColor == colorOut ||
+			width != separateOutputWidth || height != separateOutputHeight || !residualOutputSRV)
+			return false;
+		separateResidualReady = false;  // The residual belongs to exactly one main-SR result.
+
+		auto* device = globals::d3d::device;
+		auto* context = globals::d3d::context;
+		if (!device || !context)
+			return false;
+		auto* applyShader = GetShader(applyResidualCS, applyResidualAttempted,
+			kApplyResidualPath, "ApplyResidualCS");
+		auto* cleanView = GetCleanColorSRV(device, cleanColor);
+		auto* outputView = GetColorOutUAV(device, colorOut);
+		if (!applyShader || !cleanView || !outputView)
+			return false;
+
+		ID3D11RenderTargetView* savedRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT]{};
+		ID3D11DepthStencilView* savedDSV = nullptr;
+		context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, &savedDSV);
+		context->OMSetRenderTargets(0, nullptr, nullptr);
+		DispatchTransfer(context, applyShader, { cleanView, residualOutputSRV.get() },
+			outputView, nullptr, nullptr, width, height);
+		context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, savedDSV);
+		for (auto*& rtv : savedRTVs) {
+			if (rtv)
+				rtv->Release();
+		}
+		if (savedDSV)
+			savedDSV->Release();
+		return true;
+	}
+
+	bool Evaluate(const FrameInputs& inputs)
+	{
+		ZoneScoped;
+		if (failureLatched)
+			return false;
+
+		auto* device = globals::d3d::device;
+		auto* context = globals::d3d::context;
+		if (!device || !context)
+			return false;
+		if (!ValidateInputs(inputs) || !Available())
+			return false;
+
+		TracyD3D11Zone(globals::state->tracyCtx, "Neural Rendering");
+
+		// Callers may still have render targets bound; a UAV write to a bound
+		// resource would be silently dropped, so unbind and restore around the pass.
+		ID3D11RenderTargetView* savedRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT]{};
+		ID3D11DepthStencilView* savedDSV = nullptr;
+		context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, &savedDSV);
+		context->OMSetRenderTargets(0, nullptr, nullptr);
+
+		const bool succeeded = Run(inputs, device, context);
+
+		context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, savedDSV);
+		for (auto*& rtv : savedRTVs) {
+			if (rtv)
+				rtv->Release();
+		}
+		if (savedDSV)
+			savedDSV->Release();
+
+		return succeeded;
+	}
+
+	/// Releases everything this object owns directly, leaving the runtime and interop alone.
+	void ReleaseGpuResources()
+	{
+		color = {};
+		depth = {};
+		motionVectors = {};
+		output = {};
+		residualInput = {};
+		residualOutput = {};
+		residualExposure = {};
+
+		outputSRV = nullptr;
+		colorSRV = nullptr;
+		residualOutputSRV = nullptr;
+		editedColorSRV = nullptr;
+		editedColorSRVSource = nullptr;
+		colorInSRV = nullptr;
+		colorInSRVSource = nullptr;
+		cleanColorSRV = nullptr;
+		cleanColorSRVSource = nullptr;
+		colorOutUAV = nullptr;
+		colorOutUAVSource = nullptr;
+		lastColorInput = nullptr;
+
+		encodeColorCS = nullptr;
+		decodeColorCS = nullptr;
+		copyDepthGuideCS = nullptr;
+		encodeResidualCS = nullptr;
+		applyResidualCS = nullptr;
+		prepareToneDataCS = nullptr;
+		filterToneDataHorizontalCS = nullptr;
+		filterToneDataVerticalCS = nullptr;
+		transferParamsCB = nullptr;
+		linearClampSampler = nullptr;
+		encodeColorAttempted = false;
+		decodeColorAttempted = false;
+		copyDepthGuideAttempted = false;
+		encodeResidualAttempted = false;
+		applyResidualAttempted = false;
+		prepareToneDataAttempted = false;
+		filterToneDataHorizontalAttempted = false;
+		filterToneDataVerticalAttempted = false;
+
+		toneData = nullptr;
+		toneDataSRV = nullptr;
+		toneDataUAV = nullptr;
+		toneScratch = nullptr;
+		toneScratchSRV = nullptr;
+		toneScratchUAV = nullptr;
+		toneWidth = 0;
+		toneHeight = 0;
+		toneDataValid = false;
+		loggedToneFailure = false;
+
+		debugStats = nullptr;
+		debugStatsUAV = nullptr;
+		for (auto& staging : debugStaging)
+			staging = nullptr;
+		debugStagingPending.fill(false);
+		debugStagingSlot = 0;
+		debugReadback = {};
+
+		failureLatched = false;
+		featureAvailable = false;
+		resetPending = true;
+		separateResetPending = true;
+		separateResidualReady = false;
+		separateOutputWidth = 0;
+		separateOutputHeight = 0;
+		separateQualityMode = UINT_MAX;
+		separatePreset = UINT_MAX;
+		lastActiveWidth = 0;
+		lastActiveHeight = 0;
+		lastGuideWidth = 0;
+		lastGuideHeight = 0;
+		lastModelWidth = 0;
+		lastModelHeight = 0;
+		requestedModelWidth = 0;
+		requestedModelHeight = 0;
+		requestedModelStableFrames = 0;
+		evaluateFrameIndex = 0;
+		lastEvaluatedFrameIndex = 0;
+		previousEvaluatedStyle = 0;
+
+		loggedInvalidInputs = false;
+		loggedShaderFailure = false;
+		loggedViewFailure = false;
+	}
+
+	void Destroy()
+	{
+		interop.WaitForIdle();
+		// Retire private histories only. Shutting down the shared NGX core during rendering can fault in
+		// NVSDK_NGX_D3D12_Shutdown1.
+		NeuralRenderingNGX::Runtime::Instance().ResetFeature();
+		ReleaseGpuResources();
+	}
+};
+
+NeuralRenderingBackend::NeuralRenderingBackend() :
+	state(std::make_unique<State>())
+{}
+
+NeuralRenderingBackend::~NeuralRenderingBackend() = default;
+
+bool NeuralRenderingBackend::IsAvailable()
+{
+	return state->Available();
+}
+
+bool NeuralRenderingBackend::IsFeatureAvailable() const
+{
+	return state->featureAvailable;
+}
+
+NeuralRenderingBackend::DebugReadback NeuralRenderingBackend::GetDebugReadback() const
+{
+	return state->debugReadback;
+}
+
+bool NeuralRenderingBackend::Evaluate(const FrameInputs& inputs)
+{
+	return state->Evaluate(inputs);
+}
+
+bool NeuralRenderingBackend::PrepareSeparateUpscaling(const FrameInputs& inputs)
+{
+	return state->PrepareSeparate(inputs);
+}
+
+bool NeuralRenderingBackend::ResolveSeparateUpscaling(ID3D11Resource* cleanColor, ID3D11Resource* colorOut,
+	std::uint32_t width, std::uint32_t height)
+{
+	return state->ResolveSeparate(cleanColor, colorOut, width, height);
+}
+
+void NeuralRenderingBackend::DestroyResources()
+{
+	state->Destroy();
+}

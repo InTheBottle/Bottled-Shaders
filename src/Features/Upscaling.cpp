@@ -4,6 +4,7 @@
 #include "Deferred.h"
 #include "HDRDisplay.h"
 #include "Hooks.h"
+#include "NeuralRendering.h"
 #include "PostProcessing.h"
 #include "State.h"
 #include "Upscaling/DX12SwapChain.h"
@@ -1538,7 +1539,8 @@ void Upscaling::Upscale()
 		TracyD3D11Zone(globals::state->tracyCtx, "Upscaling Dispatch");
 
 		if (upscaleMethod == UpscaleMethod::kDLSS) {
-			streamline.Upscale(main.texture, reactiveMaskTexture->resource.get(), transparencyCompositionMaskTexture->resource.get(), motionVectorCopyTexture->resource.get());
+			// Neural Rendering seam S1: Before/Separate Upscaling may substitute the DLSS input.
+			streamline.Upscale(globals::features::neuralRendering.PrepareUpscaleInput(main.texture, motionVectorCopyTexture->resource.get()), reactiveMaskTexture->resource.get(), transparencyCompositionMaskTexture->resource.get(), motionVectorCopyTexture->resource.get());
 		} else if (upscaleMethod == UpscaleMethod::kFSR) {
 			auto& depthStencil = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN];
 			ID3D11Resource* fsrDepth = runtimeFsrDepthTexture ? runtimeFsrDepthTexture->resource.get() : depthStencil.texture;
@@ -1555,6 +1557,8 @@ void Upscaling::PerformUpscaling()
 	ZoneScoped;
 	TracyD3D11Zone(globals::state->tracyCtx, "Upscaling");
 	Upscale();
+	// Neural Rendering seams S2+S3: After/Separate Upscaling and the Finished Image depth guide, before UpscaleDepth().
+	globals::features::neuralRendering.ResolveUpscaledFrame(sharpenerTexture);
 	UpscaleDepth();
 
 	auto& runtimeData = globals::game::graphicsState->GetRuntimeData();

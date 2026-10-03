@@ -82,6 +82,11 @@ namespace Permutation
 		static const uint NoFoliageTint = (1 << 9);
 		static const uint IsAurora = (1 << 10);
 		static const uint IsMoon = (1 << 11);
+		// Allocated downward from bit 31; keep in sync with State::ExtraShaderDescriptors (State.h).
+		// Geometry of a humanoid (ActorTypeNPC) actor; see NeuralRenderingCategories::Equipment.
+		static const uint IsHumanoidActor = (1u << 31);
+		// Hair or facial-hair head part, whatever its shader type; see NeuralRenderingCategories::Hair.
+		static const uint IsHair = (1u << 30);
 	}
 
 	namespace ExtraFeatureFlags
