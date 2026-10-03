@@ -27,7 +27,7 @@ void InitializeLog([[maybe_unused]] spdlog::level::level_enum a_level = spdlog::
 		util::report_and_fail("Failed to find standard logging directory"sv);
 	}
 
-	*path /= std::format("{}.log"sv, Plugin::NAME);
+	*path /= "BottledShaders.log"sv;
 	auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path->string(), true);
 #endif
 
