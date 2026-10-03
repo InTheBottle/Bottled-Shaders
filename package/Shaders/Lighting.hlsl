@@ -2204,7 +2204,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float snowOcclusion = inWorld;
 #		endif
 
-#		if defined(DO_ALPHA_TEST) && defined(LOD_BLENDING)  // should only match object lod trees (ultra trees), they have no special define
+#		if defined(DO_ALPHA_TEST) && defined(LOD_BLENDING) && !defined(TREE_ANIM)  // should only match object lod trees (ultra trees), they have no special define
 	if (HasSoftLighting()) {
 		float rx;
 		float ry;
@@ -2228,7 +2228,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		if defined(TRUE_PBR)
 		if (glintParameters.y < 0.01)
 			material.GlintLogMicrofacetDensity = 1;  // disables glint where there shouldn't be any
-#			if defined(LANDSCAPE)
+#			if defined(TREE_ANIM)
+		float disp = 0;
+#			elif defined(LANDSCAPE)
 		float disp = sh0;  // GetTerrainHeight is already (raw - 0.5) * HeightScale
 #			elif defined(EMAT)
 		float disp = (sh0 - 0.5) * displacementParams.HeightScale;
@@ -2237,7 +2239,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #			endif
 #		elif defined(LANDSCAPE) && defined(EMAT)
 		float disp = sh0;  // GetTerrainHeight is already (raw - 0.5) * HeightScale
-#		elif defined(EMAT)
+#		elif defined(EMAT) && !defined(TREE_ANIM)
 		float disp = (sh0 - 0.5);
 #		else
 		float disp = 0;
@@ -2245,6 +2247,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		float3 snowNormal = worldNormal;
 #		if defined(TREE_ANIM)
 		snowNormal = normalize(snowNormal + float3(0, 0, 0.5));
+		float3 treeSnowNormal = snowNormal;
 		if (SharedData::snowCoverSettings.AffectTreeTint && !(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::NoFoliageTint))
 			SnowCover::ApplyFoliageColor(material.BaseColor, SnowCover::GetEnvironmentalMultiplier(adjustedWorldPos));
 #		endif
@@ -2261,6 +2264,8 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		if defined(MODELSPACENORMALS) && !defined(SKINNED)
 			float3 sd = FrameBuffer::ViewToWorld(-float3(ddx_fine(snowFactor), ddy_fine(snowFactor), 0), false);
 			worldNormal = normalize(lerp(worldNormal, snowNormal, snowFactor * 0.75) + sd);
+#		elif defined(TREE_ANIM)
+			worldNormal = normalize(lerp(worldNormal, treeSnowNormal, snowFactor * 0.75));
 #		else
 			worldNormal = normalize(lerp(worldNormal, normalize(mul(tbn, snowNormal)), snowFactor * 0.75));
 #		endif
