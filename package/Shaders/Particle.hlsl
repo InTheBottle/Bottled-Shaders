@@ -351,7 +351,7 @@ if (SharedData::enbSettings.EnableRain) {
 	float3 raindropColor = lerp(refractColor, reflectColor, fresnel);
 
 #		if defined(LIGHT_LIMIT_FIX)
-	float pointLightingScale = SharedData::enbSettings.Enable ? SharedData::enbSettings.ParticlePointLightingInfluence : 1.0;
+	float pointLightingScale = SharedData::enbSettings.EnableParticle ? SharedData::enbSettings.ParticlePointLightingInfluence : 1.0;
 	uint lightOffset, lightCount;
 	[branch] if (pointLightingScale > 0.0 && GetLightCluster(posWS.xyz, lightOffset, lightCount))
 	{

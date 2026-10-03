@@ -51,7 +51,7 @@ public:
 		uint UseProceduralGradientWeights;
 		float ProceduralGradientWeightCurve;
 		float LightSpriteCurve;
-		float pad1;
+		uint EnableParticle;
 
 		float ParticleIntensity;
 		float ParticleLightingInfluence;
@@ -166,6 +166,11 @@ public:
 	static_assert(offsetof(PerFrame, CloudsColorFilter) % 16 == 0);
 	static_assert(offsetof(PerFrame, MasserBillboardTan) % 16 == 0);
 
+	struct Settings
+	{
+		bool IgnorePresetParticles = false;
+	} settings;
+
 	bool enableEffect = false;
 
 	ID3D11PixelShader* raymarchVolumetricRaysPS = nullptr;
@@ -199,6 +204,9 @@ public:
 	void UpdateSkyScattering(PerFrame& a_data);
 
 	virtual void DrawSettings() override;
+	virtual void LoadSettings(json& o_json) override;
+	virtual void SaveSettings(json& o_json) override;
+	virtual void RestoreDefaultSettings() override;
 	virtual void SetupResources() override;
 	virtual void Prepass() override;
 	virtual void ClearShaderCache() override;
