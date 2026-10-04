@@ -252,14 +252,14 @@ public:
 	 */
 	bool RenderTonemap(RE::RENDER_TARGET a_input, RE::RENDER_TARGET a_output);
 
-	/** @brief True when the effect chain replaced ISHDR this frame, leaving an SDR scene for HDR Display to expand. */
+	/** @brief True when the effect chain replaced ISHDR for the frame being presented, leaving an SDR scene for HDR Display to expand. */
 	bool ReplacedTonemapperThisFrame() const;
 
 private:
 	bool EnsureScatteringBlendState();
 	bool EnsureSunRaysResources(uint32_t a_width, uint32_t a_height);
 
-	uint tonemapReplacedFrame = UINT32_MAX;  ///< frameCount when the effect chain last wrote the tonemap output
+	uint tonemapReplacedFrame = UINT32_MAX;  ///< frameCount at which the effect chain's last tonemap output gets presented
 
 	/** @brief Point light settings, resolved once per frame in CheckCommonData since OverridePointLightColor runs per light. */
 	struct PointLightingParams
