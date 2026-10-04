@@ -40,6 +40,13 @@ public:
 
 	float2 jitter = { 0, 0 };
 
+	enum class FrameGenMethod
+	{
+		kNone,
+		kFSR,
+		kDLSSG
+	};
+
 	enum class UpscaleMethod
 	{
 		kNONE,
@@ -59,7 +66,9 @@ public:
 		uint frameGenerationMode = 1;
 		uint frameGenerationForceEnable = 0;
 		bool frameGenerationAllowInMenus = false;
-		uint streamlineLogLevel = 0;  // 0=Off, 1=Default, 2=Verbose
+		bool preferFSRFrameGen = false;
+		uint dlssgFramesToGenerate = 1;  // Generated frames per real frame (1=2x)
+		uint streamlineLogLevel = 0;     // 0=Off, 1=Default, 2=Verbose
 		float sharpnessFSR = 0.0f;
 		bool sharpnessEnabledDLSS = false;
 		float sharpnessDLSS = 0.0f;
@@ -125,7 +134,6 @@ public:
 	bool ShouldPrepareFrameGeneration() const;
 	/** @brief Returns the frame-generation decision made in post-processing, held until the frame is presented. */
 	bool ShouldUseFrameGenerationThisFrame() const;
-	float GetFrameGenerationFrameTime() const;
 	bool IsUpscalingActive() const;
 
 	// Feature interface overrides
@@ -145,6 +153,9 @@ public:
 	virtual void SetupResources() override;
 
 	UpscaleMethod GetUpscaleMethod() const;
+	FrameGenMethod GetFrameGenMethod() const;
+	bool UsesDLSSGFrameGen() const;
+	uint GetFrameGenerationMultiplier() const;
 
 	void CheckResources(UpscaleMethod a_upscalemethod);
 	void CreateUpscalingTextureResources(UpscaleMethod a_upscalemethod);
@@ -186,7 +197,8 @@ public:
 
 	// Static instances instead of singletons
 	static inline Streamline streamline;
-	static inline FidelityFX fidelityFX;  ///< Only for frame generation
+	static inline Streamline streamlineDX12;  ///< DLSS-G frame generation
+	static inline FidelityFX fidelityFX;      ///< AMD FSR frame generation
 	static inline DX12SwapChain dx12SwapChain;
 	static inline RCAS rcas;  ///< Standalone RCAS sharpening for DLSS
 
@@ -246,6 +258,7 @@ public:
 	void SetProxyD3D11Device(ID3D11Device* device);
 	void SetProxyD3D11DeviceContext(ID3D11DeviceContext* context);
 	void CreateProxySwapChain(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC swapChainDesc);
+	void CreateProxySwapChainDirect(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC swapChainDesc);
 	void CreateProxyInterop();
 	IDXGISwapChain* GetProxySwapChain();
 

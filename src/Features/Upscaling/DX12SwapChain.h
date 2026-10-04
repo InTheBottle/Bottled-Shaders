@@ -66,8 +66,11 @@ class DX12SwapChain
 public:
 	winrt::com_ptr<ID3D12Device> d3d12Device;
 	winrt::com_ptr<ID3D12CommandQueue> commandQueue;
-	winrt::com_ptr<ID3D12CommandAllocator> commandAllocators[2];
-	winrt::com_ptr<ID3D12GraphicsCommandList4> commandLists[2];
+
+	static constexpr UINT kMaxBackBuffers = 5;
+
+	winrt::com_ptr<ID3D12CommandAllocator> commandAllocators[kMaxBackBuffers];
+	winrt::com_ptr<ID3D12GraphicsCommandList4> commandLists[kMaxBackBuffers];
 
 	IDXGISwapChain4* swapChain;
 
@@ -86,12 +89,12 @@ public:
 	winrt::com_ptr<ID3D11Fence> d3d11Fence;
 	winrt::com_ptr<ID3D12Fence> d3d12Fence;
 
-	winrt::com_ptr<ID3D12Resource> swapChainBuffers[2];
+	winrt::com_ptr<ID3D12Resource> swapChainBuffers[kMaxBackBuffers];
 
 	UINT frameIndex = 0;
 	UINT64 fenceValue = 0;
 
-	UINT64 frameFenceValues[2] = {0, 0};
+	UINT64 frameFenceValues[kMaxBackBuffers] = {};
 
 	LARGE_INTEGER qpf;
 
@@ -99,11 +102,15 @@ public:
 
 	DXGISwapChainProxy* swapChainProxy = nullptr;
 
+	bool useDLSSG = false;
+	UINT backBufferCount = 2;
+
 	// Returns the current frame time (in seconds) for accurate FPS calculation when frame generation is active
 	float GetFrameTime() const;
 
 	void CreateD3D12Device(IDXGIAdapter* a_adapter);
 	void CreateSwapChain(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC swapChainDesc);
+	void CreateSwapChainDirect(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC swapChainDesc);
 
 	void CreateInterop();
 	void RecreateWrappedResources(const DXGI_SWAP_CHAIN_DESC1& desc);
