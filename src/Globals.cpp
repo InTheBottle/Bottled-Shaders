@@ -10,6 +10,7 @@
 #include "Features/ExtendedTranslucency.h"
 #include "Features/FootstepParticles.h"
 #include "Features/FoliageLighting.h"
+#include "Features/FurShells.h"
 #include "Features/GrassCollision.h"
 #include "Features/GrassLighting.h"
 #include "Features/GrassOptimizations.h"
@@ -116,6 +117,7 @@ namespace globals
 		SnowCover snowCover{};
 		FootstepParticles footstepParticles{};
 		HairBacklighting hairBacklighting{};
+		FurShells furShells{};
 		LandscapeSeams landscapeSeams{};
 
 		namespace llf
