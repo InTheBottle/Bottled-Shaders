@@ -270,7 +270,11 @@ public:
 		NoSnow = 1 << 8,
 		NoFoliageTint = 1 << 9,
 		IsAurora = 1 << 10,
-		IsMoon = 1 << 11
+		IsMoon = 1 << 11,
+		// Humanoid (ActorTypeNPC) geometry, set by NeuralRendering::SetupGeometryCategory.
+		IsHumanoidActor = 1u << 31,
+		// Hair or facial-hair head part, set by NeuralRendering::SetupGeometryCategory.
+		IsHair = 1u << 30
 	};
 
 	/** @brief Bitflags describing extra feature-specific properties related to terrain displacement and material models. */

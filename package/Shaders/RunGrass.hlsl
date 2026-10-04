@@ -4,6 +4,7 @@
 #include "Common/LightingCommon.hlsli"
 #include "Common/Math.hlsli"
 #include "Common/MotionBlur.hlsli"
+#include "Common/NeuralRenderingCategories.hlsli"
 #include "Common/Permutation.hlsli"
 #include "Common/Random.hlsli"
 #include "Common/SharedData.hlsli"
@@ -1007,7 +1008,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 	psout.Specular = float4(specularColor, 1);
 	psout.Masks = float4(0, 0, Color::RGBToYCoCg(directionalAmbientColor).x, 1);
-	psout.Masks2 = float4(1.0 - grassAO, 0, 0, 1);
+	psout.Masks2 = float4(NeuralRenderingCategories::Pack(1.0 - grassAO, NeuralRenderingCategories::Foliage), 0, 0, 1);
 #		endif
 	return psout;
 }
@@ -1188,7 +1189,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 	psout.Albedo = float4(albedo, 1);
 	psout.Masks = float4(0, 0, Color::RGBToYCoCg(directionalAmbientColor).x, 1);
-	psout.Masks2 = float4(1.0 - vertexAO, 0, 0, 1);
+	psout.Masks2 = float4(NeuralRenderingCategories::Pack(1.0 - vertexAO, NeuralRenderingCategories::Foliage), 0, 0, 1);
 #		endif
 
 	return psout;
