@@ -1,5 +1,7 @@
 #include "State.h"
 
+#include "Utils/FrameCosts.h"
+
 #include <codecvt>
 
 #include <pystring/pystring.h>
@@ -122,7 +124,8 @@ void State::Draw()
 		// Process deferred cell transitions (interior detection)
 		sceneSettingsManager->Update();
 
-		if (csEditor.loaded) {
+		// Weather transitions are a per-frame matter; Draw runs per draw call (10k+ a frame).
+		if (csEditor.loaded && weatherFrameChecker.IsNewFrame()) {
 			ZoneScopedN("WeatherManager::UpdateFeatures");
 			weatherManager->UpdateFeatures();
 		}
@@ -303,6 +306,7 @@ bool State::HandlePostProcessing(RE::RENDER_TARGET a_input, RE::RENDER_TARGET a_
 void State::Reset()
 {
 	globals::profiler->EndFrame();
+	FrameCosts::BeginFrame();
 
 	Feature::ForEachLoadedFeature("Reset", [](Feature* feature) { feature->Reset(); });
 

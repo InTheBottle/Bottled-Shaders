@@ -169,6 +169,8 @@ struct PerformanceOverlay : OverlayFeature
 	void UpdateGraphValues();
 	void DrawFPS();
 	void DrawVRAM();
+	/** @brief Detailed mode: every measured cost in the frame with its share and whether it belongs to a feature. */
+	void DrawDetailedBreakdown();
 	void DrawPostFGFrameTimeGraph();
 
 	// ============================================================================
@@ -246,6 +248,21 @@ struct PerformanceOverlay : OverlayFeature
 		float maxFrameTime = 0.0f;
 		float smoothedMinFrameTime = 0.0f;
 		float smoothedMaxFrameTime = 50.0f;
+
+		// Detailed breakdown: exponentially smoothed CPU costs from FrameCosts
+		float smoothPresentMs = 0.0f;
+		float smoothFrameLimiterMs = 0.0f;
+		float smoothReflexSleepMs = 0.0f;
+		float smoothFrameGenSetupMs = 0.0f;
+		float smoothUiDrawMs = 0.0f;
+		float smoothOverlayDrawMs = 0.0f;
+		bool detailedRefreshDue = true;  ///< Set when the update interval elapses; the breakdown tables rebuild then
+		float smoothDlssBridgeCpuMs = 0.0f;
+		float smoothDlssEvalGpuMs = 0.0f;
+		float smoothDlssBridgeGpuMs = 0.0f;
+		float smoothDrawHookMs = 0.0f;
+		float smoothNeuralTotalMs = 0.0f;
+		float smoothNeuralModelMs = 0.0f;
 	};
 	State state;
 
@@ -279,6 +296,7 @@ struct PerformanceOverlay : OverlayFeature
 		bool ShowInOverlay = true;  // was: Enabled
 		bool ShowDrawCalls = true;
 		bool ShowCSPasses = true;
+		bool ShowDetailedBreakdown = false;
 		bool ShowVRAM = true;
 		bool ShowFPS = true;
 		bool ShowPreFGFrameTimeGraph = true;
