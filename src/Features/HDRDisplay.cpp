@@ -821,8 +821,7 @@ void HDRDisplay::RestoreFramebuffer()
 
 bool HDRDisplay::IsFGCompositingThisFrame() const
 {
-	auto& upscaling = globals::features::upscaling;
-	return upscaling.ShouldUseFrameGenerationThisFrame() && !upscaling.UsesDLSSGFrameGen();
+	return globals::features::upscaling.ShouldUseFrameGenerationThisFrame();
 }
 
 HDRDisplay::D3D12UIBufferMode HDRDisplay::GetD3D12UIBufferMode()

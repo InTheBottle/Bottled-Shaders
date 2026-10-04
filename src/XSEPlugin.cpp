@@ -157,8 +157,6 @@ bool Load()
 		stl::report_and_fail("Old version of PrivateProfileRedirector detected, 0.6.2+ required if using it."sv);
 	}
 
-	Streamline::EnsureDriverProfileAllowsDLSSG();
-
 	auto messaging = SKSE::GetMessagingInterface();
 	messaging->RegisterListener("SKSE", MessageHandler);
 

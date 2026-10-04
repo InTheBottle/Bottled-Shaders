@@ -478,13 +478,15 @@ void PerformanceOverlay::DrawFPS()
 
 	// Show Post-FG frametime graph if enabled
 	if (this->settings.ShowPostFGFrameTimeGraph && this->state.isFrameGenerationActive) {
-		if (globals::features::upscaling.UsesDLSSGFrameGen()) {
-			Util::Text::Info("%s", T(TKEY("post_fg_derived"), "Post-FG: Derived from reported flip count"));
-		} else {
+		// Check if FSR frame generation is active (FSR doesn't provide timing data)
+		bool isFrameGenActive = globals::features::upscaling.IsFrameGenerationActive();
+
+		if (isFrameGenActive) {
+			// Show note that FSR uses calculated data
 			Util::Text::Warning("%s", T(TKEY("post_fg_calculated"), "Post-FG: Calculated timing (2x Pre-FG)"));
-		}
-		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("fsr_dlss_timing_tooltip"), "AMD FSR Frame Generation timing is calculated assuming 2x Pre-FG.\nNVIDIA DLSS Frame Generation timing is derived from the driver's reported flip count per real frame."));
+			if (auto _tt = Util::HoverTooltipWrapper()) {
+				ImGui::Text("AMD FSR Frame Generation uses calculated timing data (2x Pre-FG).\nNVIDIA DLSS Frame Generation provides measured timing data.");
+			}
 		}
 
 		// Show post-FG graph for both DLSS and FSR (FSR uses calculated data)
@@ -1985,15 +1987,18 @@ void PerformanceOverlay::UpdateGraphValues()
 	state.smoothedMaxFrameTime = state.smoothedMaxFrameTime + Settings::kSmoothingFactor * (graphMax - state.smoothedMaxFrameTime);
 
 	if (state.isFrameGenerationActive) {
-		auto& upscaling = globals::features::upscaling;
-		if (upscaling.UsesDLSSGFrameGen()) {
-			const float framesPresented = static_cast<float>(std::max(1u, upscaling.streamlineDX12.lastDLSSGFramesPresented));
-			state.postFGFrameTimeMs = state.frameTimeMs / framesPresented;
-			state.postFGFps = state.fps * framesPresented;
+		// Get frametime directly from the Frame Generation system
+		float fgDeltaTime = globals::features::upscaling.GetFrameGenerationFrameTime();
+
+		// Check if FSR frame generation is active (FSR doesn't provide timing data)
+		bool isFrameGenActive = globals::features::upscaling.IsFrameGenerationActive();
+		if (fgDeltaTime > 0.0f && !isFrameGenActive) {
+			state.postFGFrameTimeMs = fgDeltaTime * 1000.0f;
+			state.postFGFps = 1000.0f / state.postFGFrameTimeMs;
 		} else {
-			const float multiplier = static_cast<float>(upscaling.GetFrameGenerationMultiplier());
-			state.postFGFrameTimeMs = state.frameTimeMs / multiplier;
-			state.postFGFps = state.fps * multiplier;
+			// Fallback if FG time is not available
+			state.postFGFrameTimeMs = state.frameTimeMs / Settings::kFrameGenerationMultiplier;
+			state.postFGFps = state.fps * Settings::kFrameGenerationMultiplier;
 		}
 
 		// Update post-FG smooth values when timer elapses

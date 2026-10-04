@@ -30,8 +30,6 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	frameGenerationMode,
 	frameGenerationForceEnable,
 	frameGenerationAllowInMenus,
-	preferFSRFrameGen,
-	dlssgFramesToGenerate,
 	streamlineLogLevel,
 	sharpnessFSR,
 	sharpnessEnabledDLSS,
@@ -137,11 +135,6 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChainUpscaling(
 			shouldProxy = false;
 	}
 
-	if (shouldProxy && Streamline::IsSmoothMotionEnabledForProfile()) {
-		logger::warn("[Frame Generation] NVIDIA Smooth Motion is enabled; disabling this plugin's frame generation to avoid crashing alongside it");
-		shouldProxy = false;
-	}
-
 	upscaling.lowRefreshRate = refreshRate < 120;
 	upscaling.isWindowed = pSwapChainDesc->Windowed;
 
@@ -150,32 +143,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChainUpscaling(
 	if (shouldProxy) {
 		logger::info("[Frame Generation] Frame Generation enabled, using D3D12 proxy");
 
-		bool dlssgAvailable = false;
-		if (upscaling.streamlineDX12.initialized && adapterDesc.VendorId == Streamline::kNvidiaVendorId) {
-			auto& sc = upscaling.dx12SwapChain;
-			sc.CreateD3D12Device(pAdapter);
-
-			upscaling.streamlineDX12.SetD3DDevice12(sc.d3d12Device.get());
-			upscaling.streamlineDX12.CheckFeatures(pAdapter);
-			upscaling.streamlineDX12.PostDevice();
-
-			const bool userPrefersReachableFsr = upscaling.settings.preferFSRFrameGen && upscaling.fidelityFX.featureFSR3FG;
-			dlssgAvailable = upscaling.streamlineDX12.featureDLSSG && !userPrefersReachableFsr;
-
-			if (dlssgAvailable && upscaling.streamlineDX12.slUpgradeInterface) {
-				upscaling.streamlineDX12.slUpgradeInterface((void**)&sc.d3d12Device);
-
-				sc.commandQueue = nullptr;
-				D3D12_COMMAND_QUEUE_DESC queueDesc = {};
-				queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-				queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-				queueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
-				queueDesc.NodeMask = 0;
-				DX::ThrowIfFailed(sc.d3d12Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(sc.commandQueue.put())));
-			}
-		}
-
-		if (dlssgAvailable || upscaling.HasFrameGenModule()) {
+		if (upscaling.HasFrameGenModule()) {
 			DX::ThrowIfFailed(D3D11CreateDevice(
 				pAdapter,
 				DriverType,
@@ -190,16 +158,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChainUpscaling(
 
 			upscaling.SetProxyD3D11Device(*ppDevice);
 			upscaling.SetProxyD3D11DeviceContext(*ppImmediateContext);
-
-			if (dlssgAvailable) {
-				logger::info("[Frame Generation] DLSS-G available, creating direct swap chain");
-				upscaling.CreateProxySwapChainDirect(pAdapter, *pSwapChainDesc);
-				if (upscaling.streamlineDX12.slUpgradeInterface)
-					upscaling.streamlineDX12.slUpgradeInterface((void**)&upscaling.dx12SwapChain.swapChain);
-			} else {
-				upscaling.CreateProxySwapChain(pAdapter, *pSwapChainDesc);
-			}
-
+			upscaling.CreateProxySwapChain(pAdapter, *pSwapChainDesc);
 			upscaling.CreateProxyInterop();
 
 			*ppSwapChain = upscaling.GetProxySwapChain();
@@ -222,7 +181,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChainUpscaling(
 
 			return S_OK;
 		} else {
-			logger::warn("[Frame Generation] No frame generation module available, skipping proxy");
+			logger::warn("[Frame Generation] FidelityFX DLLs are not loaded, skipping proxy");
 			upscaling.fidelityFXMissing = true;
 		}
 	}
@@ -387,18 +346,11 @@ void Upscaling::DrawSettings()
 	if (ImGui::TreeNodeEx(T(TKEY("frame_generation"), "Frame Generation"), ImGuiTreeNodeFlags_DefaultOpen)) {
 		ImGui::Text("%s", T(TKEY("frame_generation_desc"),
 							  "Frame Generation interpolates real frames with generated ones for a smoother experience"));
-		const auto fgMethod = GetFrameGenMethod();
-		if (fgMethod == FrameGenMethod::kDLSSG) {
-			ImGui::TextColored(Util::Colors::GetSuccess(), "%s", T(TKEY("frame_generation_dlssg_active"), "Using NVIDIA DLSS Frame Generation (Auto)"));
-		} else if (fgMethod == FrameGenMethod::kFSR) {
-			if (streamlineDX12.featureDLSSG)
-				ImGui::TextColored(Util::Colors::GetInfo(), "%s", T(TKEY("frame_generation_fsr_active_preferred"), "Using AMD FSR Frame Generation (Preferred)"));
-			else
-				ImGui::TextColored(Util::Colors::GetInfo(), "%s", T(TKEY("frame_generation_fsr_active"), "Using AMD FSR Frame Generation (Auto)"));
-		} else if (fidelityFX.featureFSR3FG) {
+		ImGui::Text("%s", T(TKEY("frame_generation_tech"),
+							  "Uses AMD FSR Frame Generation technology"));
+		if (HasFrameGenModule())
 			ImGui::Text("%s", T(TKEY("frame_generation_available"),
 								  "AMD FSR Frame Generation is available."));
-		}
 		ImGui::Text("%s", T(TKEY("frame_generation_proxy_note"),
 							  "Requires a D3D11 to D3D12 proxy which can create compatibility issues"));
 		ImGui::Text("%s", T(TKEY("frame_generation_restart_note"),
@@ -434,23 +386,6 @@ void Upscaling::DrawSettings()
 		if (ImGui::Checkbox(T(TKEY("frame_generation"), "Frame Generation"), &fgEnabled))
 			settings.frameGenerationMode = fgEnabled ? 1 : 0;
 
-		if (streamlineDX12.featureDLSSG) {
-			ImGui::Checkbox(T(TKEY("prefer_fsr_frame_gen"), "Prefer AMD FSR Frame Generation"), &settings.preferFSRFrameGen);
-			if (auto _tt = Util::HoverTooltipWrapper()) {
-				ImGui::TextUnformatted(T(TKEY("prefer_fsr_frame_gen_tooltip_1"), "Uses AMD FSR Frame Generation instead of NVIDIA DLSS Frame Generation."));
-				ImGui::TextUnformatted(T(TKEY("prefer_fsr_frame_gen_tooltip_2"), "Requires a restart."));
-			}
-		}
-
-		if (fgMethod == FrameGenMethod::kDLSSG && streamlineDX12.dlssgMaxFramesToGenerate > 1) {
-			int multiplier = static_cast<int>(GetFrameGenerationMultiplier());
-			const int maxMultiplier = static_cast<int>(streamlineDX12.dlssgMaxFramesToGenerate) + 1;
-			if (ImGui::SliderInt(T(TKEY("dlssg_frame_multiplier"), "DLSS Frame Generation Multiplier"), &multiplier, 2, maxMultiplier, "%dx", ImGuiSliderFlags_AlwaysClamp))
-				settings.dlssgFramesToGenerate = static_cast<uint>(multiplier - 1);
-			if (auto _tt = Util::HoverTooltipWrapper())
-				ImGui::TextUnformatted(T(TKEY("dlssg_frame_multiplier_tooltip"), "How many total frames are shown per rendered frame."));
-		}
-
 		if (!frameGenerationDx12PathActive)
 			ImGui::BeginDisabled();
 
@@ -475,19 +410,13 @@ void Upscaling::DrawSettings()
 		ImGui::TreePop();
 	}
 
-	const bool reflexSupported = streamline.reflexSupportedOnCurrentAdapter || streamlineDX12.reflexSupportedOnCurrentAdapter;
-	if (reflexSupported && ImGui::TreeNodeEx(T(TKEY("nvidia_reflex"), "NVIDIA Reflex"), ImGuiTreeNodeFlags_DefaultOpen)) {
-		const bool usingDX12Reflex = UsesDLSSGFrameGen();
-		const auto& activeReflex = usingDX12Reflex ? streamlineDX12 : streamline;
-		const bool reflexBlockedByFrameGeneration = frameGenerationDx12PathActive && !usingDX12Reflex;
-		const bool reflexAvailable = activeReflex.initialized && activeReflex.featureReflex;
+	if (streamline.reflexSupportedOnCurrentAdapter && ImGui::TreeNodeEx(T(TKEY("nvidia_reflex"), "NVIDIA Reflex"), ImGuiTreeNodeFlags_DefaultOpen)) {
+		const bool reflexBlockedByFrameGeneration = frameGenerationDx12PathActive;
+		const bool reflexAvailable = streamline.initialized && streamline.featureReflex;
 		const bool reflexControlsAvailable = reflexAvailable && !reflexBlockedByFrameGeneration;
-		const bool markerOptimizationAvailable = reflexControlsAvailable && activeReflex.featurePCL;
+		const bool markerOptimizationAvailable = reflexControlsAvailable && streamline.featurePCL;
 		if (reflexBlockedByFrameGeneration) {
 			ImGui::TextDisabled("%s", T(TKEY("reflex_blocked_by_fg"), "Reflex is unavailable while the DX12 frame-generation swapchain is active."));
-		}
-		if (usingDX12Reflex) {
-			ImGui::Text("%s", T(TKEY("reflex_via_dx12"), "Reflex is running via DX12 (DLSS Frame Generation active)."));
 		}
 
 		if (!reflexAvailable) {
@@ -572,7 +501,7 @@ void Upscaling::DrawSettings()
 
 		ImGui::Separator();
 		Util::DrawDllVersionTable("AMD FidelityFX DLLs (click to open folder)", FidelityFX::PluginDir, FidelityFX::dllVersions, "ffx_dll_versions");
-		Util::DrawDllVersionTable("NVIDIA Streamline DLLs (click to open folder)", streamline.pluginDir.c_str(), Streamline::dllVersions, "sl_dll_versions");
+		Util::DrawDllVersionTable("NVIDIA Streamline DLLs (click to open folder)", Streamline::PluginDir, Streamline::dllVersions, "sl_dll_versions");
 		ImGui::TreePop();
 	}
 }
@@ -613,10 +542,6 @@ void Upscaling::LoadSettings(json& o_json)
 	if (settings.presetDLSS > 4) {
 		logger::warn("[Upscaling] Loaded presetDLSS {} out of range, resetting to 0 (Default)", settings.presetDLSS);
 		settings.presetDLSS = 0;
-	}
-	if (settings.dlssgFramesToGenerate < 1 || settings.dlssgFramesToGenerate > 3) {
-		logger::warn("[Upscaling] Loaded dlssgFramesToGenerate {} out of range, resetting to 1 (2x)", settings.dlssgFramesToGenerate);
-		settings.dlssgFramesToGenerate = 1;
 	}
 	const float originalReflexFPSLimit = settings.reflexFPSLimit;
 	if (!std::isfinite(settings.reflexFPSLimit)) {
@@ -1312,9 +1237,6 @@ void Upscaling::TimerSleepQPC(int64_t targetQPC)
 
 void Upscaling::FrameLimiter()
 {
-	if (UsesDLSSGFrameGen())
-		return;
-
 	if (d3d12SwapChainActive) {
 		// Use frame latency waitable object if available for better frame pacing
 		HANDLE waitableObject = GetFrameLatencyWaitableObject();
@@ -1409,11 +1331,7 @@ bool Upscaling::IsFrameGenerationDx12PathActive() const
 
 bool Upscaling::IsFrameGenerationActive() const
 {
-	if (!IsFrameGenerationDx12PathActive() || !settings.frameGenerationMode)
-		return false;
-	if (dx12SwapChain.useDLSSG)
-		return streamlineDX12.featureDLSSG && streamlineDX12.lastDLSSGStatus == sl::DLSSGStatus::eOk;
-	return fidelityFX.isFrameGenActive;
+	return IsFrameGenerationDx12PathActive() && settings.frameGenerationMode && fidelityFX.isFrameGenActive;
 }
 
 bool Upscaling::ShouldPrepareFrameGeneration() const
@@ -1443,19 +1361,34 @@ bool Upscaling::IsUpscalingActive() const
 	return resolutionScale.x < .99f;
 }
 
+/**
+ * @brief Retrieves the current frame time for frame generation.
+ *
+ * Returns the frame time from the D3D12 swap chain if frame generation is active; otherwise, returns 0.
+ *
+ * @return float The current frame time in seconds, or 0 if frame generation is inactive.
+ */
+float Upscaling::GetFrameGenerationFrameTime() const
+{
+	if (!IsFrameGenerationActive())
+		return 0.0f;
+
+	// Get the current frame time from D3D12 swapchain
+	if (dx12SwapChain.swapChain) {
+		// Get frame time from the D3D12 SwapChain
+		return GetFrameTime();
+	}
+
+	return 0.0f;
+}
+
 // Unified interface methods
 void Upscaling::LoadUpscalingSDKs()
 {
 	// Initialize upscaling SDK components during plugin startup
 	// This ensures all SDKs are available before any D3D device creation
 	streamline.LoadInterposer();
-
-	streamlineDX12.renderAPI = sl::RenderAPI::eD3D12;
-	streamlineDX12.pluginDir = L"Data\\Shaders\\Upscaling\\StreamlineDX12";
-	streamlineDX12.instanceTag = "DX12";
-	streamlineDX12.LoadInterposer();
-
-	fidelityFX.LoadFFX();
+	fidelityFX.LoadFFX();  // Only for frame generation now
 }
 
 HANDLE Upscaling::GetFrameLatencyWaitableObject() const
@@ -1497,29 +1430,7 @@ void Upscaling::PostBackendDevice()
 // Module availability methods
 bool Upscaling::HasFrameGenModule() const
 {
-	const bool userPrefersReachableFsr = settings.preferFSRFrameGen && fidelityFX.featureFSR3FG;
-	return fidelityFX.featureFSR3FG || (streamlineDX12.featureDLSSG && !userPrefersReachableFsr);
-}
-
-Upscaling::FrameGenMethod Upscaling::GetFrameGenMethod() const
-{
-	if (!d3d12SwapChainActive)
-		return FrameGenMethod::kNone;
-	if (dx12SwapChain.useDLSSG)
-		return FrameGenMethod::kDLSSG;
-	return FrameGenMethod::kFSR;
-}
-
-bool Upscaling::UsesDLSSGFrameGen() const
-{
-	return d3d12SwapChainActive && dx12SwapChain.useDLSSG;
-}
-
-uint Upscaling::GetFrameGenerationMultiplier() const
-{
-	if (!UsesDLSSGFrameGen())
-		return 2;
-	return std::clamp<uint32_t>(settings.dlssgFramesToGenerate, 1, streamlineDX12.dlssgMaxFramesToGenerate) + 1;
+	return fidelityFX.featureFSR3FG;
 }
 
 // Proxy interface methods
@@ -1536,11 +1447,6 @@ void Upscaling::SetProxyD3D11DeviceContext(ID3D11DeviceContext* context)
 void Upscaling::CreateProxySwapChain(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC swapChainDesc)
 {
 	dx12SwapChain.CreateSwapChain(adapter, swapChainDesc);
-}
-
-void Upscaling::CreateProxySwapChainDirect(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC swapChainDesc)
-{
-	dx12SwapChain.CreateSwapChainDirect(adapter, swapChainDesc);
 }
 
 void Upscaling::CreateProxyInterop()

@@ -1314,6 +1314,7 @@
   "feature.upscaling.frame_generation_in_menus_tooltip_2": "Может быть более плавным, но увеличивает задержку ввода в меню.",
   "feature.upscaling.frame_generation_proxy_note": "Требует прокси D3D11 к D3D12, что может создавать проблемы совместимости",
   "feature.upscaling.frame_generation_restart_note": "Переключение этой настройки требует перезапуска для корректной работы",
+  "feature.upscaling.frame_generation_tech": "Использует технологию AMD FSR Frame Generation",
   "feature.upscaling.frame_limit_vrr": "Ограничение кадров (переменная частота обновления)",
   "feature.upscaling.key_feature_1": "Поддержка DLSS (Deep Learning Super Sampling)",
   "feature.upscaling.key_feature_2": "Поддержка FSR (FidelityFX Super Resolution)",
