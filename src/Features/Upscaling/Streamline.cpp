@@ -420,6 +420,21 @@ bool Streamline::EnsureFrameToken()
 	if (!initialized || !slGetNewFrameToken || !globals::state)
 		return false;
 
+	if (renderAPI == sl::RenderAPI::eD3D12) {
+		if (!presentFrameTokenStale)
+			return frameToken != nullptr;
+
+		presentFrameTokenStale = false;
+		++presentFrameIndex;
+		if (SL_FAILED(result, slGetNewFrameToken(frameToken, &presentFrameIndex))) {
+			logger::error("[Streamline {}] Could not get frame token: {}", instanceTag, magic_enum::enum_name(result));
+			frameToken = nullptr;
+			return false;
+		}
+
+		return frameToken != nullptr;
+	}
+
 	if (!frameChecker.IsNewFrame())
 		return frameToken != nullptr;
 
@@ -430,6 +445,11 @@ bool Streamline::EnsureFrameToken()
 	}
 
 	return frameToken != nullptr;
+}
+
+void Streamline::EndPresentFrame()
+{
+	presentFrameTokenStale = true;
 }
 
 bool Streamline::CheckFrameConstants(sl::ViewportHandle p_viewport)
@@ -757,7 +777,7 @@ void Streamline::UpdateReflex()
 	if (!slReflexSleep)
 		return;
 
-	if (options.mode == sl::ReflexMode::eOff && options.frameLimitUs == 0)
+	if (renderAPI != sl::RenderAPI::eD3D12 && options.mode == sl::ReflexMode::eOff && options.frameLimitUs == 0)
 		return;
 
 	const uint32_t currentFrame = globals::state ? globals::state->frameCount : 0;
@@ -830,7 +850,7 @@ void Streamline::ConfigureDLSSG(bool enabled)
 
 	if (slDLSSGGetState && enabled) {
 		sl::DLSSGState state{};
-		if (SL_FAILED(stateResult, slDLSSGGetState(viewport, state, &options))) {
+		if (SL_FAILED(stateResult, slDLSSGGetState(viewport, state, nullptr))) {
 			static uint32_t stateFailCount = 0;
 			if (++stateFailCount % 60 == 0) {
 				logger::warn("[Streamline DX12] slDLSSGGetState has failed {} times: {}", stateFailCount, magic_enum::enum_name(stateResult));

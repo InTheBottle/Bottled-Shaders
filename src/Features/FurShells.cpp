@@ -16,6 +16,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	Enabled,
 	ShellCount,
 	Length,
+	BodyLength,
 	Droop,
 	RootThreshold,
 	TipThreshold,
@@ -33,6 +34,7 @@ namespace
 
 	constexpr uint32_t MaxShells = 32;
 	constexpr uint32_t ShellTextureSlot = 122;
+	constexpr uint32_t NormalTextureSlot = 122;
 	constexpr uint32_t PerPassSlot = 13;
 	constexpr uint32_t ResolvesPerFrame = 16;
 	constexpr size_t MaxEntries = 8192;
@@ -57,12 +59,22 @@ namespace
 		case Envmap:
 		case Glowmap:
 		case Parallax:
+		case Facegen:
+		case FacegenRGBTint:
 		case ParallaxOcc:
 		case MultilayerParallax:
 			return true;
 		default:
 			return false;
 		}
+	}
+
+	bool IsSkinTechnique(uint32_t a_descriptor)
+	{
+		using enum SIE::ShaderCache::LightingShaderTechniques;
+
+		const auto technique = static_cast<SIE::ShaderCache::LightingShaderTechniques>((a_descriptor >> 24) & 0x3F);
+		return technique == Facegen || technique == FacegenRGBTint;
 	}
 
 	uint32_t GetResolvableShells(float a_length, float a_distance)
@@ -148,6 +160,10 @@ void FurShells::DrawSettings()
 	ImGui::SliderFloat(T(TKEY("length"), "Length"), &settings.Length, 0.1f, 6.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::TextWrapped("%s", T(TKEY("length_tooltip"), "Fur length in game units."));
+
+	ImGui::SliderFloat(T(TKEY("body_length"), "Body Length"), &settings.BodyLength, 0.05f, 3.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextWrapped("%s", T(TKEY("body_length_tooltip"), "Fur length on skin, such as khajiit bodies and heads, in game units."));
 
 	ImGui::SliderFloat(T(TKEY("droop"), "Droop"), &settings.Droop, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 	if (auto _tt = Util::HoverTooltipWrapper())
@@ -236,21 +252,27 @@ RE::NiSourceTexture* FurShells::FindShell(RE::BSRenderPass* a_pass)
 	auto it = entries.find(diffuse);
 	if (it == entries.end() || it->second.name != diffuse->name) {
 		RE::NiSourceTexturePtr shell;
-		if (const char* diffusePath = material->textureSet ? material->textureSet->GetTexturePath(RE::BSTextureSet::Texture::kDiffuse) : nullptr; diffusePath && *diffusePath) {
-			std::string path = NormalizeTexturePath(diffusePath);
-			if (!missingShells.contains(path)) {
-				if (resolveBudget == 0)
-					return nullptr;
-				--resolveBudget;
+		std::string previousPath;
+		const char* setPath = material->textureSet ? material->textureSet->GetTexturePath(RE::BSTextureSet::Texture::kDiffuse) : nullptr;
+		for (const char* diffusePath : { diffuse->name.c_str(), setPath }) {
+			if (shell || !diffusePath || !*diffusePath)
+				continue;
 
-				bool exists = false;
-				shell = LoadShell(path, exists);
-				if (!exists) {
-					if (missingShells.size() >= MaxMissingShells)
-						missingShells.clear();
-					missingShells.emplace(std::move(path));
-				}
+			std::string path = NormalizeTexturePath(diffusePath);
+			if (path == previousPath || missingShells.contains(path))
+				continue;
+			if (resolveBudget == 0)
+				return nullptr;
+			--resolveBudget;
+
+			bool exists = false;
+			shell = LoadShell(path, exists);
+			if (!exists) {
+				if (missingShells.size() >= MaxMissingShells)
+					missingShells.clear();
+				missingShells.emplace(path);
 			}
+			previousPath = std::move(path);
 		}
 
 		if (entries.size() >= MaxEntries)
@@ -274,7 +296,7 @@ void FurShells::BeginPass(RE::BSShader* a_shader, RE::BSRenderPass* a_pass)
 		return;
 
 	auto* state = globals::state;
-	if ((state->permutationData.ExtraShaderDescriptor & ReflectionsFlag) != 0 || (state->modifiedVertexDescriptor & ModelSpaceNormalsFlag) != 0 || !IsFurTechnique(state->currentPixelDescriptor))
+	if ((state->permutationData.ExtraShaderDescriptor & ReflectionsFlag) != 0 || !IsFurTechnique(state->currentPixelDescriptor))
 		return;
 
 	const auto depthMode = globals::game::shadowState->GetRuntimeData().depthStencilDepthMode;
@@ -291,12 +313,25 @@ void FurShells::BeginPass(RE::BSShader* a_shader, RE::BSRenderPass* a_pass)
 	if (shells == 0 || !CanDrawShells(geometry))
 		return;
 
+	const bool modelSpaceNormals = (state->modifiedVertexDescriptor & ModelSpaceNormalsFlag) != 0;
+	if (modelSpaceNormals && !geometry->GetGeometryRuntimeData().skinInstance)
+		return;
+
 	auto* shell = FindShell(a_pass);
 	auto* shellView = shell && shell->rendererTexture ? shell->rendererTexture->resourceView : nullptr;
 	if (!shellView)
 		return;
 
-	shells = std::min(shells, GetResolvableShells(settings.Length, distance));
+	ID3D11ShaderResourceView* normalView = nullptr;
+	if (modelSpaceNormals) {
+		auto* normal = static_cast<RE::BSLightingShaderMaterialBase*>(a_pass->shaderProperty->material)->normalTexture.get();
+		normalView = normal && normal->rendererTexture ? normal->rendererTexture->resourceView : nullptr;
+		if (!normalView)
+			return;
+	}
+
+	const float length = IsSkinTechnique(state->currentPixelDescriptor) ? settings.BodyLength : settings.Length;
+	shells = std::min(shells, GetResolvableShells(length, distance));
 
 	auto* shaderCache = globals::shaderCache;
 	auto* vertexShader = shaderCache->GetVertexShader(*a_shader, state->modifiedVertexDescriptor | FurFlag);
@@ -305,7 +340,7 @@ void FurShells::BeginPass(RE::BSShader* a_shader, RE::BSRenderPass* a_pass)
 	if (!vertexShader || !pixelShader || !depthShader)
 		return;
 
-	const PerPass perPass{ settings.Length, static_cast<float>(shells), settings.Droop, settings.RootThreshold, settings.TipThreshold, settings.RootDarkening, settings.ShellColor, 0.0f };
+	const PerPass perPass{ length, static_cast<float>(shells), settings.Droop, settings.RootThreshold, settings.TipThreshold, settings.RootDarkening, settings.ShellColor, 0.0f };
 	if (std::memcmp(&perPass, &lastPerPass, sizeof(PerPass)) != 0) {
 		perPassCB->Update(perPass);
 		lastPerPass = perPass;
@@ -324,6 +359,8 @@ void FurShells::BeginPass(RE::BSShader* a_shader, RE::BSRenderPass* a_pass)
 	context->VSSetConstantBuffers(PerPassSlot, 1, &buffer);
 	context->PSSetConstantBuffers(PerPassSlot, 1, &buffer);
 	context->PSSetShaderResources(ShellTextureSlot, 1, &shellView);
+	if (normalView)
+		context->VSSetShaderResources(NormalTextureSlot, 1, &normalView);
 
 	instanceCount = shells + 1;
 	++passCount;

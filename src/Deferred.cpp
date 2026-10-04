@@ -717,16 +717,42 @@ void Deferred::Hooks::BSCubeMapCamera_RenderCubemap::thunk(RE::NiAVObject* camer
 	auto deferred = globals::deferred;
 	auto state = globals::state;
 
-	auto& terrainShadows = globals::features::terrainShadows;
+	static constexpr int faceOrder[6] = { 0, 1, 4, 2, 3, 5 };
+	static int pendingFaces = 0;
+	static uint32_t batchIndex = 0;
+	static uint32_t nextFace = 0;
 
-	deferred->ReflectionsPrepasses();
-	state->permutationData.ExtraShaderDescriptor |= static_cast<uint32_t>(State::ExtraShaderDescriptors::IsReflections);
-	if (terrainShadows.loaded)
-		terrainShadows.lodShadowMap.BeginFace(camera, static_cast<uint32_t>(a2));
-	func(camera, a2, a3, a4, a5);
-	if (terrainShadows.loaded)
-		terrainShadows.lodShadowMap.EndFace();
-	state->permutationData.ExtraShaderDescriptor &= ~static_cast<uint32_t>(State::ExtraShaderDescriptors::IsReflections);
+	const auto render = [&](int a_faces, bool a_last) {
+		auto& terrainShadows = globals::features::terrainShadows;
+
+		deferred->ReflectionsPrepasses();
+		state->permutationData.ExtraShaderDescriptor |= static_cast<uint32_t>(State::ExtraShaderDescriptors::IsReflections);
+		if (terrainShadows.loaded)
+			terrainShadows.lodShadowMap.BeginFace(camera, static_cast<uint32_t>(a_faces));
+		func(camera, a_faces, a3, a_last, a5);
+		if (terrainShadows.loaded)
+			terrainShadows.lodShadowMap.EndFace();
+		state->permutationData.ExtraShaderDescriptor &= ~static_cast<uint32_t>(State::ExtraShaderDescriptors::IsReflections);
+	};
+
+	const uint32_t index = batchIndex;
+	batchIndex = a4 ? 0 : index + 1;
+
+	if (state->throttleWaterCubemap && index == 0 && !a4) {
+		pendingFaces = a2;
+		return;
+	}
+
+	if (const int heldFaces = std::exchange(pendingFaces, 0)) {
+		if (index == 1 && a4) {
+			a2 = 1 << faceOrder[nextFace];
+			nextFace = (nextFace + 1) % 6;
+		} else {
+			render(heldFaces, false);
+		}
+	}
+
+	render(a2, a4);
 }
 
 void Deferred::Hooks::Main_RenderFirstPersonView::thunk(bool a1, bool a2)

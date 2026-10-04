@@ -21,6 +21,7 @@ struct FurShells : Feature
 		bool Enabled = true;
 		uint32_t ShellCount = 12;
 		float Length = 1.2f;
+		float BodyLength = 0.4f;
 		float Droop = 0.15f;
 		float RootThreshold = 1.0f;
 		float TipThreshold = 1.0f;

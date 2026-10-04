@@ -595,6 +595,7 @@ void State::SaveToJson(nlohmann::json& settings)
 	advanced["Use FileWatcher"] = shaderCache->UseFileWatcher();
 	advanced["Frame Annotations"] = frameAnnotations;
 	advanced["Partial Precision"] = enablePartialPrecision.load(std::memory_order_relaxed);
+	advanced["Throttle Water Cubemap"] = throttleWaterCubemap;
 	settings["Advanced"] = advanced;
 
 	json general;
@@ -674,6 +675,8 @@ void State::LoadFromJson(nlohmann::json& settings)
 			frameAnnotations = advanced["Frame Annotations"];
 		if (advanced.contains("Partial Precision") && advanced["Partial Precision"].is_boolean())
 			enablePartialPrecision.store(advanced["Partial Precision"].get<bool>(), std::memory_order_relaxed);
+		if (advanced.contains("Throttle Water Cubemap") && advanced["Throttle Water Cubemap"].is_boolean())
+			throttleWaterCubemap = advanced["Throttle Water Cubemap"];
 	}
 
 	if (settings.contains("General") && settings["General"].is_object()) {

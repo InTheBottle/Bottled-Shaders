@@ -175,14 +175,15 @@ VS_OUTPUT main(VS_INPUT input)
 	precise float4 previousInputPosition = inputPosition;
 
 #	if defined(FUR_SHELLS)
-#		if !defined(MODELSPACENORMALS)
 	float furShell = FurShells::GetShell(instanceID);
-	float3 furOffset = (input.Normal.xyz * 2.0 - 1.0) * (FurShells::Length * furShell);
+#		if defined(MODELSPACENORMALS)
+	float3 furNormal = FurShells::GetModelNormal(input.TexCoord0.xy * TexcoordOffset.zw + TexcoordOffset.xy);
+#		else
+	float3 furNormal = input.Normal.xyz * 2.0 - 1.0;
+#		endif
+	float3 furOffset = furNormal * (FurShells::Length * furShell);
 	inputPosition.xyz += furOffset;
 	previousInputPosition.xyz += furOffset;
-#		else
-	float furShell = 0.0;
-#		endif
 #	endif
 
 #	if defined(TREE_ANIM)
@@ -833,6 +834,22 @@ float GetSnowParameterY(float texProjTmp, float alpha)
 #		undef WETNESS_EFFECTS
 #		undef DYNAMIC_CUBEMAPS
 #		undef WATER_EFFECTS
+#	endif
+
+#	if defined(CUBEMAP_REFLECTIONS) && !defined(LANDSCAPE)
+#		undef EXTENDED_MATERIALS
+#		undef EXTENDED_TRANSLUCENCY
+#		undef LIGHT_LIMIT_FIX
+#		undef SCREEN_SPACE_SHADOWS
+#		undef SKYLIGHTING
+#		undef SSS
+#		undef TERRAIN_BLENDING
+#		undef VOLUMETRIC_SHADOWS
+#		undef WATER_EFFECTS
+#		undef WETNESS_EFFECTS
+#		undef CS_SKIN
+#		undef CS_HAIR
+#		undef HAIR_BACKLIGHTING
 #	endif
 
 #	if defined(WORLD_MAP)
@@ -2653,7 +2670,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	endif
 	transmissionColor += dirLightOutput.transmission;
 
-#	if !defined(LOD)
+#	if !defined(LOD) && !(defined(CUBEMAP_REFLECTIONS) && !defined(LANDSCAPE))
 #		if !defined(LIGHT_LIMIT_FIX)
 	[loop] for (uint lightIndex = 0; lightIndex < numLights; lightIndex++)
 	{
@@ -3404,6 +3421,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 #		if defined(SSS) && defined(SKIN)
 	psout.Masks = float4(saturate(baseColor.a), !(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsBeastRace), masksZ, psout.Diffuse.w);
+#			if defined(FUR_SHELLS)
+	if (input.FurShell > 0.0)
+		psout.Masks.x = 0;
+#			endif
 #		else
 	psout.Masks = float4(0, 0, masksZ, psout.Diffuse.w);
 #		endif

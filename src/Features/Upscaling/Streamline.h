@@ -90,6 +90,8 @@ public:
 
 	Util::FrameChecker frameChecker;
 	sl::FrameToken* frameToken = nullptr;
+	uint32_t presentFrameIndex = 0;
+	bool presentFrameTokenStale = true;
 
 	bool isRTXBelow40series = false;
 
@@ -152,6 +154,7 @@ public:
 
 	/** @brief Acquires a new frame token from Streamline for the current frame. */
 	bool EnsureFrameToken();
+	void EndPresentFrame();
 	/**
 	 * @brief Sets camera and jitter constants on the Streamline viewport for the current frame.
 	 * @param p_viewport The viewport handle to configure.

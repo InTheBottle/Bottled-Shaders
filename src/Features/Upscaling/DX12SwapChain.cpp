@@ -372,8 +372,10 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	// Present the frame
 	DX::ThrowIfFailed(swapChain->Present(SyncInterval, Flags));
 
-	if (useDLSSG)
+	if (useDLSSG) {
 		upscaling.streamlineDX12.EmitPCLMarker(sl::PCLMarker::ePresentEnd);
+		upscaling.streamlineDX12.EndPresentFrame();
+	}
 
 	// Wait for D3D12 to finish
 	fenceValue++;
