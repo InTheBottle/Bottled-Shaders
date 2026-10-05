@@ -24,7 +24,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	ShellColor,
 	FadeStart,
 	FadeEnd,
-	HideCoveredFur)
+	HideCoveredFur,
+	OverlayFur)
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	FurShells::ShellOverride,
@@ -56,6 +57,7 @@ namespace
 	constexpr size_t MaxMissingShells = 65536;
 	constexpr uint32_t MaxOverrideSize = 65536;
 	constexpr float PixelsPerShell = 1.0f;
+	constexpr std::string_view EmptyOverlayPath = "textures\\actors\\character\\overlays\\default.dds";
 
 	bool CanDrawShells(RE::BSGeometry* a_geometry)
 	{
@@ -245,6 +247,10 @@ void FurShells::DrawSettings()
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::TextWrapped("%s", T(TKEY("hide_covered_fur_tooltip"), "Skips fur whose roots are covered by clothing, armor or anything else in front of them, so it stops poking through. Works in the world view, not in first person or menus."));
 
+	ImGui::Checkbox(T(TKEY("overlay_fur"), "Show Overlays On Fur"), &settings.OverlayFur);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextWrapped("%s", T(TKEY("overlay_fur_tooltip"), "Carries RaceMenu overlays such as tattoos, body paint and fur patterns up through the fur, so they color it instead of staying hidden under it. Each overlay in use draws the fur once more."));
+
 	ImGui::Text("%s: %u", T(TKEY("fur_passes"), "Fur passes last frame"), lastPassCount);
 
 	DrawOverrideSettings();
@@ -422,9 +428,10 @@ void FurShells::Reset()
 	lastPassCount = passCount;
 	passCount = 0;
 	lastDiffuse = nullptr;
-	lastShell = nullptr;
-	lastData = nullptr;
+	lastLookup = {};
 	deferredPasses.clear();
+	deferredOverlayPasses.clear();
+	frameBodies.clear();
 	deferralClosed = false;
 }
 
@@ -465,19 +472,15 @@ void FurShells::GenerateShaderPermutations(RE::BSShader* a_shader)
 	}
 }
 
-RE::NiSourceTexture* FurShells::FindShell(RE::BSRenderPass* a_pass, ShellData*& a_data)
+FurShells::ShellLookup FurShells::FindShell(RE::BSRenderPass* a_pass)
 {
-	a_data = nullptr;
-
 	auto* property = a_pass->shaderProperty;
 	auto* material = property ? static_cast<RE::BSLightingShaderMaterialBase*>(property->material) : nullptr;
 	auto* diffuse = material ? material->diffuseTexture.get() : nullptr;
 	if (!diffuse)
-		return nullptr;
-	if (diffuse == lastDiffuse) {
-		a_data = lastData;
-		return lastShell;
-	}
+		return {};
+	if (diffuse == lastDiffuse)
+		return lastLookup;
 
 	auto it = entries.find(diffuse);
 	if (it == entries.end() || it->second.name != diffuse->name) {
@@ -493,7 +496,7 @@ RE::NiSourceTexture* FurShells::FindShell(RE::BSRenderPass* a_pass, ShellData*& 
 			if (path == previousPath || missingShells.contains(path))
 				continue;
 			if (resolveBudget == 0)
-				return nullptr;
+				return {};
 			--resolveBudget;
 
 			bool exists = false;
@@ -513,16 +516,51 @@ RE::NiSourceTexture* FurShells::FindShell(RE::BSRenderPass* a_pass, ShellData*& 
 			previousPath = std::move(path);
 		}
 
+		const bool emptyOverlay = NormalizeTexturePath(diffuse->name.c_str()) == EmptyOverlayPath || (setPath && NormalizeTexturePath(setPath) == EmptyOverlayPath);
 		if (entries.size() >= MaxEntries)
 			entries.clear();
-		it = entries.insert_or_assign(diffuse, Entry{ diffuse->name, std::move(shell), data }).first;
+		it = entries.insert_or_assign(diffuse, Entry{ diffuse->name, std::move(shell), data, emptyOverlay }).first;
 	}
 
 	lastDiffuse = diffuse;
-	lastShell = it->second.shell.get();
-	lastData = it->second.data;
-	a_data = lastData;
-	return lastShell;
+	lastLookup = { it->second.shell.get(), it->second.data, true, it->second.emptyOverlay };
+	return lastLookup;
+}
+
+const FurShells::FrameBody* FurShells::FindFrameBody(RE::BSGeometry* a_geometry) const
+{
+	if (frameBodies.empty())
+		return nullptr;
+
+	auto* skinInstance = a_geometry->GetGeometryRuntimeData().skinInstance.get();
+	auto* partition = skinInstance ? skinInstance->skinPartition.get() : nullptr;
+	if (!partition)
+		return nullptr;
+
+	for (const auto& body : frameBodies)
+		if (body.partition == partition && body.rootParent == skinInstance->rootParent && body.geometry != a_geometry)
+			return &body;
+
+	return nullptr;
+}
+
+void FurShells::RecordFrameBody(RE::NiSkinInstance* a_skinInstance, RE::BSGeometry* a_geometry, const PerPass& a_perPass, ID3D11ShaderResourceView* a_shellView, ID3D11ShaderResourceView* a_normalView, bool a_deferred)
+{
+	auto* partition = a_skinInstance->skinPartition.get();
+	if (!partition)
+		return;
+
+	auto it = std::ranges::find_if(frameBodies, [&](const FrameBody& a_body) { return a_body.geometry == a_geometry; });
+	if (it == frameBodies.end())
+		it = frameBodies.emplace(frameBodies.end());
+
+	it->partition = partition;
+	it->rootParent = a_skinInstance->rootParent;
+	it->geometry = a_geometry;
+	it->shellView.copy_from(a_shellView);
+	it->normalView.copy_from(a_normalView);
+	it->perPass = a_perPass;
+	it->deferred = a_deferred;
 }
 
 void FurShells::BeginPass(RE::BSShader* a_shader, RE::BSRenderPass* a_pass)
@@ -539,25 +577,31 @@ void FurShells::BeginPass(RE::BSShader* a_shader, RE::BSRenderPass* a_pass)
 	if ((state->permutationData.ExtraShaderDescriptor & ReflectionsFlag) != 0 || !IsFurTechnique(state->currentPixelDescriptor))
 		return;
 
-	const auto depthMode = globals::game::shadowState->GetRuntimeData().depthStencilDepthMode;
-	if (depthMode != kTestEqual && depthMode != kTestWrite)
-		return;
-
 	auto* geometry = a_pass->geometry;
 	if (!geometry)
+		return;
+
+	if (const auto* body = FindFrameBody(geometry)) {
+		BeginOverlayPass(a_shader, a_pass, *body);
+		return;
+	}
+
+	const auto depthMode = globals::game::shadowState->GetRuntimeData().depthStencilDepthMode;
+	if (depthMode != kTestEqual && depthMode != kTestWrite)
 		return;
 
 	const float distance = std::max(0.0f, geometry->worldBound.center.GetDistance(Util::GetEyePosition()) - geometry->worldBound.radius);
 	if (distance >= std::max(settings.FadeEnd, overrideFadeEnd) || !CanDrawShells(geometry))
 		return;
 
+	auto* skinInstance = geometry->GetGeometryRuntimeData().skinInstance.get();
 	const bool modelSpaceNormals = (state->modifiedVertexDescriptor & ModelSpaceNormalsFlag) != 0;
-	if (modelSpaceNormals && !geometry->GetGeometryRuntimeData().skinInstance)
+	if (modelSpaceNormals && !skinInstance)
 		return;
 
-	ShellData* data = nullptr;
-	auto* shell = FindShell(a_pass, data);
-	auto* shellView = shell && shell->rendererTexture ? shell->rendererTexture->resourceView : nullptr;
+	const auto lookup = FindShell(a_pass);
+	auto* data = lookup.data;
+	auto* shellView = lookup.shell && lookup.shell->rendererTexture ? lookup.shell->rendererTexture->resourceView : nullptr;
 	if (!shellView || !data)
 		return;
 
@@ -588,34 +632,85 @@ void FurShells::BeginPass(RE::BSShader* a_shader, RE::BSRenderPass* a_pass)
 	if (!vertexShader || !pixelShader || !depthShader)
 		return;
 
-	if (!replaying && !deferralClosed && settings.HideCoveredFur && state->inWorld && currentPass.pass == a_pass) {
+	const bool defer = !replaying && !deferralClosed && settings.HideCoveredFur && state->inWorld && currentPass.pass == a_pass;
+
+	PerPass perPass{ values.Length, static_cast<float>(shells), values.Droop, values.RootThreshold, values.TipThreshold, values.RootDarkening, values.ShellColor, 0.0f };
+	if (skinInstance && settings.OverlayFur)
+		RecordFrameBody(skinInstance, geometry, perPass, shellView, normalView, defer || replaying);
+
+	if (defer) {
 		deferredPasses.push_back(currentPass);
 		return;
 	}
 
-	const PerPass perPass{ values.Length, static_cast<float>(shells), values.Droop, values.RootThreshold, values.TipThreshold, values.RootDarkening, values.ShellColor, replaying && rootTest ? 1.0f : 0.0f };
-	if (std::memcmp(&perPass, &lastPerPass, sizeof(PerPass)) != 0) {
-		perPassCB->Update(perPass);
-		lastPerPass = perPass;
-	}
-
+	perPass.RootTest = replaying && rootTest ? 1.0f : 0.0f;
+	furVertexShader = reinterpret_cast<ID3D11VertexShader*>(vertexShader->shader);
 	furPixelShader = reinterpret_cast<ID3D11PixelShader*>(pixelShader->shader);
 	depthPixelShader = reinterpret_cast<ID3D11PixelShader*>(depthShader->shader);
+	BindPass(perPass, shellView, normalView);
+}
+
+void FurShells::BeginOverlayPass(RE::BSShader* a_shader, RE::BSRenderPass* a_pass, const FrameBody& a_body)
+{
+	const auto lookup = FindShell(a_pass);
+	if (!lookup.resolved || lookup.emptyOverlay || static_cast<RE::BSLightingShaderMaterialBase*>(a_pass->shaderProperty->material)->materialAlpha <= 0.0f)
+		return;
+
+	auto* state = globals::state;
+	const bool modelSpaceNormals = (state->modifiedVertexDescriptor & ModelSpaceNormalsFlag) != 0;
+	if (modelSpaceNormals != static_cast<bool>(a_body.normalView))
+		return;
+
+	auto* shaderCache = globals::shaderCache;
+	auto* vertexShader = shaderCache->GetVertexShader(*a_shader, state->modifiedVertexDescriptor | FurFlag);
+	auto* pixelShader = shaderCache->GetPixelShader(*a_shader, state->modifiedPixelDescriptor | FurFlag);
+	if (!vertexShader || !pixelShader)
+		return;
+
+	if (!replaying && !deferralClosed && a_body.deferred) {
+		if (currentPass.pass == a_pass)
+			deferredOverlayPasses.push_back(currentPass);
+		return;
+	}
+
+	PerPass perPass = a_body.perPass;
+	perPass.ShellColor = 0.0f;
+	perPass.RootTest = a_body.deferred && rootTest ? 1.0f : 0.0f;
+	if (perPass.RootTest > 0.0f) {
+		ID3D11ShaderResourceView* view = depthCopyView.get();
+		globals::d3d::context->PSSetShaderResources(DepthTextureSlot, 1, &view);
+	}
+
+	furVertexShader = reinterpret_cast<ID3D11VertexShader*>(vertexShader->shader);
+	furPixelShader = reinterpret_cast<ID3D11PixelShader*>(pixelShader->shader);
+	overlayPass = true;
+	BindPass(perPass, a_body.shellView.get(), a_body.normalView.get());
+}
+
+void FurShells::BindPass(const PerPass& a_perPass, ID3D11ShaderResourceView* a_shellView, ID3D11ShaderResourceView* a_normalView)
+{
+	if (std::memcmp(&a_perPass, &lastPerPass, sizeof(PerPass)) != 0) {
+		perPassCB->Update(a_perPass);
+		lastPerPass = a_perPass;
+	}
 
 	auto* context = globals::d3d::context;
 	context->VSGetShader(savedVertexShader.put(), nullptr, nullptr);
 	context->PSGetShader(savedPixelShader.put(), nullptr, nullptr);
-	context->VSSetShader(reinterpret_cast<ID3D11VertexShader*>(vertexShader->shader), nullptr, 0);
-	context->PSSetShader(furPixelShader, nullptr, 0);
+	if (!overlayPass) {
+		context->VSSetShader(furVertexShader, nullptr, 0);
+		context->PSSetShader(furPixelShader, nullptr, 0);
+	}
 
 	ID3D11Buffer* buffer = perPassCB->CB();
 	context->VSSetConstantBuffers(PerPassSlot, 1, &buffer);
 	context->PSSetConstantBuffers(PerPassSlot, 1, &buffer);
-	context->PSSetShaderResources(ShellTextureSlot, 1, &shellView);
-	if (normalView)
-		context->VSSetShaderResources(NormalTextureSlot, 1, &normalView);
+	context->PSSetShaderResources(ShellTextureSlot, 1, &a_shellView);
+	if (a_normalView)
+		context->VSSetShaderResources(NormalTextureSlot, 1, &a_normalView);
 
-	instanceCount = replaying ? shells : shells + 1;
+	const auto shellInstances = static_cast<uint32_t>(a_perPass.ShellCount);
+	instanceCount = overlayPass || replaying ? shellInstances : shellInstances + 1;
 	++passCount;
 }
 
@@ -624,6 +719,7 @@ void FurShells::EndPass()
 	if (instanceCount == 0)
 		return;
 	instanceCount = 0;
+	overlayPass = false;
 
 	auto* context = globals::d3d::context;
 	context->VSSetShader(savedVertexShader.get(), nullptr, 0);
@@ -644,6 +740,11 @@ const FurShells::DepthStates* FurShells::GetDepthStates(ID3D11DepthStencilState*
 
 		D3D11_DEPTH_STENCIL_DESC desc;
 		a_source->GetDesc(&desc);
+
+		D3D11_DEPTH_STENCIL_DESC overlayDesc = desc;
+		overlayDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+		overlayDesc.StencilWriteMask = 0;
+
 		desc.DepthEnable = TRUE;
 		desc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
 		desc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
@@ -652,9 +753,10 @@ const FurShells::DepthStates* FurShells::GetDepthStates(ID3D11DepthStencilState*
 		if (SUCCEEDED(device->CreateDepthStencilState(&desc, states.prepass.put()))) {
 			desc.DepthFunc = D3D11_COMPARISON_EQUAL;
 			desc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
-			if (SUCCEEDED(device->CreateDepthStencilState(&desc, states.shade.put()))) {
+			if (SUCCEEDED(device->CreateDepthStencilState(&desc, states.shade.put())) && SUCCEEDED(device->CreateDepthStencilState(&overlayDesc, states.overlay.put()))) {
 				Util::SetResourceName(states.prepass.get(), "FurShells::PrepassDepthState");
 				Util::SetResourceName(states.shade.get(), "FurShells::ShadeDepthState");
+				Util::SetResourceName(states.overlay.get(), "FurShells::OverlayDepthState");
 			} else {
 				states.prepass = nullptr;
 			}
@@ -682,6 +784,17 @@ bool FurShells::DrawShells(UINT a_indexCount, UINT a_startIndexLocation, INT a_b
 	const auto* states = GetDepthStates(depthState.get());
 	if (!states) {
 		EndPass();
+		return replaying;
+	}
+
+	if (overlayPass) {
+		context->OMSetDepthStencilState(states->overlay.get(), stencilRef);
+		context->VSSetShader(furVertexShader, nullptr, 0);
+		context->PSSetShader(furPixelShader, nullptr, 0);
+		context->DrawIndexedInstanced(a_indexCount, instanceCount, a_startIndexLocation, a_baseVertexLocation, 0);
+		context->VSSetShader(savedVertexShader.get(), nullptr, 0);
+		context->PSSetShader(savedPixelShader.get(), nullptr, 0);
+		context->OMSetDepthStencilState(depthState.get(), stencilRef);
 		return replaying;
 	}
 
@@ -819,8 +932,11 @@ void FurShells::RenderDeferredShells()
 	replaying = true;
 	for (const auto& deferred : deferredPasses)
 		Hooks::BSBatchRenderer_RenderPassImmediately::func(deferred.pass, deferred.technique, deferred.alphaTest, deferred.renderFlags);
+	for (const auto& deferred : deferredOverlayPasses)
+		Hooks::BSBatchRenderer_RenderPassImmediately::func(deferred.pass, deferred.technique, deferred.alphaTest, deferred.renderFlags);
 	replaying = false;
 	deferredPasses.clear();
+	deferredOverlayPasses.clear();
 
 	shadowState.alphaBlendMode = alphaBlendMode;
 	shadowState.alphaBlendWriteMode = alphaBlendWriteMode;

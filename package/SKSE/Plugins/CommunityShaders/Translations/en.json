@@ -950,6 +950,8 @@
     "feature.fur_shells.length": "Length",
     "feature.fur_shells.length_tooltip": "Fur length in game units.",
     "feature.fur_shells.name": "Fur Shells",
+    "feature.fur_shells.overlay_fur": "Show Overlays On Fur",
+    "feature.fur_shells.overlay_fur_tooltip": "Carries RaceMenu overlays such as tattoos, body paint and fur patterns up through the fur, so they color it instead of staying hidden under it. Each overlay in use draws the fur once more.",
     "feature.fur_shells.override_active": "This texture uses its own values.",
     "feature.fur_shells.override_enabled": "Enabled",
     "feature.fur_shells.override_enabled_tooltip": "Turn off to stop fur growing on meshes that use this shell texture.",
