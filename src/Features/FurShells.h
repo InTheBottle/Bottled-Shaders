@@ -31,6 +31,20 @@ struct FurShells : Feature
 		float FadeEnd = 2500.0f;
 	} settings;
 
+	struct ShellOverride
+	{
+		bool Enabled = true;
+		uint32_t ShellCount = 12;
+		float Length = 1.2f;
+		float Droop = 0.15f;
+		float RootThreshold = 1.0f;
+		float TipThreshold = 1.0f;
+		float RootDarkening = 0.6f;
+		float ShellColor = 1.0f;
+		float FadeStart = 700.0f;
+		float FadeEnd = 2500.0f;
+	};
+
 	virtual void DrawSettings() override;
 	virtual void LoadSettings(json& o_json) override;
 	virtual void SaveSettings(json& o_json) override;
@@ -61,10 +75,18 @@ private:
 	};
 	static_assert(sizeof(PerPass) == 32);
 
+	struct ShellData
+	{
+		ShellOverride values;
+		bool overridden = false;
+		bool skin = false;
+	};
+
 	struct Entry
 	{
 		RE::BSFixedString name;
 		RE::NiSourceTexturePtr shell;
+		ShellData* data = nullptr;
 	};
 
 	struct DepthStates
@@ -74,8 +96,21 @@ private:
 		winrt::com_ptr<ID3D11DepthStencilState> shade;
 	};
 
-	RE::NiSourceTexture* FindShell(RE::BSRenderPass* a_pass);
+	RE::NiSourceTexture* FindShell(RE::BSRenderPass* a_pass, ShellData*& a_data);
 	const DepthStates* GetDepthStates(ID3D11DepthStencilState* a_source);
+	ShellOverride GetGlobalValues(bool a_skin) const;
+	void LoadOverride(const std::string& a_shellPath, ShellData& a_data);
+	bool SaveOverride(const std::string& a_shellPath, const ShellOverride& a_values, std::string& a_outputPath);
+	void UpdateOverrideFadeEnd();
+	void DrawOverrideSettings();
+
+	std::unordered_map<std::string, ShellData> shellTextures;
+	std::string selectedShellName;
+	ShellData* selectedShell = nullptr;
+	ShellData* lastData = nullptr;
+	std::string overrideStatus;
+	bool overrideStatusFailed = false;
+	float overrideFadeEnd = 0.0f;
 
 	eastl::unique_ptr<ConstantBuffer> perPassCB;
 	winrt::com_ptr<ID3D11BlendState> noColorWrite;
