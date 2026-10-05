@@ -667,6 +667,9 @@ void Deferred::Hooks::Main_RenderWorld::thunk(bool a1)
 	state->inWorld = true;
 	func(a1);
 
+	if (globals::features::upscaling.loaded)
+		globals::features::upscaling.CaptureWorldCamera();
+
 	state->inWorld = false;
 	state->permutationData.ExtraShaderDescriptor &= ~static_cast<uint32_t>(State::ExtraShaderDescriptors::InWorld);
 };

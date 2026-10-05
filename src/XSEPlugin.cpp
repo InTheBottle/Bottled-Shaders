@@ -157,6 +157,15 @@ bool Load()
 		stl::report_and_fail("Old version of PrivateProfileRedirector detected, 0.6.2+ required if using it."sv);
 	}
 
+	Streamline::EnsureDriverProfileAllowsDLSSG();
+
+	if (Streamline::IsSmoothMotionEnabledForProfile())
+		logger::warn(
+			"NVIDIA Smooth Motion is enabled for this profile. It is known to crash "
+			"alongside D3D11 hooking mods (including this plugin). Disable Smooth "
+			"Motion for Skyrim Special Edition in the NVIDIA App if you experience "
+			"crashes at startup.");
+
 	auto messaging = SKSE::GetMessagingInterface();
 	messaging->RegisterListener("SKSE", MessageHandler);
 
