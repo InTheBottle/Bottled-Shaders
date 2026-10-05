@@ -23,7 +23,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	RootDarkening,
 	ShellColor,
 	FadeStart,
-	FadeEnd)
+	FadeEnd,
+	HideCoveredFur)
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	FurShells::ShellOverride,
@@ -48,6 +49,7 @@ namespace
 	constexpr uint32_t MaxShells = 32;
 	constexpr uint32_t ShellTextureSlot = 122;
 	constexpr uint32_t NormalTextureSlot = 122;
+	constexpr uint32_t DepthTextureSlot = 123;
 	constexpr uint32_t PerPassSlot = 13;
 	constexpr uint32_t ResolvesPerFrame = 16;
 	constexpr size_t MaxEntries = 8192;
@@ -112,6 +114,22 @@ namespace
 		if (!path.starts_with("textures\\"))
 			path.insert(0, "textures\\");
 		return path;
+	}
+
+	DXGI_FORMAT GetDepthViewFormat(DXGI_FORMAT a_format)
+	{
+		switch (a_format) {
+		case DXGI_FORMAT_R24G8_TYPELESS:
+			return DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+		case DXGI_FORMAT_R32G8X24_TYPELESS:
+			return DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+		case DXGI_FORMAT_R32_TYPELESS:
+			return DXGI_FORMAT_R32_FLOAT;
+		case DXGI_FORMAT_R16_TYPELESS:
+			return DXGI_FORMAT_R16_UNORM;
+		default:
+			return DXGI_FORMAT_UNKNOWN;
+		}
 	}
 
 	std::string GetOverridePath(const std::string& a_shellPath)
@@ -222,6 +240,10 @@ void FurShells::DrawSettings()
 	ImGui::SliderFloat(T(TKEY("fade_end"), "Fade End"), &settings.FadeEnd, 0.0f, 8000.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp);
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::TextWrapped("%s", T(TKEY("fade_tooltip"), "Shells thin out between these distances and stop past the end."));
+
+	ImGui::Checkbox(T(TKEY("hide_covered_fur"), "Hide Fur Under Clothing"), &settings.HideCoveredFur);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextWrapped("%s", T(TKEY("hide_covered_fur_tooltip"), "Skips fur whose roots are covered by clothing, armor or anything else in front of them, so it stops poking through. Works in the world view, not in first person or menus."));
 
 	ImGui::Text("%s: %u", T(TKEY("fur_passes"), "Fur passes last frame"), lastPassCount);
 
@@ -402,6 +424,8 @@ void FurShells::Reset()
 	lastDiffuse = nullptr;
 	lastShell = nullptr;
 	lastData = nullptr;
+	deferredPasses.clear();
+	deferralClosed = false;
 }
 
 void FurShells::GenerateShaderPermutations(RE::BSShader* a_shader)
@@ -564,7 +588,12 @@ void FurShells::BeginPass(RE::BSShader* a_shader, RE::BSRenderPass* a_pass)
 	if (!vertexShader || !pixelShader || !depthShader)
 		return;
 
-	const PerPass perPass{ values.Length, static_cast<float>(shells), values.Droop, values.RootThreshold, values.TipThreshold, values.RootDarkening, values.ShellColor, 0.0f };
+	if (!replaying && !deferralClosed && settings.HideCoveredFur && state->inWorld && currentPass.pass == a_pass) {
+		deferredPasses.push_back(currentPass);
+		return;
+	}
+
+	const PerPass perPass{ values.Length, static_cast<float>(shells), values.Droop, values.RootThreshold, values.TipThreshold, values.RootDarkening, values.ShellColor, replaying && rootTest ? 1.0f : 0.0f };
 	if (std::memcmp(&perPass, &lastPerPass, sizeof(PerPass)) != 0) {
 		perPassCB->Update(perPass);
 		lastPerPass = perPass;
@@ -586,7 +615,7 @@ void FurShells::BeginPass(RE::BSShader* a_shader, RE::BSRenderPass* a_pass)
 	if (normalView)
 		context->VSSetShaderResources(NormalTextureSlot, 1, &normalView);
 
-	instanceCount = shells + 1;
+	instanceCount = replaying ? shells : shells + 1;
 	++passCount;
 }
 
@@ -641,6 +670,9 @@ const FurShells::DepthStates* FurShells::GetDepthStates(ID3D11DepthStencilState*
 
 bool FurShells::DrawShells(UINT a_indexCount, UINT a_startIndexLocation, INT a_baseVertexLocation)
 {
+	if (instanceCount == 0)
+		return replaying;
+
 	auto* context = globals::d3d::context;
 
 	winrt::com_ptr<ID3D11DepthStencilState> depthState;
@@ -650,7 +682,7 @@ bool FurShells::DrawShells(UINT a_indexCount, UINT a_startIndexLocation, INT a_b
 	const auto* states = GetDepthStates(depthState.get());
 	if (!states) {
 		EndPass();
-		return false;
+		return replaying;
 	}
 
 	winrt::com_ptr<ID3D11BlendState> blendState;
@@ -699,12 +731,106 @@ struct FurShells::Hooks
 		static void thunk(ID3D11DeviceContext* a_context, UINT a_indexCount, UINT a_startIndexLocation, INT a_baseVertexLocation)
 		{
 			auto& furShells = globals::features::furShells;
-			if (furShells.GetInstanceCount() <= 1 || a_context != globals::d3d::context || !furShells.DrawShells(a_indexCount, a_startIndexLocation, a_baseVertexLocation))
+			if (!furShells.IsDrawing() || a_context != globals::d3d::context || !furShells.DrawShells(a_indexCount, a_startIndexLocation, a_baseVertexLocation))
 				func(a_context, a_indexCount, a_startIndexLocation, a_baseVertexLocation);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
+
+	struct BSBatchRenderer_RenderPassImmediately
+	{
+		static void thunk(RE::BSRenderPass* a_pass, uint32_t a_technique, bool a_alphaTest, uint32_t a_renderFlags)
+		{
+			auto& furShells = globals::features::furShells;
+			furShells.currentPass = { a_pass, a_technique, a_alphaTest, a_renderFlags };
+			func(a_pass, a_technique, a_alphaTest, a_renderFlags);
+			furShells.currentPass.pass = nullptr;
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
 };
+
+bool FurShells::CopySceneDepth()
+{
+	auto* texture = globals::game::renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN].texture;
+	if (!texture || depthCopyFailed)
+		return false;
+
+	D3D11_TEXTURE2D_DESC desc{};
+	texture->GetDesc(&desc);
+
+	D3D11_TEXTURE2D_DESC copyDesc{};
+	if (depthCopy)
+		depthCopy->GetDesc(&copyDesc);
+
+	if (!depthCopyView || copyDesc.Width != desc.Width || copyDesc.Height != desc.Height || copyDesc.Format != desc.Format) {
+		depthCopy = nullptr;
+		depthCopyView = nullptr;
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC viewDesc{};
+		viewDesc.Format = GetDepthViewFormat(desc.Format);
+		viewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		viewDesc.Texture2D.MipLevels = 1;
+
+		auto* device = globals::d3d::device;
+		if (viewDesc.Format == DXGI_FORMAT_UNKNOWN || desc.SampleDesc.Count != 1 || FAILED(device->CreateTexture2D(&desc, nullptr, depthCopy.put())) || FAILED(device->CreateShaderResourceView(depthCopy.get(), &viewDesc, depthCopyView.put()))) {
+			depthCopy = nullptr;
+			depthCopyView = nullptr;
+			depthCopyFailed = true;
+			logger::warn("[Fur Shells] Failed to create depth copy, fur under clothing stays visible");
+			return false;
+		}
+		Util::SetResourceName(depthCopy.get(), "FurShells::DepthCopy");
+		Util::SetResourceName(depthCopyView.get(), "FurShells::DepthCopy SRV");
+	}
+
+	globals::d3d::context->CopyResource(depthCopy.get(), texture);
+	return true;
+}
+
+void FurShells::RenderDeferredShells()
+{
+	deferralClosed = true;
+	if (deferredPasses.empty())
+		return;
+
+	auto* state = globals::state;
+	if (state->frameAnnotations)
+		state->BeginPerfEvent("Fur Shells - Deferred Shells");
+
+	rootTest = CopySceneDepth();
+	if (rootTest) {
+		ID3D11ShaderResourceView* view = depthCopyView.get();
+		globals::d3d::context->PSSetShaderResources(DepthTextureSlot, 1, &view);
+	}
+
+	auto& shadowState = globals::game::shadowState->GetRuntimeData();
+	auto* stateUpdateFlags = globals::game::stateUpdateFlags;
+	const auto alphaBlendMode = shadowState.alphaBlendMode;
+	const auto alphaBlendWriteMode = shadowState.alphaBlendWriteMode;
+	const auto depthMode = shadowState.depthStencilDepthMode;
+
+	shadowState.alphaBlendMode = 0;
+	shadowState.alphaBlendWriteMode = 1;
+	shadowState.depthStencilDepthMode = RE::BSGraphics::DepthStencilDepthMode::kTestEqual;
+	stateUpdateFlags->set(RE::BSGraphics::ShaderFlags::DIRTY_ALPHA_BLEND);
+	stateUpdateFlags->set(RE::BSGraphics::ShaderFlags::DIRTY_DEPTH_MODE);
+
+	replaying = true;
+	for (const auto& deferred : deferredPasses)
+		Hooks::BSBatchRenderer_RenderPassImmediately::func(deferred.pass, deferred.technique, deferred.alphaTest, deferred.renderFlags);
+	replaying = false;
+	deferredPasses.clear();
+
+	shadowState.alphaBlendMode = alphaBlendMode;
+	shadowState.alphaBlendWriteMode = alphaBlendWriteMode;
+	shadowState.depthStencilDepthMode = depthMode;
+	stateUpdateFlags->set(RE::BSGraphics::ShaderFlags::DIRTY_ALPHA_BLEND);
+	stateUpdateFlags->set(RE::BSGraphics::ShaderFlags::DIRTY_DEPTH_MODE);
+
+	if (state->frameAnnotations)
+		state->EndPerfEvent();
+}
 
 void FurShells::SetupResources()
 {
@@ -737,6 +863,7 @@ void FurShells::PostPostLoad()
 {
 	stl::write_vfunc<0x6, Hooks::BSLightingShader_SetupGeometry>(RE::VTABLE_BSLightingShader[0]);
 	stl::write_vfunc<0x7, Hooks::BSLightingShader_RestoreGeometry>(RE::VTABLE_BSLightingShader[0]);
+	stl::write_thunk_call<Hooks::BSBatchRenderer_RenderPassImmediately>(REL::RelocationID(100852, 107642).address() + REL::Relocate(0x29E, 0x28F));
 	logger::info("[Fur Shells] Installed hooks");
 }
 

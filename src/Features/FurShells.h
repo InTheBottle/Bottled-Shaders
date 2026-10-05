@@ -29,6 +29,7 @@ struct FurShells : Feature
 		float ShellColor = 1.0f;
 		float FadeStart = 700.0f;
 		float FadeEnd = 2500.0f;
+		bool HideCoveredFur = true;
 	} settings;
 
 	struct ShellOverride
@@ -57,7 +58,8 @@ struct FurShells : Feature
 	void BeginPass(RE::BSShader* a_shader, RE::BSRenderPass* a_pass);
 	void EndPass();
 	bool DrawShells(UINT a_indexCount, UINT a_startIndexLocation, INT a_baseVertexLocation);
-	uint32_t GetInstanceCount() const { return instanceCount; }
+	void RenderDeferredShells();
+	bool IsDrawing() const { return instanceCount != 0 || replaying; }
 
 private:
 	struct Hooks;
@@ -71,9 +73,17 @@ private:
 		float TipThreshold;
 		float RootDarkening;
 		float ShellColor;
-		float Pad;
+		float RootTest;
 	};
 	static_assert(sizeof(PerPass) == 32);
+
+	struct DeferredPass
+	{
+		RE::BSRenderPass* pass = nullptr;
+		uint32_t technique = 0;
+		bool alphaTest = false;
+		uint32_t renderFlags = 0;
+	};
 
 	struct ShellData
 	{
@@ -103,6 +113,7 @@ private:
 	bool SaveOverride(const std::string& a_shellPath, const ShellOverride& a_values, std::string& a_outputPath);
 	void UpdateOverrideFadeEnd();
 	void DrawOverrideSettings();
+	bool CopySceneDepth();
 
 	std::unordered_map<std::string, ShellData> shellTextures;
 	std::string selectedShellName;
@@ -111,6 +122,15 @@ private:
 	std::string overrideStatus;
 	bool overrideStatusFailed = false;
 	float overrideFadeEnd = 0.0f;
+
+	DeferredPass currentPass;
+	std::vector<DeferredPass> deferredPasses;
+	winrt::com_ptr<ID3D11Texture2D> depthCopy;
+	winrt::com_ptr<ID3D11ShaderResourceView> depthCopyView;
+	bool depthCopyFailed = false;
+	bool deferralClosed = false;
+	bool replaying = false;
+	bool rootTest = false;
 
 	eastl::unique_ptr<ConstantBuffer> perPassCB;
 	winrt::com_ptr<ID3D11BlendState> noColorWrite;

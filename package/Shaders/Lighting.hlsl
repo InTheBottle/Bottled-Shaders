@@ -104,6 +104,7 @@ struct VS_OUTPUT
 	float3 ModelPosition: TEXCOORD12;
 #if defined(FUR_SHELLS)
 	nointerpolation float FurShell: TEXCOORD13;
+	float4 FurRoot: TEXCOORD14;
 #endif
 };
 #ifdef VSHADER
@@ -176,6 +177,7 @@ VS_OUTPUT main(VS_INPUT input)
 
 #	if defined(FUR_SHELLS)
 	float furShell = FurShells::GetShell(instanceID);
+	float4 furRootPosition = inputPosition;
 #		if defined(MODELSPACENORMALS)
 	float3 furNormal = FurShells::GetModelNormal(input.TexCoord0.xy * TexcoordOffset.zw + TexcoordOffset.xy);
 #		else
@@ -209,6 +211,7 @@ VS_OUTPUT main(VS_INPUT input)
 	float furDroop = FurShells::Droop * furShell * furShell;
 	worldPosition.z -= furDroop;
 	previousWorldPosition.z -= furDroop;
+	float4 furRootViewPos = mul(ViewProj, float4(mul(furRootPosition, transpose(worldMatrix)), 1));
 #		endif
 
 	float4 viewPos = mul(ViewProj, worldPosition);
@@ -223,6 +226,7 @@ VS_OUTPUT main(VS_INPUT input)
 	float furDroop = FurShells::Droop * furShell * furShell;
 	worldPosition.z -= furDroop;
 	previousWorldPosition.z -= furDroop;
+	float4 furRootViewPos = mul(modelView, furRootPosition);
 	viewPos -= furDroop * float4(ViewProj[0].z, ViewProj[1].z, ViewProj[2].z, ViewProj[3].z);
 #		endif
 #	endif  // SKINNED
@@ -327,6 +331,7 @@ VS_OUTPUT main(VS_INPUT input)
 
 #	if defined(FUR_SHELLS)
 	vsout.FurShell = furShell;
+	vsout.FurRoot = furRootViewPos;
 #	endif
 
 	return vsout;
@@ -1115,7 +1120,8 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 #	if defined(FUR_SHELLS)
 	float4 furSample = FurShells::TexShell.SampleBias(SampColorSampler, uv, SharedData::MipBias);
-	if (input.FurShell > 0.0 && furSample.w < lerp(FurShells::RootThreshold, FurShells::TipThreshold, input.FurShell))
+	bool furRootCovered = FurShells::IsRootCovered(input.FurRoot, fwidth(input.FurRoot.w));
+	if (input.FurShell > 0.0 && (furRootCovered || furSample.w < lerp(FurShells::RootThreshold, FurShells::TipThreshold, input.FurShell)))
 		discard;
 #	endif
 

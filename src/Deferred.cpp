@@ -8,6 +8,7 @@
 
 #include "Features/DynamicCubemaps.h"
 #include "Features/Effects11.h"
+#include "Features/FurShells.h"
 #include "Features/IBL.h"
 #include "Features/ReverseZ.h"
 #include "Features/ScreenSpaceGI.h"
@@ -691,6 +692,10 @@ void Deferred::Hooks::Main_RenderWorld_BlendedDecals::thunk(RE::BSShaderAccumula
 			terrainBlending.RenderTerrainBlendingPasses();
 		}
 	}
+
+	auto& furShells = globals::features::furShells;
+	if (furShells.loaded)
+		furShells.RenderDeferredShells();
 
 	// Deferred blended decals
 

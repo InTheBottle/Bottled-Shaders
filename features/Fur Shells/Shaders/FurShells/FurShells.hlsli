@@ -12,11 +12,20 @@ namespace FurShells
 		float TipThreshold;
 		float RootDarkening;
 		float ShellColor;
-		float Pad;
+		float RootTest;
 	};
 
 #if defined(PSHADER)
 	Texture2D<float4> TexShell : register(t122);
+	Texture2D<float4> TexDepth : register(t123);
+
+	bool IsRootCovered(float4 rootPosition, float rootSlope)
+	{
+		float2 uv = rootPosition.xy / rootPosition.w * float2(0.5, -0.5) + 0.5;
+		float sceneDepth = SharedData::GetScreenDepth(TexDepth.Load(SharedData::ConvertUVToSampleCoord(uv)).x);
+		float bias = 0.03 + rootSlope + 2e-8 * rootPosition.w * rootPosition.w;
+		return RootTest > 0.0 && sceneDepth < rootPosition.w - bias;
+	}
 #endif
 
 #if defined(VSHADER) && defined(MODELSPACENORMALS)
