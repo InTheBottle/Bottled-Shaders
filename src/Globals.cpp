@@ -30,6 +30,7 @@
 #include "Features/ProceduralSun.h"
 #include "Features/RemoteControl.h"
 #include "Features/RenderDoc.h"
+#include "Features/SceneCulling.h"
 #include "Features/ScreenSpaceGI.h"
 #include "Features/ScreenSpaceShadows.h"
 #include "Features/ScreenshotFeature.h"
@@ -42,6 +43,7 @@
 #include "Features/TerrainHelper.h"
 #include "Features/TerrainShadows.h"
 #include "Features/TerrainVariation.h"
+#include "Features/TextureStreaming.h"
 #include "Features/UnifiedWater.h"
 #include "Features/Upscaling.h"
 #include "Features/VanillaFresnel.h"
@@ -119,6 +121,8 @@ namespace globals
 		HairBacklighting hairBacklighting{};
 		FurShells furShells{};
 		LandscapeSeams landscapeSeams{};
+		SceneCulling sceneCulling{};
+		TextureStreaming textureStreaming{};
 
 		namespace llf
 		{

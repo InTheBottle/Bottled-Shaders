@@ -31,6 +31,7 @@
 #include "Features/PostProcessing.h"
 #include "Features/RemoteControl.h"
 #include "Features/RenderDoc.h"
+#include "Features/SceneCulling.h"
 #include "Features/ScreenSpaceGI.h"
 #include "Features/ScreenSpaceShadows.h"
 #include "Features/ScreenshotFeature.h"
@@ -43,6 +44,7 @@
 #include "Features/TerrainHelper.h"
 #include "Features/TerrainShadows.h"
 #include "Features/TerrainVariation.h"
+#include "Features/TextureStreaming.h"
 #include "Features/UnifiedWater.h"
 #include "Features/Upscaling.h"
 #include "Features/VanillaFresnel.h"
@@ -241,6 +243,8 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::footstepParticles,
 		&globals::features::hairBacklighting,
 		&globals::features::furShells,
+		&globals::features::sceneCulling,
+		&globals::features::textureStreaming,
 		&globals::features::landscapeSeams
 	};
 
