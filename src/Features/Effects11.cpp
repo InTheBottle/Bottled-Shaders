@@ -781,9 +781,67 @@ void Effects11::OverrideAmbientLighting(DirectionalAmbientColors& DirectionalAmb
 	}
 }
 
+void Effects11::DataLoaded()
+{
+	nightEyeImods.clear();
+	auto dataHandler = RE::TESDataHandler::GetSingleton();
+	if (!dataHandler)
+		return;
+	for (auto* setting : dataHandler->GetFormArray<RE::EffectSetting>()) {
+		if (setting && setting->HasArchetype(RE::EffectSetting::Archetype::kNightEye) && setting->data.imageSpaceMod)
+			nightEyeImods.insert(setting->data.imageSpaceMod);
+	}
+}
+
+bool Effects11::HasNightEyeEffect() const
+{
+	auto player = globals::game::player;
+	if (!player || !player->GetParentCell())
+		return false;
+	auto magicTarget = player->GetMagicTarget();
+	if (!magicTarget)
+		return false;
+	auto effects = magicTarget->GetActiveEffectList();
+	if (!effects)
+		return false;
+
+	using Flag = RE::ActiveEffect::Flag;
+	for (const auto* activeEffect : *effects) {
+		if (!activeEffect || activeEffect->flags.any(Flag::kInactive, Flag::kDispelled))
+			continue;
+		const auto* setting = activeEffect->GetBaseObject();
+		if (!setting)
+			continue;
+		if (setting->HasArchetype(RE::EffectSetting::Archetype::kNightEye))
+			return true;
+		if (setting->data.imageSpaceMod && nightEyeImods.contains(setting->data.imageSpaceMod))
+			return true;
+	}
+	return false;
+}
+
+void Effects11::UpdateNightEye()
+{
+	nightEye.active = HasNightEyeEffect();
+	const float target = nightEye.active ? 1.0f : 0.0f;
+
+	const auto& ids = EffectManager::GetSingleton().ids;
+	const float fadeTime = ids.nightEyeFadeTime != 0xFFFFFFFF ? SettingManager::GetSingleton().GetValue<float>(ids.nightEyeFadeTime) : 0.0f;
+	const float delta = globals::game::deltaTime ? *globals::game::deltaTime : 0.0f;
+	if (fadeTime <= 0.0f) {
+		nightEye.factor = target;
+		return;
+	}
+	if (delta <= 0.0f)
+		return;
+	const float step = delta / fadeTime;
+	nightEye.factor = std::clamp(nightEye.factor + std::clamp(target - nightEye.factor, -step, step), 0.0f, 1.0f);
+}
+
 void Effects11::OnSkyUpdateColors(RE::Sky* a_sky)
 {
 	CheckCommonData();
+	UpdateNightEye();
 	if (enableEffect)
 		OverrideWeather(a_sky);
 }

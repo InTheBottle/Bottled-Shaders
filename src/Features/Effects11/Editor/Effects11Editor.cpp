@@ -81,6 +81,7 @@ namespace
 		{ "BLOOM", Group::Camera },
 		{ "LENS", Group::Camera },
 		{ "DEPTHOFFIELD", Group::Camera },
+		{ "NIGHTEYE", Group::Camera },
 		{ "WATER", Group::WaterAndRain },
 		{ "RAIN", Group::WaterAndRain },
 	};
@@ -164,6 +165,8 @@ namespace
 			return { T("feature.effects11.category.lens", "Lens"), T("feature.effects11.category.lens_desc", "Overall lens effect amount handed to the shaders.") };
 		if (a_category == "DEPTHOFFIELD")
 			return { T("feature.effects11.category.depthoffield", "Depth of Field"), T("feature.effects11.category.depthoffield_desc", "How quickly focus and aperture follow the scene.") };
+		if (a_category == "NIGHTEYE")
+			return { T("feature.effects11.category.nighteye", "Night Eye"), T("feature.effects11.category.nighteye_desc", "Tint, exposure and contrast applied while a Night Eye power (Khajiit, vampire, werewolf or modded) is active on the player.") };
 		if (a_category == "WATER")
 			return { T("feature.effects11.category.water", "Water"), T("feature.effects11.category.water_desc", "Waves, color, reflections and lighting of water.") };
 		if (a_category == "RAIN")
@@ -833,6 +836,12 @@ void Effects11Editor::DrawCategory(const std::string& a_category, const char* a_
 	if (!usable) {
 		const auto unavailable = I18n::GetSingleton()->Format(TKEY("rain_unavailable"), { { "reason", raindropStatus } }, "Rain is unavailable: {reason}");
 		Util::Text::WrappedWarning("%s", unavailable.c_str());
+	}
+
+	if (a_category == "NIGHTEYE") {
+		if (EffectManager::GetSingleton().enbEffect.PresetHandlesNightEye())
+			Util::Text::WrappedInfo("%s", T(TKEY("nighteye_preset"), "This preset's enbeffect.fx handles Night Eye itself (KNActive), so these values are not applied."));
+		Util::TextUnformattedDisabled(globals::features::effects11.IsNightEyeActive() ? T(TKEY("nighteye_active"), "A Night Eye effect is active on the player.") : T(TKEY("nighteye_inactive"), "No Night Eye effect is active on the player."));
 	}
 
 	if (isParticle)
