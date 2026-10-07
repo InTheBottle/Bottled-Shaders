@@ -271,7 +271,8 @@ public:
 		NoSnow = 1 << 8,
 		NoFoliageTint = 1 << 9,
 		IsAurora = 1 << 10,
-		IsMoon = 1 << 11
+		IsMoon = 1 << 11,
+		NoSkyScattering = 1 << 12
 	};
 
 	/** @brief Bitflags describing extra feature-specific properties related to terrain displacement and material models. */
