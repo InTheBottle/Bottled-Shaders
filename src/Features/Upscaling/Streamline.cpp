@@ -417,13 +417,18 @@ bool Streamline::IsSmoothMotionEnabledForProfile()
  */
 bool Streamline::EnsureFrameToken()
 {
+	return globals::state && EnsureFrameToken(globals::state->frameCount);
+}
+
+bool Streamline::EnsureFrameToken(uint32_t a_frameIndex)
+{
 	if (!initialized || !slGetNewFrameToken || !globals::state)
 		return false;
 
-	if (!frameChecker.IsNewFrame())
+	if (!frameChecker.IsNewFrame(a_frameIndex))
 		return frameToken != nullptr;
 
-	if (SL_FAILED(result, slGetNewFrameToken(frameToken, &globals::state->frameCount))) {
+	if (SL_FAILED(result, slGetNewFrameToken(frameToken, &a_frameIndex))) {
 		logger::error("[Streamline {}] Could not get frame token: {}", instanceTag, magic_enum::enum_name(result));
 		frameToken = nullptr;
 		return false;
@@ -777,7 +782,7 @@ void Streamline::UpdateReflex()
 	if (lastReflexSleepFrame == currentFrame)
 		return;
 
-	if (!EnsureFrameToken())
+	if (!EnsureFrameToken(renderAPI == sl::RenderAPI::eD3D12 ? currentFrame + 1 : currentFrame))
 		return;
 
 	lastReflexSleepFrame = currentFrame;
@@ -795,9 +800,7 @@ void Streamline::UpdateReflex()
 
 void Streamline::EmitPCLMarker(sl::PCLMarker a_marker)
 {
-	if (!initialized || !featurePCL || !slPCLSetMarker)
-		return;
-	if (!EnsureFrameToken())
+	if (!initialized || !featurePCL || !slPCLSetMarker || !frameToken)
 		return;
 
 	if (SL_FAILED(result, slPCLSetMarker(a_marker, *frameToken))) {

@@ -152,6 +152,8 @@ public:
 
 	/** @brief Acquires a new frame token from Streamline for the current frame. */
 	bool EnsureFrameToken();
+	/** @brief Acquires the frame token for an explicit frame index; reuses the cached token when the index is unchanged. */
+	bool EnsureFrameToken(uint32_t a_frameIndex);
 	/**
 	 * @brief Sets camera and jitter constants on the Streamline viewport for the current frame.
 	 * @param p_viewport The viewport handle to configure.

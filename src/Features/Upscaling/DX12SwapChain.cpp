@@ -281,16 +281,17 @@ HRESULT DX12SwapChain::ResizeBuffers(UINT bufferCount, UINT width, UINT height, 
 	if (!swapChain)
 		return DXGI_ERROR_INVALID_CALL;
 
-	// DXGI defines zero as "preserve the current buffer count". FidelityFX's
-	// frame-generation swap-chain stores the supplied value verbatim and uses it
-	// as its replacement-buffer count, so forwarding zero leaves it with no valid
-	// source resource at the next Present.
-	const UINT effectiveBufferCount = bufferCount ? bufferCount : swapChainDesc.BufferCount;
-	if (!bufferCount)
-		logger::warn("[FidelityFX] Normalized ResizeBuffers count from 0 to {} to preserve replacement buffers", effectiveBufferCount);
-	if (effectiveBufferCount != backBufferCount) {
-		logger::error("[DX12SwapChain] Rejected unsupported resize buffer count change {} -> {}", backBufferCount, effectiveBufferCount);
-		return DXGI_ERROR_UNSUPPORTED;
+	// FidelityFX's frame-generation swap-chain stores the supplied value verbatim
+	// and uses it as its replacement-buffer count, so zero (DXGI's "preserve")
+	// would leave it with no valid source resource at the next Present. The caller's
+	// count describes its own D3D11 chain, not this one, so the chain keeps its own.
+	const UINT effectiveBufferCount = backBufferCount;
+	if (bufferCount && bufferCount != backBufferCount) {
+		static bool loggedCountOverride = false;
+		if (!loggedCountOverride) {
+			loggedCountOverride = true;
+			logger::info("[DX12SwapChain] ResizeBuffers requested {} buffers; keeping {}", bufferCount, backBufferCount);
+		}
 	}
 
 	// These references are to FidelityFX replacement buffers. They must not keep
@@ -477,6 +478,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 HRESULT DX12SwapChain::GetDevice(REFIID uuid, void** ppDevice)
 {
 	if (uuid == __uuidof(ID3D11Device) || uuid == __uuidof(ID3D11Device1) || uuid == __uuidof(ID3D11Device2) || uuid == __uuidof(ID3D11Device3) || uuid == __uuidof(ID3D11Device4) || uuid == __uuidof(ID3D11Device5)) {
+		d3d11Device->AddRef();
 		*ppDevice = d3d11Device.get();
 		return S_OK;
 	}
@@ -681,10 +683,16 @@ DXGISwapChainProxy::DXGISwapChainProxy(IDXGISwapChain4* a_swapChain)
 /****IUknown****/
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::QueryInterface(REFIID riid, void** ppvObj)
 {
-	auto ret = swapChain->QueryInterface(riid, ppvObj);
-	if (*ppvObj)
-		*ppvObj = this;
-	return ret;
+	if (!ppvObj)
+		return E_POINTER;
+
+	*ppvObj = nullptr;
+	if (riid != __uuidof(IUnknown) && riid != __uuidof(IDXGIObject) && riid != __uuidof(IDXGIDeviceSubObject) && riid != __uuidof(IDXGISwapChain))
+		return E_NOINTERFACE;
+
+	AddRef();
+	*ppvObj = this;
+	return S_OK;
 }
 
 ULONG STDMETHODCALLTYPE DXGISwapChainProxy::AddRef()

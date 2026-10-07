@@ -295,8 +295,6 @@ bool Effect::Apply()
 
 void Effect::Unload()
 {
-	effect = nullptr;
-
 	techniques.clear();
 	variables.clear();
 	customTextureCache.clear();
@@ -312,6 +310,8 @@ void Effect::Unload()
 	sourceOrderMap.clear();
 
 	ClearVariableCache();
+
+	effect = nullptr;
 
 	filePresent = false;
 	errors.clear();

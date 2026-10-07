@@ -242,7 +242,7 @@ Skylighting::SkylightingCB Skylighting::GetCommonBufferData(bool a_inWorld)
 
 	return {
 		.OcclusionViewProj = OcclusionTransform,
-		.OcclusionDir = OcclusionDir,
+		.OcclusionDir = float4{ OcclusionDir.x, OcclusionDir.y, OcclusionDir.z, occlusionFresh ? 1.0f : 0.0f },
 		.PosOffset = cellOrigin - eyePos,
 		.ArrayOrigin = {
 			((int)cellID.x - probeArrayDims[0] / 2) % probeArrayDims[0],
@@ -301,6 +301,7 @@ void Skylighting::Prepass()
 			context->Dispatch((probeArrayDims[0] + 7u) >> 3, (probeArrayDims[1] + 7u) >> 3, probeArrayDims[2]);
 			globals::profiler->EndPass();
 		}
+		occlusionFresh = false;
 
 		// Reset
 		{
@@ -668,7 +669,7 @@ void Skylighting::RenderOcclusion()
 					}
 
 					// disc transformation
-					vPoint.x = sqrt(vPoint.x * sin(settings.MaxZenith));
+					vPoint.x = sqrt(vPoint.x) * sin(settings.MaxZenith);
 					vPoint.y *= 6.28318530718f;
 
 					vPoint = { vPoint.x * cos(vPoint.y), vPoint.x * sin(vPoint.y) };
@@ -697,6 +698,7 @@ void Skylighting::RenderOcclusion()
 
 				OcclusionDir = -float4{ PrecipitationShaderDirectionF.x, PrecipitationShaderDirectionF.y, PrecipitationShaderDirectionF.z, 0 };
 				OcclusionTransform = ((RE::BSParticleShaderRainEmitter*)rain)->occlusionProjection;
+				occlusionFresh = true;
 
 				delete rain;
 

@@ -111,6 +111,7 @@ public:
 	float probeGridBottomZ = -FLT_MAX;
 	REX::W32::XMFLOAT4X4 OcclusionTransform;
 	float4 OcclusionDir;
+	bool occlusionFresh = false;
 	uint frameCount = 0;
 
 	static constexpr uint OcclusionConvergenceFrames = 16;
