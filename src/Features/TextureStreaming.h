@@ -18,7 +18,7 @@ struct TextureStreaming : Feature
 				T("feature.texture_streaming.key_feature_2", "VRAM budget mode: only kicks in above a usage threshold, largest savings first, refills when room frees up"),
 				T("feature.texture_streaming.key_feature_3", "Remembered sizes are passed to the DDS loader so the top mips are never read after a loading screen"),
 				T("feature.texture_streaming.key_feature_4", "RAM buffer for textures that go back and forth, so they do not hit the disk twice"),
-				T("feature.texture_streaming.key_feature_5", "UI, map, LOD, terrain, fonts and inventory previews are always full size") } };
+				T("feature.texture_streaming.key_feature_5", "UI, map, LOD, terrain, fonts, inventory previews and character skin, faces, hair and eyes are always full size") } };
 	}
 
 	struct Settings

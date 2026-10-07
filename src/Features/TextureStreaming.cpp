@@ -322,6 +322,7 @@ namespace
 		Probe probe = Probe::kNone;
 		bool eligible = false;
 		bool busy = false;
+		bool protect = false;
 		std::uint32_t passId = 0;
 		float passNeed = 0;
 		std::uint32_t lowPasses = 0;
@@ -835,6 +836,11 @@ namespace
 		return p;
 	}
 
+	bool IsCharacterTexturePath(std::string_view a_path) noexcept
+	{
+		return a_path.find("actors\\character\\") != std::string_view::npos || a_path.find("facegendata\\") != std::string_view::npos;
+	}
+
 	std::mutex g_sizeLock;
 	std::unordered_map<std::string, std::uint32_t> g_loadEdge;
 	std::unordered_set<std::string> g_neverReduce;
@@ -874,6 +880,15 @@ namespace
 		return g_loadEdge.contains(a_path);
 	}
 
+	void ProtectPath(const std::string& a_path)
+	{
+		if (a_path.empty())
+			return;
+		std::scoped_lock lock(g_sizeLock);
+		g_neverReduce.insert(a_path);
+		g_sizesDirty |= g_loadEdge.erase(a_path) > 0;
+	}
+
 	void LoadSizes()
 	{
 		const auto file = SizesFile();
@@ -888,7 +903,12 @@ namespace
 				continue;
 			const auto edge = static_cast<std::uint32_t>(std::strtoul(line.c_str(), nullptr, 10));
 			if (edge >= 64) {
-				g_loadEdge[line.substr(bar + 1)] = edge;
+				auto path = line.substr(bar + 1);
+				if (IsCharacterTexturePath(path)) {
+					g_sizesDirty = true;
+					continue;
+				}
+				g_loadEdge[std::move(path)] = edge;
 				++n;
 			}
 		}
@@ -929,6 +949,8 @@ namespace
 			return 0;
 		try {
 			const auto path = NormalizePath(src->name.c_str());
+			if (IsCharacterTexturePath(path))
+				return 0;
 			std::scoped_lock lock(g_sizeLock);
 			const auto it = g_loadEdge.find(path);
 			if (it == g_loadEdge.end())
@@ -1000,7 +1022,7 @@ namespace
 
 	std::uint32_t g_passId = 1;
 
-	void OnSeen(RE::NiSourceTexture* a_src, float a_needPx)
+	void OnSeen(RE::NiSourceTexture* a_src, float a_needPx, bool a_protect)
 	{
 		const auto r = a_src->rendererTexture;
 		if (!r || !r->texture)
@@ -1025,7 +1047,12 @@ namespace
 				              st.path.starts_with("textures\\") && st.path.ends_with(".dds") && !Excluded(st.path);
 				if (st.eligible && !st.busy && HasRememberedEdge(st.path))
 					QueueProbe(st, r);
+				a_protect |= IsCharacterTexturePath(st.path);
 			}
+		}
+		if (a_protect && !st.protect) {
+			st.protect = true;
+			ProtectPath(st.path);
 		}
 		st.lastSeen = Clock::now();
 		if (st.passId != g_passId) {
@@ -1038,7 +1065,9 @@ namespace
 		if (!st.hold)
 			st.hold.reset(a_src);
 		if (st.Reduced() && !st.busy && st.probe == Probe::kOk) {
-			if (WantedEdge(st, a_needPx / UpMargin()) > st.CurEdge())
+			if (st.protect)
+				QueueReload(st, r, st.FullEdge());
+			else if (WantedEdge(st, a_needPx / UpMargin()) > st.CurEdge())
 				QueueReload(st, r, UpTarget(WantedEdge(st, a_needPx), st.FullEdge()));
 		}
 	}
@@ -1060,7 +1089,7 @@ namespace
 		auto& st = it->second;
 		st.busy = false;
 		const auto r = a_job.r;
-		if (!a_job.src || a_job.src->rendererTexture != r || r->texture != st.res || !r->resourceView || !g_device || !g_context)
+		if (st.protect || !a_job.src || a_job.src->rendererTexture != r || r->texture != st.res || !r->resourceView || !g_device || !g_context)
 			return;
 		std::uint32_t drop = 0;
 		while ((st.CurEdge() >> (drop + 1)) >= a_job.targetEdge && drop + 1 < st.curMips)
@@ -1215,6 +1244,17 @@ namespace
 		}
 	}
 
+	bool SafeIsCharacterMaterial(RE::BSLightingShaderMaterialBase* a_material) noexcept
+	{
+		__try {
+			const auto feature = a_material->GetFeature();
+			return feature == RE::BSShaderMaterial::Feature::kFaceGen || feature == RE::BSShaderMaterial::Feature::kFaceGenRGBTint ||
+			       feature == RE::BSShaderMaterial::Feature::kHairTint || feature == RE::BSShaderMaterial::Feature::kEye;
+		} __except (1) {
+			return false;
+		}
+	}
+
 	void VisitGeometry(RE::BSGeometry* a_geom, float a_forceNeed)
 	{
 		const auto prop = a_geom->GetGeometryRuntimeData().shaderProperty.get();
@@ -1229,11 +1269,12 @@ namespace
 			const float dist = std::sqrt(dx * dx + dy * dy + dz * dz) - b.radius;
 			need = dist <= 1.0f ? 1.0e6f : 2.0f * b.radius / dist * g_pixelsPerUnit;
 		}
+		const bool protect = SafeIsCharacterMaterial(material);
 		RE::NiSourceTexture* textures[kMaxTextures]{};
 		const int n = SafeGather(material, textures);
 		for (int i = 0; i < n; ++i) {
 			if (textures[i])
-				OnSeen(textures[i], need);
+				OnSeen(textures[i], need, protect);
 		}
 	}
 
@@ -1406,9 +1447,9 @@ namespace
 					ChainBytes(st.fi, st.fullW, st.fullH, st.fullMips) - ChainBytes(st.fi, st.curW, st.curH, st.curMips) });
 			}
 			if (st.eligible && !st.busy) {
-				if (st.Reduced() && st.hold && st.probe == Probe::kOk && (!active || (seen && WantedEdge(st, st.passNeed / UpMargin()) > st.CurEdge()))) {
-					QueueReload(st, r, active ? UpTarget(WantedEdge(st, st.passNeed), st.FullEdge()) : st.FullEdge());
-				} else if (active && seen && pressure) {
+				if (st.Reduced() && st.hold && st.probe == Probe::kOk && (st.protect || !active || (seen && WantedEdge(st, st.passNeed / UpMargin()) > st.CurEdge()))) {
+					QueueReload(st, r, active && !st.protect ? UpTarget(WantedEdge(st, st.passNeed), st.FullEdge()) : st.FullEdge());
+				} else if (active && seen && pressure && !st.protect) {
 					const auto want = WantedEdge(st, st.passNeed);
 					if (want * 2 <= st.CurEdge() && now - st.lastReload >= kCooldown) {
 						if (st.probe == Probe::kNone) {
