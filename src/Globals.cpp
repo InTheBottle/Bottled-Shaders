@@ -30,7 +30,6 @@
 #include "Features/ProceduralSun.h"
 #include "Features/RemoteControl.h"
 #include "Features/RenderDoc.h"
-#include "Features/SceneCulling.h"
 #include "Features/ScreenSpaceGI.h"
 #include "Features/ScreenSpaceShadows.h"
 #include "Features/ScreenshotFeature.h"
@@ -121,7 +120,6 @@ namespace globals
 		HairBacklighting hairBacklighting{};
 		FurShells furShells{};
 		LandscapeSeams landscapeSeams{};
-		SceneCulling sceneCulling{};
 		TextureStreaming textureStreaming{};
 
 		namespace llf

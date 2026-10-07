@@ -50,7 +50,6 @@ struct FootstepParticles;
 struct HairBacklighting;
 struct FurShells;
 struct LandscapeSeams;
-struct SceneCulling;
 struct TextureStreaming;
 
 class State;
@@ -154,7 +153,6 @@ namespace globals
 		extern HairBacklighting hairBacklighting;
 		extern FurShells furShells;
 		extern LandscapeSeams landscapeSeams;
-		extern SceneCulling sceneCulling;
 		extern TextureStreaming textureStreaming;
 
 	}
