@@ -781,16 +781,60 @@ void Effects11::OverrideAmbientLighting(DirectionalAmbientColors& DirectionalAmb
 	}
 }
 
+namespace
+{
+	bool IsNightEyeEditorID(const char* a_editorID)
+	{
+		if (!a_editorID)
+			return false;
+		std::string lower(a_editorID);
+		for (auto& c : lower)
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		for (const char* token : { "nighteye", "night_eye", "nightvision", "night_vision", "vampiresight", "vampire_sight", "predatorvision" }) {
+			if (lower.find(token) != std::string::npos)
+				return true;
+		}
+		return false;
+	}
+}
+
 void Effects11::DataLoaded()
 {
 	nightEyeImods.clear();
+	nightEyeKeyword = nullptr;
 	auto dataHandler = RE::TESDataHandler::GetSingleton();
 	if (!dataHandler)
 		return;
+
+	for (auto* keyword : dataHandler->GetFormArray<RE::BGSKeyword>()) {
+		if (keyword && keyword->formEditorID == std::string_view("MagicNightEye")) {
+			nightEyeKeyword = keyword;
+			break;
+		}
+	}
+
+	for (auto* imod : dataHandler->GetFormArray<RE::TESImageSpaceModifier>()) {
+		if (imod && IsNightEyeEditorID(imod->GetFormEditorID()))
+			nightEyeImods.insert(imod);
+	}
+
 	for (auto* setting : dataHandler->GetFormArray<RE::EffectSetting>()) {
-		if (setting && setting->HasArchetype(RE::EffectSetting::Archetype::kNightEye) && setting->data.imageSpaceMod)
+		if (!setting || !setting->data.imageSpaceMod)
+			continue;
+		if (setting->HasArchetype(RE::EffectSetting::Archetype::kNightEye) || (nightEyeKeyword && setting->HasKeyword(nightEyeKeyword)))
 			nightEyeImods.insert(setting->data.imageSpaceMod);
 	}
+
+	logger::info("[EFFECTS11] Night Eye detection: MagicNightEye keyword {}, {} night eye image space modifiers", nightEyeKeyword ? "found" : "missing", nightEyeImods.size());
+}
+
+bool Effects11::IsNightEyeSetting(const RE::EffectSetting* a_setting) const
+{
+	if (a_setting->HasArchetype(RE::EffectSetting::Archetype::kNightEye))
+		return true;
+	if (nightEyeKeyword && a_setting->HasKeyword(nightEyeKeyword))
+		return true;
+	return a_setting->data.imageSpaceMod && nightEyeImods.contains(a_setting->data.imageSpaceMod);
 }
 
 bool Effects11::HasNightEyeEffect() const
@@ -810,11 +854,7 @@ bool Effects11::HasNightEyeEffect() const
 		if (!activeEffect || activeEffect->flags.any(Flag::kInactive, Flag::kDispelled))
 			continue;
 		const auto* setting = activeEffect->GetBaseObject();
-		if (!setting)
-			continue;
-		if (setting->HasArchetype(RE::EffectSetting::Archetype::kNightEye))
-			return true;
-		if (setting->data.imageSpaceMod && nightEyeImods.contains(setting->data.imageSpaceMod))
+		if (setting && IsNightEyeSetting(setting))
 			return true;
 	}
 	return false;
