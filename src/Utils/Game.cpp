@@ -186,15 +186,6 @@ namespace Util
 		return shadowState->GetRuntimeData().posAdjust.getEye();
 	}
 
-	RE::NiPoint3 GetCameraWorldPosition()
-	{
-		if (const auto camera = RE::Main::WorldRootCamera())
-			return camera->world.translate;
-		if (const auto playerCamera = RE::PlayerCamera::GetSingleton(); playerCamera && playerCamera->cameraRoot)
-			return playerCamera->cameraRoot->world.translate;
-		return {};
-	}
-
 	float4 GetCameraData()
 	{
 		static float& cameraNear = (*(float*)(REL::RelocationID(517032, 403540).address() + 0x40));

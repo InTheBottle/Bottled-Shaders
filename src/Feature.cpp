@@ -43,7 +43,6 @@
 #include "Features/TerrainHelper.h"
 #include "Features/TerrainShadows.h"
 #include "Features/TerrainVariation.h"
-#include "Features/TextureStreaming.h"
 #include "Features/UnifiedWater.h"
 #include "Features/Upscaling.h"
 #include "Features/VanillaFresnel.h"
@@ -242,7 +241,6 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::footstepParticles,
 		&globals::features::hairBacklighting,
 		&globals::features::furShells,
-		&globals::features::textureStreaming,
 		&globals::features::landscapeSeams
 	};
 

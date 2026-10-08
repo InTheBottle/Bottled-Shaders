@@ -42,7 +42,6 @@
 #include "Features/TerrainHelper.h"
 #include "Features/TerrainShadows.h"
 #include "Features/TerrainVariation.h"
-#include "Features/TextureStreaming.h"
 #include "Features/UnifiedWater.h"
 #include "Features/Upscaling.h"
 #include "Features/VanillaFresnel.h"
@@ -120,7 +119,6 @@ namespace globals
 		HairBacklighting hairBacklighting{};
 		FurShells furShells{};
 		LandscapeSeams landscapeSeams{};
-		TextureStreaming textureStreaming{};
 
 		namespace llf
 		{

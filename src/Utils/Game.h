@@ -40,8 +40,6 @@ namespace Util
 
 	RE::NiPoint3 GetEyePosition();
 
-	RE::NiPoint3 GetCameraWorldPosition();
-
 	float2 ConvertToDynamic(float2 a_size, bool a_ignoreLock = false);
 
 	// Game unit conversions
