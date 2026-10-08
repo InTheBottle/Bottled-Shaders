@@ -19,6 +19,7 @@
 #include "Features/HairBacklighting.h"
 #include "Features/HDRDisplay.h"
 #include "Features/HairSpecular.h"
+#include "Features/HiZOcclusion.h"
 #include "Features/HorizonFix.h"
 #include "Features/IBL.h"
 #include "Features/InteriorSun.h"
@@ -226,6 +227,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::reverseZ,
 		&globals::features::upscaling,
 		&globals::features::renderDoc,
+		&globals::features::hiZOcclusion,
 		&globals::features::remoteControl,
 		&globals::features::csEditor,
 		&globals::features::screenshotFeature,
