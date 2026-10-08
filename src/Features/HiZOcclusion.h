@@ -5,7 +5,6 @@
 #include <array>
 #include <atomic>
 #include <unordered_map>
-#include <unordered_set>
 
 #include <RE/N/NiSmartPointer.h>
 
@@ -136,10 +135,12 @@ struct HiZOcclusion : OverlayFeature
 		bool showCulledNoEarlyOut = true;
 
 		// Per-result-type culling toggles (disable to diagnose false positives)
-		bool cullFrustum = true;     // cull frustum-failed objects (magenta)
 		bool cullNoEarlyOut = true;  // cull depth-test-failed objects (red)
 
 		uint32_t consecutiveOccludedThreshold = 1;  // 1-100, cull after N consecutive occluded tests
+		float shadowSweepDistance = 4096.0f;
+		float guardAngle = 10.0f;
+		float motionMarginFrames = 3.0f;
 
 		std::array<bool, 30> cullRenderMode = { true };  // Whether each culling type should be allowed
 	};
@@ -210,8 +211,23 @@ struct HiZOcclusion : OverlayFeature
 	inline ID3D11ShaderResourceView* GetHiZSRV() const { return hiZSRV; }
 	inline uint32_t GetHiZMipCount() const { return hiZMipCount; }
 
+	enum PassKind : uint8_t
+	{
+		kCameraPass = 1 << 0,
+		kSunShadowPass = 1 << 1
+	};
+
+	static uint8_t GetPassKind(uint32_t renderMode);
+	static const char* GetRenderModeName(uint32_t renderMode);
+	static bool IsMainViewRegistration(uint32_t renderMode, const RE::BSGraphics::BSShaderAccumulator* accum);
+	void CaptureSunShadowDirection(const RE::NiCamera* camera);
+
+	std::array<std::atomic<float>, 3> sunShadowDirection{};
+	std::atomic<bool> sunShadowDirectionCaptured = false;
+
 	// Check if a given geometry was determined to be occluded
 	bool IsGeometryOccluded(RE::BSGeometry* geometry) const;
+	bool IsShadowCasterOccluded(RE::BSGeometry* geometry) const;
 
 	bool IsPlayerAttachedGeometry(RE::BSGeometry* geometry, RE::TESObjectREFR* refr) const;
 
@@ -290,8 +306,6 @@ struct HiZOcclusion : OverlayFeature
 
 			earlyCulledCount.store(0, std::memory_order_relaxed);
 
-			lastResultFrame = 0;
-			staleFrameCount = 0;
 			resourceSetupDurationMS = 0.0f;
 			recreateDurationMS = 0.0f;
 			gpuCullingTimeMs = 0.0f;
@@ -310,6 +324,30 @@ struct HiZOcclusion : OverlayFeature
 	};
 	CullingStats stats;
 
+	struct PendingRecord
+	{
+		RE::BSGeometry* geometry;
+		uint8_t passes;
+	};
+
+	struct TestEntry
+	{
+		DirectX::XMFLOAT4 bounds;
+		DirectX::XMFLOAT4 sweep;
+	};
+
+	struct SnapshotEntry
+	{
+		RE::NiPointer<RE::BSGeometry> geometry;
+		PassKind pass;
+	};
+
+	struct OcclusionTracker
+	{
+		std::unordered_map<RE::BSGeometry*, RE::NiPointer<RE::BSGeometry>> occluded;
+		std::unordered_map<RE::BSGeometry*, uint32_t> counts;
+	};
+
 	struct AsyncReadbackState
 	{
 		static const int BUFFER_COUNT = 3;  // Triple buffering to handle GPU latency
@@ -318,43 +356,55 @@ struct HiZOcclusion : OverlayFeature
 		D3D11_MAPPED_SUBRESOURCE mappedData[BUFFER_COUNT] = {};
 		bool hasPendingRead[BUFFER_COUNT] = {};
 		uint32_t pendingFrameIndex[BUFFER_COUNT] = {};
-		std::vector<RE::NiPointer<RE::BSGeometry>> geometrySnapshots[BUFFER_COUNT];  // Geometry tested in each buffer
-		uint32_t geometryCount[BUFFER_COUNT] = {};                                   // Number of geometry in each buffer
-		uint32_t writeIndex = 0;                                                     // Next buffer to write GPU results to
-		uint32_t readIndex = 0;                                                      // Next buffer to try reading from
-		uint32_t numPendingReads = 0;                                                // Track how many buffers have pending reads
+		std::vector<SnapshotEntry> geometrySnapshots[BUFFER_COUNT];  // Geometry tested in each buffer
+		uint32_t geometryCount[BUFFER_COUNT] = {};                   // Number of geometry in each buffer
+		uint32_t writeIndex = 0;                                     // Next buffer to write GPU results to
+		uint32_t readIndex = 0;                                      // Next buffer to try reading from
+		uint32_t numPendingReads = 0;                                // Track how many buffers have pending reads
+		DirectX::XMFLOAT3 cameraForward[BUFFER_COUNT] = {};
 	};
 	AsyncReadbackState readbackState;
 
 	// Thread-local vector to hold geometry collected by the current worker thread
-	inline static thread_local std::vector<RE::BSGeometry*> localPendingGeometry;
+	inline static thread_local std::vector<PendingRecord> localPendingGeometry;
 
 	// Tracking active thread-local vectors
-	std::vector<std::vector<RE::BSGeometry*>*> allThreadVectors;
+	std::vector<std::vector<PendingRecord>*> allThreadVectors;
 	std::mutex threadVectorsMutex;
 
 	// Shared state for async pipeline
-	uint32_t numGeometry = 0;                                            // Number of geometry objects in current batch
-	uint32_t numGeometryPending = 0;                                     // Number of geometry in pending results
-	std::vector<RE::NiPointer<RE::BSGeometry>> pendingGeometrySnapshot;  // Snapshot for current dispatch
+	uint32_t numGeometry = 0;                            // Number of test entries in current batch
+	std::vector<SnapshotEntry> pendingGeometrySnapshot;  // Snapshot for current dispatch
 
 	// Geometry batch for GPU culling
 	std::vector<RE::NiPointer<RE::BSGeometry>> pendingGeometry;
-	std::unordered_set<RE::BSGeometry*> pendingGeometrySet;  // For fast lookup
-	std::vector<DirectX::XMFLOAT4> geometryBounds;           // xyz=center, w=radius
+	std::vector<uint8_t> pendingPasses;
+	std::unordered_map<RE::BSGeometry*, size_t> pendingGeometryIndex;
+	std::vector<TestEntry> geometryBounds;
+
+	DirectX::XMFLOAT3 lastEyePosition = {};
+	DirectX::XMFLOAT3 lastCameraForward = { 0.0f, 1.0f, 0.0f };
+	DirectX::XMFLOAT3 currentCameraForward = { 0.0f, 1.0f, 0.0f };
+	DirectX::XMFLOAT3 appliedShadowForward = { 0.0f, 1.0f, 0.0f };
+	bool hasCameraHistory = false;
+	float frameRotation = 0.0f;
+	float motionMargin = 0.0f;
 
 	// Occlusion flag bit - uses unused bit 30 in NiAVObject::flags for O(1) lookup
 	// This avoids hash set lookups in hot paths (early culling hooks)
 	static constexpr uint32_t kOccludedFlag = 1u << 30;
+	static constexpr float kCameraCutDistance = 1000.0f;
+	static constexpr float kCameraCutAngle = 30.0f;
 
-	// Geometry currently carrying kOccludedFlag (needed for ClearOcclusionState)
-	std::unordered_map<RE::BSGeometry*, RE::NiPointer<RE::BSGeometry>> occludedGeometry;
-
-	// Consecutive occluded test counts — the occluded flag is set when count reaches threshold
-	std::unordered_map<RE::BSGeometry*, uint32_t> consecutiveOccludedCount;
+	OcclusionTracker cameraOcclusion;
+	OcclusionTracker shadowOcclusion;
 
 	static void SetOccludedFlag(RE::BSGeometry* geometry, bool occluded);
 	void ClearOcclusionState();
+	void ClearShadowOcclusionState();
+	void UpdateCameraMotion();
+	bool IsReadbackReady(uint32_t bufferIndex);
+	void ReleaseReadbackSlot(uint32_t bufferIndex);
 
 	void ExecuteVisibilityTests();
 	void ConsolidatePendingGeometry();
@@ -366,11 +416,10 @@ struct HiZOcclusion : OverlayFeature
 		DirectX::XMFLOAT4 overlayColorToggles;  // 16 (8 bits per toggle: behind|invalid|centerOff|camInside|invalidDepth|nearestOff|visible|occluded)
 
 		DirectX::XMFLOAT3 cameraWorldPos;  // 12
-		float pad0 = 0.0f;                 //  4 -> 16
+		float motionMargin = 0.0f;         //  4 -> 16
 
-		DirectX::XMFLOAT2 bufferDim;     //  8
-		DirectX::XMFLOAT2 bufferDimInv;  //  8 -> 32
-										 // Total: 48 + 16 (overlayColorToggles) + 16 (overlaySettings) + 16 (hiZParams) = 64 bytes (multiple of 16)
+		DirectX::XMFLOAT2 bufferDim;  //  8
+		DirectX::XMFLOAT2 guardBand;  //  8 -> 16
 	};
 	static_assert(sizeof(HiZSettings) % 16 == 0, "HiZSettings must be 16B-sized");
 	static_assert(alignof(HiZSettings) <= 16, "HiZSettings alignment should not exceed 16");

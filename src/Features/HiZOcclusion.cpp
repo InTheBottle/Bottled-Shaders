@@ -31,12 +31,38 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	showVisInvalidRadius,
 	showCulledFrustum,
 	showCulledNoEarlyOut,
-	cullFrustum,
 	cullNoEarlyOut,
 	consecutiveOccludedThreshold,
+	shadowSweepDistance,
+	guardAngle,
+	motionMarginFrames,
 	cullRenderMode)
 
 #define I18N_KEY_PREFIX "feature.hiz_occlusion."
+
+namespace
+{
+	float Angle(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b)
+	{
+		const float d = std::clamp(a.x * b.x + a.y * b.y + a.z * b.z, -1.0f, 1.0f);
+		return DirectX::XMConvertToDegrees(std::acos(d));
+	}
+
+	float Distance(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b)
+	{
+		const float dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+		return std::sqrt(dx * dx + dy * dy + dz * dz);
+	}
+
+	float GuardBandUV(float projScale, float guardDegrees)
+	{
+		if (projScale <= 0.0f)
+			return 0.0f;
+		const float halfFov = std::atan(1.0f / projScale);
+		const float guarded = std::min(halfFov + DirectX::XMConvertToRadians(guardDegrees), DirectX::XMConvertToRadians(89.0f));
+		return 0.5f * projScale * (std::tan(guarded) - 1.0f / projScale);
+	}
+}
 
 HiZOcclusion::~HiZOcclusion()
 {
@@ -251,12 +277,60 @@ void HiZOcclusion::DrawSettings()
 
 				// Render mode culling toggles
 				ImGui::Text("%s", T(TKEY("render_mode_culling"), "Render Mode Culling:"));
-				for (int i = 0; i < 30; i++) {
-					const auto label = std::format("{} {}##HiZRenderMode{}", T(TKEY("render_mode"), "Render Mode"), i, i);
-					ImGui::Checkbox(label.c_str(), &settings.cullRenderMode[i]);
-					// Number of calls for this render mode
-					ImGui::SameLine();
-					ImGui::Text("%u", stats.renderModeCalls[i].load());
+				if (ImGui::BeginTable("##HiZRenderModes", 3, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg)) {
+					ImGui::TableSetupColumn(T(TKEY("render_mode_column_pass"), "Pass"));
+					ImGui::TableSetupColumn(T(TKEY("render_mode_column_test"), "Test"));
+					ImGui::TableSetupColumn(T(TKEY("render_mode_column_calls"), "Calls"));
+					ImGui::TableHeadersRow();
+					for (uint32_t i = 0; i < static_cast<uint32_t>(settings.cullRenderMode.size()); i++) {
+						const uint8_t pass = GetPassKind(i);
+						const uint32_t calls = stats.renderModeCalls[i].load();
+						if (!pass && !calls)
+							continue;
+
+						ImGui::PushID(static_cast<int>(i));
+						ImGui::TableNextRow();
+						ImGui::TableNextColumn();
+						{
+							auto _disabled = Util::DisableGuard(!pass);
+							const auto label = std::format("{} ({})", GetRenderModeName(i), i);
+							bool enabled = pass && settings.cullRenderMode[i];
+							if (ImGui::Checkbox(label.c_str(), &enabled))
+								settings.cullRenderMode[i] = enabled;
+						}
+						ImGui::TableNextColumn();
+						if (pass == kCameraPass)
+							ImGui::TextUnformatted(T(TKEY("render_mode_test_camera"), "Camera occlusion"));
+						else if (pass == kSunShadowPass)
+							ImGui::TextUnformatted(T(TKEY("render_mode_test_shadow"), "Shadow + caster occlusion"));
+						else
+							ImGui::TextDisabled("%s", T(TKEY("render_mode_test_unsupported"), "Not cullable"));
+						ImGui::TableNextColumn();
+						ImGui::Text("%u", calls);
+						ImGui::PopID();
+					}
+					ImGui::EndTable();
+				}
+
+				ImGui::SliderFloat(T(TKEY("shadow_sweep_distance"), "Shadow Reach"), &settings.shadowSweepDistance, 0.0f, 16384.0f, "%.0f");
+				if (auto _tt = Util::HoverTooltipWrapper()) {
+					ImGui::Text("%s", T(TKEY("shadow_sweep_distance_tooltip"),
+										  "How far a caster's shadow is followed along the sun direction.\n"
+										  "A caster is only dropped from the shadow map when it and its shadow are hidden. 0 disables shadow culling."));
+				}
+
+				ImGui::SliderFloat(T(TKEY("guard_angle"), "Turn Guard (degrees)"), &settings.guardAngle, 0.0f, 45.0f, "%.1f");
+				if (auto _tt = Util::HoverTooltipWrapper()) {
+					ImGui::Text("%s", T(TKEY("guard_angle_tooltip"),
+										  "Shadows just outside the view are kept so turning does not reveal missing shadows.\n"
+										  "Shadow culling also resets when the camera turns further than this before new results arrive."));
+				}
+
+				ImGui::SliderFloat(T(TKEY("motion_margin_frames"), "Motion Margin (frames)"), &settings.motionMarginFrames, 0.0f, 10.0f, "%.1f");
+				if (auto _tt = Util::HoverTooltipWrapper()) {
+					ImGui::Text("%s", T(TKEY("motion_margin_frames_tooltip"),
+										  "Grows every bound by this many frames of camera movement to hide readback latency.\n"
+										  "Higher = less pop-in while moving, less culling."));
 				}
 
 				int threshold = static_cast<int>(settings.consecutiveOccludedThreshold);
@@ -338,7 +412,7 @@ void HiZOcclusion::DrawSettings()
 					ImGui::SameLine();
 					ImGui::Text(": %u", stats.visTestPassed);
 
-					ImGui::Checkbox(T(TKEY("camera_inside_teal"), "Camera inside (teal)"), &settings.showVisInsideBounds);
+					ImGui::Checkbox(T(TKEY("undecided_teal"), "Undecided (teal)"), &settings.showVisInsideBounds);
 					ImGui::SameLine();
 					ImGui::Text(": %u", stats.visInsideBounds);
 
@@ -347,10 +421,12 @@ void HiZOcclusion::DrawSettings()
 					ImGui::Text(": %u", stats.visInvalidRadius);
 
 					ImGui::Spacing();
-					ImGui::Text("%s", T(TKEY("cull"), "Cull:"));
-					ImGui::Checkbox(T(TKEY("frustum_magenta"), "Frustum (magenta)"), &settings.cullFrustum);
+					ImGui::Checkbox(T(TKEY("outside_magenta"), "Outside view (magenta)"), &settings.showCulledFrustum);
 					ImGui::SameLine();
 					ImGui::Text(": %u", stats.culledFrustum);
+
+					ImGui::Spacing();
+					ImGui::Text("%s", T(TKEY("cull"), "Cull:"));
 					ImGui::Checkbox(T(TKEY("occluded_red"), "Occluded (red)"), &settings.cullNoEarlyOut);
 					ImGui::SameLine();
 					ImGui::Text(": %u", stats.culledNoEarlyOut);
@@ -364,7 +440,8 @@ void HiZOcclusion::DrawSettings()
 				ImGui::Text("%s %u", T(TKEY("frame"), "Frame:"), globals::state ? globals::state->frameCount : 0);
 				ImGui::Text("%s %u", T(TKEY("geometry_tested"), "Geometry tested:"), stats.geometryListSize);
 				ImGui::Text("%s %u", T(TKEY("total_tests"), "Total tests:"), stats.totalTested);
-				ImGui::Text("%s %zu", T(TKEY("occluded_set_size"), "Occluded set size:"), occludedGeometry.size());
+				ImGui::Text("%s %zu", T(TKEY("occluded_set_size"), "Occluded set size:"), cameraOcclusion.occluded.size());
+				ImGui::Text("%s %zu", T(TKEY("shadow_occluded_set_size"), "Shadow casters culled:"), shadowOcclusion.occluded.size());
 
 				if (stats.staleFrameCount > 0) {
 					ImGui::TextColored(theme.StatusPalette.Warning, "%s %u", T(TKEY("results_stale"), "Results stale (frames):"), stats.staleFrameCount);
@@ -444,6 +521,13 @@ bool HiZOcclusion::IsOverlayVisible() const
 void HiZOcclusion::LoadSettings(json& o_json)
 {
 	settings = o_json;
+	settings.conservativeBias = std::clamp(settings.conservativeBias, 0.0f, 0.05f);
+	settings.consecutiveOccludedThreshold = std::clamp(settings.consecutiveOccludedThreshold, 1u, 100u);
+	settings.boundsMaxObjects = std::clamp(settings.boundsMaxObjects, 8u, 2048u);
+	settings.hizViewerScale = std::clamp(settings.hizViewerScale, 0.1f, 4.0f);
+	settings.shadowSweepDistance = std::clamp(settings.shadowSweepDistance, 0.0f, 16384.0f);
+	settings.guardAngle = std::clamp(settings.guardAngle, 0.0f, 45.0f);
+	settings.motionMarginFrames = std::clamp(settings.motionMarginFrames, 0.0f, 10.0f);
 }
 
 void HiZOcclusion::SaveSettings(json& o_json)
@@ -676,6 +760,8 @@ void HiZOcclusion::Prepass()
 		}
 	}
 
+	UpdateCameraMotion();
+
 	// Prepare consolidated geometry list for testing
 	ConsolidatePendingGeometry();
 
@@ -692,11 +778,15 @@ void HiZOcclusion::Prepass()
 		ExecuteVisibilityTests();
 	}
 
+	if (!shadowOcclusion.occluded.empty() && Angle(appliedShadowForward, currentCameraForward) + frameRotation > settings.guardAngle)
+		ClearShadowOcclusionState();
+
 	// Only process visibility tests if we have geometry from previous frame
 	if (!pendingGeometry.empty()) {
 		// Clean up resources that we are finished with
 		pendingGeometry.clear();
-		pendingGeometrySet.clear();
+		pendingPasses.clear();
+		pendingGeometryIndex.clear();
 		geometryBounds.clear();
 	} else {
 		logger::debug("Frame {} - No pending geometry to process in Prepass", globals::state->frameCount);
@@ -716,7 +806,8 @@ void HiZOcclusion::ConsolidatePendingGeometry()
 {
 	// Clear global consolidated containers
 	pendingGeometry.clear();
-	pendingGeometrySet.clear();
+	pendingPasses.clear();
+	pendingGeometryIndex.clear();
 
 	// Consolidate thread-local lists
 	{
@@ -730,13 +821,19 @@ void HiZOcclusion::ConsolidatePendingGeometry()
 			}
 		}
 		pendingGeometry.reserve(totalCount);
+		pendingPasses.reserve(totalCount);
+		pendingGeometryIndex.reserve(totalCount);
 
-		// Merge vectors and deduplicate using pendingGeometrySet
+		// Merge vectors and deduplicate
 		for (auto* threadVec : allThreadVectors) {
 			if (threadVec) {
-				for (auto* geo : *threadVec) {
-					if (pendingGeometrySet.insert(geo).second) {
-						pendingGeometry.emplace_back(geo);
+				for (const auto& record : *threadVec) {
+					auto [it, inserted] = pendingGeometryIndex.try_emplace(record.geometry, pendingGeometry.size());
+					if (inserted) {
+						pendingGeometry.emplace_back(record.geometry);
+						pendingPasses.push_back(record.passes);
+					} else {
+						pendingPasses[it->second] |= record.passes;
 					}
 				}
 				// Clear the thread-local vector for the next frame
@@ -1084,11 +1181,11 @@ bool HiZOcclusion::SetupGPUCullingResources()
 
 	// Create geometry bounds buffer (input)
 	D3D11_BUFFER_DESC bufferDesc = {};
-	bufferDesc.ByteWidth = maxGeometryCount * sizeof(DirectX::XMFLOAT4);
+	bufferDesc.ByteWidth = maxGeometryCount * sizeof(TestEntry);
 	bufferDesc.Usage = D3D11_USAGE_DEFAULT;
 	bufferDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 	bufferDesc.CPUAccessFlags = 0;
-	bufferDesc.StructureByteStride = sizeof(DirectX::XMFLOAT4);
+	bufferDesc.StructureByteStride = sizeof(TestEntry);
 	bufferDesc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
 
 	HRESULT hr = device->CreateBuffer(&bufferDesc, nullptr, &geometryBoundsBuffer);
@@ -1292,6 +1389,31 @@ void HiZOcclusion::ReleaseDebugBuffer()
 	}
 }
 
+bool HiZOcclusion::IsReadbackReady(uint32_t bufferIndex)
+{
+	auto context = globals::d3d::context;
+	if (auto* query = readbackState.completionQueries[bufferIndex]) {
+		BOOL done = FALSE;
+		return context->GetData(query, &done, sizeof(done), D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK && done;
+	}
+
+	D3D11_MAPPED_SUBRESOURCE mapped{};
+	if (FAILED(context->Map(readbackState.stagingBuffers[bufferIndex], 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped)))
+		return false;
+	context->Unmap(readbackState.stagingBuffers[bufferIndex], 0);
+	return true;
+}
+
+void HiZOcclusion::ReleaseReadbackSlot(uint32_t bufferIndex)
+{
+	if (!readbackState.hasPendingRead[bufferIndex])
+		return;
+	readbackState.hasPendingRead[bufferIndex] = false;
+	readbackState.geometrySnapshots[bufferIndex].clear();
+	readbackState.geometryCount[bufferIndex] = 0;
+	readbackState.numPendingReads--;
+}
+
 void HiZOcclusion::ExecuteVisibilityTests()
 {
 	auto context = globals::d3d::context;
@@ -1304,82 +1426,39 @@ void HiZOcclusion::ExecuteVisibilityTests()
 	// Track whether we got fresh results this frame
 	bool gotNewResults = false;
 
-	// Try to read results from any pending staging buffers (multi-buffered approach)
 	if (readbackState.numPendingReads > 0) {
 		auto readStart = std::chrono::high_resolution_clock::now();
 
-		// Try to read from all pending buffers (oldest first)
-		uint32_t attemptsToRead = readbackState.numPendingReads;
-		for (uint32_t attempt = 0; attempt < attemptsToRead && readbackState.numPendingReads > 0; ++attempt) {
-			uint32_t bufferIdx = readbackState.readIndex;
+		uint32_t newestReady = UINT32_MAX;
+		while (readbackState.numPendingReads > 0) {
+			const uint32_t bufferIdx = readbackState.readIndex;
+			if (!readbackState.hasPendingRead[bufferIdx] || !IsReadbackReady(bufferIdx))
+				break;
+			if (newestReady != UINT32_MAX)
+				ReleaseReadbackSlot(newestReady);
+			newestReady = bufferIdx;
+			readbackState.readIndex = (bufferIdx + 1) % AsyncReadbackState::BUFFER_COUNT;
+		}
 
-			if (readbackState.hasPendingRead[bufferIdx]) {
-				// Check if GPU has completed using event query (if available)
-				bool gpuComplete = false;
+		if (newestReady != UINT32_MAX) {
+			auto mapStart = std::chrono::high_resolution_clock::now();
+			HRESULT hr = context->Map(readbackState.stagingBuffers[newestReady], 0, D3D11_MAP_READ, 0, &readbackState.mappedData[newestReady]);
+			auto mapEnd = std::chrono::high_resolution_clock::now();
+			stats.mapTimeMs = static_cast<float>(std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(mapEnd - mapStart).count());
 
-				if (readbackState.completionQueries[bufferIdx]) {
-					// Use query for precise completion detection
-					BOOL queryData = FALSE;
-					HRESULT queryHr = context->GetData(readbackState.completionQueries[bufferIdx],
-						&queryData, sizeof(BOOL), D3D11_ASYNC_GETDATA_DONOTFLUSH);
-					gpuComplete = (queryHr == S_OK && queryData);
+			if (SUCCEEDED(hr)) {
+				auto copyStart = std::chrono::high_resolution_clock::now();
+				ProcessVisibilityResults(newestReady);
+				gotNewResults = true;
+				auto copyEnd = std::chrono::high_resolution_clock::now();
+				stats.copyDataTimeMs = static_cast<float>(std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(copyEnd - copyStart).count());
 
-					if (!gpuComplete && settings.debugMode && attempt == 0) {
-						logger::debug("Frame {} - GPU work not yet complete for buffer {} (query)",
-							globals::state->frameCount, bufferIdx);
-					}
-				} else {
-					// Fallback to polling with DO_NOT_WAIT if query not available
-					gpuComplete = false;  // Will attempt Map() below
-				}
-
-				if (gpuComplete || !readbackState.completionQueries[bufferIdx]) {
-					auto mapStart = std::chrono::high_resolution_clock::now();
-
-					UINT mapFlags = readbackState.completionQueries[bufferIdx] ? 0 : D3D11_MAP_FLAG_DO_NOT_WAIT;
-					HRESULT hr = context->Map(readbackState.stagingBuffers[bufferIdx], 0,
-						D3D11_MAP_READ, mapFlags,
-						&readbackState.mappedData[bufferIdx]);
-
-					auto mapEnd = std::chrono::high_resolution_clock::now();
-					stats.mapTimeMs = static_cast<float>(std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(mapEnd - mapStart).count());
-
-					if (SUCCEEDED(hr)) {
-						auto copyStart = std::chrono::high_resolution_clock::now();
-
-						// Successfully mapped - process results using the geometry snapshot from this buffer
-						ProcessVisibilityResults(bufferIdx);
-						gotNewResults = true;
-
-						auto copyEnd = std::chrono::high_resolution_clock::now();
-						stats.copyDataTimeMs = static_cast<float>(std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(copyEnd - copyStart).count());
-
-						auto unmapStart = std::chrono::high_resolution_clock::now();
-						context->Unmap(readbackState.stagingBuffers[bufferIdx], 0);
-						auto unmapEnd = std::chrono::high_resolution_clock::now();
-						stats.unmapTimeMs = static_cast<float>(std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(unmapEnd - unmapStart).count());
-
-						// Mark buffer as free
-						readbackState.hasPendingRead[bufferIdx] = false;
-						readbackState.geometrySnapshots[bufferIdx].clear();
-						readbackState.numPendingReads--;
-
-						// Advance read index for next frame
-						readbackState.readIndex = (readbackState.readIndex + 1) % AsyncReadbackState::BUFFER_COUNT;
-						break;  // Successfully processed one buffer, don't read more this frame
-					} else {
-						// GPU not done yet - try next buffer in ring
-						readbackState.readIndex = (readbackState.readIndex + 1) % AsyncReadbackState::BUFFER_COUNT;
-						if (settings.debugMode && attempt == 0) {
-							logger::debug("Buffer {} not ready (frame {}), will retry next frame",
-								bufferIdx, readbackState.pendingFrameIndex[bufferIdx]);
-						}
-					}
-				}
-			} else {
-				// This buffer has no pending read, advance
-				readbackState.readIndex = (readbackState.readIndex + 1) % AsyncReadbackState::BUFFER_COUNT;
+				auto unmapStart = std::chrono::high_resolution_clock::now();
+				context->Unmap(readbackState.stagingBuffers[newestReady], 0);
+				auto unmapEnd = std::chrono::high_resolution_clock::now();
+				stats.unmapTimeMs = static_cast<float>(std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(unmapEnd - unmapStart).count());
 			}
+			ReleaseReadbackSlot(newestReady);
 		}
 
 		auto readEnd = std::chrono::high_resolution_clock::now();
@@ -1387,48 +1466,60 @@ void HiZOcclusion::ExecuteVisibilityTests()
 	}
 
 	// Track stale frame count when no new results were obtained
-	// The occludedGeometry set persists from the previous frame automatically
+	// The occluded sets persist from the previous frame automatically
 	if (!gotNewResults && stats.lastResultFrame > 0) {
 		stats.staleFrameCount = globals::state->frameCount - stats.lastResultFrame;
 		if (settings.debugMode && stats.staleFrameCount > 0) {
 			logger::debug("Frame {} - Using cached occlusion results from frame {} ({} frames stale, {} geometry occluded)",
-				globals::state->frameCount, stats.lastResultFrame, stats.staleFrameCount, occludedGeometry.size());
+				globals::state->frameCount, stats.lastResultFrame, stats.staleFrameCount, cameraOcclusion.occluded.size());
 		}
 	}
 
 	// Dispatch new test if we have geometry to process
 	if (!pendingGeometry.empty()) {
-		// Create the worldBound array, filtering out nullptrs and invalid radii
 		geometryBounds.clear();
 		pendingGeometrySnapshot.clear();
 		geometryBounds.reserve(pendingGeometry.size());
 		pendingGeometrySnapshot.reserve(pendingGeometry.size());
 
-		const uint32_t cappedCount = std::min<uint32_t>(static_cast<uint32_t>(pendingGeometry.size()), maxGeometryCount);
-		uint32_t processed = 0;
-
-		for (auto& geometry : pendingGeometry) {
-			if (!geometry || processed >= cappedCount) {
-				continue;
+		DirectX::XMFLOAT4 sunSweep{ 0.0f, 0.0f, 0.0f, 0.0f };
+		bool hasSunSweep = false;
+		if (sunShadowDirectionCaptured.exchange(false, std::memory_order_acquire) && settings.shadowSweepDistance > 0.0f) {
+			const RE::NiPoint3 direction{ sunShadowDirection[0].load(std::memory_order_relaxed), sunShadowDirection[1].load(std::memory_order_relaxed), sunShadowDirection[2].load(std::memory_order_relaxed) };
+			const float length = direction.Length();
+			if (length > 0.0f) {
+				const float scale = settings.shadowSweepDistance / length;
+				sunSweep = { direction.x * scale, direction.y * scale, direction.z * scale, 0.0f };
+				hasSunSweep = true;
 			}
-
-			auto& worldBound = geometry->worldBound;
-			if (worldBound.radius <= 0.0f) {
-				continue;
-			}
-
-			geometryBounds.emplace_back(worldBound.center.x, worldBound.center.y, worldBound.center.z, worldBound.radius);
-			pendingGeometrySnapshot.emplace_back(geometry);
-			++processed;
 		}
 
-		numGeometry = processed;
+		for (size_t i = 0; i < pendingGeometry.size() && geometryBounds.size() < maxGeometryCount; ++i) {
+			const auto& geometry = pendingGeometry[i];
+			if (!geometry || geometry->worldBound.radius <= 0.0f)
+				continue;
+
+			const auto& worldBound = geometry->worldBound;
+			const DirectX::XMFLOAT4 bounds{ worldBound.center.x, worldBound.center.y, worldBound.center.z, worldBound.radius };
+			const uint8_t passes = pendingPasses[i];
+
+			if (passes & kCameraPass) {
+				geometryBounds.push_back({ bounds, { 0.0f, 0.0f, 0.0f, 0.0f } });
+				pendingGeometrySnapshot.push_back({ geometry, kCameraPass });
+			}
+			if ((passes & kSunShadowPass) && hasSunSweep && geometryBounds.size() < maxGeometryCount) {
+				geometryBounds.push_back({ bounds, sunSweep });
+				pendingGeometrySnapshot.push_back({ geometry, kSunShadowPass });
+			}
+		}
+
+		numGeometry = static_cast<uint32_t>(geometryBounds.size());
 
 		if (numGeometry == 0) {
 			return;
 		}
 
-		logger::debug("ExecuteVisibilityTests: Frame {} - Processing {} geometry objects", globals::state->frameCount, numGeometry);
+		logger::debug("ExecuteVisibilityTests: Frame {} - Processing {} test entries", globals::state->frameCount, numGeometry);
 
 		// Execute HiZ Tests for this frame
 		DispatchComputeShader();
@@ -1437,13 +1528,9 @@ void HiZOcclusion::ExecuteVisibilityTests()
 		if (readbackState.numPendingReads >= AsyncReadbackState::BUFFER_COUNT) {
 			logger::warn("All {} staging buffers are full! GPU readback is severely delayed. Skipping oldest buffer.",
 				AsyncReadbackState::BUFFER_COUNT);
-			// Force-free the oldest buffer (readIndex points to it)
-			uint32_t oldestIdx = readbackState.readIndex;
-			if (readbackState.hasPendingRead[oldestIdx]) {
-				readbackState.hasPendingRead[oldestIdx] = false;
-				readbackState.numPendingReads--;
-				readbackState.readIndex = (readbackState.readIndex + 1) % AsyncReadbackState::BUFFER_COUNT;
-			}
+			const uint32_t oldestIdx = readbackState.readIndex;
+			ReleaseReadbackSlot(oldestIdx);
+			readbackState.readIndex = (oldestIdx + 1) % AsyncReadbackState::BUFFER_COUNT;
 		}
 
 		// Copy current frame results to next available staging buffer
@@ -1461,8 +1548,10 @@ void HiZOcclusion::ExecuteVisibilityTests()
 		stats.copyTimeMs = static_cast<float>(std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(copyEnd - copyStart).count());
 
 		// Store geometry snapshot WITH this buffer so results match when read back
-		readbackState.geometrySnapshots[writeIdx] = pendingGeometrySnapshot;
+		readbackState.geometrySnapshots[writeIdx] = std::move(pendingGeometrySnapshot);
+		pendingGeometrySnapshot.clear();
 		readbackState.geometryCount[writeIdx] = numGeometry;
+		readbackState.cameraForward[writeIdx] = currentCameraForward;
 
 		// Mark buffer as pending
 		readbackState.hasPendingRead[writeIdx] = true;
@@ -1515,7 +1604,7 @@ void HiZOcclusion::DispatchComputeShader()
 	}
 
 	// Update the buffer for GPU
-	const D3D11_BOX boundsBox{ 0, 0, 0, numGeometry * static_cast<UINT>(sizeof(DirectX::XMFLOAT4)), 1, 1 };
+	const D3D11_BOX boundsBox{ 0, 0, 0, numGeometry * static_cast<UINT>(sizeof(TestEntry)), 1, 1 };
 	context->UpdateSubresource(geometryBoundsBuffer, 0, &boundsBox, geometryBounds.data(), 0, 0);
 
 	// Update constant buffer with camera parameters
@@ -1529,6 +1618,10 @@ void HiZOcclusion::DispatchComputeShader()
 			settings.debugMode ? 1.0f : 0.0f);
 		auto eyePos = Util::GetEyePosition();
 		params.cameraWorldPos = DirectX::XMFLOAT3(eyePos.x, eyePos.y, eyePos.z);
+		params.motionMargin = motionMargin;
+
+		const auto& projection = globals::game::shadowState->GetRuntimeData().cameraData.getEye().projMat;
+		params.guardBand = { GuardBandUV(std::abs(projection(0, 0)), settings.guardAngle), GuardBandUV(std::abs(projection(1, 1)), settings.guardAngle) };
 
 		// Only pack overlay settings when debug/overlay is actually enabled
 		// This avoids unnecessary CPU work per dispatch in production
@@ -1557,7 +1650,6 @@ void HiZOcclusion::DispatchComputeShader()
 		renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN].texture->GetDesc(&texDesc);
 
 		params.bufferDim = { (float)texDesc.Width, (float)texDesc.Height };
-		params.bufferDimInv = { 1.0f / params.bufferDim.x, 1.0f / params.bufferDim.y };
 
 		if (SUCCEEDED(context->Map(hiZTestParamsBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
 			memcpy(mapped.pData, &params, sizeof(HiZSettings));
@@ -1577,9 +1669,10 @@ void HiZOcclusion::DispatchComputeShader()
 
 			// Log first 3 geometry bounds to verify world-space coords
 			for (uint32_t i = 0; i < std::min<uint32_t>(3, numGeometry); ++i) {
-				auto& b = geometryBounds[i];
-				logger::debug("  bounds[{}]: center=({:.1f},{:.1f},{:.1f}) radius={:.1f}",
-					i, b.x, b.y, b.z, b.w);
+				const auto& b = geometryBounds[i].bounds;
+				const auto& sweep = geometryBounds[i].sweep;
+				logger::debug("  bounds[{}]: center=({:.1f},{:.1f},{:.1f}) radius={:.1f} sweep=({:.1f},{:.1f},{:.1f})",
+					i, b.x, b.y, b.z, b.w, sweep.x, sweep.y, sweep.z);
 			}
 		}
 	}
@@ -1697,18 +1790,23 @@ void HiZOcclusion::ProcessVisibilityResults(uint32_t bufferIndex)
 	const auto& geometrySnapshot = readbackState.geometrySnapshots[bufferIndex];
 	const uint32_t geometryCount = readbackState.geometryCount[bufferIndex];
 
-	std::unordered_map<RE::BSGeometry*, RE::NiPointer<RE::BSGeometry>> stillOccluded;
-	std::unordered_map<RE::BSGeometry*, uint32_t> occludedCounts;
-	stillOccluded.reserve(occludedGeometry.size());
-	occludedCounts.reserve(consecutiveOccludedCount.size());
+	OcclusionTracker camera;
+	OcclusionTracker shadow;
+	camera.occluded.reserve(cameraOcclusion.occluded.size());
+	camera.counts.reserve(cameraOcclusion.counts.size());
+	shadow.occluded.reserve(shadowOcclusion.occluded.size());
+	shadow.counts.reserve(shadowOcclusion.counts.size());
 
 	for (uint32_t i = 0; i < geometryCount && i < geometrySnapshot.size(); ++i) {
-		const auto& geo = geometrySnapshot[i];
-		if (!geo)
+		const auto& entry = geometrySnapshot[i];
+		if (!entry.geometry)
 			continue;
 		stats.totalTested++;
 
-		auto* geometry = geo.get();
+		auto* geometry = entry.geometry.get();
+		const bool shadowPass = entry.pass == kSunShadowPass;
+		const auto& previous = shadowPass ? shadowOcclusion : cameraOcclusion;
+		auto& next = shadowPass ? shadow : camera;
 		bool keepState = false;
 		bool occluded = false;
 
@@ -1716,7 +1814,7 @@ void HiZOcclusion::ProcessVisibilityResults(uint32_t bufferIndex)
 		case static_cast<uint32_t>(-3):  // Not culled: Test passed
 			stats.visTestPassed++;
 			break;
-		case static_cast<uint32_t>(-2):  // Not culled: Inside bounds
+		case static_cast<uint32_t>(-2):  // Not culled: Undecidable
 			stats.visInsideBounds++;
 			break;
 		case static_cast<uint32_t>(-1):  // Not culled: Invalid Radius
@@ -1726,9 +1824,9 @@ void HiZOcclusion::ProcessVisibilityResults(uint32_t bufferIndex)
 			stats.defaultValue++;
 			keepState = true;
 			break;
-		case 1u:  // Culled: Frustum
+		case 1u:  // Outside the view
 			stats.culledFrustum++;
-			occluded = settings.cullFrustum;
+			occluded = shadowPass;
 			break;
 		case 2u:  // Culled: No early out
 			stats.culledNoEarlyOut++;
@@ -1740,42 +1838,41 @@ void HiZOcclusion::ProcessVisibilityResults(uint32_t bufferIndex)
 		}
 
 		if (keepState) {
-			if (auto it = occludedGeometry.find(geometry); it != occludedGeometry.end())
-				stillOccluded.emplace(geometry, it->second);
-			if (auto it = consecutiveOccludedCount.find(geometry); it != consecutiveOccludedCount.end())
-				occludedCounts.emplace(geometry, it->second);
+			if (auto it = previous.occluded.find(geometry); it != previous.occluded.end())
+				next.occluded.emplace(geometry, it->second);
+			if (auto it = previous.counts.find(geometry); it != previous.counts.end())
+				next.counts.emplace(geometry, it->second);
 			continue;
 		}
 
-		if (!occluded) {
-			SetOccludedFlag(geometry, false);
+		if (!occluded)
 			continue;
-		}
 
 		// Track consecutive frames for conservative culling
 		uint32_t count = 1;
-		if (auto it = consecutiveOccludedCount.find(geometry); it != consecutiveOccludedCount.end())
+		if (auto it = previous.counts.find(geometry); it != previous.counts.end())
 			count = it->second + 1;
-		occludedCounts[geometry] = count;
+		next.counts[geometry] = count;
 
-		if (count >= settings.consecutiveOccludedThreshold) {
-			SetOccludedFlag(geometry, true);
-			stillOccluded.emplace(geometry, geo);
-		}
+		if (count >= settings.consecutiveOccludedThreshold)
+			next.occluded.emplace(geometry, entry.geometry);
 	}
 
-	for (auto& [geometry, geo] : occludedGeometry) {
-		if (!stillOccluded.contains(geometry))
+	for (auto& [geometry, geo] : cameraOcclusion.occluded) {
+		if (!camera.occluded.contains(geometry))
 			SetOccludedFlag(geometry, false);
 	}
+	for (auto& [geometry, geo] : camera.occluded)
+		SetOccludedFlag(geometry, true);
 
-	occludedGeometry = std::move(stillOccluded);
-	consecutiveOccludedCount = std::move(occludedCounts);
+	cameraOcclusion = std::move(camera);
+	shadowOcclusion = std::move(shadow);
+	appliedShadowForward = readbackState.cameraForward[bufferIndex];
 
 	if (settings.debugMode) {
 		logger::debug(
-			"Visibility results: passed={}, inside={}, invalid={}, "
-			"frustum={}, occluded={}, default={}",
+			"Visibility results: passed={}, undecided={}, invalid={}, "
+			"outside={}, occluded={}, default={}",
 			stats.visTestPassed, stats.visInsideBounds, stats.visInvalidRadius,
 			stats.culledFrustum, stats.culledNoEarlyOut, stats.defaultValue);
 	}
@@ -1790,10 +1887,111 @@ void HiZOcclusion::SetOccludedFlag(RE::BSGeometry* geometry, bool occluded)
 
 void HiZOcclusion::ClearOcclusionState()
 {
-	for (auto& [geometry, geo] : occludedGeometry)
+	for (auto& [geometry, geo] : cameraOcclusion.occluded)
 		SetOccludedFlag(geometry, false);
-	occludedGeometry.clear();
-	consecutiveOccludedCount.clear();
+	cameraOcclusion = {};
+	shadowOcclusion = {};
+}
+
+void HiZOcclusion::ClearShadowOcclusionState()
+{
+	shadowOcclusion = {};
+}
+
+void HiZOcclusion::UpdateCameraMotion()
+{
+	auto* camera = RE::Main::WorldRootCamera();
+	if (!camera)
+		return;
+
+	const auto& rotate = camera->world.rotate;
+	const DirectX::XMFLOAT3 forward{ rotate.entry[0][0], rotate.entry[1][0], rotate.entry[2][0] };
+	const auto eyePosition = Util::GetEyePosition();
+	const DirectX::XMFLOAT3 position{ eyePosition.x, eyePosition.y, eyePosition.z };
+
+	if (hasCameraHistory) {
+		const float moved = Distance(position, lastEyePosition);
+		frameRotation = Angle(forward, lastCameraForward);
+		if (moved > kCameraCutDistance || frameRotation > kCameraCutAngle) {
+			ClearOcclusionState();
+			for (uint32_t i = 0; i < AsyncReadbackState::BUFFER_COUNT; ++i)
+				ReleaseReadbackSlot(i);
+			readbackState.readIndex = readbackState.writeIndex;
+			motionMargin = 0.0f;
+		} else {
+			motionMargin = moved * settings.motionMarginFrames;
+		}
+	}
+
+	currentCameraForward = forward;
+	lastCameraForward = forward;
+	lastEyePosition = position;
+	hasCameraHistory = true;
+}
+
+uint8_t HiZOcclusion::GetPassKind(uint32_t renderMode)
+{
+	switch (renderMode) {
+	case 0:
+	case 12:
+		return kCameraPass;
+	case 14:
+		return kSunShadowPass;
+	default:
+		return 0;
+	}
+}
+
+const char* HiZOcclusion::GetRenderModeName(uint32_t renderMode)
+{
+	switch (renderMode) {
+	case 0:
+		return T(TKEY("render_mode_world"), "World");
+	case 12:
+		return T(TKEY("render_mode_sun_shadow_mask"), "Sun Shadow Mask");
+	case 13:
+		return T(TKEY("render_mode_spot_shadow_map"), "Spot Light Shadow Maps");
+	case 14:
+		return T(TKEY("render_mode_sun_shadow_cascades"), "Sun Shadow Cascades");
+	case 15:
+		return T(TKEY("render_mode_omni_shadow_map"), "Omni Light Shadow Maps");
+	case 18:
+		return T(TKEY("render_mode_local_map"), "Local Map");
+	case 19:
+		return T(TKEY("render_mode_local_map_second"), "Local Map (Second Pass)");
+	case 22:
+		return T(TKEY("render_mode_first_person"), "First Person");
+	case 23:
+		return T(TKEY("render_mode_screen_splatter"), "Screen Splatter");
+	case 25:
+		return T(TKEY("render_mode_cubemap_lod"), "Cubemap LOD");
+	case 27:
+		return T(TKEY("render_mode_decals"), "Decals");
+	case 28:
+		return T(TKEY("render_mode_precipitation_occlusion"), "Precipitation Occlusion");
+	default:
+		return T(TKEY("render_mode_unknown"), "Unknown");
+	}
+}
+
+bool HiZOcclusion::IsMainViewRegistration(uint32_t renderMode, const RE::BSGraphics::BSShaderAccumulator* accum)
+{
+	if (renderMode == 12) {
+		static REL::Relocation<RE::BSGraphics::BSShaderAccumulator**> worldShadowMaskAccumulator{ REL::ID(415008) };
+		return accum == *worldShadowMaskAccumulator;
+	}
+	return accum->camera == RE::Main::WorldRootCamera();
+}
+
+void HiZOcclusion::CaptureSunShadowDirection(const RE::NiCamera* camera)
+{
+	if (!camera)
+		return;
+	const auto& rotate = camera->world.rotate;
+	sunShadowDirection[0].store(rotate.entry[0][0], std::memory_order_relaxed);
+	sunShadowDirection[1].store(rotate.entry[1][0], std::memory_order_relaxed);
+	sunShadowDirection[2].store(rotate.entry[2][0], std::memory_order_relaxed);
+	sunShadowDirectionCaptured.store(true, std::memory_order_release);
 }
 
 bool HiZOcclusion::IsGeometryOccluded(RE::BSGeometry* geometry) const
@@ -1801,6 +1999,11 @@ bool HiZOcclusion::IsGeometryOccluded(RE::BSGeometry* geometry) const
 	if (!geometry)
 		return false;
 	return (geometry->GetFlags().underlying() & kOccludedFlag) != 0;
+}
+
+bool HiZOcclusion::IsShadowCasterOccluded(RE::BSGeometry* geometry) const
+{
+	return geometry && shadowOcclusion.occluded.contains(geometry);
 }
 
 bool HiZOcclusion::IsPlayerAttachedGeometry(RE::BSGeometry* geometry, RE::TESObjectREFR* refr) const

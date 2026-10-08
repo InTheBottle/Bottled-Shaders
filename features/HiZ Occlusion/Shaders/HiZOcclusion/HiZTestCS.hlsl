@@ -1,153 +1,148 @@
 #include "Common/FrameBuffer.hlsli"
-#include "Common/SharedData.hlsli"
 
 // =============================================================================
 // HiZ Occlusion Test Compute Shader
 // =============================================================================
-// VERSION: 2.1
-//
-// PURPOSE:
-//   Tests geometry bounding spheres against a Hierarchical-Z depth pyramid to
-//   determine visibility. Objects fully occluded by closer geometry are culled
-//   to save rendering work.
-//
-// ALGORITHM OVERVIEW:
-//   1. Each thread tests one geometry's bounding sphere
-//   2. Transform sphere center from world space -> camera-relative -> view space
-//   3. Early-out if camera is inside sphere (always visible)
-//   4. Calculate appropriate mip level based on screen coverage
-//   5. Sample Hi-Z depth at multiple points on the sphere surface
-//   6. If ANY point passes depth test -> object is visible
-//   7. If ALL points fail -> object is occluded
-//
-// ASYNC READBACK ARCHITECTURE:
-//   Results are written to VisibilityResults buffer which is copied to a staging
-//   buffer for CPU readback. Due to GPU latency, results are typically read back
-//   2-3 frames later. This means:
-//   - Objects are always rendered at least once before being culled
-//   - Culled objects may take 2-3 frames to reappear when camera reveals them
-//   - This latency is the tradeoff for non-blocking GPU queries
+// VERSION: 3.0
 //
 // RESULT CODES (written to VisibilityResults):
-//   -3: Visible - depth test passed (at least one sample passed)
-//   -2: Visible - camera is inside bounding sphere
-//   -1: Visible - invalid radius (skip culling for safety)
-//    0: Default/unprocessed (should not remain after shader runs)
-//    1: Culled - frustum culled (all sample points behind camera)
-//    2: Culled - occluded (all depth tests failed)
-//
-// REFERENCES:
-//   - https://www.nickdarnell.com/hierarchical-z-buffer-occlusion-culling/
-//   - Skyrim uses left-handed coordinate system (Direct3D convention)
-//   - https://learn.microsoft.com/en-us/windows/win32/direct3d9/viewports-and-clipping
+//   -3: Visible - depth test passed
+//   -2: Visible - undecidable (crosses the near plane or the screen edge)
+//   -1: Visible - invalid radius
+//    0: Default/unprocessed
+//    1: Outside the view (and the guard band for swept entries)
+//    2: Occluded
 // =============================================================================
 
-Texture2D<float> HiZBuffer : register(t0);  // Hierarchical depth pyramid (mip 0 = full res)
-SamplerState HiZSampler : register(s0);
-
-// Input: Bounding spheres for all geometry to test this frame
-// Format: xyz = world-space center, w = radius
-StructuredBuffer<float4> GeometryBounds : register(t1);
-
-// Output: Visibility result codes (see header for code meanings)
-// One uint per geometry object, indexed by SV_DispatchThreadID.x
-RWStructuredBuffer<uint> VisibilityResults : register(u0);
-
-// =============================================================================
-// Constant Buffer - Updated each frame from CPU
-// =============================================================================
-cbuffer HiZParams : register(b0)
+struct TestEntry
 {
-	// HiZSettings components:
-	//   x = mipCount (number of mip levels in Hi-Z pyramid)
-	//   y = conservativeBias (depth bias to reduce false occlusion, e.g. 0.01 = 1%)
-	//   z = geometryCount (number of objects to test this dispatch)
-	//   w = debugMode (1 = enable debug output)
-	float4 HiZSettings;
-
-	// overlaySettings components:
-	//   x = overlayEnabled (0 or 1)
-	//   y = maxObjectsToDraw (limit overlay rendering for performance)
-	//   z,w = unused
-	float4 overlaySettings;
-
-	// overlayColorToggles: bit flags for filtering which result types to draw
-	//   bit 0: show visible (test passed)
-	//   bit 1: show visible (inside bounds)
-	//   bit 2: show visible (invalid radius)
-	//   bit 3: show culled (frustum)
-	//   bit 4: show culled (occluded)
-	float4 overlayColorToggles;
-
-	// Camera world position - used to convert world coords to camera-relative
-	float3 CameraWorldPos;
-	float pad0;
-
-	// Screen dimensions for debug overlay rendering
-	float2 BufferDim;     // screenWidth, screenHeight
-	float2 BufferDimInv;  // 1/screenWidth, 1/screenHeight
+	float4 Bounds;
+	float4 Sweep;
 };
 
-// =============================================================================
-// Constants for mip level calculation
-// =============================================================================
+Texture2D<float> HiZBuffer : register(t0);
+StructuredBuffer<TestEntry> Entries : register(t1);
+RWStructuredBuffer<uint> VisibilityResults : register(u0);
 
-// Minimum depth threshold to prevent division by zero in mip calculations
-static const float MIN_DEPTH_THRESHOLD = 0.01;
-
-// NDC range is [-1, 1], so multiply by 0.5 to convert to [0, 1] range for pixel calculation
-static const float NDC_TO_PIXEL_SCALE = 0.5;
-
-// Mip level bias: subtract from log2(screenSize) to use finer depth resolution.
-// Using a lower mip level (finer resolution) reduces false occlusion but costs more samples.
-// A value of 1.5 means we use approximately 2-3x finer resolution than the object's screen coverage.
-//static const float MIP_LEVEL_BIAS = 1.5;
-static const float MIP_LEVEL_BIAS = 1.5;
-
-// =============================================================================
-// Projection Helpers
-// =============================================================================
-
-/// Converts a view-space position to Hi-Z buffer UV coordinates.
-/// @param viewPos Position in view/camera space
-/// @return UV coordinates suitable for sampling HiZBuffer
-float2 ViewToHiZUV(float3 viewPos)
+cbuffer HiZParams : register(b0)
 {
-	return FrameBuffer::ViewToUV(viewPos, true);
-}
+	float4 HiZSettings;
+	float4 overlaySettings;
+	float4 overlayColorToggles;
+	float3 CameraWorldPos;
+	float MotionMargin;
+	float2 BufferDim;
+	float2 GuardBand;
+};
+
+static const uint RESULT_VISIBLE = 0xFFFFFFFD;
+static const uint RESULT_UNDECIDED = 0xFFFFFFFE;
+static const uint RESULT_INVALID = 0xFFFFFFFF;
+static const uint RESULT_OUTSIDE = 1;
+static const uint RESULT_OCCLUDED = 2;
+
+static const uint SEGMENT_HIDDEN = 0;
+static const uint SEGMENT_OUTSIDE = 1;
+static const uint SEGMENT_VISIBLE = 2;
+static const uint SEGMENT_UNDECIDED = 3;
+
+static const uint SWEEP_SEGMENTS = 5;
+static const float SWEEP_FRACTIONS[SWEEP_SEGMENTS + 1] = { 0.0, 0.0625, 0.125, 0.25, 0.5, 1.0 };
 
 float LinearizeHiZDepth(float depth)
 {
 	return FrameBuffer::CameraProj[2][3] / (depth - FrameBuffer::CameraProj[2][2]);
 }
 
-bool PassesDepthTest(float viewDepth, float hiZDepth, float conservativeBias)
+float NearPlaneZ()
 {
-	return viewDepth <= LinearizeHiZDepth(hiZDepth) * (1.0 + conservativeBias);
+#ifdef REVERSE_Z
+	return LinearizeHiZDepth(1.0);
+#else
+	return LinearizeHiZDepth(0.0);
+#endif
 }
 
-// =============================================================================
-// Debug Visualization (optional, controlled by overlaySettings)
-// =============================================================================
-// NOTE: All debug/overlay code is wrapped in #ifdef ENABLE_DEBUG_OVERLAY.
-// The production shader variant compiles without this define, dead-stripping
-// all overlay drawing functions and DebugOutput/DebugOverlay UAVs from the
-// compiled binary. This removes register pressure and instruction count.
-// =============================================================================
+float FarthestDepth(float a, float b)
+{
+#ifdef REVERSE_Z
+	return min(a, b);
+#else
+	return max(a, b);
+#endif
+}
+
+void ExtendRect(float3 centerVS, float radius, inout float2 uvMin, inout float2 uvMax)
+{
+	[unroll] for (uint i = 0; i < 8; ++i)
+	{
+		float3 corner = centerVS + float3((i & 1) ? radius : -radius, (i & 2) ? radius : -radius, (i & 4) ? radius : -radius);
+		float2 uv = FrameBuffer::ViewToUV(corner, true);
+		uvMin = min(uvMin, uv);
+		uvMax = max(uvMax, uv);
+	}
+}
+
+float SampleFarthestLinearDepth(float2 uvMin, float2 uvMax)
+{
+	uint width, height, levels;
+	HiZBuffer.GetDimensions(0, width, height, levels);
+	float2 pxMin = uvMin * float2(width, height);
+	float2 pxMax = uvMax * float2(width, height);
+
+	float extent = max(max(pxMax.x - pxMin.x, pxMax.y - pxMin.y), 1.0);
+	int level = min((int)ceil(log2(extent)), (int)HiZSettings.x - 1);
+	if (level > 0) {
+		float finer = exp2(-(float)(level - 1));
+		int2 span = int2(floor(pxMax * finer)) - int2(floor(pxMin * finer));
+		if (all(span <= 1))
+			level -= 1;
+	}
+
+	uint mipW, mipH, mipLevels;
+	HiZBuffer.GetDimensions(level, mipW, mipH, mipLevels);
+	int2 lastTexel = int2(mipW, mipH) - 1;
+	float scale = exp2(-(float)level);
+	int2 t0 = min(int2(floor(pxMin * scale)), lastTexel);
+	int2 t1 = min(int2(floor(pxMax * scale)), lastTexel);
+
+	float depth = HiZBuffer.Load(int3(t0, level));
+	depth = FarthestDepth(depth, HiZBuffer.Load(int3(t1.x, t0.y, level)));
+	depth = FarthestDepth(depth, HiZBuffer.Load(int3(t0.x, t1.y, level)));
+	depth = FarthestDepth(depth, HiZBuffer.Load(int3(t1, level)));
+	return LinearizeHiZDepth(depth);
+}
+
+uint TestSegment(float3 aVS, float3 bVS, float radius, bool swept, out float2 uvMin, out float2 uvMax)
+{
+	uvMin = 1e30;
+	uvMax = -1e30;
+
+	float zMin = min(aVS.z, bVS.z) - radius;
+	float zMax = max(aVS.z, bVS.z) + radius;
+	float nearZ = NearPlaneZ();
+	if (zMax <= nearZ)
+		return SEGMENT_OUTSIDE;
+	if (zMin <= nearZ)
+		return SEGMENT_UNDECIDED;
+
+	ExtendRect(aVS, radius, uvMin, uvMax);
+	if (swept)
+		ExtendRect(bVS, radius, uvMin, uvMax);
+
+	float2 band = swept ? GuardBand : 0.0;
+	if (any(uvMax < -band) || any(uvMin > 1.0 + band))
+		return SEGMENT_OUTSIDE;
+	if (any(uvMin < 0.0) || any(uvMax > 1.0))
+		return SEGMENT_UNDECIDED;
+	if (zMin >= LinearizeHiZDepth(FrameBuffer::FarPlaneDepth()))
+		return SEGMENT_UNDECIDED;
+
+	float sceneZ = SampleFarthestLinearDepth(uvMin, uvMax);
+	return zMin <= sceneZ * (1.0 + HiZSettings.y) ? SEGMENT_VISIBLE : SEGMENT_HIDDEN;
+}
 
 #ifdef ENABLE_DEBUG_OVERLAY
-
-// Debug output buffer - structured for comprehensive debugging
-struct DebugData
-{
-	float4 centerWS_radius;     // xyz=centerWS, w=radius (16 bytes, offset 0)
-	float4 centerRel_objDepth;  // xyz=centerWSCameraRelative, w=objDepth (16 bytes, offset 16)
-	float sceneDepth;           // 4 bytes (offset 32)
-	uint earlyOutReason;        // 4 bytes (offset 36)
-	float2 padding;             // 8 bytes padding (offset 40) -> total 48 bytes
-};
-
-RWStructuredBuffer<DebugData> DebugOutput : register(u1);
 
 RWTexture2D<unorm float4> DebugOverlay : register(u2);
 
@@ -160,8 +155,6 @@ void DrawPixel(int2 p, uint baseW, uint baseH, float4 color)
 
 void DrawCross(int2 p, uint baseW, uint baseH, float4 color, int thickness)
 {
-	// Variable size cross based on thickness
-	// Min: 3x3, Max: 15x15
 	int halfSize = max(1, thickness * 3);
 	[unroll] for (int i = -halfSize; i <= halfSize; ++i)
 	{
@@ -172,414 +165,123 @@ void DrawCross(int2 p, uint baseW, uint baseH, float4 color, int thickness)
 
 void DrawRectOutline(int2 minTex0, int2 maxTex0, uint baseW, uint baseH, float4 color, int thickness)
 {
-	// Optimized rectangle drawing with pixel budget to prevent GPU stalls
-	// For debug visualization, we don't need perfect rectangles at extreme sizes
-	int halfThickness = max(0, thickness / 2);
+	int halfThickness = max(0, thickness >> 1);
 
 	int width = maxTex0.x - minTex0.x;
 	int height = maxTex0.y - minTex0.y;
 
-	// Maximum pixels to draw per rectangle (prevents excessive work for large bounding boxes)
-	const int MAX_PIXELS_PER_RECT = 512;
-
-	// Calculate stride to skip pixels if rectangle is too large
 	int horizPixels = width * (1 + 2 * halfThickness);
 	int vertPixels = height * (1 + 2 * halfThickness);
 	int totalPixels = 2 * horizPixels + 2 * vertPixels;
 
-	int stride = max(1, totalPixels / MAX_PIXELS_PER_RECT);
+	int stride = max(1, totalPixels >> 9);
 
 	for (int t = -halfThickness; t <= halfThickness; ++t) {
-		// Top/bottom edges
 		for (int x = minTex0.x; x <= maxTex0.x; x += stride) {
 			DrawPixel(int2(x, minTex0.y + t), baseW, baseH, color);
 			DrawPixel(int2(x, maxTex0.y + t), baseW, baseH, color);
 		}
-		// Left/right edges
 		for (int y = minTex0.y; y <= maxTex0.y; y += stride) {
 			DrawPixel(int2(minTex0.x + t, y), baseW, baseH, color);
 			DrawPixel(int2(maxTex0.x + t, y), baseW, baseH, color);
 		}
 	}
-
-	// Always draw corners for clarity, even with large stride
-	if (stride > 1) {
-		for (int t = -halfThickness; t <= halfThickness; ++t) {
-			DrawPixel(int2(maxTex0.x, minTex0.y + t), baseW, baseH, color);
-			DrawPixel(int2(maxTex0.x, maxTex0.y + t), baseW, baseH, color);
-			DrawPixel(int2(minTex0.x + t, maxTex0.y), baseW, baseH, color);
-			DrawPixel(int2(maxTex0.x + t, maxTex0.y), baseW, baseH, color);
-		}
-	}
 }
 
-void DrawBounds(uint geometryIndex, float3 centerVS, float radius)
+void DrawBounds(uint geometryIndex, uint result, float2 uvMin, float2 uvMax, float distance)
 {
-	// Check if this color is enabled
-	uint toggleBits = uint(overlayColorToggles.x);
-	bool shouldDraw = false;
-
-	if (
-		(VisibilityResults[geometryIndex] == -3 && toggleBits & 1) ||  // Not culled: Test passed
-		(VisibilityResults[geometryIndex] == -2 && toggleBits & 2) ||  // Not culled: Inside bounds
-		(VisibilityResults[geometryIndex] == -1 && toggleBits & 4) ||  // Not culled: Invalid Radius
-		(VisibilityResults[geometryIndex] == 1 && toggleBits & 8) ||   // Culled: Frustum
-		(VisibilityResults[geometryIndex] == 2 && toggleBits & 16))    // Culled: No early out
-	{
-		shouldDraw = true;
-	}
-
-	// Early exit if this color is filtered out, or frustum culled.
-	if (!shouldDraw || VisibilityResults[geometryIndex] == 1)
+	if (overlaySettings.x == 0 || geometryIndex >= (uint)overlaySettings.y || uvMin.x > uvMax.x)
 		return;
 
-	// Compute base dimensions
-	uint baseW, baseH, mipCount;
-	HiZBuffer.GetDimensions(0, baseW, baseH, mipCount);
-
-	// Center point UV
-	float2 centerUV = ViewToHiZUV(centerVS);
-	int2 centerPix = int2(centerUV * float2(baseW, baseH));
-
-	// Calculate distance-based thickness
-	// Close objects (depth 0-100) = thick (3-5 pixels)
-	// Medium objects (depth 100-500) = medium (2-3 pixels)
-	// Far objects (depth 500+) = thin (1 pixel)
-
-	// Thickness = depth / 500
-	float distance = length(centerVS);
-	int thickness = int(500 / distance);
-	if (thickness < 1)
-		thickness = 1;
-	if (thickness > 5)
-		thickness = 5;
-
-	// Color based on VisibilityResults
+	uint toggleBits = uint(overlayColorToggles.x);
 	float4 color;
-	if (VisibilityResults[geometryIndex] == -3) {         // Not culled: Test passed
-		color = float4(0, 1, 0, 1);                       // Green
-	} else if (VisibilityResults[geometryIndex] == -2) {  // Not culled: Inside bounds
-		color = float4(0, 1, 0.5, 1);                     // Teal
-	} else if (VisibilityResults[geometryIndex] == -1) {  // Not culled: Invalid Radius
-		color = float4(0, 1, 1, 1);                       // Cyan
-	} else if (VisibilityResults[geometryIndex] == 0) {   // Default value
-		color = float4(1, 1, 1, 1);                       // white
-	} else if (VisibilityResults[geometryIndex] == 1) {   // Culled: Frustum
-		color = float4(1, 0, 1, 1);                       // Magenta
-	} else if (VisibilityResults[geometryIndex] == 2) {   // Culled: No early out
-		color = float4(1, 0, 0, 1);                       // Red
+	if (result == RESULT_VISIBLE && (toggleBits & 1)) {
+		color = float4(0, 1, 0, 1);
+	} else if (result == RESULT_UNDECIDED && (toggleBits & 2)) {
+		color = float4(0, 1, 0.5, 1);
+	} else if (result == RESULT_INVALID && (toggleBits & 4)) {
+		color = float4(0, 1, 1, 1);
+	} else if (result == RESULT_OUTSIDE && (toggleBits & 8)) {
+		color = float4(1, 0, 1, 1);
+	} else if (result == RESULT_OCCLUDED && (toggleBits & 16)) {
+		color = float4(1, 0, 0, 1);
 	} else {
 		return;
 	}
 
-	// Draw center point cross with distance-based thickness
-	DrawCross(centerPix, baseW, baseH, color, thickness);
+	uint baseW, baseH, mipCount;
+	HiZBuffer.GetDimensions(0, baseW, baseH, mipCount);
+	float2 size = float2(baseW, baseH);
 
-	// Calculate approximate screen-space bounding box for the sphere
-	// Project sphere bounds to get conservative rectangle
-	float3 viewDir = centerVS * rsqrt(max(dot(centerVS, centerVS), 1e-12));
+	int thickness = clamp(int(500 / max(distance, 1.0)), 1, 5);
+	float2 clampedMin = saturate(uvMin);
+	float2 clampedMax = saturate(uvMax);
+	DrawCross(int2((clampedMin + clampedMax) * 0.5 * size), baseW, baseH, color, thickness);
 
-	// Calculate approximate corner positions in view space
-	float3 right = float3(1, 0, 0);
-	float3 up = float3(0, 1, 0);
-
-	// Estimate screen bounds by projecting offset points
-	float2 minUV = float2(1, 1);
-	float2 maxUV = float2(0, 0);
-
-	float3 offsets[4] = {
-		float3(1, 0, 0),
-		float3(0, 1, 0),
-		float3(-1, 0, 0),
-		float3(0, -1, 0)
-	};
-
-	[unroll] for (int i = 0; i < 4; i++)
-	{
-		float3 dir3 = offsets[i];
-		float lenSq = dot(dir3, dir3);
-		float3 unitDir = dir3 * rsqrt(max(lenSq, 1e-12));
-		float3 pointVS = centerVS + unitDir * radius;
-		float2 pointUV = ViewToHiZUV(pointVS);
-		minUV = min(minUV, pointUV);
-		maxUV = max(maxUV, pointUV);
-	}
-
-	// Draw outline of bounding rectangle
-	int2 minTex0 = int2(
-		clamp((int)floor(minUV.x * baseW), 0, (int)baseW - 1),
-		clamp((int)floor(minUV.y * baseH), 0, (int)baseH - 1));
-	int2 maxTex0 = int2(
-		clamp((int)floor(maxUV.x * baseW), 0, (int)baseW - 1),
-		clamp((int)floor(maxUV.y * baseH), 0, (int)baseH - 1));
+	int2 minTex0 = clamp(int2(floor(clampedMin * size)), 0, int2(baseW, baseH) - 1);
+	int2 maxTex0 = clamp(int2(floor(clampedMax * size)), 0, int2(baseW, baseH) - 1);
 	DrawRectOutline(minTex0, maxTex0, baseW, baseH, color, thickness);
 }
 
 #endif  // ENABLE_DEBUG_OVERLAY
 
-// =============================================================================
-// Mip Level Selection
-// =============================================================================
-
-/// Calculates the appropriate Hi-Z mip level to sample for a given object.
-///
-/// The mip level is chosen based on the object's screen-space size:
-/// - Larger objects (more pixels) -> higher mip level (coarser depth)
-/// - Smaller objects (fewer pixels) -> lower mip level (finer depth)
-///
-/// Using a mip level that roughly matches the object's screen coverage ensures
-/// we get a representative depth value without over-sampling.
-///
-/// @param centerVS Object center in view space
-/// @param radius Object bounding sphere radius
-/// @return Mip level to use for Hi-Z sampling (0 = full resolution)
-float GetMipLevel(float3 centerVS, float radius)
+uint ResolveResult(TestEntry entry, out float2 uvMin, out float2 uvMax, out float distance)
 {
-	float depth = abs(centerVS.z);
+	uvMin = 1e30;
+	uvMax = -1e30;
+	distance = 0.0;
 
-	// Prevent division by zero
-	if (depth < MIN_DEPTH_THRESHOLD)
-		return 0.0;
+	float radius = entry.Bounds.w;
+	if (radius <= 0.0)
+		return RESULT_INVALID;
+	radius += MotionMargin;
 
-	// Get projection scale from first element of projection matrix
-	// CameraProj[0][0] = horizontal FOV scale = 1/tan(fovX/2)
-	float projScaleX = FrameBuffer::CameraProj[0][0];
+	float3 centerVS = mul(FrameBuffer::CameraView, float4(entry.Bounds.xyz - CameraWorldPos, 1)).xyz;
+	distance = length(centerVS);
+	if (distance <= radius)
+		return RESULT_UNDECIDED;
 
-	// Screen-space radius in NDC: (radius / depth) * projectionScale
-	float screenRadiusNDC = (radius / depth) * projScaleX;
+	float3 sweepVS = mul(FrameBuffer::CameraView, float4(entry.Sweep.xyz, 0)).xyz;
+	bool swept = dot(entry.Sweep.xyz, entry.Sweep.xyz) > 0.0;
 
-	// Convert to pixels (NDC is [-1,1], so multiply by half width)
-	uint hiZWidth, hiZHeight, hiZMipCount;
-	HiZBuffer.GetDimensions(0, hiZWidth, hiZHeight, hiZMipCount);
-	float screenRadiusPixels = abs(screenRadiusNDC) * hiZWidth * NDC_TO_PIXEL_SCALE;
-
-	// Diameter in pixels
-	float screenSizePixels = screenRadiusPixels * 2.0;
-
-	// Subtract MIP_LEVEL_BIAS to use finer depth resolution (reduces false occlusion)
-	float mipLevel = max(0.0, log2(max(1.0, screenSizePixels)) - MIP_LEVEL_BIAS);
-
-	return clamp(mipLevel, 0.0, HiZSettings.x - 1.0);  // Clamp to valid mip range
-}
-
-// =============================================================================
-// Visibility Reporting
-// =============================================================================
-
-/// Reports a geometry as visible and optionally draws debug overlay.
-/// Called when depth test passes or early-out determines visibility.
-/// @param geometryIndex Index into GeometryBounds/VisibilityResults
-/// @param centerVS Object center in view space (for debug rendering)
-/// @param radius Object radius (for debug rendering)
-void ReportVisibleGeometry(int geometryIndex, float3 centerVS, float radius)
-{
-#ifdef ENABLE_DEBUG_OVERLAY
-	if (overlaySettings.x != 0 && geometryIndex < overlaySettings.y) {
-		DrawBounds(geometryIndex, centerVS, radius);
+	if (!swept) {
+		uint segment = TestSegment(centerVS, centerVS, radius, false, uvMin, uvMax);
+		if (segment == SEGMENT_VISIBLE)
+			return RESULT_VISIBLE;
+		if (segment == SEGMENT_UNDECIDED)
+			return RESULT_UNDECIDED;
+		return segment == SEGMENT_HIDDEN ? RESULT_OCCLUDED : RESULT_OUTSIDE;
 	}
-#endif
-}
 
-// =============================================================================
-// Main Entry Point
-// =============================================================================
-// Each thread tests one geometry object's bounding sphere against the Hi-Z pyramid.
-// Thread count = geometryCount, dispatched as (ceil(geometryCount/256), 1, 1)
-// =============================================================================
+	bool anyHidden = false;
+	[unroll] for (uint i = 0; i < SWEEP_SEGMENTS; ++i)
+	{
+		float2 segMin, segMax;
+		uint segment = TestSegment(centerVS + sweepVS * SWEEP_FRACTIONS[i], centerVS + sweepVS * SWEEP_FRACTIONS[i + 1], radius, true, segMin, segMax);
+		if (i == 0) {
+			uvMin = segMin;
+			uvMax = segMax;
+		}
+		if (segment == SEGMENT_VISIBLE)
+			return RESULT_VISIBLE;
+		if (segment == SEGMENT_UNDECIDED)
+			return RESULT_UNDECIDED;
+		anyHidden = anyHidden || segment == SEGMENT_HIDDEN;
+	}
+	return anyHidden ? RESULT_OCCLUDED : RESULT_OUTSIDE;
+}
 
 [numthreads(256, 1, 1)] void main(uint3 dispatchThreadID : SV_DispatchThreadID) {
 	uint geometryIndex = dispatchThreadID.x;
-	uint geometryCount = (uint)HiZSettings.z;
-	if (geometryIndex >= geometryCount)
+	if (geometryIndex >= (uint)HiZSettings.z)
 		return;
 
-	// Initialize to "unprocessed" - this should be overwritten before shader exits
-	VisibilityResults[geometryIndex] = 0;
+	float2 uvMin, uvMax;
+	float distance;
+	uint result = ResolveResult(Entries[geometryIndex], uvMin, uvMax, distance);
+	VisibilityResults[geometryIndex] = result;
 
-	// Load bounding sphere data
-	float4 Bounds = GeometryBounds[geometryIndex];
-	float3 centerWS = Bounds.xyz;
-	float radius = Bounds.w;
-
-	// =========================================================================
-	// COORDINATE TRANSFORM: World Space -> View Space
-	// =========================================================================
-	// Skyrim stores positions in camera-relative world coordinates.
-	// Subtract camera position to get true world-relative coords before view transform.
-	// NOTE: Some interior cell bounds appear to follow the camera inverted - needs investigation.
-	float3 centerWSCameraRelative = centerWS - CameraWorldPos;
-	float3 centerVS = mul(FrameBuffer::CameraView, float4(centerWSCameraRelative, 1)).xyz;
-
-	// =========================================================================
-	// EARLY OUT 1: Invalid radius -> mark visible (safety)
-	// =========================================================================
-	if (radius <= 0.0) {
-		VisibilityResults[geometryIndex] = -1;  // Visible: invalid radius
 #ifdef ENABLE_DEBUG_OVERLAY
-		if (overlaySettings.x != 0 && geometryIndex < (uint)overlaySettings.y) {
-			DrawBounds(geometryIndex, centerVS, radius);
-		}
-#endif
-		return;
-	}
-
-	// =========================================================================
-	// EARLY OUT 2: Camera inside bounding sphere -> always visible
-	// =========================================================================
-	float centerDist = length(centerVS);
-	if (centerDist <= radius) {
-		VisibilityResults[geometryIndex] = -2;  // Visible: camera inside bounds
-#ifdef ENABLE_DEBUG_OVERLAY
-		if (overlaySettings.x != 0 && geometryIndex < (uint)overlaySettings.y) {
-			DrawBounds(geometryIndex, centerVS, radius);
-		}
-#endif
-		return;
-	}
-
-	// =========================================================================
-	// MIP LEVEL SELECTION
-	// =========================================================================
-	// Choose Hi-Z mip level based on object's screen coverage.
-	// Larger screen coverage -> coarser mip (faster, acceptable accuracy)
-	float mipLevel = GetMipLevel(centerVS, radius);
-	float conservativeBias = HiZSettings.y;
-
-	// =========================================================================
-	// HIERARCHICAL DEPTH TESTING
-	// =========================================================================
-	// Test multiple points on the bounding sphere surface against the Hi-Z depth.
-	// If ANY point passes the depth test, the object is considered visible.
-	//
-	// Points are tested in priority order to maximize early-out for visible objects:
-	// 1. Center point + nearest sphere point (2 points)
-	// 2. 6 axis-aligned directions (cardinal directions)
-	// 3. 8 corner directions (diagonals)
-	// Total: 16 strategic points instead of 78 (26 × 3 scales)
-	static const float3 offsets[14] = {
-		// 6 axis-aligned (face centers of cube)
-		float3(1, 0, 0), float3(-1, 0, 0),
-		float3(0, 1, 0), float3(0, -1, 0),
-		float3(0, 0, 1), float3(0, 0, -1),
-		// 8 corners (diagonals)
-		float3(1, 1, 1), float3(1, 1, -1),
-		float3(1, -1, 1), float3(1, -1, -1),
-		float3(-1, 1, 1), float3(-1, 1, -1),
-		float3(-1, -1, 1), float3(-1, -1, -1)
-	};
-
-	bool anyPointBehindCamera = false;
-	bool anyPointOnScreen = false;
-
-	// -------------------------------------------------------------------------
-	// Test 1: Center point and nearest sphere point (highest visibility probability)
-	// -------------------------------------------------------------------------
-	if (centerVS.z > 0.0) {
-		float2 centerUV = clamp(ViewToHiZUV(centerVS), float2(0.0, 0.0), float2(1.0, 1.0));
-
-		float hiZDepth = HiZBuffer.SampleLevel(HiZSampler, centerUV, mipLevel).r;
-		if (PassesDepthTest(centerVS.z, hiZDepth, conservativeBias)) {
-			VisibilityResults[geometryIndex] = -3;
-			ReportVisibleGeometry(geometryIndex, centerVS, radius);
-			return;
-		}
-		anyPointOnScreen = true;
-
-		// Test nearest sphere point
-		float3 normalDir = -normalize(centerVS);
-		float3 nearestSpherePoint = centerVS + normalDir * radius;
-		if (nearestSpherePoint.z > 0.0) {
-			float2 nearestUV = clamp(ViewToHiZUV(nearestSpherePoint), float2(0.0, 0.0), float2(1.0, 1.0));
-
-			// NEW: Entire sphere beyond far plane — don't occlusion-cull
-			if (nearestSpherePoint.z > LinearizeHiZDepth(FrameBuffer::FarPlaneDepth())) {
-				VisibilityResults[geometryIndex] = -3;
-				ReportVisibleGeometry(geometryIndex, centerVS, radius);
-				return;
-			}
-
-			hiZDepth = HiZBuffer.SampleLevel(HiZSampler, nearestUV, mipLevel).r;
-			if (PassesDepthTest(nearestSpherePoint.z, hiZDepth, conservativeBias)) {
-				VisibilityResults[geometryIndex] = -3;  // Visible: depth test passed
-				ReportVisibleGeometry(geometryIndex, centerVS, radius);
-				return;
-			}
-		}
-	} else {
-		anyPointBehindCamera = true;
-	}
-
-	// -------------------------------------------------------------------------
-	// Test 2: Sphere surface sampling (14 strategic points)
-	// -------------------------------------------------------------------------
-	// Test axis-aligned and corner directions at full radius.
-	// Visible objects typically exit on first few tests due to early-out.
-	[unroll] for (int i = 0; i < 14; ++i)
-	{
-		float3 dir3 = offsets[i];
-		float lenSq = dot(dir3, dir3);
-		float3 unitDir = dir3 * rsqrt(max(lenSq, 1e-12));
-		float3 pointVS = centerVS + unitDir * radius;
-
-		if (pointVS.z <= 0.0) {
-			anyPointBehindCamera = true;
-			continue;
-		}
-
-		float2 rawUV = ViewToHiZUV(pointVS);
-
-		if (rawUV.x >= 0.0 && rawUV.x <= 1.0 &&
-			rawUV.y >= 0.0 && rawUV.y <= 1.0) {
-			anyPointOnScreen = true;
-		}
-
-		float2 pointUV = clamp(rawUV, float2(0.0, 0.0), float2(1.0, 1.0));
-
-		float hiZDepth = HiZBuffer.SampleLevel(HiZSampler, pointUV, mipLevel).r;
-		if (PassesDepthTest(pointVS.z, hiZDepth, conservativeBias)) {
-			VisibilityResults[geometryIndex] = -3;  // Visible: depth test passed
-			ReportVisibleGeometry(geometryIndex, centerVS, radius);
-			return;
-		}
-	}
-
-	// =========================================================================
-	// FRUSTUM CULLING: No points in front of camera
-	// =========================================================================
-	// If ALL tested points were off-screen, the object is
-	// completely outside the view frustum and can be culled.
-	// If any point was in front of camera, and at least on point was behind camera,
-	// the object should not be culled.
-	if (!anyPointOnScreen && !anyPointBehindCamera) {
-		VisibilityResults[geometryIndex] = 1;  // Culled: frustum (behind camera)
-#ifdef ENABLE_DEBUG_OVERLAY
-		if (overlaySettings.x != 0 && geometryIndex < (uint)overlaySettings.y) {
-			DrawBounds(geometryIndex, centerVS, radius);
-		}
-#endif
-		return;
-	} else if (anyPointBehindCamera) {
-		VisibilityResults[geometryIndex] = -2;  // Visible: camera inside bounds
-#ifdef ENABLE_DEBUG_OVERLAY
-		if (overlaySettings.x != 0 && geometryIndex < (uint)overlaySettings.y) {
-			DrawBounds(geometryIndex, centerVS, radius);
-		}
-#endif
-		return;
-	}
-
-	// =========================================================================
-	// OCCLUSION CULLING: All depth tests failed
-	// =========================================================================
-	// If we reach here, all tested points were on-screen but failed the depth test.
-	// The object is occluded by closer geometry and can be culled.
-	//
-	// NOTE: This result will be read back by the CPU 2-3 frames later due to
-	// async GPU readback. The object will be re-tested each frame while culled.
-	VisibilityResults[geometryIndex] = 2;  // Culled: occluded (all depth tests failed)
-#ifdef ENABLE_DEBUG_OVERLAY
-	if (overlaySettings.x != 0 && geometryIndex < (uint)overlaySettings.y) {
-		DrawBounds(geometryIndex, centerVS, radius);
-	}
+	DrawBounds(geometryIndex, result, uvMin, uvMax, distance);
 #endif
 }
