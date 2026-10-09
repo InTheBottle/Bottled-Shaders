@@ -1623,8 +1623,8 @@ HDRDisplay::HDRDataCB HDRDisplay::BuildHDRData() const
 	// Without it, ISHDR gamma-encodes its output even in HDR mode. Linear Lighting stands down on the flat world map
 	// and whenever Effects11 is on (LinearLighting::GetCommonBufferData).
 	auto& effects11 = globals::features::effects11;
-	bool isSceneLinear = globals::features::linearLighting.settings.enableLinearLighting && !globals::state->IsFlatWorldMapOpen() &&
-	                     !(effects11.loaded && effects11.enableEffect);
+	bool isSceneLinear = globals::features::linearLighting.loaded && globals::features::linearLighting.settings.enableLinearLighting &&
+	                     !globals::state->IsMainLoadingOrFlatMapOpen() && !(effects11.loaded && effects11.enableEffect);
 
 	const bool applyAutoHDR = effects11.ReplacedTonemapperThisFrame();
 	float effectivePeakNits = static_cast<float>(applyAutoHDR ? std::min(settings.hdrPeakNits, kAutoHDRMaxNits) : settings.hdrPeakNits);

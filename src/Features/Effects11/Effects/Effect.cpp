@@ -8,6 +8,7 @@
 #include "../ENBExtender.h"
 #include "../PresetManager.h"
 #include "../TextureManager.h"
+#include "Features/ReverseZ.h"
 #include "Globals.h"
 #include "State.h"
 #include "Features/Effects11/SettingsPatches.h"
@@ -1148,6 +1149,10 @@ void Effect::UpdateExternBindings()
 	auto invView = fb.GetCameraViewInverse();
 	auto wvp = fb.GetCameraViewProj();
 	auto invWvp = fb.GetCameraViewProjInverse();
+	if (globals::features::reverseZ.IsActive() && ReverseZ::IsReversedUploadedProjection(fb.GetCameraProj())) {
+		ReverseZ::FlipUploadedProjection(wvp);
+		ReverseZ::FlipUploadedInverse(invWvp);
+	}
 
 	for (auto& eb : externBindings) {
 		if (!eb.variable)

@@ -270,7 +270,7 @@ void Streamline::RequestFeatureLoad(sl::Feature a_feature, const char* a_feature
 		logger::warn("[Streamline {}] Failed to request {} load: {}", instanceTag, a_featureName, magic_enum::enum_name(loadResult));
 }
 
-void Streamline::BindReflexAndPCL()
+void Streamline::BindReflexAndPCL(bool a_reflexSupported, bool a_pclSupported)
 {
 	if (!slGetFeatureFunction || !reflexSupportedOnCurrentAdapter)
 		return;
@@ -284,14 +284,14 @@ void Streamline::BindReflexAndPCL()
 	reflexFnsBound &= BindFeatureFunction(sl::kFeatureReflex, "slReflexGetState", (void*&)slReflexGetState);
 	reflexFnsBound &= BindFeatureFunction(sl::kFeatureReflex, "slReflexSleep", (void*&)slReflexSleep);
 	reflexFnsBound &= BindFeatureFunction(sl::kFeatureReflex, "slReflexSetOptions", (void*&)slReflexSetOptions);
-	featureReflex = reflexFnsBound && slReflexSetOptions && slReflexSleep;
+	featureReflex = a_reflexSupported && reflexFnsBound && slReflexSetOptions && slReflexSleep;
 	if (!featureReflex)
 		logger::warn("[Streamline {}] Reflex functions are missing; Reflex runtime controls will be disabled", instanceTag);
 	else
 		logger::info("[Streamline {}] Reflex runtime controls are available", instanceTag);
 
 	bool pclFnBound = BindFeatureFunction(sl::kFeaturePCL, "slPCLSetMarker", (void*&)slPCLSetMarker);
-	featurePCL = pclFnBound && slPCLSetMarker;
+	featurePCL = a_pclSupported && pclFnBound && slPCLSetMarker;
 	if (!featurePCL)
 		logger::warn("[Streamline {}] PCL marker function is unavailable; marker optimization requests will be ignored", instanceTag);
 	else
@@ -302,7 +302,11 @@ void Streamline::PostDevice()
 {
 	// Hook up all of the feature functions using the sl function slGetFeatureFunction
 
+	const bool reflexSupported = featureReflex;
+	const bool pclSupported = featurePCL;
+
 	if (renderAPI == sl::RenderAPI::eD3D12) {
+		const bool dlssgSupported = featureDLSSG;
 		slDLSSGGetState = nullptr;
 		slDLSSGSetOptions = nullptr;
 		featureDLSSG = false;
@@ -315,10 +319,10 @@ void Streamline::PostDevice()
 			bool dlssgFnsBound = true;
 			dlssgFnsBound &= BindFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGGetState", (void*&)slDLSSGGetState);
 			dlssgFnsBound &= BindFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGSetOptions", (void*&)slDLSSGSetOptions);
-			featureDLSSG = dlssgFnsBound && slDLSSGGetState && slDLSSGSetOptions;
+			featureDLSSG = dlssgSupported && dlssgFnsBound && slDLSSGGetState && slDLSSGSetOptions;
 
 			if (!featureDLSSG) {
-				logger::warn("[Streamline DX12] DLSS-G functions missing; DLSS-G runtime controls will be disabled");
+				logger::warn("[Streamline DX12] DLSS-G {}; DLSS-G runtime controls will be disabled", dlssgSupported ? "functions missing" : "not supported on this system");
 				dlssgMaxFramesToGenerate = 1;
 			} else {
 				logger::info("[Streamline DX12] DLSS-G runtime controls are available");
@@ -335,7 +339,7 @@ void Streamline::PostDevice()
 				}
 			}
 
-			BindReflexAndPCL();
+			BindReflexAndPCL(reflexSupported, pclSupported);
 		}
 
 		reflexOptionsCache = {};
@@ -356,7 +360,7 @@ void Streamline::PostDevice()
 	featureReflex = false;
 	featurePCL = false;
 
-	BindReflexAndPCL();
+	BindReflexAndPCL(reflexSupported, pclSupported);
 
 	reflexOptionsCache = {};
 	lastReflexSleepFrame = UINT32_MAX;
@@ -456,7 +460,7 @@ bool Streamline::CheckFrameConstants(sl::ViewportHandle p_viewport)
 	auto& upscaling = globals::features::upscaling;
 	const bool frameGenInstance = renderAPI == sl::RenderAPI::eD3D12;
 	bool usedWorldCamera = false;
-	const auto& frameBuffer = frameGenInstance ? upscaling.GetConstantsCamera(&usedWorldCamera) : globals::game::frameBufferCached;
+	const auto& frameBuffer = upscaling.GetConstantsCamera(&usedWorldCamera);
 	if (frameGenInstance)
 		upscaling.constantsUsedWorldCamera = usedWorldCamera;
 	auto viewMatrix = frameBuffer.GetCameraViewInverse().Transpose();
@@ -482,7 +486,12 @@ bool Streamline::CheckFrameConstants(sl::ViewportHandle p_viewport)
 
 	auto jitter = upscaling.jitter;
 	slConstants.jitterOffset = { -jitter.x, -jitter.y };
-	slConstants.reset = (frameGenInstance && globals::state->IsMainOrLoadingMenuOpen()) ? sl::Boolean::eTrue : sl::Boolean::eFalse;
+	const uint32_t constantsFrame = globals::state->frameCount;
+	const bool constantsGap = lastConstantsFrame == UINT32_MAX || constantsFrame - lastConstantsFrame > 1;
+	const bool sceneCut = globals::state->IsMainOrLoadingMenuOpen();
+	slConstants.reset = (sceneCut || constantsResetPending || constantsGap) ? sl::Boolean::eTrue : sl::Boolean::eFalse;
+	constantsResetPending = sceneCut;
+	lastConstantsFrame = constantsFrame;
 
 	slConstants.mvecScale = { 1.0f, 1.0f };
 	slConstants.motionVectors3D = sl::Boolean::eFalse;
@@ -608,7 +617,7 @@ void Streamline::SetDLSSOptions(sl::ViewportHandle p_viewport, uint32_t width)
 	}
 }
 
-void Streamline::EvaluateDLSS(sl::ViewportHandle vp,
+bool Streamline::EvaluateDLSS(sl::ViewportHandle vp,
 	ID3D11Resource* colorIn, ID3D11Resource* colorOut, ID3D11Resource* depth,
 	ID3D11Resource* mvec, ID3D11Resource* reactiveMask, ID3D11Resource* transparencyMask,
 	const sl::Extent& extentIn, const sl::Extent& extentOut, uint32_t outputWidth)
@@ -623,7 +632,7 @@ void Streamline::EvaluateDLSS(sl::ViewportHandle vp,
 	sl::Resource transparencyMaskRes = { sl::ResourceType::eTex2d, transparencyMask, 0 };
 
 	if (!CheckFrameConstants(vp))
-		return;
+		return false;
 
 	const bool emitPCLMarkers =
 		globals::features::upscaling.settings.reflexUseMarkersToOptimize &&
@@ -679,10 +688,12 @@ void Streamline::EvaluateDLSS(sl::ViewportHandle vp,
 			evalErrorLogged = true;
 			logger::error("[Streamline] slEvaluateFeature failed result={}", (int)evalResult);
 		}
+		return false;
 	}
+	return true;
 }
 
-void Streamline::Upscale(ID3D11Resource* a_upscalingTexture, ID3D11Resource* a_reactiveMask, ID3D11Resource* a_transparencyCompositionMask, ID3D11Resource* a_motionVectors)
+bool Streamline::Upscale(ID3D11Resource* a_upscalingTexture, ID3D11Resource* a_reactiveMask, ID3D11Resource* a_transparencyCompositionMask, ID3D11Resource* a_motionVectors)
 {
 	auto renderer = globals::game::renderer;
 	auto& depthTexture = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN];
@@ -699,7 +710,7 @@ void Streamline::Upscale(ID3D11Resource* a_upscalingTexture, ID3D11Resource* a_r
 	sl::Extent extentIn{ 0, 0, (uint)renderSize.x, (uint)renderSize.y };
 	sl::Extent extentOut{ 0, 0, (uint)screenSize.x, (uint)screenSize.y };
 
-	EvaluateDLSS(viewport,
+	return EvaluateDLSS(viewport,
 		a_upscalingTexture, colorOut,
 		depthTexture.texture, a_motionVectors, a_reactiveMask, a_transparencyCompositionMask,
 		extentIn, extentOut, (uint)screenSize.x);
@@ -747,7 +758,7 @@ void Streamline::UpdateReflex()
 	sl::ReflexOptions options{};
 	if (renderAPI == sl::RenderAPI::eD3D12) {
 		// DX12 Reflex: DLSS-G requires at least eLowLatency when FG is active
-		bool needReflex = upscaling.ShouldPrepareFrameGeneration() || settings.reflexLowLatencyMode;
+		bool needReflex = upscaling.ShouldPrepareFrameGeneration() || (upscaling.UsesDLSSGFrameGen() && settings.frameGenerationMode) || settings.reflexLowLatencyMode;
 		if (needReflex)
 			options.mode = settings.reflexLowLatencyBoost ? sl::ReflexMode::eLowLatencyWithBoost : sl::ReflexMode::eLowLatency;
 		else

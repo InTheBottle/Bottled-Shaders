@@ -127,6 +127,7 @@ public:
 	bool d3d12SwapChainActive = false;
 	// Set by Main_PostProcessing when frame-generation inputs were copied; cleared after Present.
 	bool frameGenerationPrepared = false;
+	bool dlssOutputValid = false;
 
 	globals::FrameBufferCache worldCameraFrame{};
 	bool worldCameraFrameValid = false;
@@ -236,13 +237,6 @@ public:
 	bool previousUpscalingWasActive = false;
 	bool depthUpscaleUseWideKernel = false;
 
-	/**
-	 * Set by MenuOpenCloseEventHandler when LoadingMenu closes (cell/worldspace transitions,
-	 * initial load). Consumed at the start of Upscale() to force a one-frame DLSS feature
-	 * rebuild.
-	 */
-	std::atomic<bool> pendingDLSSReset{ false };
-
 	/** @brief Copies depth and motion vectors for frame generation; returns false if its shaders or shared buffers are unavailable. */
 	bool CopySharedD3D12Resources();
 	void PostDisplay();
@@ -319,12 +313,5 @@ private:
 	{
 		static void thunk();
 		static inline REL::Relocation<decltype(thunk)> func;
-	};
-
-	class MenuOpenCloseEventHandler : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
-	{
-	public:
-		virtual RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override;
-		static bool Register();
 	};
 };

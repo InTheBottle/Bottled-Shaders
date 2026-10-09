@@ -33,8 +33,8 @@ struct ScreenshotFeature : public Feature
 
 	/** @brief Captures a screenshot from the current back buffer and enqueues it for async encoding and save. */
 	void Capture();
-	/** @brief Checks for a pending capture request and executes Capture() if one is pending. Should be called before the wrapped buffers are cleared. */
-	void ProcessCaptureRequest();
+	/** @brief Checks for a pending capture request and executes Capture() if one is pending and `presented` matches the source's capture phase. */
+	void ProcessCaptureRequest(bool presented);
 	bool applyCropToScreenshot = true;
 
 	// Settings
@@ -67,6 +67,9 @@ private:
 	std::queue<PendingScreenshot> screenshotQueue;
 	std::thread screenshotWorker;
 	bool screenshotWorkerRunning = false;
+	std::atomic<uint32_t> screenshotsInFlight{ 0 };
+	bool multithreadProtectionRaised = false;
+	BOOL previousMultithreadProtection = FALSE;
 	Util::Subrect::Controller subrect;
 
 	// SRV-readable copy used when the capture source's own SRV can't be sampled
@@ -79,5 +82,7 @@ private:
 	void EnqueueScreenshot(PendingScreenshot&& screenshot);
 	void ScreenshotWorkerLoop();
 	void EnsurePreviewCache(ID3D11Texture2D* sourceTexture);
+	void RaiseMultithreadProtection();
+	void RestoreMultithreadProtection();
 	static void ShowInGameNotification(std::string message);
 };

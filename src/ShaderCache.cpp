@@ -1826,13 +1826,9 @@ namespace SIE
 				return false;
 			}
 			static constexpr std::string_view reverseZOnly[] = { "BSImagespaceShaderWorldMap", "BSImagespaceShaderWorldMapNoSkyBlur" };
-			static constexpr std::string_view standardZOnly[] = { "BGSLensFlareVisibilityPass" };
 			auto& reverseZ = globals::features::reverseZ;
 			const bool reverseZImageSpace = reverseZ.loaded && reverseZ.HasShaderDefine(RE::BSShader::Type::ImageSpace);
 			if (!reverseZImageSpace && std::ranges::find(reverseZOnly, it->first) != std::end(reverseZOnly)) {
-				return false;
-			}
-			if (reverseZImageSpace && std::ranges::find(standardZOnly, it->first) != std::end(standardZOnly)) {
 				return false;
 			}
 			descriptor = it->second;
@@ -2338,7 +2334,7 @@ namespace SIE
 
 	bool ShaderCache::IsEnabled() const
 	{
-		return isEnabled;
+		return isEnabled || globals::features::reverseZ.IsActive();
 	}
 
 	void ShaderCache::SetEnabled(bool value)

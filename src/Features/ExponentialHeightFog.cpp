@@ -101,7 +101,9 @@ namespace
 				 &Settings::volumetricFogDistance, &Settings::volumetricFogStartDistance,
 				 &Settings::volumetricFogNearFadeInDistance, &Settings::volumetricFogExtinctionScale,
 				 &Settings::volumetricDepthDistributionScale }) {
-			if (current.*field != previous.*field)
+			const float value = current.*field;
+			const float previousValue = previous.*field;
+			if (std::abs(value - previousValue) > kMaximumWeatherHistoryChange * std::max(std::abs(value), std::abs(previousValue)))
 				return false;
 		}
 		if (current.useVanillaFogSettings) {

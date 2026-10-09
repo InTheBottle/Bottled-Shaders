@@ -207,6 +207,10 @@ bool Hooks::BSShader_BeginTechnique::thunk(RE::BSShader* shader, uint32_t vertex
 	// Only check against non-shader bits
 	state->permutationData.PixelShaderDescriptor &= ~state->modifiedPixelDescriptor;
 
+	if (shader->shaderType.get() == RE::BSShader::Type::Sky && globals::features::reverseZ.IsActive() &&
+		(!state->ShaderEnabled(RE::BSShader::Type::Sky) || !shaderCache->GetVertexShader(*shader, state->modifiedVertexDescriptor)))
+		return false;
+
 	bool shaderFound = func(shader, vertexDescriptor, pixelDescriptor, skipPixelShader);
 
 	if (!shaderFound && shader->shaderType.get() != RE::BSShader::Type::Effect) {
@@ -424,6 +428,8 @@ struct IDXGISwapChain_Present
 	{
 		globals::state->Reset();
 
+		globals::features::screenshotFeature.ProcessCaptureRequest(false);
+
 		HRESULT retval = globals::features::hdrDisplay.HandleSwapChainPresent(
 			This,
 			SyncInterval,
@@ -432,7 +438,7 @@ struct IDXGISwapChain_Present
 				return func(swapChain, syncInterval, presentFlags);
 			});
 
-		globals::features::screenshotFeature.ProcessCaptureRequest();
+		globals::features::screenshotFeature.ProcessCaptureRequest(true);
 
 		TracyD3D11Collect(globals::state->tracyCtx);
 

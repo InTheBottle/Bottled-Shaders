@@ -355,7 +355,14 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	// Wait for D3D11 to finish (includes ApplyHDR scene encoding AND UIBrightnessCS)
 	const uint64_t d3d11SignalValue = interopFence.Next();
 	DX::ThrowIfFailed(d3d11Context->Signal(interopFence.fence11.get(), d3d11SignalValue));
+	d3d11Context->Flush();
 	DX::ThrowIfFailed(commandQueue->Wait(interopFence.fence12.get(), d3d11SignalValue));
+
+	// Null only after a resize failure severe enough that even the pre-resize
+	// buffers couldn't be re-fetched (e.g. device removed) -- skip this frame's
+	// copy/present rather than pass a null resource to D3D12.
+	if (!swapChainBuffers[frameIndex])
+		return DXGI_ERROR_DEVICE_REMOVED;
 
 	// New frame, reset
 	if (frameFenceValues[frameIndex])
@@ -367,11 +374,6 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	{
 		auto fakeSwapChain = swapChainBufferWrapped->resource.get();
 		auto realSwapChain = swapChainBuffers[frameIndex].get();
-		// Null only after a resize failure severe enough that even the pre-resize
-		// buffers couldn't be re-fetched (e.g. device removed) -- skip this frame's
-		// copy/present rather than pass a null resource to D3D12.
-		if (!realSwapChain)
-			return DXGI_ERROR_DEVICE_REMOVED;
 		{
 			std::vector<D3D12_RESOURCE_BARRIER> barriers;
 			barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(fakeSwapChain, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE));
@@ -404,7 +406,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 				depthBufferShared12 ? depthBufferShared12->resource.get() : nullptr,
 				motionVectorBufferShared12 ? motionVectorBufferShared12->resource.get() : nullptr,
 				hudLess ? hudLessBufferWrapped->resource.get() : (swapChainBufferWrapped ? swapChainBufferWrapped->resource.get() : nullptr),
-				hudLess ? nullptr : (uiBufferWrapped ? uiBufferWrapped->resource.get() : nullptr),
+				nullptr,
 				swapChainDesc.Width, swapChainDesc.Height);
 			streamlineDX12.ConfigureDLSSG(upscaling.ShouldUseFrameGenerationThisFrame());
 		} else {

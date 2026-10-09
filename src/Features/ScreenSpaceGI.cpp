@@ -751,6 +751,15 @@ void ScreenSpaceGI::DrawSSGI()
 
 	// Zeroing the accumulation count drives the denoiser's lerp factor to 1, dropping stale
 	// history in one frame instead of fading it over MaxAccumFrames.
+	{
+		float2 frameDim = Util::ConvertToDynamic(float2{ (float)texRadiance->desc.Width, (float)texRadiance->desc.Height });
+		frameDim = { floor(frameDim.x), floor(frameDim.y) };
+		static float2 previousFrameDim = { 0.0f, 0.0f };
+		if (previousFrameDim.x != frameDim.x || previousFrameDim.y != frameDim.y) {
+			previousFrameDim = frameDim;
+			queuedResetHistory = true;
+		}
+	}
 	if (queuedResetHistory.exchange(false)) {
 		FLOAT clr[4] = { 0.f, 0.f, 0.f, 0.f };
 		for (auto& tex : texAccumFrames)
