@@ -95,14 +95,6 @@ namespace SharedData
 		float4 CubemapColor;
 	};
 
-	struct LODShadowCapture
-	{
-		float4 AxisX;
-		float4 AxisY;
-		float4 AxisZ;
-		float4 Cascades[3];
-	};
-
 	struct TerraOccSettings
 	{
 		bool EnableTerrainShadow;
@@ -110,11 +102,7 @@ namespace SharedData
 		float2 ZRange;
 		float2 Offset;
 		float ZBlur;
-		float LODShadowStrength;
-		float LODShadowResolution;
-		float LODShadowBlend;
-		LODShadowCapture LODShadowCaptures[2];
-		float4 LODShadowDepthBias;
+		float3 pad0;
 	};
 
 	struct LightLimitFixSettings

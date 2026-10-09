@@ -58,8 +58,6 @@ struct ReverseZ : Feature
 	[[nodiscard]] ID3D11DepthStencilState* GetReversedState(ID3D11DepthStencilState* a_state);
 	[[nodiscard]] ID3D11RasterizerState* GetReversedRasterizerState(ID3D11RasterizerState* a_state);
 
-	static void SetHookPassthrough(bool a_passthrough);
-
 	[[nodiscard]] static bool IsReversedUploadedProjection(const Matrix& a_projection);
 	static void FlipUploadedProjection(Matrix& a_matrix);
 	static void FlipUploadedInverse(Matrix& a_matrix);

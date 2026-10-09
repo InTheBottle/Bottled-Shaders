@@ -58,7 +58,6 @@ namespace
 	ID3D11RasterizerState* g_boundRasterState = nullptr;
 	bool g_reverseTargetBound = false;
 	bool g_projectionReversed = false;
-	bool g_hookPassthrough = false;
 
 	D3D11_VIEWPORT g_requestedViewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE]{};
 	D3D11_VIEWPORT g_mappedViewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE]{};
@@ -620,7 +619,7 @@ namespace
 	{
 		static void thunk(ID3D11DeviceContext* This, ID3D11DepthStencilState* pDepthStencilState, UINT StencilRef)
 		{
-			if (This == globals::d3d::context && !g_hookPassthrough) {
+			if (This == globals::d3d::context) {
 				g_requestedState = pDepthStencilState;
 				g_requestedStencilRef = StencilRef;
 				g_boundState = ShouldFlip() ? globals::features::reverseZ.GetReversedState(pDepthStencilState) : pDepthStencilState;
@@ -636,7 +635,7 @@ namespace
 	{
 		static void thunk(ID3D11DeviceContext* This, ID3D11RasterizerState* pRasterizerState)
 		{
-			if (This == globals::d3d::context && !g_hookPassthrough) {
+			if (This == globals::d3d::context) {
 				g_requestedRasterState = pRasterizerState;
 				g_boundRasterState = ShouldFlip() ? globals::features::reverseZ.GetReversedRasterizerState(pRasterizerState) : pRasterizerState;
 				func(This, g_boundRasterState);
@@ -651,7 +650,7 @@ namespace
 	{
 		static void thunk(ID3D11DeviceContext* This, UINT NumViewports, const D3D11_VIEWPORT* pViewports)
 		{
-			if (This != globals::d3d::context || g_hookPassthrough || !pViewports || NumViewports == 0 || NumViewports > D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE) {
+			if (This != globals::d3d::context || !pViewports || NumViewports == 0 || NumViewports > D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE) {
 				func(This, NumViewports, pViewports);
 				return;
 			}
@@ -737,7 +736,7 @@ namespace
 	{
 		static void thunk(ID3D11DeviceContext* This, ID3D11DepthStencilView* pDepthStencilView, UINT ClearFlags, FLOAT Depth, UINT8 Stencil)
 		{
-			if (This == globals::d3d::context && !g_hookPassthrough && g_projectionReversed && globals::features::reverseZ.IsReverseDepthView(pDepthStencilView))
+			if (This == globals::d3d::context && g_projectionReversed && globals::features::reverseZ.IsReverseDepthView(pDepthStencilView))
 				Depth = 1.0f - Depth;
 			func(This, pDepthStencilView, ClearFlags, Depth, Stencil);
 		}
@@ -765,10 +764,6 @@ namespace
 	{
 		static void thunk(ID3D11DeviceContext* This, UINT NumViews, ID3D11RenderTargetView* const* ppRenderTargetViews, ID3D11DepthStencilView* pDepthStencilView)
 		{
-			if (g_hookPassthrough) {
-				func(This, NumViews, ppRenderTargetViews, pDepthStencilView);
-				return;
-			}
 			if (This == globals::d3d::context && NumViews > 0 && ppRenderTargetViews)
 				pDepthStencilView = ResolveFaceDepth(This, ppRenderTargetViews[0], pDepthStencilView);
 			func(This, NumViews, ppRenderTargetViews, pDepthStencilView);
@@ -781,10 +776,6 @@ namespace
 	{
 		static void thunk(ID3D11DeviceContext* This, UINT NumRTVs, ID3D11RenderTargetView* const* ppRenderTargetViews, ID3D11DepthStencilView* pDepthStencilView, UINT UAVStartSlot, UINT NumUAVs, ID3D11UnorderedAccessView* const* ppUnorderedAccessViews, const UINT* pUAVInitialCounts)
 		{
-			if (g_hookPassthrough) {
-				func(This, NumRTVs, ppRenderTargetViews, pDepthStencilView, UAVStartSlot, NumUAVs, ppUnorderedAccessViews, pUAVInitialCounts);
-				return;
-			}
 			if (This == globals::d3d::context && NumRTVs != D3D11_KEEP_RENDER_TARGETS_AND_DEPTH_STENCIL && NumRTVs > 0 && ppRenderTargetViews)
 				pDepthStencilView = ResolveFaceDepth(This, ppRenderTargetViews[0], pDepthStencilView);
 			func(This, NumRTVs, ppRenderTargetViews, pDepthStencilView, UAVStartSlot, NumUAVs, ppUnorderedAccessViews, pUAVInitialCounts);
@@ -799,7 +790,7 @@ namespace
 		static void thunk(ID3D11DeviceContext* This, ID3D11DepthStencilState** ppDepthStencilState, UINT* pStencilRef)
 		{
 			func(This, ppDepthStencilState, pStencilRef);
-			if (This != globals::d3d::context || g_hookPassthrough || !ppDepthStencilState || !*ppDepthStencilState)
+			if (This != globals::d3d::context || !ppDepthStencilState || !*ppDepthStencilState)
 				return;
 			if (*ppDepthStencilState != g_boundState || !g_requestedState || g_requestedState == g_boundState)
 				return;
@@ -815,7 +806,7 @@ namespace
 		static void thunk(ID3D11DeviceContext* This, ID3D11RasterizerState** ppRasterizerState)
 		{
 			func(This, ppRasterizerState);
-			if (This != globals::d3d::context || g_hookPassthrough || !ppRasterizerState || !*ppRasterizerState)
+			if (This != globals::d3d::context || !ppRasterizerState || !*ppRasterizerState)
 				return;
 			if (*ppRasterizerState != g_boundRasterState || !g_requestedRasterState || g_requestedRasterState == g_boundRasterState)
 				return;
@@ -831,7 +822,7 @@ namespace
 		static void thunk(ID3D11DeviceContext* This, UINT* pNumViewports, D3D11_VIEWPORT* pViewports)
 		{
 			func(This, pNumViewports, pViewports);
-			if (This != globals::d3d::context || g_hookPassthrough || !pNumViewports || !pViewports)
+			if (This != globals::d3d::context || !pNumViewports || !pViewports)
 				return;
 			const UINT count = std::min<UINT>(*pNumViewports, D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE);
 			for (UINT i = 0; i < count; ++i)
@@ -862,11 +853,6 @@ void ReverseZ::InstallRuntimeHooks()
 	stl::detour_vfunc<95, ID3D11DeviceContext_RSGetViewports>(context);
 
 	logger::info("ReverseZ: installed depth-state, depth-clear and state read-back hooks");
-}
-
-void ReverseZ::SetHookPassthrough(bool a_passthrough)
-{
-	g_hookPassthrough = a_passthrough;
 }
 
 void ReverseZ::PostPostLoad()
