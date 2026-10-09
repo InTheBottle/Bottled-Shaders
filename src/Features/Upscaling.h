@@ -3,7 +3,6 @@
 #include "Feature.h"
 #include "Upscaling/DX12SwapChain.h"
 #include "Upscaling/FidelityFX.h"
-#include "Upscaling/FrameGenStats.h"
 #include "Upscaling/RCAS/RCAS.h"
 #include "Upscaling/Streamline.h"
 #include <d3d11_4.h>
@@ -41,13 +40,6 @@ public:
 
 	float2 jitter = { 0, 0 };
 
-	enum class FrameGenMethod
-	{
-		kNone,
-		kFSR,
-		kDLSSG
-	};
-
 	enum class UpscaleMethod
 	{
 		kNONE,
@@ -67,13 +59,6 @@ public:
 		uint frameGenerationMode = 1;
 		uint frameGenerationForceEnable = 0;
 		bool frameGenerationAllowInMenus = false;
-		bool enableDLSSFrameGen = false;
-		// Generated frames per real frame (1=2x). Clamped at apply time to the
-		// hardware-reported DLSSGState::numFramesToGenerateMax.
-		uint dlssgFramesToGenerate = 1;
-		bool dlssgDisableVSync = true;
-		bool dlssgWorldCameraConstants = true;
-		bool dlssgHudLessCapture = false;
 		uint streamlineLogLevel = 0;  // 0=Off, 1=Default, 2=Verbose
 		float sharpnessFSR = 0.0f;
 		bool sharpnessEnabledDLSS = false;
@@ -131,9 +116,6 @@ public:
 
 	globals::FrameBufferCache worldCameraFrame{};
 	bool worldCameraFrameValid = false;
-	bool constantsUsedWorldCamera = false;
-
-	FrameGenStats frameGenStats;
 
 	// Timing and scaling
 	double refreshRate = 0.0f;
@@ -166,20 +148,9 @@ public:
 	virtual void SetupResources() override;
 
 	UpscaleMethod GetUpscaleMethod() const;
-	FrameGenMethod GetFrameGenMethod() const;
-	bool UsesDLSSGFrameGen() const;
 
-	/** @brief Real:generated frame ratio for the active FG backend -- the single source
-	 * of truth for pacing (FrameLimiter) and reporting (PerformanceOverlay). */
-	uint GetFrameGenerationMultiplier() const;
-
-	json GetFrameGenDiagnostics();
 	void CaptureWorldCamera();
-	const globals::FrameBufferCache& GetConstantsCamera(bool* a_usedWorldCamera = nullptr) const;
-	bool IsForeignCameraPublished() const;
-	void CaptureHudLessColor();
-	void RecordFrameGenPresent(double a_presentMs, UINT a_syncInterval, bool a_tearing, bool a_hudLess);
-	void LogFrameGenStats();
+	const globals::FrameBufferCache& GetConstantsCamera() const;
 
 	void CheckResources(UpscaleMethod a_upscalemethod);
 	void CreateUpscalingTextureResources(UpscaleMethod a_upscalemethod);
@@ -221,8 +192,7 @@ public:
 
 	// Static instances instead of singletons
 	static inline Streamline streamline;
-	static inline Streamline streamlineDX12;  ///< DLSS-G frame generation
-	static inline FidelityFX fidelityFX;      ///< AMD FSR frame generation
+	static inline FidelityFX fidelityFX;  ///< AMD FSR frame generation
 	static inline DX12SwapChain dx12SwapChain;
 	static inline RCAS rcas;  ///< Standalone RCAS sharpening for DLSS
 
@@ -275,7 +245,6 @@ public:
 	void SetProxyD3D11Device(ID3D11Device* device);
 	void SetProxyD3D11DeviceContext(ID3D11DeviceContext* context);
 	void CreateProxySwapChain(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC swapChainDesc);
-	void CreateProxySwapChainDirect(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC swapChainDesc);
 	void CreateProxyInterop();
 	IDXGISwapChain* GetProxySwapChain();
 

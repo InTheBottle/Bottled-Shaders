@@ -105,9 +105,7 @@ public:
 	winrt::com_ptr<ID3D12Device> d3d12Device;
 	winrt::com_ptr<ID3D12CommandQueue> commandQueue;
 
-	// 4x DLSS-G generates 3 interpolated frames per real frame; the SL pacer needs those
-	// plus 2 slots of its own slack to avoid oversubscribing the flip-model chain.
-	static constexpr UINT kMaxBackBuffers = 5;
+	static constexpr UINT kMaxBackBuffers = 2;
 
 	winrt::com_ptr<ID3D12CommandAllocator> commandAllocators[kMaxBackBuffers];
 	winrt::com_ptr<ID3D12GraphicsCommandList4> commandLists[kMaxBackBuffers];
@@ -118,7 +116,6 @@ public:
 
 	WrappedResource* swapChainBufferWrapped;
 	WrappedResource* uiBufferWrapped;
-	WrappedResource* hudLessBufferWrapped = nullptr;
 
 	// D3D12 interop resources for frame generation
 	WrappedResource* depthBufferShared12 = nullptr;
@@ -141,10 +138,6 @@ public:
 
 	DXGISwapChainProxy* swapChainProxy = nullptr;
 
-	bool useDLSSG = false;
-	bool tearingSupported = false;
-	bool hudLessCaptured = false;
-
 	// Actual buffer count the live swap chain was created/resized with (<= kMaxBackBuffers).
 	UINT backBufferCount = 2;
 
@@ -153,7 +146,6 @@ public:
 
 	void CreateD3D12Device(IDXGIAdapter* a_adapter);
 	void CreateSwapChain(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC swapChainDesc);
-	void CreateSwapChainDirect(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC swapChainDesc);
 
 	void CreateInterop();
 	/** @brief (Re)creates the D3D11/D3D12-shared swap-chain and UI buffer textures at (re)size time. */

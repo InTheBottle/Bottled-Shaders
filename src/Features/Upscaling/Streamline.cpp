@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <bit>
-#include <chrono>
 #include <cmath>
 #include <dxgi.h>
 #include <dxgi1_3.h>
@@ -80,40 +79,29 @@ void Streamline::LoadInterposer()
 {
 	triedInitialization = true;
 
-	std::filesystem::path pluginDirPath = std::filesystem::path(pluginDir);
+	std::filesystem::path pluginDirPath = std::filesystem::path(PluginDir);
 
-	std::wstring interposerPath = (pluginDirPath / interposerDllName).wstring();
+	std::wstring interposerPath = (pluginDirPath / L"sl.interposer.dll").wstring();
 	interposer = LoadLibraryW(interposerPath.c_str());
 	if (interposer == nullptr) {
 		DWORD errorCode = GetLastError();
-		logger::info("[Streamline {}] Failed to load interposer: Error Code {:x}", instanceTag, errorCode);
+		logger::info("[Streamline] Failed to load interposer: Error Code {:x}", errorCode);
 		return;
 	} else {
-		logger::info("[Streamline {}] Interposer loaded at address: {:p}", instanceTag, static_cast<void*>(interposer));
+		logger::info("[Streamline] Interposer loaded at address: {:p}", static_cast<void*>(interposer));
 	}
 
-	if (renderAPI == sl::RenderAPI::eD3D11) {
-		Streamline::dllVersions = Util::EnumerateDllVersions(pluginDirPath);
-		for (const auto& [name, versionStr] : Streamline::dllVersions)
-			logger::info("[Streamline DX11] {} version: {}", name, versionStr);
-	} else {
-		for (const auto& [name, versionStr] : Util::EnumerateDllVersions(pluginDirPath))
-			logger::info("[Streamline DX12] {} version: {}", name, versionStr);
-	}
+	Streamline::dllVersions = Util::EnumerateDllVersions(pluginDirPath);
+	for (const auto& [name, versionStr] : Streamline::dllVersions)
+		logger::info("[Streamline] {} version: {}", name, versionStr);
 
-	logger::info("[Streamline {}] Initializing Streamline", instanceTag);
+	logger::info("[Streamline] Initializing Streamline");
 
 	sl::Preferences pref;
 
-	sl::Feature featuresDX11[] = { sl::kFeatureDLSS, sl::kFeatureReflex, sl::kFeaturePCL };
-	sl::Feature featuresDX12[] = { sl::kFeatureDLSS_G, sl::kFeatureReflex, sl::kFeaturePCL };
-	if (renderAPI == sl::RenderAPI::eD3D11) {
-		pref.featuresToLoad = featuresDX11;
-		pref.numFeaturesToLoad = _countof(featuresDX11);
-	} else {
-		pref.featuresToLoad = featuresDX12;
-		pref.numFeaturesToLoad = _countof(featuresDX12);
-	}
+	sl::Feature featuresToLoad[] = { sl::kFeatureDLSS, sl::kFeatureReflex, sl::kFeaturePCL };
+	pref.featuresToLoad = featuresToLoad;
+	pref.numFeaturesToLoad = _countof(featuresToLoad);
 
 	// Set log level from settings
 	switch (globals::features::upscaling.settings.streamlineLogLevel) {
@@ -134,23 +122,19 @@ void Streamline::LoadInterposer()
 	auto pluginDirAbsolute = std::filesystem::absolute(pluginDirPath, pluginPathError);
 	if (pluginPathError)
 		pluginDirAbsolute = pluginDirPath;
-	static std::wstring pluginDirAbsoluteW_DX11;
-	static std::wstring pluginDirAbsoluteW_DX12;
-	std::wstring& pluginDirAbsoluteW = (renderAPI == sl::RenderAPI::eD3D11) ? pluginDirAbsoluteW_DX11 : pluginDirAbsoluteW_DX12;
+	static std::wstring pluginDirAbsoluteW;
 	pluginDirAbsoluteW = pluginDirAbsolute.wstring();
 	const wchar_t* pluginPaths[1] = { pluginDirAbsoluteW.c_str() };
 	pref.pathsToPlugins = pluginPaths;
 	pref.numPathsToPlugins = 1;
-	logger::info("[Streamline {}] Plugin search path: {}", instanceTag, pluginDirAbsolute.string());
+	logger::info("[Streamline] Plugin search path: {}", pluginDirAbsolute.string());
 
 	pref.engine = sl::EngineType::eCustom;
 	pref.engineVersion = "1.0.0";
 	pref.projectId = "f8776929-c969-43bd-ac2b-294b4de58aac";
 
-	pref.renderAPI = renderAPI;
+	pref.renderAPI = sl::RenderAPI::eD3D11;
 	pref.flags = sl::PreferenceFlags::eUseManualHooking;
-	if (renderAPI == sl::RenderAPI::eD3D12)
-		pref.flags |= sl::PreferenceFlags::eUseFrameBasedResourceTagging;
 
 	// Hook up all of the functions exported by the SL Interposer Library
 	slInit = (PFun_slInit*)GetProcAddress(interposer, "slInit");
@@ -162,7 +146,6 @@ void Streamline::LoadInterposer()
 	slAllocateResources = (PFun_slAllocateResources*)GetProcAddress(interposer, "slAllocateResources");
 	slFreeResources = (PFun_slFreeResources*)GetProcAddress(interposer, "slFreeResources");
 	slSetTag = (PFun_slSetTag*)GetProcAddress(interposer, "slSetTag");
-	slSetTagForFrame = (PFun_slSetTagForFrame*)GetProcAddress(interposer, "slSetTagForFrame");
 	slGetFeatureRequirements = (PFun_slGetFeatureRequirements*)GetProcAddress(interposer, "slGetFeatureRequirements");
 	slGetFeatureVersion = (PFun_slGetFeatureVersion*)GetProcAddress(interposer, "slGetFeatureVersion");
 	slUpgradeInterface = (PFun_slUpgradeInterface*)GetProcAddress(interposer, "slUpgradeInterface");
@@ -173,23 +156,22 @@ void Streamline::LoadInterposer()
 	slSetD3DDevice = (PFun_slSetD3DDevice*)GetProcAddress(interposer, "slSetD3DDevice");
 
 	if (SL_FAILED(res, slInit(pref, sl::kSDKVersion))) {
-		logger::critical("[Streamline {}] Failed to initialize Streamline", instanceTag);
+		logger::critical("[Streamline] Failed to initialize Streamline");
 	} else {
 		initialized = true;
 		featureDLSS = false;
-		featureDLSSG = false;
 		featureReflex = false;
 		featurePCL = false;
 		reflexSupportedOnCurrentAdapter = false;
 		reflexOptionsCache = {};
 		lastReflexSleepFrame = UINT32_MAX;
-		logger::info("[Streamline {}] Successfully initialized Streamline", instanceTag);
+		logger::info("[Streamline] Successfully initialized Streamline");
 	}
 }
 
 void Streamline::CheckFeatures(IDXGIAdapter* a_adapter)
 {
-	logger::info("[Streamline {}] Checking features", instanceTag);
+	logger::info("[Streamline] Checking features");
 	DXGI_ADAPTER_DESC adapterDesc;
 	a_adapter->GetDesc(&adapterDesc);
 	reflexSupportedOnCurrentAdapter = adapterDesc.VendorId == kNvidiaVendorId;
@@ -202,27 +184,24 @@ void Streamline::CheckFeatures(IDXGIAdapter* a_adapter)
 		outAvailable = false;
 		bool loaded = false;
 		if (SL_FAILED(result, slIsFeatureLoaded(feature, loaded))) {
-			logger::warn("[Streamline {}] {} load-state query failed: {}", instanceTag, featureName, magic_enum::enum_name(result));
+			logger::warn("[Streamline] {} load-state query failed: {}", featureName, magic_enum::enum_name(result));
 			return;
 		}
 		if (!loaded) {
-			logger::info("[Streamline {}] {} feature is not loaded", instanceTag, featureName);
+			logger::info("[Streamline] {} feature is not loaded", featureName);
 			sl::FeatureRequirements featureRequirements;
 			sl::Result requirementsResult = slGetFeatureRequirements(feature, featureRequirements);
 			if (requirementsResult != sl::Result::eOk) {
-				logger::info("[Streamline {}] {} feature failed to load due to: {}", instanceTag, featureName, magic_enum::enum_name(requirementsResult));
+				logger::info("[Streamline] {} feature failed to load due to: {}", featureName, magic_enum::enum_name(requirementsResult));
 			}
 			return;
 		}
 
-		logger::info("[Streamline {}] {} feature is loaded", instanceTag, featureName);
+		logger::info("[Streamline] {} feature is loaded", featureName);
 		outAvailable = slIsFeatureSupported(feature, adapterInfo) == sl::Result::eOk;
 	};
 
-	if (renderAPI == sl::RenderAPI::eD3D11)
-		checkFeatureAvailability(sl::kFeatureDLSS, "DLSS", featureDLSS);
-	else
-		checkFeatureAvailability(sl::kFeatureDLSS_G, "DLSS-G", featureDLSSG);
+	checkFeatureAvailability(sl::kFeatureDLSS, "DLSS", featureDLSS);
 	if (reflexSupportedOnCurrentAdapter) {
 		checkFeatureAvailability(sl::kFeatureReflex, "Reflex", featureReflex);
 		checkFeatureAvailability(sl::kFeaturePCL, "PCL", featurePCL);
@@ -240,15 +219,12 @@ void Streamline::CheckFeatures(IDXGIAdapter* a_adapter)
 			logger::info("[Streamline] Newer RTX GPU detected, DLSS 4.5 will be used instead of DLSS 4.0");
 	}
 
-	if (renderAPI == sl::RenderAPI::eD3D11)
-		logger::info("[Streamline DX11] DLSS {} available", featureDLSS ? "is" : "is not");
-	else
-		logger::info("[Streamline DX12] DLSS-G {} available", featureDLSSG ? "is" : "is not");
+	logger::info("[Streamline] DLSS {} available", featureDLSS ? "is" : "is not");
 	if (reflexSupportedOnCurrentAdapter) {
-		logger::info("[Streamline {}] Reflex {} available", instanceTag, featureReflex ? "is" : "is not");
-		logger::info("[Streamline {}] PCL {} available", instanceTag, featurePCL ? "is" : "is not");
+		logger::info("[Streamline] Reflex {} available", featureReflex ? "is" : "is not");
+		logger::info("[Streamline] PCL {} available", featurePCL ? "is" : "is not");
 	} else {
-		logger::info("[Streamline {}] Reflex/PCL disabled on non-NVIDIA adapter", instanceTag);
+		logger::info("[Streamline] Reflex/PCL disabled on non-NVIDIA adapter");
 	}
 	reflexOptionsCache = {};
 	lastReflexSleepFrame = UINT32_MAX;
@@ -259,7 +235,7 @@ bool Streamline::BindFeatureFunction(sl::Feature a_feature, const char* a_functi
 	a_function = nullptr;
 	const sl::Result bindResult = slGetFeatureFunction(a_feature, a_functionName, a_function);
 	if (bindResult != sl::Result::eOk)
-		logger::warn("[Streamline {}] {} bind failed with {}", instanceTag, a_functionName, magic_enum::enum_name(bindResult));
+		logger::warn("[Streamline] {} bind failed with {}", a_functionName, magic_enum::enum_name(bindResult));
 	return bindResult == sl::Result::eOk && a_function != nullptr;
 }
 
@@ -267,7 +243,7 @@ void Streamline::RequestFeatureLoad(sl::Feature a_feature, const char* a_feature
 {
 	const sl::Result loadResult = slSetFeatureLoaded(a_feature, true);
 	if (loadResult != sl::Result::eOk)
-		logger::warn("[Streamline {}] Failed to request {} load: {}", instanceTag, a_featureName, magic_enum::enum_name(loadResult));
+		logger::warn("[Streamline] Failed to request {} load: {}", a_featureName, magic_enum::enum_name(loadResult));
 }
 
 void Streamline::BindReflexAndPCL(bool a_reflexSupported, bool a_pclSupported)
@@ -286,16 +262,16 @@ void Streamline::BindReflexAndPCL(bool a_reflexSupported, bool a_pclSupported)
 	reflexFnsBound &= BindFeatureFunction(sl::kFeatureReflex, "slReflexSetOptions", (void*&)slReflexSetOptions);
 	featureReflex = a_reflexSupported && reflexFnsBound && slReflexSetOptions && slReflexSleep;
 	if (!featureReflex)
-		logger::warn("[Streamline {}] Reflex functions are missing; Reflex runtime controls will be disabled", instanceTag);
+		logger::warn("[Streamline] Reflex functions are missing; Reflex runtime controls will be disabled");
 	else
-		logger::info("[Streamline {}] Reflex runtime controls are available", instanceTag);
+		logger::info("[Streamline] Reflex runtime controls are available");
 
 	bool pclFnBound = BindFeatureFunction(sl::kFeaturePCL, "slPCLSetMarker", (void*&)slPCLSetMarker);
 	featurePCL = a_pclSupported && pclFnBound && slPCLSetMarker;
 	if (!featurePCL)
-		logger::warn("[Streamline {}] PCL marker function is unavailable; marker optimization requests will be ignored", instanceTag);
+		logger::warn("[Streamline] PCL marker function is unavailable; marker optimization requests will be ignored");
 	else
-		logger::info("[Streamline {}] PCL marker interface is available", instanceTag);
+		logger::info("[Streamline] PCL marker interface is available");
 }
 
 void Streamline::PostDevice()
@@ -304,48 +280,6 @@ void Streamline::PostDevice()
 
 	const bool reflexSupported = featureReflex;
 	const bool pclSupported = featurePCL;
-
-	if (renderAPI == sl::RenderAPI::eD3D12) {
-		const bool dlssgSupported = featureDLSSG;
-		slDLSSGGetState = nullptr;
-		slDLSSGSetOptions = nullptr;
-		featureDLSSG = false;
-		slReflexGetState = nullptr;
-		slReflexSleep = nullptr;
-		slReflexSetOptions = nullptr;
-		slPCLSetMarker = nullptr;
-
-		if (slGetFeatureFunction) {
-			bool dlssgFnsBound = true;
-			dlssgFnsBound &= BindFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGGetState", (void*&)slDLSSGGetState);
-			dlssgFnsBound &= BindFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGSetOptions", (void*&)slDLSSGSetOptions);
-			featureDLSSG = dlssgSupported && dlssgFnsBound && slDLSSGGetState && slDLSSGSetOptions;
-
-			if (!featureDLSSG) {
-				logger::warn("[Streamline DX12] DLSS-G {}; DLSS-G runtime controls will be disabled", dlssgSupported ? "functions missing" : "not supported on this system");
-				dlssgMaxFramesToGenerate = 1;
-			} else {
-				logger::info("[Streamline DX12] DLSS-G runtime controls are available");
-
-				sl::DLSSGState state{};
-				if (SL_FAILED(result, slDLSSGGetState(viewport, state, nullptr))) {
-					logger::warn("[Streamline DX12] slDLSSGGetState failed querying numFramesToGenerateMax: {}", magic_enum::enum_name(result));
-					dlssgMaxFramesToGenerate = 1;
-				} else {
-					dlssgMaxFramesToGenerate = std::max<uint32_t>(1, state.numFramesToGenerateMax);
-					dlssgVSyncSupported = state.bIsVsyncSupportAvailable == sl::Boolean::eTrue;
-					logger::info("[Streamline DX12] DLSS-G supports up to {}x frame generation", dlssgMaxFramesToGenerate + 1);
-					logger::info("[Streamline DX12] DLSS-G V-Sync support {} available", dlssgVSyncSupported ? "is" : "is not");
-				}
-			}
-
-			BindReflexAndPCL(reflexSupported, pclSupported);
-		}
-
-		reflexOptionsCache = {};
-		lastReflexSleepFrame = UINT32_MAX;
-		return;
-	}
 
 	if (featureDLSS) {
 		slGetFeatureFunction(sl::kFeatureDLSS, "slDLSSGetOptimalSettings", (void*&)slDLSSGetOptimalSettings);
@@ -366,47 +300,6 @@ void Streamline::PostDevice()
 	lastReflexSleepFrame = UINT32_MAX;
 }
 
-void Streamline::SetD3DDevice12(ID3D12Device* a_device)
-{
-	if (!initialized || !slSetD3DDevice || !a_device)
-		return;
-	if (SL_FAILED(result, slSetD3DDevice(static_cast<void*>(a_device))))
-		logger::error("[Streamline DX12] slSetD3DDevice(device) failed: {}", magic_enum::enum_name(result));
-	else
-		logger::info("[Streamline DX12] D3D12 device bound");
-}
-
-void Streamline::EnsureDriverProfileAllowsDLSSG()
-{
-	Util::NvApiDrs::Api drs{};
-	uint32_t disableValue = 0;
-	if (!drs.TryGetSkyrimSetting(Util::NvApiDrs::kKeyDLSSGDisable, disableValue) || disableValue == 0)
-		return;
-
-	logger::info("[Streamline DX12] Driver profile disables DLSS-G (DRS key {:#x}={}); resetting to driver default",
-		Util::NvApiDrs::kKeyDLSSGDisable, disableValue);
-
-	Util::NvApiDrs::SessionHandle session{};
-	Util::NvApiDrs::ProfileHandle profile{};
-	if (!drs.TryOpenSkyrimProfile(session, profile))
-		return;
-
-	Util::NvApiDrs::Setting newSetting{};
-	newSetting.version = Util::NvApiDrs::kSettingVersion;
-	newSetting.settingId = Util::NvApiDrs::kKeyDLSSGDisable;
-	newSetting.settingType = 0;
-	newSetting.u32CurrentValue = 0;
-	if (drs.SetSetting(session, profile, &newSetting) != 0 || drs.SaveSettings(session) != 0)
-		logger::warn(
-			"[Streamline DX12] Failed to reset the DRS key; DLSS-G will report eOk but generate no frames. "
-			"Disable the DLSS override for Skyrim in the NVIDIA App, or clear key {:#x} with NVIDIA Profile Inspector.",
-			Util::NvApiDrs::kKeyDLSSGDisable);
-	else
-		logger::info("[Streamline DX12] DRS key reset; if frame generation does not engage this session, restart the game");
-
-	drs.DestroySession(session);
-}
-
 bool Streamline::IsSmoothMotionEnabledForProfile()
 {
 	Util::NvApiDrs::Api drs{};
@@ -421,19 +314,14 @@ bool Streamline::IsSmoothMotionEnabledForProfile()
  */
 bool Streamline::EnsureFrameToken()
 {
-	return globals::state && EnsureFrameToken(globals::state->frameCount);
-}
-
-bool Streamline::EnsureFrameToken(uint32_t a_frameIndex)
-{
 	if (!initialized || !slGetNewFrameToken || !globals::state)
 		return false;
 
-	if (!frameChecker.IsNewFrame(a_frameIndex))
+	if (!frameChecker.IsNewFrame())
 		return frameToken != nullptr;
 
-	if (SL_FAILED(result, slGetNewFrameToken(frameToken, &a_frameIndex))) {
-		logger::error("[Streamline {}] Could not get frame token: {}", instanceTag, magic_enum::enum_name(result));
+	if (SL_FAILED(result, slGetNewFrameToken(frameToken, &globals::state->frameCount))) {
+		logger::error("[Streamline] Could not get frame token: {}", magic_enum::enum_name(result));
 		frameToken = nullptr;
 		return false;
 	}
@@ -458,11 +346,7 @@ bool Streamline::CheckFrameConstants(sl::ViewportHandle p_viewport)
 	slConstants.cameraFar = *globals::game::cameraFar;
 
 	auto& upscaling = globals::features::upscaling;
-	const bool frameGenInstance = renderAPI == sl::RenderAPI::eD3D12;
-	bool usedWorldCamera = false;
-	const auto& frameBuffer = upscaling.GetConstantsCamera(&usedWorldCamera);
-	if (frameGenInstance)
-		upscaling.constantsUsedWorldCamera = usedWorldCamera;
+	const auto& frameBuffer = upscaling.GetConstantsCamera();
 	auto viewMatrix = frameBuffer.GetCameraViewInverse().Transpose();
 	const auto& cameraPosition = frameBuffer.GetCameraPosAdjust();
 	const auto& previousCameraPosition = frameBuffer.GetCameraPreviousPosAdjust();
@@ -501,7 +385,7 @@ bool Streamline::CheckFrameConstants(sl::ViewportHandle p_viewport)
 	slConstants.motionVectorsJittered = sl::Boolean::eFalse;
 
 	if (SL_FAILED(res, slSetConstants(slConstants, *frameToken, p_viewport))) {
-		logger::error("[Streamline {}] Could not set constants", instanceTag);
+		logger::error("[Streamline] Could not set constants");
 		return false;
 	}
 
@@ -730,7 +614,7 @@ void Streamline::UpdateReflex()
 		}
 
 		if (SL_FAILED(result, slReflexSetOptions(options))) {
-			logger::error("[Streamline {}] {}: {}", instanceTag, onFailMessage, magic_enum::enum_name(result));
+			logger::error("[Streamline] {}: {}", onFailMessage, magic_enum::enum_name(result));
 			return;
 		}
 
@@ -740,42 +624,20 @@ void Streamline::UpdateReflex()
 		reflexOptionsCache.useMarkersToOptimize = options.useMarkersToOptimize;
 	};
 
-	const auto& upscaling = globals::features::upscaling;
-
-	// Disable DX11 Reflex only when DLSS-G actually drives it via DX12 -- FSR3 FG
-	// shares the D3D12 proxy but never emits DX12 Reflex markers.
-	if (renderAPI == sl::RenderAPI::eD3D11 && upscaling.UsesDLSSGFrameGen()) {
-		sl::ReflexOptions disabledOptions{};
-		disabledOptions.mode = sl::ReflexMode::eOff;
-		disabledOptions.frameLimitUs = 0u;
-		disabledOptions.useMarkersToOptimize = false;
-		applyReflexOptionsIfChanged(disabledOptions, "Failed to disable Reflex while DLSS-G frame-generation is active");
-		return;
-	}
-
 	auto& settings = globals::features::upscaling.settings;
 
 	sl::ReflexOptions options{};
-	if (renderAPI == sl::RenderAPI::eD3D12) {
-		// DX12 Reflex: DLSS-G requires at least eLowLatency when FG is active
-		bool needReflex = upscaling.ShouldPrepareFrameGeneration() || (upscaling.UsesDLSSGFrameGen() && settings.frameGenerationMode) || settings.reflexLowLatencyMode;
-		if (needReflex)
-			options.mode = settings.reflexLowLatencyBoost ? sl::ReflexMode::eLowLatencyWithBoost : sl::ReflexMode::eLowLatency;
-		else
-			options.mode = sl::ReflexMode::eOff;
-	} else {
-		if (!settings.reflexLowLatencyMode)
-			options.mode = sl::ReflexMode::eOff;
-		else
-			options.mode = settings.reflexLowLatencyBoost ? sl::ReflexMode::eLowLatencyWithBoost : sl::ReflexMode::eLowLatency;
-	}
+	if (!settings.reflexLowLatencyMode)
+		options.mode = sl::ReflexMode::eOff;
+	else
+		options.mode = settings.reflexLowLatencyBoost ? sl::ReflexMode::eLowLatencyWithBoost : sl::ReflexMode::eLowLatency;
 
 	const float originalReflexFPSLimit = settings.reflexFPSLimit;
 	float reflexFPSLimit = originalReflexFPSLimit;
 	if (!std::isfinite(reflexFPSLimit)) {
 		reflexFPSLimit = 60.0f;
 		settings.reflexFPSLimit = reflexFPSLimit;
-		logger::warn("[Streamline {}] reflexFPSLimit is not finite ({}), using {}", instanceTag, originalReflexFPSLimit, reflexFPSLimit);
+		logger::warn("[Streamline] reflexFPSLimit is not finite ({}), using {}", originalReflexFPSLimit, reflexFPSLimit);
 	}
 	const float fpsLimit = std::clamp(reflexFPSLimit, 20.0f, 240.0f);
 	options.frameLimitUs = settings.reflexUseFPSLimit ? static_cast<uint32_t>(std::lround(1000000.0 / static_cast<double>(fpsLimit))) : 0u;
@@ -793,129 +655,13 @@ void Streamline::UpdateReflex()
 	if (lastReflexSleepFrame == currentFrame)
 		return;
 
-	if (!EnsureFrameToken(renderAPI == sl::RenderAPI::eD3D12 ? currentFrame + 1 : currentFrame))
+	if (!EnsureFrameToken())
 		return;
 
 	lastReflexSleepFrame = currentFrame;
-	const auto sleepStart = std::chrono::steady_clock::now();
 	if (SL_FAILED(result, slReflexSleep(*frameToken))) {
-		logger::warn("[Streamline {}] Reflex sleep call failed: {}", instanceTag, magic_enum::enum_name(result));
+		logger::warn("[Streamline] Reflex sleep call failed: {}", magic_enum::enum_name(result));
 	}
-	lastReflexSleepMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - sleepStart).count();
-
-	// The frame's simulation begins right after the Reflex sleep returns; the matching
-	// eSimulationEnd (and the render/present markers) are emitted on the present path.
-	if (renderAPI == sl::RenderAPI::eD3D12)
-		EmitPCLMarker(sl::PCLMarker::eSimulationStart);
-}
-
-void Streamline::EmitPCLMarker(sl::PCLMarker a_marker)
-{
-	if (!initialized || !featurePCL || !slPCLSetMarker || !frameToken)
-		return;
-
-	if (SL_FAILED(result, slPCLSetMarker(a_marker, *frameToken))) {
-		static bool errorLogged = false;
-		if (!errorLogged) {
-			errorLogged = true;
-			logger::warn("[Streamline {}] slPCLSetMarker({}) failed: {}", instanceTag,
-				magic_enum::enum_name(a_marker), magic_enum::enum_name(result));
-		}
-	}
-}
-
-void Streamline::ConfigureDLSSG(bool enabled)
-{
-	if (!initialized || !slDLSSGSetOptions)
-		return;
-
-	sl::DLSSGOptions options{};
-	options.mode = enabled ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
-	options.flags = sl::DLSSGFlags::eRetainResourcesWhenOff;
-	options.numFramesToGenerate = std::clamp<uint32_t>(
-		globals::features::upscaling.settings.dlssgFramesToGenerate, 1, dlssgMaxFramesToGenerate);
-
-	if (SL_FAILED(result, slDLSSGSetOptions(viewport, options))) {
-		static bool errorLogged = false;
-		if (!errorLogged) {
-			errorLogged = true;
-			logger::error("[Streamline DX12] slDLSSGSetOptions failed: {}", magic_enum::enum_name(result));
-		}
-		return;
-	}
-
-	if (enabled) {
-		dlssgResourcesRetained = true;
-	} else if (!globals::features::upscaling.settings.frameGenerationMode && dlssgResourcesRetained) {
-		if (SL_FAILED(result, slFreeResources(sl::kFeatureDLSS_G, viewport))) {
-			static bool errorLogged = false;
-			if (!errorLogged) {
-				errorLogged = true;
-				logger::error("[Streamline DX12] Failed to free DLSS-G resources: {}", magic_enum::enum_name(result));
-			}
-			return;
-		}
-		dlssgResourcesRetained = false;
-	}
-
-	if (slDLSSGGetState && enabled) {
-		sl::DLSSGState state{};
-		if (SL_FAILED(stateResult, slDLSSGGetState(viewport, state, &options))) {
-			static uint32_t stateFailCount = 0;
-			if (++stateFailCount % 60 == 0) {
-				logger::warn("[Streamline DX12] slDLSSGGetState has failed {} times: {}", stateFailCount, magic_enum::enum_name(stateResult));
-			}
-		} else {
-			lastDLSSGStatus = state.status;
-			lastDLSSGFramesPresented = state.numFramesActuallyPresented;
-
-			static sl::DLSSGStatus lastLoggedStatus = sl::DLSSGStatus::eOk;
-			if (state.status != sl::DLSSGStatus::eOk && state.status != lastLoggedStatus) {
-				lastLoggedStatus = state.status;
-				logger::warn("[Streamline DX12] DLSS-G not generating frames this session: status={}",
-					magic_enum::enum_name(state.status));
-			} else if (state.status == sl::DLSSGStatus::eOk && lastLoggedStatus != sl::DLSSGStatus::eOk) {
-				lastLoggedStatus = sl::DLSSGStatus::eOk;
-				logger::info("[Streamline DX12] DLSS-G status recovered to eOk, now generating frames");
-			}
-
-			if (globals::features::upscaling.settings.streamlineLogLevel >= 2) {
-				static uint32_t callCount = 0;
-				if (++callCount % 120 == 0) {
-					logger::info("[Streamline DX12] DLSS-G presented {} frames since last query (requested {}x)",
-						state.numFramesActuallyPresented, options.numFramesToGenerate + 1);
-				}
-			}
-		}
-	}
-}
-
-void Streamline::TagDX12Resources(ID3D12GraphicsCommandList* cmdList,
-	ID3D12Resource* depth, ID3D12Resource* mvec, ID3D12Resource* hudLessColor,
-	ID3D12Resource* uiColorAndAlpha, uint32_t width, uint32_t height)
-{
-	if (!initialized || !slSetTagForFrame || !frameToken || !cmdList)
-		return;
-
-	sl::Extent extent{ 0, 0, width, height };
-
-	auto renderSizeF = float2{ (float)globals::game::graphicsState->screenWidth, (float)globals::game::graphicsState->screenHeight } * globals::features::upscaling.resolutionScale;
-	sl::Extent renderExtent{ 0, 0, static_cast<uint32_t>(renderSizeF.x), static_cast<uint32_t>(renderSizeF.y) };
-
-	sl::Resource depthRes = { sl::ResourceType::eTex2d, depth, D3D12_RESOURCE_STATE_COMMON };
-	sl::Resource mvecRes = { sl::ResourceType::eTex2d, mvec, D3D12_RESOURCE_STATE_COMMON };
-	sl::Resource hudLessRes = { sl::ResourceType::eTex2d, hudLessColor, D3D12_RESOURCE_STATE_COMMON };
-	sl::Resource uiRes = { sl::ResourceType::eTex2d, uiColorAndAlpha, D3D12_RESOURCE_STATE_COMMON };
-
-	sl::ResourceTag tags[] = {
-		{ &depthRes, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent },
-		{ &mvecRes, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent },
-		{ &hudLessRes, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, &extent },
-		{ &uiRes, sl::kBufferTypeUIColorAndAlpha, sl::ResourceLifecycle::eValidUntilPresent, &extent },
-	};
-	const uint32_t numTags = uiColorAndAlpha ? _countof(tags) : _countof(tags) - 1;
-
-	slSetTagForFrame(*frameToken, viewport, tags, numTags, cmdList);
 }
 
 /**
