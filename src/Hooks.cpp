@@ -19,6 +19,7 @@
 #include "Features/InteriorSun.h"
 #include "Features/LandscapeSeams.h"
 #include "Features/LightLimitFix.h"
+#include "Features/OrderIndependentTransparency.h"
 #include "Features/PostProcessing.h"
 #include "Features/ReverseZ.h"
 #include "Features/ScreenshotFeature.h"
@@ -193,6 +194,9 @@ bool Hooks::BSShader_BeginTechnique::thunk(RE::BSShader* shader, uint32_t vertex
 
 	NormalizeLegacyUtilityDescriptors(*shader, state->modifiedVertexDescriptor, state->modifiedPixelDescriptor);
 	state->ModifyShaderLookup(*shader, state->modifiedVertexDescriptor, state->modifiedPixelDescriptor);
+
+	if (globals::features::orderIndependentTransparency.ShouldCapture())
+		globals::features::orderIndependentTransparency.ResolveTechnique(*shader, state->modifiedPixelDescriptor, skipPixelShader);
 
 	constexpr auto reflectionsFlag = static_cast<uint32_t>(SIE::ShaderCache::LightingShaderFlags::Reflections);
 	constexpr auto deferredFlag = static_cast<uint32_t>(SIE::ShaderCache::LightingShaderFlags::Deferred);
@@ -507,6 +511,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 void Hooks::BSGraphics_SetDirtyStates::thunk(bool isCompute)
 {
+	globals::features::orderIndependentTransparency.PreSetStateDirty();
 	func(isCompute);
 	globals::state->Draw();
 }

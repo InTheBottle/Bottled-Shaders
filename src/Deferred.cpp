@@ -10,6 +10,7 @@
 #include "Features/Effects11.h"
 #include "Features/FurShells.h"
 #include "Features/IBL.h"
+#include "Features/OrderIndependentTransparency.h"
 #include "Features/ReverseZ.h"
 #include "Features/ScreenSpaceGI.h"
 #include "Features/Skylighting.h"
@@ -715,6 +716,8 @@ void Deferred::Hooks::Main_RenderWorld_BlendedDecals::thunk(RE::BSShaderAccumula
 
 		context->CopyResource(depthCopy.texture, depth.texture);
 	}
+
+	globals::features::orderIndependentTransparency.BeginWater();
 
 	// After this point, water starts rendering
 };

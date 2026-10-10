@@ -9,6 +9,10 @@
 #include "Common/Skinned.hlsli"
 #define EFFECT
 
+#if defined(DEFERRED) && defined(OIT)
+#	undef OIT
+#endif
+
 #if defined(SOFT) && defined(NORMALS) && defined(TEXTURE) && defined(FALLOFF) && defined(VC) && \
     !defined(LIGHTING) && !defined(PARTICLES) && !defined(STRIP_PARTICLES) &&                    \
     !defined(BLOOD) && !defined(MEMBRANE) && !defined(ADDBLEND) && !defined(MULTBLEND) &&        \
@@ -418,6 +422,14 @@ struct PS_OUTPUT
 #	else
 	float4 Color2: SV_Target2;
 #	endif
+#	if defined(OIT)
+	float OITWriteDepth: SV_Target3;
+#		if OIT == 3
+	float4 OITAccumFront: SV_Target4;
+	float4 OITAccumAll: SV_Target5;
+	float2 OITRevealage: SV_Target6;
+#		endif
+#	endif
 };
 #endif
 
@@ -620,6 +632,11 @@ float3 GetLightingShadow(float3 color, float3 worldPosition, float2 screenPositi
 }
 #	endif
 
+#	if defined(OIT)
+#		include "OIT/OITCapture.hlsli"
+
+[earlydepthstencil]
+#	endif
 PS_OUTPUT main(PS_INPUT input)
 {
 	PS_OUTPUT psout = (PS_OUTPUT)0;
@@ -1008,6 +1025,20 @@ PS_OUTPUT main(PS_INPUT input)
 	if (!(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InWorld) && SharedData::linearLightingSettings.enableLinearLighting) {
 		psout.Diffuse.xyz = Color::LinearToSrgb(psout.Diffuse.xyz);
 	}
+#	endif
+
+#	if defined(OIT)
+	OITOutput oit = OIT_Capture(int2(input.Position.xy), psout.Diffuse, input.Position.z);
+	psout.Diffuse = oit.color;
+	psout.OITWriteDepth = oit.writeDepth;
+#		if OIT == 3
+	psout.OITAccumFront = oit.accumFront;
+	psout.OITAccumAll = oit.accumAll;
+	psout.OITRevealage = oit.revealage;
+#		elif !defined(MOTIONVECTORS_NORMALS)
+	if (oit.captured)
+		psout.Color2 = oit.color;
+#		endif
 #	endif
 	return psout;
 }

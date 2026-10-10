@@ -643,7 +643,7 @@ namespace SIE
 			MTLandLODBlend = 19,
 		};
 
-		enum class LightingShaderFlags
+		enum class LightingShaderFlags : uint32_t
 		{
 			VC = 1 << 0,
 			Skinned = 1 << 1,
@@ -671,7 +671,8 @@ namespace SIE
 			DoAlphaTest = 1 << 20,
 			Snow = 1 << 21,
 			CharacterLight = 1 << 22,
-			AdditionalAlphaMask = 1 << 23
+			AdditionalAlphaMask = 1 << 23,
+			OIT = 3u << 30
 		};
 
 		enum class BloodSplatterShaderTechniques
@@ -715,6 +716,11 @@ namespace SIE
 		enum class GrassShaderFlags
 		{
 			AlphaTest = 0x10000,
+		};
+
+		enum class ParticleShaderFlags : uint32_t
+		{
+			OIT = 3 << 15,
 		};
 
 		enum class ParticleShaderTechniques
@@ -778,7 +784,8 @@ namespace SIE
 			SkyObject = 1 << 24,
 			MsnSpuSkinned = 1 << 25,
 			MotionVectorsNormals = 1 << 26,
-			Deferred = 1 << 27
+			Deferred = 1 << 27,
+			OIT = 3 << 28
 		};
 
 		enum class UtilityShaderFlags : uint64_t

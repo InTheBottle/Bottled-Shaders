@@ -237,6 +237,7 @@ public:
 
 	__declspec(noinline) void ModifyParticle(RE::BSRenderPass* Pass);
 	void ParticleShaderHacks();
+	bool OverridesParticleBlend();
 	/** @brief True when the effect is on, the raindrop texture loaded, and RAIN "Enable" is set. */
 	bool IsRainEnabled();
 

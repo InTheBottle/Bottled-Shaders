@@ -14,6 +14,7 @@
 #include "Utils/D3D.h"
 
 #include "Features/DynamicCubemaps.h"
+#include "Features/OrderIndependentTransparency.h"
 #include "Features/ReverseZ.h"
 
 #include "ShaderDDC.h"
@@ -135,10 +136,21 @@ namespace SIE
 			return 0x3F & (descriptor >> 24);
 		}
 
+		static void AddOITDefines(uint32_t descriptor, uint32_t mask, std::span<D3D_SHADER_MACRO> defines, size_t& lastIndex)
+		{
+			static constexpr const char* kVariants[] = { "0", "1", "2", "3" };
+			const uint32_t variant = (descriptor & mask) >> std::countr_zero(mask);
+			if (variant == 0)
+				return;
+			defines[lastIndex++] = { "OIT", kVariants[variant & 3] };
+			if (variant == 2)
+				defines[lastIndex++] = { "OIT_NODE_COUNT", globals::features::orderIndependentTransparency.GetNodeCountDefine() };
+		}
+
 		static void GetLightingShaderDefines(uint32_t descriptor, std::span<D3D_SHADER_MACRO> defines)
 		{
 			static REL::Relocation<void(uint32_t, D3D_SHADER_MACRO*)> VanillaGetLightingShaderDefines(RELOCATION_ID(101631, 108698));
-			VanillaGetLightingShaderDefines(descriptor & ~static_cast<uint32_t>(ShaderCache::LightingShaderFlags::Reflections), defines.data());
+			VanillaGetLightingShaderDefines(descriptor & ~(static_cast<uint32_t>(ShaderCache::LightingShaderFlags::Reflections) | static_cast<uint32_t>(ShaderCache::LightingShaderFlags::OIT)), defines.data());
 
 			size_t lastIndex = std::ranges::find_if(defines, [](const D3D_SHADER_MACRO& macro) { return macro.Name == nullptr; }) - defines.begin();
 
@@ -163,6 +175,7 @@ namespace SIE
 					defines[lastIndex++] = { "FUR_SHELLS_DEPTH", nullptr };
 				}
 			}
+			AddOITDefines(descriptor, static_cast<uint32_t>(ShaderCache::LightingShaderFlags::OIT), defines, lastIndex);
 
 			for (auto* feature : Feature::GetFeatureList()) {
 				if (feature->loaded && feature->HasShaderDefine(RE::BSShader::Type::Lighting)) {
@@ -318,7 +331,7 @@ namespace SIE
 		{
 			using enum ShaderCache::ParticleShaderTechniques;
 
-			const auto technique = static_cast<ShaderCache::ParticleShaderTechniques>(descriptor);
+			const auto technique = static_cast<ShaderCache::ParticleShaderTechniques>(descriptor & ~static_cast<uint32_t>(ShaderCache::ParticleShaderFlags::OIT));
 			size_t lastIndex = 0;
 			switch (technique) {
 			case ParticlesGryColor:
@@ -350,6 +363,7 @@ namespace SIE
 					break;
 				}
 			}
+			AddOITDefines(descriptor, static_cast<uint32_t>(ShaderCache::ParticleShaderFlags::OIT), defines, lastIndex);
 
 			for (auto* feature : Feature::GetFeatureList()) {
 				if (feature->loaded && feature->HasShaderDefine(RE::BSShader::Type::Particle)) {
@@ -446,6 +460,7 @@ namespace SIE
 			if (descriptor & static_cast<uint32_t>(ShaderCache::EffectShaderFlags::Deferred)) {
 				defines[lastIndex++] = { "DEFERRED", nullptr };
 			}
+			AddOITDefines(descriptor, static_cast<uint32_t>(ShaderCache::EffectShaderFlags::OIT), defines, lastIndex);
 
 			for (auto* feature : Feature::GetFeatureList()) {
 				if (feature->loaded && feature->HasShaderDefine(RE::BSShader::Type::Effect)) {

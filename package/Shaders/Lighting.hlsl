@@ -21,6 +21,10 @@
 #	undef IBL
 #endif
 
+#if defined(DEFERRED) && defined(OIT)
+#	undef OIT
+#endif
+
 #if (defined(TREE_ANIM) || defined(LANDSCAPE)) && !defined(VC)
 #	define VC
 #endif  // TREE_ANIM || LANDSCAPE || !VC
@@ -362,6 +366,14 @@ struct PS_OUTPUT
 	float4 Diffuse: SV_Target0;
 	float4 MotionVectors: SV_Target1;
 	float4 NormalGlossiness: SV_Target2;
+#	if defined(OIT)
+	float OITWriteDepth: SV_Target3;
+#		if OIT == 3
+	float4 OITAccumFront: SV_Target4;
+	float4 OITAccumAll: SV_Target5;
+	float2 OITRevealage: SV_Target6;
+#		endif
+#	endif
 };
 #endif
 
@@ -1044,7 +1056,11 @@ bool UseSkylightingShadowVisibility()
 
 #	include "Common/LightingEval.hlsli"
 
-#	if defined(FUR_SHELLS) && !defined(FUR_SHELLS_DEPTH)
+#	if defined(OIT)
+#		include "OIT/OITCapture.hlsli"
+#	endif
+
+#	if (defined(FUR_SHELLS) && !defined(FUR_SHELLS_DEPTH)) || defined(OIT)
 [earlydepthstencil]
 #	endif
 PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
@@ -3481,6 +3497,20 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 #	if defined(FUR_SHELLS_DEPTH)
 	psout = (PS_OUTPUT)0;
+#	endif
+
+#	if defined(OIT)
+	OITOutput oit = OIT_Capture(int2(input.Position.xy), psout.Diffuse, input.Position.z);
+	psout.Diffuse = oit.color;
+	psout.OITWriteDepth = oit.writeDepth;
+#		if OIT == 3
+	psout.OITAccumFront = oit.accumFront;
+	psout.OITAccumAll = oit.accumAll;
+	psout.OITRevealage = oit.revealage;
+#		else
+	if (oit.captured && outputColorToAuxiliaryTarget)
+		psout.NormalGlossiness = oit.color;
+#		endif
 #	endif
 
 	return psout;

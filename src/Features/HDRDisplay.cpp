@@ -7,6 +7,7 @@
 #include "Globals.h"
 #include "I18n/I18n.h"
 #include "LinearLighting.h"
+#include "OrderIndependentTransparency.h"
 #include "Menu.h"
 #include "ShaderCache.h"
 #include "State.h"
@@ -947,7 +948,7 @@ namespace
 	{
 		static void WINAPI thunk(ID3D11DeviceContext* This, ID3D11BlendState* pBlendState, const FLOAT BlendFactor[4], UINT SampleMask)
 		{
-			if (pBlendState) {
+			if (pBlendState && !globals::features::orderIndependentTransparency.IsSettingOwnBlendState()) {
 				auto& hdr = globals::features::hdrDisplay;
 				const bool d3d11HdrCapture = hdr.loaded && hdr.settings.enableHDR && hdr.uiTexture;
 				const bool fgCapture = globals::features::upscaling.d3d12SwapChainActive;

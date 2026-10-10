@@ -10,6 +10,7 @@
 #include "Features/ExponentialHeightFog.h"
 #include "Features/ExtendedMaterials.h"
 #include "Features/ExtendedTranslucency.h"
+#include "Features/OrderIndependentTransparency.h"
 #include "Features/FoliageLighting.h"
 #include "Features/FootstepParticles.h"
 #include "Features/FurShells.h"
@@ -224,6 +225,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::terrainVariation,
 		&globals::features::ibl,
 		&globals::features::extendedTranslucency,
+		&globals::features::orderIndependentTransparency,
 		&globals::features::reverseZ,
 		&globals::features::upscaling,
 		&globals::features::renderDoc,

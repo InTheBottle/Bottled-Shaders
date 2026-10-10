@@ -287,7 +287,11 @@ public:
 		THLand5HasDisplacement = 1 << 5,
 		ETMaterialModel = 0b111 << 6,
 		THLandHasDisplacement = 1 << 9,
-		TVMeshVariation = 1 << 10
+		TVMeshVariation = 1 << 10,
+		OITAdditive = 1 << 11,
+		OITMultiplicative = 1 << 12,
+		OITDepthWrite = 1 << 13,
+		OITDisabled = 1 << 14
 	};
 
 	bool inWorld = false;

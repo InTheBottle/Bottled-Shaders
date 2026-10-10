@@ -8,6 +8,7 @@
 #include "Features/ExponentialHeightFog.h"
 #include "Features/ExtendedMaterials.h"
 #include "Features/ExtendedTranslucency.h"
+#include "Features/OrderIndependentTransparency.h"
 #include "Features/FootstepParticles.h"
 #include "Features/FoliageLighting.h"
 #include "Features/FurShells.h"
@@ -104,6 +105,7 @@ namespace globals
 		PerformanceOverlay performanceOverlay{};
 		WetnessEffects wetnessEffects{};
 		ExtendedTranslucency extendedTranslucency{};
+		OrderIndependentTransparency orderIndependentTransparency{};
 		ReverseZ reverseZ{};
 		Upscaling upscaling{};
 		HDRDisplay hdrDisplay{};

@@ -206,6 +206,14 @@ struct PS_OUTPUT
 {
 	float4 Color: SV_Target0;
 	float4 Normal: SV_Target1;
+#if defined(OIT)
+	float OITWriteDepth: SV_Target3;
+#	if OIT == 3
+	float4 OITAccumFront: SV_Target4;
+	float4 OITAccumAll: SV_Target5;
+	float2 OITRevealage: SV_Target6;
+#	endif
+#endif
 };
 
 #ifdef PSHADER
@@ -297,6 +305,24 @@ float GetPointLightIntensity(LightLimitFix::Light light, float3 positionWS, out 
 }
 #	endif
 
+#	if defined(OIT)
+#		define OIT_CAPTURE_IGNORE_ALPHA_THRESHOLD 1
+#		include "OIT/OITCapture.hlsli"
+
+void ApplyOIT(inout PS_OUTPUT psout, float4 position)
+{
+	OITOutput oit = OIT_Capture(int2(position.xy), psout.Color, position.z);
+	psout.Color = oit.color;
+	psout.OITWriteDepth = oit.writeDepth;
+#		if OIT == 3
+	psout.OITAccumFront = oit.accumFront;
+	psout.OITAccumAll = oit.accumAll;
+	psout.OITRevealage = oit.revealage;
+#		endif
+}
+
+[earlydepthstencil]
+#	endif
 PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 {
 	PS_OUTPUT psout;
@@ -381,6 +407,9 @@ if (SharedData::enbSettings.EnableRain) {
 	psout.Color.xyz = Color::IrradianceToGamma(raindropColor);
     psout.Color.w = alpha;
     psout.Normal = float4(0, 1, 0, alpha);
+#		if defined(OIT)
+	ApplyOIT(psout, input.Position);
+#		endif
     return psout;
 }
 #	endif
@@ -442,6 +471,9 @@ if (SharedData::enbSettings.EnableRain) {
 	psout.Normal.w = baseColor.w;
 	psout.Normal.xyz = float3(0, 1, 0);
 
+#	if defined(OIT)
+	ApplyOIT(psout, input.Position);
+#	endif
 	return psout;
 }
 #endif

@@ -951,17 +951,22 @@ void Effects11::ModifyParticle(RE::BSRenderPass* Pass)
 	context->VSSetConstantBuffers(5, 2, cbs);
 }
 
-void Effects11::ParticleShaderHacks()
+bool Effects11::OverridesParticleBlend()
 {
 	if (!enableEffect || !raindropSRV)
-		return;
+		return false;
 
 	auto state = globals::state;
 	if (!state->currentShader || state->currentShader->shaderType.get() != RE::BSShader::Type::Particle)
-		return;
+		return false;
 	if (state->currentPixelDescriptor != static_cast<uint32_t>(SIE::ShaderCache::ParticleShaderTechniques::EnvCubeRain))
-		return;
-	if (!IsRainEnabled())
+		return false;
+	return IsRainEnabled();
+}
+
+void Effects11::ParticleShaderHacks()
+{
+	if (!OverridesParticleBlend())
 		return;
 
 	auto context = globals::d3d::context;

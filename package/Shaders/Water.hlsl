@@ -359,6 +359,10 @@ Texture2D<float4> FlowMapNormalsTex : register(t9);
 Texture2D<float4> SSRReflectionTex : register(t10);
 Texture2D<float4> RawSSRReflectionTex : register(t11);
 
+#	if defined(OIT)
+Texture2D<float4> AlphaOnlyTex : register(t66);
+#	endif
+
 cbuffer PerTechnique : register(b0)
 {
 	float4 VPOSOffset : packoffset(c0);  // inverse main render target width and height in xy, 0 in zw
@@ -958,6 +962,21 @@ DiffuseOutput GetWaterDiffuseColor(PS_INPUT input, float3 normal, float3 viewDir
 
 	float2 refractionUV = FrameBuffer::GetDynamicResolutionAdjustedScreenPosition(refractionUvRaw);
 	float3 refractionColor = RefractionTex.Sample(RefractionSampler, refractionUV).xyz;
+
+#				if defined(OIT)
+	[branch] if (SharedData::orderIndependentTransparencySettings.Enabled)
+	{
+		float2 transparencyUvRaw = refractionUvRaw;
+#					if defined(DEPTH) && !defined(VERTEX_ALPHA_DEPTH)
+		float2 transparencyScreenPosition = FrameBuffer::DynamicResolutionParams1.xy * (refractionUvRaw / VPOSOffset.xy);
+		float4 transparencyPosition = mul(FrameBuffer::CameraViewProjInverse, float4((refractionUvRaw * 2 - 1) * float2(1, -1), DepthTex.Load(float3(transparencyScreenPosition, 0)).x, 1));
+		transparencyPosition = float4(transparencyPosition.xyz / transparencyPosition.w, 1.0);
+		transparencyUvRaw += MotionBlur::GetSSCameraMotionVector(transparencyPosition);
+#					endif
+		float4 transparency = AlphaOnlyTex.Sample(RefractionSampler, FrameBuffer::GetPreviousDynamicResolutionAdjustedScreenPosition(transparencyUvRaw));
+		refractionColor = lerp(refractionColor, transparency.xyz, saturate(transparency.w));
+	}
+#				endif
 
 #				if defined(UNDERWATER)
 	float refractionMul = 0;

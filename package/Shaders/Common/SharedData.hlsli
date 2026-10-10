@@ -613,6 +613,18 @@ namespace SharedData
 		uint3 pad;
 	};
 
+	struct OrderIndependentTransparencySettings
+	{
+		uint Enabled;
+		float AlphaThreshold;
+		float WriteDepthThreshold;
+		float SSRAlphaScale;
+		float WBOITAdditiveAlphaScale;
+		float WBOITMinProjectedDistance;
+		float WBOITWeightMin;
+		float WBOITWeightMax;
+	};
+
 	cbuffer FeatureData : register(b6)
 	{
 		GrassLightingSettings grassLightingSettings;
@@ -642,6 +654,7 @@ namespace SharedData
 		VolumetricLightingSettings volumetricLightingSettings;
 		HorizonFixSettings horizonFixSettings;
 		HairBacklightingSettings hairBacklightingSettings;
+		OrderIndependentTransparencySettings orderIndependentTransparencySettings;
 	};
 
 	Texture2D<float4> DepthTexture : register(t17);

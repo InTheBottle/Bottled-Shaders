@@ -13,6 +13,12 @@ namespace MotionBlur
 		previousScreenPosition.xy = previousScreenPosition.xy / previousScreenPosition.ww;
 		return float2(-0.5, 0.5) * (screenPosition.xy - previousScreenPosition.xy);
 	}
+
+	float2 GetSSCameraMotionVector(float4 a_wsPosition)
+	{
+		float4 cameraMovement = float4(FrameBuffer::CameraPosAdjust.xyz - FrameBuffer::CameraPreviousPosAdjust.xyz, 0.0);
+		return GetSSMotionVector(a_wsPosition, a_wsPosition + cameraMovement);
+	}
 }
 
 #endif  // __MOTION_BLUR_DEPENDENCY_HLSL__

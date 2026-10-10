@@ -105,6 +105,18 @@ float4 GetReflectionColor(
 				positionWS.xyz = positionWS.xyz / positionWS.w;
 				positionWS.w = 1.0;
 
+#	if defined(OIT)
+				[branch] if (SharedData::orderIndependentTransparencySettings.Enabled)
+				{
+					float2 transparencySample = finalSampleUV + MotionBlur::GetSSCameraMotionVector(positionWS);
+					float4 transparency = 0.0;
+					if (!FrameBuffer::IsOutsideFrame(transparencySample))
+						transparency = AlphaTex.SampleLevel(AlphaSampler, ConvertRaySamplePrevious(transparencySample), 0);
+					transparency.w = saturate(transparency.w * SSRParams.z * SharedData::orderIndependentTransparencySettings.SSRAlphaScale);
+					return float4(lerp(color, transparency.xyz, transparency.w), fadeFactor);
+				}
+#	endif
+
 				// Compute camera motion vector
 				float2 cameraMotionVector = MotionBlur::GetSSMotionVector(positionWS, positionWS);
 

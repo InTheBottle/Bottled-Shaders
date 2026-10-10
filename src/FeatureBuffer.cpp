@@ -8,6 +8,7 @@
 #include "Features/ExponentialHeightFog.h"
 #include "Features/ExtendedMaterials.h"
 #include "Features/ExtendedTranslucency.h"
+#include "Features/OrderIndependentTransparency.h"
 #include "Features/FoliageLighting.h"
 #include "Features/GrassLighting.h"
 #include "Features/HairBacklighting.h"
@@ -78,5 +79,6 @@ std::pair<unsigned char*, size_t> GetFeatureBufferData(bool a_inWorld)
 		globals::features::postProcessing.GetCommonBufferData(),
 		globals::features::volumetricLighting.GetCommonBufferData(),
 		globals::features::horizonFix.GetCommonBufferData(),
-		globals::features::hairBacklighting.settings);
+		globals::features::hairBacklighting.settings,
+		globals::features::orderIndependentTransparency.GetCommonBufferData());
 }

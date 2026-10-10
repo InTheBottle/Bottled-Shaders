@@ -12,6 +12,7 @@
 #include "Features/ExponentialHeightFog.h"
 #include "Features/HDRDisplay.h"
 #include "Features/InteriorSun.h"
+#include "Features/OrderIndependentTransparency.h"
 #include "Features/PerformanceOverlay.h"
 #include "Features/PostProcessing.h"
 #include "Features/Skin.h"
@@ -165,6 +166,9 @@ void State::Draw()
 			ZoneScopedN("TruePBR::SetShaderResources");
 			truePBR.SetShaderResources(context);
 		}
+
+		if (globals::features::orderIndependentTransparency.loaded)
+			globals::features::orderIndependentTransparency.PreDrawHack();
 
 		if (permutationData != permutationDataPrevious) {
 			permutationCB->Update(permutationData);
@@ -999,6 +1003,8 @@ void State::ModifyShaderLookup(const RE::BSShader& a_shader, uint& a_vertexDescr
 
 				if (deferred->deferredPass || a_forceDeferred)
 					a_pixelDescriptor |= (uint32_t)SIE::ShaderCache::LightingShaderFlags::Deferred;
+				else if (inWorld)
+					a_pixelDescriptor |= globals::features::orderIndependentTransparency.GetMaterialVariant() << std::countr_zero((uint32_t)SIE::ShaderCache::LightingShaderFlags::OIT);
 
 				{
 					uint32_t technique = 0x3F & (a_vertexDescriptor >> 24);
@@ -1039,7 +1045,13 @@ void State::ModifyShaderLookup(const RE::BSShader& a_shader, uint& a_vertexDescr
 
 				if (deferred->deferredPass || a_forceDeferred)
 					a_pixelDescriptor |= (uint32_t)SIE::ShaderCache::EffectShaderFlags::Deferred;
+				else if (inWorld)
+					a_pixelDescriptor |= globals::features::orderIndependentTransparency.GetMaterialVariant() << std::countr_zero((uint32_t)SIE::ShaderCache::EffectShaderFlags::OIT);
 			}
+			break;
+		case RE::BSShader::Type::Particle:
+			if (inWorld && !deferred->deferredPass && !a_forceDeferred)
+				a_pixelDescriptor |= globals::features::orderIndependentTransparency.GetMaterialVariant() << std::countr_zero((uint32_t)SIE::ShaderCache::ParticleShaderFlags::OIT);
 			break;
 		case RE::BSShader::Type::DistantTree:
 			{
