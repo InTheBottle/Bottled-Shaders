@@ -847,6 +847,13 @@ void WetnessEffects::ApplyClimatePreset(ClimatePreset preset)
 	// Removed clamping for all settings to allow full preset range
 }
 
+void WetnessEffects::Reset()
+{
+	// Not in GetCommonBufferData: the feature buffer is rebuilt several times per frame (see Deferred).
+	if (globals::game::ui && !globals::game::ui->GameIsPaused())
+		rainTimer += (size_t)(RE::GetSecondsSinceLastFrame() * 1000);  // BSTimer::delta is always 0 for some reason
+}
+
 WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 {
 	PerFrame data{};
@@ -931,13 +938,6 @@ WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 		}
 	}
 
-	static size_t rainTimer = 0;  // size_t for precision
-	static uint rainTimerFrame = UINT_MAX;
-	if (rainTimerFrame != globals::state->frameCount) {
-		rainTimerFrame = globals::state->frameCount;
-		if (!globals::game::ui->GameIsPaused())
-			rainTimer += (size_t)(RE::GetSecondsSinceLastFrame() * 1000);  // BSTimer::delta is always 0 for some reason
-	}
 	data.Time = rainTimer / 1000.f;
 
 	data.settings = settings;

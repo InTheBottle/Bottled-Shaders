@@ -101,17 +101,26 @@ std::string Util::GetFormEditorID(const RE::TESForm* form)
 		return std::string(editorId);
 
 	// Search the global EditorID map as fallback
+	static std::mutex reverseIndexMutex;
+	static std::unordered_map<const RE::TESForm*, RE::BSFixedString> reverseIndex;
+	static size_t indexedMapSize = 0;
+
 	auto [map, lock] = RE::TESForm::GetAllFormsByEditorID();
-	if (map) {
+	if (!map)
+		return "";
+	std::scoped_lock indexLock(reverseIndexMutex);
+	{
 		RE::BSReadLockGuard locker(lock);
-		for (const auto& [name, f] : *map) {
-			if (f == form) {
-				return std::string(name.c_str());
-			}
+		if (map->size() != indexedMapSize) {
+			reverseIndex.clear();
+			reverseIndex.reserve(map->size());
+			for (const auto& [name, mappedForm] : *map)
+				reverseIndex.emplace(mappedForm, name);
+			indexedMapSize = map->size();
 		}
 	}
-
-	return "";
+	const auto entry = reverseIndex.find(form);
+	return entry != reverseIndex.end() ? std::string(entry->second.c_str()) : "";
 }
 
 std::string Util::GetFormFileKey(const RE::TESForm* form)

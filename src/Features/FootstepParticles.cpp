@@ -5,7 +5,6 @@
 #include "Features/Effects11.h"
 #include "Features/ExponentialHeightFog.h"
 #include "Features/IBL.h"
-#include "Features/InverseSquareLighting.h"
 #include "Features/LightLimitFix.h"
 #include "Features/Skylighting.h"
 #include "Features/SnowCover.h"
@@ -430,8 +429,6 @@ ID3D11PixelShader* FootstepParticles::GetParticlePS()
 			defines.push_back({ "EXP_HEIGHT_FOG", nullptr });
 		if (globals::features::lightLimitFix.loaded)
 			defines.push_back({ "LIGHT_LIMIT_FIX", nullptr });
-		if (globals::features::lightLimitFix.loaded && globals::features::inverseSquareLighting.loaded)
-			defines.push_back({ "ISL", nullptr });
 		if (globals::features::terrainShadows.loaded)
 			defines.push_back({ "TERRAIN_SHADOWS", nullptr });
 		if (globals::features::cloudShadows.loaded)

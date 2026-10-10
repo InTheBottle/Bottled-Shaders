@@ -172,7 +172,7 @@ namespace SharedData
 	struct SkylightingSettings
 	{
 		row_major float4x4 OcclusionViewProj;
-		float4 OcclusionDir;
+		float4 OcclusionSHBasis4Pi;  // SH basis of the occlusion direction, times 4 pi (Monte Carlo weight)
 
 		float4 PosOffset;   // xyz: cell origin in camera model space
 		uint4 ArrayOrigin;  // xyz: array origin
@@ -442,8 +442,12 @@ namespace SharedData
 		float fogHeight;
 		float fogHeightFalloff;
 		float fogDensity;
+		float fogHeight2;
+		float fogHeightFalloff2;
+		float fogDensity2;
 		float directionalInscatteringMultiplier;
 		float directionalInscatteringAnisotropy;
+		uint useSkyIBL;
 		float4 inscatteringTint;
 		float cubemapMipLevel;
 		float sunlightAttenuationAmount;
@@ -469,7 +473,15 @@ namespace SharedData
 		uint volumetricHistoryMissSampleCount;
 		float volumetricSampleJitterMultiplier;
 		float volumetricUpsampleJitterMultiplier;
+		float volumetricNearGridDistance;
+		uint volumetricFarGridPixelSize;
+		uint volumetricFarGridSizeZ;
 		float volumetricLocalLightScatteringIntensity;
+		float volumetricFogNoiseScale;
+		float volumetricFogNoiseThreshold;
+		float pad3;
+		float3 volumetricFogNoiseVelocity;
+		float pad0;
 		uint useVanillaFogSettings;
 		float vanillaFogMaxOpacity;
 		float vanillaFogDensity;
@@ -477,7 +489,7 @@ namespace SharedData
 		float vanillaFogFar;
 		float vanillaFogPower;
 		float vanillaFogStrength;
-		float3 pad0;
+		float pad4;
 		float4 vanillaFogNearColor;
 		float4 vanillaFogFarColor;
 		float fogLightingInfluence;

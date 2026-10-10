@@ -1056,16 +1056,6 @@ void Menu::ProcessInputEventQueue()
 				return false;
 			};
 
-			// Hardcoded Shift+Enter toggle for the CS menu (always available)
-			if (event.IsDown() && key == VK_RETURN && (GetAsyncKeyState(VK_SHIFT) & 0x8000)) {
-				if (!SetupRenderer::ShouldShowFirstTimeSetup()) {
-					IsEnabled = !IsEnabled;
-					if (IsEnabled)
-						ImGui::GetIO().ClearInputKeys();
-				}
-				continue;
-			}
-
 			if (!event.IsPressed()) {
 				// Skip key release if it was used to close the first-time setup dialog
 				if (SetupRenderer::ShouldSkipKeyRelease(key)) {

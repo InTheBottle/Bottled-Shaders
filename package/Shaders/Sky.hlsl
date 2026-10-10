@@ -151,7 +151,7 @@ VS_OUTPUT main(VS_INPUT input)
 #		if defined(DITHER) && defined(TEX)
 	vsout.Color.w *= GetSunGlareVisibility();
 #		endif
-#	endif      // OCCLUSION MOONMASK HORIZFADE
+#	endif  // OCCLUSION MOONMASK HORIZFADE
 
 #	ifdef REVERSE_Z
 	float4 skyPosition = mul(WorldViewProj, inputPosition);
@@ -342,7 +342,7 @@ PS_OUTPUT main(PS_INPUT input)
 		}
 
 		baseColor.xyz = proceduralSunColor;
-		baseColor.w = sunCoverage;
+		baseColor.w = sunCoverage * saturate(TexBaseSampler.SampleLevel(SampBaseSampler, 0.5, 0).w);
 
 		skyScale = 0.0;
 	}
@@ -372,7 +372,7 @@ PS_OUTPUT main(PS_INPUT input)
 #			else
 	float3 skyGradientColor = input.Color.xyz;
 
-#if defined(EFFECTS11)
+#				if defined(EFFECTS11)
 	float3 viewDirection = normalize(input.WorldPosition.xyz);
 	if (SharedData::enbSettings.UseProceduralGradientWeights) {
 		float gradientPosition = pow(1.0 - saturate(viewDirection.z), SharedData::enbSettings.ProceduralGradientWeightCurve);
@@ -380,12 +380,12 @@ PS_OUTPUT main(PS_INPUT input)
 	}
 	[branch] if (SharedData::enbSettings.EnableCloudsScattering)
 		skyGradientColor = SkyScattering::ApplySkyScattering(skyGradientColor, input.SkyBlendColor2.xyz, viewDirection) + SkyScattering::GetMoonGlow(viewDirection);
-#endif
+#				endif
 	psout.Color.xyz = Color::Sky(skyGradientColor) + skyScale;
 
 #				if defined(EFFECTS11)
 	[branch] if (SharedData::enbSettings.Enable && !SharedData::enbSettings.FixBlackCrush) {
-		float3 additiveDither = psout.Color.xyz + noiseGrad * 0.1;
+		float3 additiveDither = max(psout.Color.xyz + noiseGrad * 0.1, 0.0);
 		psout.Color.xyz = lerp(additiveDither, psout.Color.xyz * (1.0 + noiseGrad), saturate(dot(psout.Color.xyz, 8.0)));
 	} else {
 		psout.Color.xyz *= 1.0 + noiseGrad;

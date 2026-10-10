@@ -16,6 +16,7 @@
 #endif
 
 Texture3D<float4> ExponentialHeightFogIntegratedLightScattering : register(t19);
+Texture3D<float4> ExponentialHeightFogIntegratedLightScatteringFar : register(t22);
 
 namespace ExponentialHeightFog
 {
@@ -74,19 +75,37 @@ namespace ExponentialHeightFog
 		return sceneDepth;
 	}
 
-	float4 SampleFogGrid(Texture3D<float4> volume, uint3 volumeSize, float2 volumeUV, float sceneDepth)
+	float4 SampleFogGrid(Texture3D<float4> volume, uint3 volumeSize, float2 volumeUV, float sceneDepth, float3 gridZ, float startDistance)
 	{
-		float slice = ComputeVolumetricNormalizedSlice(sceneDepth, float(volumeSize.z));
+		float slice = log2(max(sceneDepth * gridZ.x + gridZ.y, 1e-6f)) * gridZ.z / float(volumeSize.z);
 		float3 texelCenter = 0.5f / float3(volumeSize);
 		float2 uvMin = texelCenter.xy;
 		float2 uvMax = 1.0f.xx - texelCenter.xy;
 		float z = clamp(slice - texelCenter.z, texelCenter.z, 1.0f - texelCenter.z);
 		float4 fog = volume.SampleLevel(SampColorSampler, float3(clamp(volumeUV, uvMin, uvMax), z), 0);
-		float startDistance = GetVolumetricStartDistance();
-		float3 gridZ = GetVolumetricGridZParams(float(volumeSize.z));
 		float firstBackDepth = (exp2(1.0f / gridZ.z) - gridZ.y) / max(gridZ.x, 1e-20f);
 		float nearWeight = saturate((sceneDepth - startDistance) / max(firstBackDepth - startDistance, EPSILON_DIVISION));
 		return lerp(float4(0.0f.xxx, 1.0f), fog, nearWeight);
+	}
+
+	float4 SampleVolumetricFogPair(uint3 volumeSize, float2 volumeUV, float sceneDepth)
+	{
+		float4 fog = SampleFogGrid(ExponentialHeightFogIntegratedLightScattering, volumeSize, volumeUV, sceneDepth,
+			GetVolumetricGridZParams(float(volumeSize.z)), GetVolumetricStartDistance());
+
+		float nearGridEndDistance = GetVolumetricNearGridEndDistance();
+		[branch] if (nearGridEndDistance + 1.0f < GetVolumetricTotalFarPlane() && sceneDepth > nearGridEndDistance)
+		{
+			uint3 farVolumeSize;
+			ExponentialHeightFogIntegratedLightScatteringFar.GetDimensions(farVolumeSize.x, farVolumeSize.y, farVolumeSize.z);
+			[branch] if (all(farVolumeSize > 0u))
+			{
+				float4 farFog = SampleFogGrid(ExponentialHeightFogIntegratedLightScatteringFar, farVolumeSize, volumeUV, sceneDepth,
+					GetVolumetricFarGridZParams(float(farVolumeSize.z)), nearGridEndDistance);
+				fog = float4(fog.rgb + fog.a * farFog.rgb, fog.a * farFog.a);
+			}
+		}
+		return fog;
 	}
 
 	float4 CompositeFogScattering(float4 analyticalFog, float4 volume)
@@ -100,7 +119,7 @@ namespace ExponentialHeightFog
 	{
 		float2 volumeUV;
 		float sceneDepth = GetSceneDepthForFog(positionWS, volumeUV);
-		float4 volume = sceneDepth > 0.0f ? SampleFogGrid(ExponentialHeightFogIntegratedLightScattering, volumeSize, volumeUV, sceneDepth) : float4(0.0f.xxx, 1.0f);
+		float4 volume = sceneDepth > 0.0f ? SampleVolumetricFogPair(volumeSize, volumeUV, sceneDepth) : float4(0.0f.xxx, 1.0f);
 		return CompositeFogScattering(analyticalFog, volume);
 	}
 
@@ -119,7 +138,7 @@ namespace ExponentialHeightFog
 			volumeUV += (noise * 2.0f - 1.0f) * SharedData::exponentialHeightFogSettings.volumetricUpsampleJitterMultiplier /
 			            max(float2(volumeSize.xy), 1.0f.xx);
 		}
-		float4 volume = SampleFogGrid(ExponentialHeightFogIntegratedLightScattering, volumeSize, volumeUV, sceneDepth);
+		float4 volume = SampleVolumetricFogPair(volumeSize, volumeUV, sceneDepth);
 		return CompositeFogScattering(analyticalFog, volume);
 	}
 
@@ -127,13 +146,18 @@ namespace ExponentialHeightFog
 	{
 		float fogHeightFalloff = SharedData::exponentialHeightFogSettings.fogHeightFalloff * 0.001f;
 		float fogDensity = GetHeightFogDensity();
-		if (SharedData::exponentialHeightFogSettings.useVanillaFogSettings != 0)
+		float fogHeightFalloff2 = GetHeightFogFalloff2();
+		float fogDensity2 = GetHeightFogDensity2();
+		if (SharedData::exponentialHeightFogSettings.useVanillaFogSettings != 0) {
 			fogDensity *= SharedData::exponentialHeightFogSettings.volumetricFogExtinctionScale;
-		if (fogDensity <= 0.0f && SharedData::exponentialHeightFogSettings.distanceHazeMaxOpacity <= 0.0f)
+			fogDensity2 *= SharedData::exponentialHeightFogSettings.volumetricFogExtinctionScale;
+		}
+		bool hasHeightFog = fogDensity > 0.0f || fogDensity2 > 0.0f;
+		if (!hasHeightFog && SharedData::exponentialHeightFogSettings.distanceHazeMaxOpacity <= 0.0f)
 			return 0.0f.xxxx;
 		float3 viewToPos = positionWS;
 		uint3 volumeSize = 0u.xxx;
-		applyVolumetricFog = applyVolumetricFog && fogDensity > 0.0f;
+		applyVolumetricFog = applyVolumetricFog && hasHeightFog;
 		if (applyVolumetricFog)
 			applyVolumetricFog = ShouldApplyVolumetricFog(volumeSize);
 
@@ -141,6 +165,7 @@ namespace ExponentialHeightFog
 		float viewToPosLengthInv = rcp(max(viewToPosLength, 1e-4f));
 
 		float rayOriginTerms = fogDensity * exp2(-fogHeightFalloff * max(cameraWS.z - SharedData::exponentialHeightFogSettings.fogHeight, 0));
+		float rayOriginTerms2 = fogDensity2 * exp2(-fogHeightFalloff2 * max(cameraWS.z - SharedData::exponentialHeightFogSettings.fogHeight2, 0));
 		float rayLength = viewToPosLength;
 		float rayDirectionZ = viewToPos.z;
 
@@ -162,15 +187,22 @@ namespace ExponentialHeightFog
 			rayDirectionZ = viewToPos.z - cameraToExclusionIntersectionZ;
 			float exponent = fogHeightFalloff * max(exclusionIntersectionZ - SharedData::exponentialHeightFogSettings.fogHeight, 0);
 			rayOriginTerms = fogDensity * exp2(-exponent);
+			float exponent2 = fogHeightFalloff2 * max(exclusionIntersectionZ - SharedData::exponentialHeightFogSettings.fogHeight2, 0);
+			rayOriginTerms2 = fogDensity2 * exp2(-exponent2);
 		}
 
 		float falloff = fogHeightFalloff * rayDirectionZ;
 		float lineIntegral = (1.0f - exp2(-falloff)) / falloff;
 		float lineIntegralTaylor = 0.69314718056f - 0.24022650695f * falloff;  // log(2) - (0.5 * (log(2)^2)) * falloff
-		float exponentialHeightLineIntegralCalc = rayOriginTerms * (abs(falloff) > 0.01f ? lineIntegral : lineIntegralTaylor);
+		float falloff2 = fogHeightFalloff2 * rayDirectionZ;
+		float lineIntegral2 = (1.0f - exp2(-falloff2)) / falloff2;
+		float lineIntegralTaylor2 = 0.69314718056f - 0.24022650695f * falloff2;
+		float exponentialHeightLineIntegralCalc =
+			rayOriginTerms * (abs(falloff) > 0.01f ? lineIntegral : lineIntegralTaylor) +
+			rayOriginTerms2 * (abs(falloff2) > 0.01f ? lineIntegral2 : lineIntegralTaylor2);
 		float exponentialHeightLineIntegral = exponentialHeightLineIntegralCalc * rayLength;
 
-		float expFogFactor = fogDensity > 0.0f ? saturate(exp2(-exponentialHeightLineIntegral)) : 1.0f;
+		float expFogFactor = hasHeightFog ? saturate(exp2(-exponentialHeightLineIntegral)) : 1.0f;
 
 		float3 fogInscatteringColor = 0.0f.xxx;
 		if (SharedData::exponentialHeightFogSettings.useVanillaFogSettings != 0) {
@@ -187,10 +219,27 @@ namespace ExponentialHeightFog
 		}
 		fogInscatteringColor += SharedData::exponentialHeightFogSettings.fogInscatteringColor.rgb * SharedData::exponentialHeightFogSettings.fogInscatteringColor.a;
 
-#if defined(DYNAMIC_CUBEMAPS)
-		if (SharedData::exponentialHeightFogSettings.useDynamicCubemaps > 0 && SharedData::exponentialHeightFogSettings.useVanillaFogSettings == 0) {
-			float3 cubemapColor = DynamicCubemaps::EnvReflectionsTexture.SampleLevel(SampColorSampler, normalize(lerp(positionWS, float3(0, 0, 1), saturate((SharedData::exponentialHeightFogSettings.cubemapMipLevel + 1) / 9))), SharedData::exponentialHeightFogSettings.cubemapMipLevel).xyz;
-			fogInscatteringColor += cubemapColor * SharedData::exponentialHeightFogSettings.inscatteringTint.rgb * SharedData::exponentialHeightFogSettings.inscatteringTint.a;
+#if defined(IBL) || defined(DYNAMIC_CUBEMAPS)
+		[branch] if (SharedData::exponentialHeightFogSettings.useVanillaFogSettings == 0)
+		{
+			float cubemapMipLevel = SharedData::exponentialHeightFogSettings.cubemapMipLevel;
+			float3 cubemapDirection = normalize(lerp(positionWS, float3(0, 0, 1), saturate((cubemapMipLevel + 1) / 9)));
+			float3 inscattering = 0.0;
+			[branch] if (SharedData::InInterior)
+			{
+#	if defined(DYNAMIC_CUBEMAPS)
+				if (SharedData::exponentialHeightFogSettings.useDynamicCubemaps > 0)
+					inscattering = DynamicCubemaps::EnvTexture.SampleLevel(SampColorSampler, cubemapDirection, cubemapMipLevel).xyz;
+#	endif
+			}
+			else
+			{
+#	if defined(IBL)
+				if (SharedData::exponentialHeightFogSettings.useSkyIBL > 0)
+					inscattering = ImageBasedLighting::GetSkyIBLColor(cubemapDirection);
+#	endif
+			}
+			fogInscatteringColor += inscattering * SharedData::exponentialHeightFogSettings.inscatteringTint.rgb * SharedData::exponentialHeightFogSettings.inscatteringTint.a;
 		}
 #endif
 
@@ -202,10 +251,11 @@ namespace ExponentialHeightFog
 
 		// Calculate directional light inscattering using Henyey-Greenstein phase function
 		if (SharedData::exponentialHeightFogSettings.directionalInscatteringMultiplier > 0) {
+			float3 dirLightColor = Color::DirectionalLight(SharedData::DirLightColor.xyz);
 			float3 lightDirection = normalize(SharedData::DirLightDirection.xyz);
 			float cosTheta = dot(lightDirection, viewDirection);
 			float phase = HenyeyGreenstein(cosTheta, SharedData::exponentialHeightFogSettings.directionalInscatteringAnisotropy);
-			float3 directionalLightInscattering = SharedData::DirLightColor.xyz * phase;
+			float3 directionalLightInscattering = dirLightColor * phase;
 			directionalInscattering = directionalLightInscattering * SharedData::exponentialHeightFogSettings.directionalInscatteringMultiplier;
 			if (SharedData::exponentialHeightFogSettings.useVanillaFogSettings != 0)
 				directionalInscattering *= SharedData::exponentialHeightFogSettings.fogLightingInfluence;
@@ -246,14 +296,20 @@ namespace ExponentialHeightFog
 	{
 		float fogHeightFalloff = SharedData::exponentialHeightFogSettings.fogHeightFalloff * 0.001f;
 		float fogDensity = GetHeightFogDensity();
-		if (SharedData::exponentialHeightFogSettings.useVanillaFogSettings != 0)
+		float fogHeightFalloff2 = GetHeightFogFalloff2();
+		float fogDensity2 = GetHeightFogDensity2();
+		if (SharedData::exponentialHeightFogSettings.useVanillaFogSettings != 0) {
 			fogDensity *= SharedData::exponentialHeightFogSettings.volumetricFogExtinctionScale;
-		if (fogDensity <= 0.0f) {
+			fogDensity2 *= SharedData::exponentialHeightFogSettings.volumetricFogExtinctionScale;
+		}
+		if (fogDensity <= 0.0f && fogDensity2 <= 0.0f) {
 			return 1.0f;
 		}
 
 		float exponent = fogHeightFalloff * max(positionWS.z + cameraWS.z - SharedData::exponentialHeightFogSettings.fogHeight, 0.0f);
 		float localDensity = fogDensity * exp2(-exponent);
+		float exponent2 = fogHeightFalloff2 * max(positionWS.z + cameraWS.z - SharedData::exponentialHeightFogSettings.fogHeight2, 0.0f);
+		float localDensity2 = fogDensity2 * exp2(-exponent2);
 
 		float3 lightDir = SharedData::DirLightDirection.xyz;
 		float lightDirZ = lightDir.z;
@@ -263,7 +319,8 @@ namespace ExponentialHeightFog
 		// Integral = Density * (1 - exp2(-slope * inf)) / slope
 		if (lightDirZ > 0.001f) {
 			float slope = max(fogHeightFalloff * lightDirZ, 1e-8f);
-			float exponentialHeightLineIntegral = localDensity / slope;
+			float slope2 = max(fogHeightFalloff2 * lightDirZ, 1e-8f);
+			float exponentialHeightLineIntegral = localDensity / slope + localDensity2 / slope2;
 			sunlightFogAttenuation = saturate(exp2(-exponentialHeightLineIntegral));
 		}
 
@@ -271,6 +328,40 @@ namespace ExponentialHeightFog
 		if (SharedData::exponentialHeightFogSettings.useVanillaFogSettings != 0)
 			attenuationAmount *= SharedData::exponentialHeightFogSettings.fogLightingInfluence;
 		return lerp(1.0f, sunlightFogAttenuation, attenuationAmount);
+	}
+
+	float GetSunFogAttenuation(float3 cameraWS)
+	{
+		float fogHeightFalloff = SharedData::exponentialHeightFogSettings.fogHeightFalloff * 0.001f;
+		float fogDensity = GetHeightFogDensity();
+		float fogHeightFalloff2 = GetHeightFogFalloff2();
+		float fogDensity2 = GetHeightFogDensity2();
+		if (SharedData::exponentialHeightFogSettings.useVanillaFogSettings != 0) {
+			fogDensity *= SharedData::exponentialHeightFogSettings.volumetricFogExtinctionScale;
+			fogDensity2 *= SharedData::exponentialHeightFogSettings.volumetricFogExtinctionScale;
+		}
+		if (fogDensity <= 0.0f && fogDensity2 <= 0.0f) {
+			return 1.0f;
+		}
+
+		float exponent = fogHeightFalloff * max(cameraWS.z - SharedData::exponentialHeightFogSettings.fogHeight, 0.0f);
+		float localDensity = fogDensity * exp2(-exponent);
+		float exponent2 = fogHeightFalloff2 * max(cameraWS.z - SharedData::exponentialHeightFogSettings.fogHeight2, 0.0f);
+		float localDensity2 = fogDensity2 * exp2(-exponent2);
+
+		float3 lightDir = SharedData::DirLightDirection.xyz;
+		float lightDirZ = lightDir.z;
+
+		float sunFogAttenuation = 0.0f;
+
+		// Integral = Density * (1 - exp2(-slope * inf)) / slope
+		if (lightDirZ > 0.001f) {
+			float slope = max(fogHeightFalloff * lightDirZ, 1e-8f);
+			float slope2 = max(fogHeightFalloff2 * lightDirZ, 1e-8f);
+			float exponentialHeightLineIntegral = localDensity / slope + localDensity2 / slope2;
+			sunFogAttenuation = saturate(exp2(-exponentialHeightLineIntegral));
+		}
+		return sunFogAttenuation;
 	}
 }
 #endif

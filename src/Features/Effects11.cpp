@@ -174,8 +174,10 @@ void Effects11::UpdateSkyScattering(PerFrame& a_data)
 	if (sky && sky->sun) {
 		const auto direction = globals::features::skySync.GetCelestialDirection(sky, SkySync::Caster::Sun);
 		const float length = direction.Length();
-		if (length > 1e-6f && (sunVisible || direction.z < 0.0f))
+		if (length > 1e-6f && (sunVisible || direction.z < 0.0f || !hasScatteringSunDirection)) {
 			scatteringSunDirection = { direction.x / length, direction.y / length, direction.z / length };
+			hasScatteringSunDirection = true;
+		}
 	}
 
 	const float sunHeight = scatteringSunDirection.z;

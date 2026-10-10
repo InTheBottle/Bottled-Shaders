@@ -819,7 +819,7 @@ WaterNormalData GetWaterNormal(PS_INPUT input, float distanceFactor, float norma
 	return result;
 }
 
-float3 GetWaterSpecularColor(PS_INPUT input, float3 normal, float3 viewDirection, float skylightingSpecular)
+float3 GetWaterSpecularColor(PS_INPUT input, float3 normal, float3 viewDirection, float distanceFactor, float skylightingSpecular)
 {
 	if (!(Permutation::PixelShaderDescriptor & Permutation::WaterFlags::Reflections))
 		return ReflectionColor.xyz * VarAmounts.y;
@@ -860,7 +860,7 @@ float3 GetWaterSpecularColor(PS_INPUT input, float3 normal, float3 viewDirection
 	float4 ssrReflectionColorRaw = RawSSRReflectionTex.Sample(RawSSRReflectionSampler, ssrReflectionUvDR);
 	float4 ssrReflectionColor = lerp(ssrReflectionColorBlurred, ssrReflectionColorRaw, ssrAmount * 0.7);
 	float3 finalSsrReflectionColor = max(0, ssrReflectionColor.xyz);
-	float ssrFraction = saturate(ssrReflectionColor.w * ssrAmount);
+	float ssrFraction = saturate(ssrReflectionColor.w * distanceFactor * ssrAmount);
 	reflectionColor = lerp(reflectionColor, finalSsrReflectionColor, ssrFraction);
 #			endif
 
@@ -1026,10 +1026,6 @@ float3 GetSunColor(float3 normal, float3 viewDirection, float3 worldPosition)
 #			include "LightLimitFix/LightLimitFix.hlsli"
 #		endif
 
-#		if defined(ISL) && defined(LIGHT_LIMIT_FIX)
-#			include "InverseSquareLighting/InverseSquareLighting.hlsli"
-#		endif
-
 #		if defined(IBL)
 #			include "IBL/IBL.hlsli"
 #		endif
@@ -1151,9 +1147,9 @@ PS_OUTPUT main(PS_INPUT input)
 #			else
 
 #				if defined(SKYLIGHTING)
-	float3 specularColor = GetWaterSpecularColor(input, normal, viewDirection, skylightingSpecular);
+	float3 specularColor = GetWaterSpecularColor(input, normal, viewDirection, distanceBlendFactor, skylightingSpecular);
 #				else
-	float3 specularColor = GetWaterSpecularColor(input, normal, viewDirection, 1.0);
+	float3 specularColor = GetWaterSpecularColor(input, normal, viewDirection, distanceBlendFactor, 1.0);
 #				endif
 
 	DiffuseOutput diffuseOutput = GetWaterDiffuseColor(input, normal, viewDirection, distanceMul, depthControl.y, fresnel, viewPosition, depth);
@@ -1209,12 +1205,7 @@ PS_OUTPUT main(PS_INPUT input)
 			float3 lightDirection = light.positionWS.xyz - input.WPosition.xyz;
 			float lightDist = length(lightDirection);
 
-#					if defined(ISL)
-			float intensityMultiplier = InverseSquareLighting::GetAttenuation(lightDist, light);
-#					else
-			float intensityFactor = saturate(lightDist / light.radius);
-			float intensityMultiplier = 1 - intensityFactor * intensityFactor;
-#					endif
+			float intensityMultiplier = LightLimitFix::GetAttenuation(lightDist, light);
 
 			float3 normalizedLightDirection = normalize(lightDirection);
 
@@ -1256,8 +1247,8 @@ PS_OUTPUT main(PS_INPUT input)
 
 	if (SharedData::enbSettings.EnableWater) {
 		sunColor *= SharedData::enbSettings.WaterSunSpecularMultiplier;
-#					if defined(DEPTH) && !defined(VERTEX_ALPHA_DEPTH)
-		surfaceMul = saturate(distanceMul.w * FogParam.z / ShoreFadeDepth);
+#					if defined(DEPTH) && !defined(VERTEX_ALPHA_DEPTH) && defined(REFRACTIONS)
+		surfaceMul = saturate(distanceMul.w * FogParam.z / max(min(ShoreFadeDepth, FogParam.z), 1e-4));
 		sunMul = max(sunMul, surfaceMul);
 		shoreFadedSurface = true;
 #					endif
@@ -1317,11 +1308,13 @@ PS_OUTPUT main(PS_INPUT input)
 #					else
 	float specularFraction = lerp(1, fresnel, distanceBlendFactor);
 	float waterOpacity = diffuseOutput.refractionMul;
-	float3 finalColorPreFog = lerp(diffuseOutput.refractionDiffuseColor, specularColor, specularFraction) + sunColor * depthControl.w;
+	float3 finalColorPreFog;
 	if (shoreFadedSurface) {
 		float reflectionWeight = specularFraction * surfaceMul;
-		waterOpacity = lerp(diffuseOutput.refractionMul, 1.0, reflectionWeight);
-		finalColorPreFog = (diffuseOutput.refractionDiffuseColor * (diffuseOutput.refractionMul * (1.0 - reflectionWeight)) + specularColor * reflectionWeight + sunColor * sunMul) / max(waterOpacity, 1e-4);
+		waterOpacity = max(lerp(diffuseOutput.refractionMul, 1.0, reflectionWeight), 1e-3);
+		finalColorPreFog = (diffuseOutput.refractionDiffuseColor * (diffuseOutput.refractionMul * (1.0 - reflectionWeight)) + specularColor * reflectionWeight + sunColor * (sunMul * surfaceMul)) / waterOpacity;
+	} else {
+		finalColorPreFog = lerp(diffuseOutput.refractionDiffuseColor, specularColor, specularFraction) + sunColor * depthControl.w;
 	}
 
 #						if !defined(UNIFIED_WATER)

@@ -1,7 +1,6 @@
 #include "ShadowDiagnostics.h"
 
 #include "Features/Effects11.h"
-#include "Features/InverseSquareLighting.h"
 
 #include <numbers>
 #include <psapi.h>
@@ -388,10 +387,10 @@ namespace LocalShadowDiagnostics
 		void LogSettings(const LightLimitFix& a_llf)
 		{
 			const auto& settings = a_llf.settings;
-			logger::info("[LLF][ShadowDiag] Settings: local shadows {}, cache slots {}, cache resolution {}, filter samples {}, filter scale {:.2f}, contact shadows {} (steps {}, length {:.1f}, thickness {:.1f}, strength {:.2f}), particle lights {}, ISL {}, Effects11 {}",
+			logger::info("[LLF][ShadowDiag] Settings: local shadows {}, cache slots {}, cache resolution {}, filter samples {}, filter scale {:.2f}, contact shadows {} (steps {}, length {:.1f}, thickness {:.1f}, strength {:.2f}), particle lights {}, Effects11 {}",
 				settings.EnableLocalShadows, settings.LocalShadowSlots, settings.LocalShadowResolution == 0 ? "match game"s : std::to_string(settings.LocalShadowResolution), settings.LocalShadowSamples, settings.LocalShadowFilterScale,
 				settings.EnableContactShadows, settings.ContactShadowMaxSteps, settings.ContactShadowLength, settings.ContactShadowDepthThickness, settings.ContactShadowStrength, settings.EnableParticleLights,
-				globals::features::inverseSquareLighting.loaded, globals::features::effects11.enableEffect);
+				globals::features::effects11.enableEffect);
 			const float cullSquared = *reinterpret_cast<float*>(REL::RelocationID(528316, 415264).address());
 			const float lightFadeEndSquared = *reinterpret_cast<float*>(REL::RelocationID(527669, 414583).address());
 			logger::info("[LLF][ShadowDiag] Game INI: fShadowDistance {:.0f}, fInteriorShadowDistance {:.0f}, iShadowMapResolution {:.0f}, fShadowBiasScale {:.3f}, fPoissonRadiusScale {:.2f}; engine point/spot casters per frame {}, point/spot shadow cull {:.0f}, light fade end {:.0f}",

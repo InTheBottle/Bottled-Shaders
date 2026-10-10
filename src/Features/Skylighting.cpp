@@ -6,6 +6,7 @@
 #include "State.h"
 #include "Utils/D3D.h"
 #include "Utils/MathUtils.h"
+#include "Utils/SphericalHarmonics.h"
 #include "Utils/VersionedRelocation.h"
 
 #include <numbers>
@@ -242,7 +243,7 @@ Skylighting::SkylightingCB Skylighting::GetCommonBufferData(bool a_inWorld)
 
 	return {
 		.OcclusionViewProj = OcclusionTransform,
-		.OcclusionDir = float4{ OcclusionDir.x, OcclusionDir.y, OcclusionDir.z, occlusionFresh ? 1.0f : 0.0f },
+		.OcclusionSHBasis4Pi = occlusionFresh ? OcclusionSHBasis4Pi : float4{ 0, 0, 0, 0 },
 		.PosOffset = cellOrigin - eyePos,
 		.ArrayOrigin = {
 			((int)cellID.x - probeArrayDims[0] / 2) % probeArrayDims[0],
@@ -696,7 +697,9 @@ void Skylighting::RenderOcclusion()
 				}
 				inOcclusion = false;
 
-				OcclusionDir = -float4{ PrecipitationShaderDirectionF.x, PrecipitationShaderDirectionF.y, PrecipitationShaderDirectionF.z, 0 };
+				// Every probe used to evaluate this same basis; evaluate it once per capture instead.
+				const auto basis = SphericalHarmonics::Scale(SphericalHarmonics::Evaluate(-PrecipitationShaderDirectionF), 4.0f * std::numbers::pi_v<float>);  // 4 pi from Monte Carlo
+				OcclusionSHBasis4Pi = float4{ basis.c0, basis.c1[0], basis.c1[1], basis.c1[2] };
 				OcclusionTransform = ((RE::BSParticleShaderRainEmitter*)rain)->occlusionProjection;
 				occlusionFresh = true;
 

@@ -27,8 +27,12 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	fogHeight,
 	fogHeightFalloff,
 	fogDensity,
+	fogHeight2,
+	fogHeightFalloff2,
+	fogDensity2,
 	directionalInscatteringMultiplier,
 	directionalInscatteringAnisotropy,
+	useSkyIBL,
 	inscatteringTint,
 	cubemapMipLevel,
 	sunlightAttenuationAmount,
@@ -54,6 +58,12 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	volumetricHistoryMissSampleCount,
 	volumetricSampleJitterMultiplier,
 	volumetricUpsampleJitterMultiplier,
+	volumetricNearGridDistance,
+	volumetricFarGridPixelSize,
+	volumetricFarGridSizeZ,
+	volumetricFogNoiseScale,
+	volumetricFogNoiseThreshold,
+	volumetricFogNoiseVelocity,
 	volumetricLocalLightScatteringIntensity,
 	useVanillaFogSettings,
 	vanillaFogStrength,
@@ -98,7 +108,8 @@ namespace
 		for (const auto field : {
 				 &Settings::vanillaFogStrength, &Settings::fogLightingInfluence,
 				 &Settings::fogDensity, &Settings::fogHeight, &Settings::fogHeightFalloff,
-				 &Settings::volumetricFogDistance, &Settings::volumetricFogStartDistance,
+				 &Settings::fogDensity2, &Settings::fogHeight2, &Settings::fogHeightFalloff2,
+				 &Settings::volumetricFogDistance, &Settings::volumetricFogStartDistance, &Settings::volumetricNearGridDistance,
 				 &Settings::volumetricFogNearFadeInDistance, &Settings::volumetricFogExtinctionScale,
 				 &Settings::volumetricDepthDistributionScale }) {
 			const float value = current.*field;
@@ -256,6 +267,18 @@ void ExponentialHeightFog::DrawGeneralSettings()
 	ImGui::EndDisabled();
 	Util::WeatherUI::SliderFloat(T(TKEY("fog_height"), "Fog Height"), this, "fogHeight", &settings.fogHeight, -22000.0f, 22000.0f, "%.1f");
 	Util::WeatherUI::SliderFloat(T(TKEY("fog_height_falloff"), "Fog Height Falloff"), this, "fogHeightFalloff", &settings.fogHeightFalloff, 0.001f, 2.0f, "%.3f");
+	if (ImGui::TreeNode(T(TKEY("second_fog_layer"), "Second Fog Layer"))) {
+		Util::WeatherUI::SliderFloat(T(TKEY("fog_height_2"), "Fog Height 2"), this, "fogHeight2", &settings.fogHeight2, -22000.0f, 22000.0f, "%.1f");
+		Util::WeatherUI::SliderFloat(T(TKEY("fog_height_falloff_2"), "Fog Height Falloff 2"), this, "fogHeightFalloff2", &settings.fogHeightFalloff2, 0.001f, 2.0f, "%.3f");
+		Util::WeatherUI::SliderFloat(T(TKEY("fog_density_2"), "Fog Density 2"), this, "fogDensity2", &settings.fogDensity2, 0.0f, 1.0f, "%.3f");
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("second_fog_layer_tooltip"),
+								  "Adds a second stacked exponential height fog layer with its own base height, density and height falloff.\n"
+								  "The two line integrals are summed.\n"
+								  "Use it for high-altitude haze above the ground layer or a distinct low-lying ground fog."));
+		}
+		ImGui::TreePop();
+	}
 	ImGui::BeginDisabled(settings.useVanillaFogSettings == 0 && settings.volumetricFogEnabled == 0);
 	Util::WeatherUI::SliderFloat(T(TKEY("volumetric_extinction_scale"), "Extinction Scale"), this, "volumetricFogExtinctionScale", &settings.volumetricFogExtinctionScale, 0.0f, 10.0f, "%.2f");
 	if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -294,10 +317,23 @@ void ExponentialHeightFog::DrawGeneralSettings()
 		ImGui::Text("%s", T(TKEY("apply_vanilla_fade_tooltip"), "Applies vanilla fade brightness to exponential height fog."));
 	}
 
-	ImGui::SeparatorText(T("feature.dynamic_cubemaps.name", "Dynamic Cubemaps"));
-	ImGui::BeginDisabled(settings.useVanillaFogSettings != 0 || !globals::features::dynamicCubemaps.loaded);
-	ImGui::Checkbox(T(TKEY("use_dynamic_cubemaps"), "Use Dynamic Cubemaps for Inscattering"), (bool*)&settings.useDynamicCubemaps);
-	ImGui::BeginDisabled(settings.useDynamicCubemaps == 0);
+	ImGui::SeparatorText(T(TKEY("inscattering_cubemap"), "Inscattering Cubemap"));
+	ImGui::BeginDisabled(settings.useVanillaFogSettings != 0);
+	ImGui::BeginDisabled(!globals::features::ibl.loaded);
+	ImGui::Checkbox(T(TKEY("use_sky_ibl"), "Use Sky IBL for Exterior Inscattering"), (bool*)&settings.useSkyIBL);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("use_sky_ibl_tooltip"), "Adds the sky IBL color to the fog inscattering in exteriors. Requires the Image Based Lighting feature."));
+	}
+	ImGui::EndDisabled();
+	ImGui::BeginDisabled(!globals::features::dynamicCubemaps.loaded);
+	ImGui::Checkbox(T(TKEY("use_dynamic_cubemaps"), "Use Dynamic Cubemaps for Interior Inscattering"), (bool*)&settings.useDynamicCubemaps);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("use_dynamic_cubemaps_tooltip"), "Adds the dynamic environment cubemap color to the fog inscattering in interiors."));
+	}
+	ImGui::EndDisabled();
+	const bool hasCubemapInscattering = (settings.useSkyIBL != 0 && globals::features::ibl.loaded) ||
+	                                    (settings.useDynamicCubemaps != 0 && globals::features::dynamicCubemaps.loaded);
+	ImGui::BeginDisabled(!hasCubemapInscattering);
 	Util::WeatherUI::ColorEdit4(T(TKEY("inscattering_cubemap_tint"), "Inscattering Cubemap Tint"), this, "inscatteringTint", (float*)&settings.inscatteringTint);
 	ImGui::BeginDisabled(settings.inscatteringTint.w <= 0.0f);
 	ImGui::SliderFloat(T(TKEY("cubemap_mip_level"), "Cubemap Mip Level"), &settings.cubemapMipLevel, 1.0f, 8.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
@@ -329,6 +365,26 @@ void ExponentialHeightFog::DrawVolumetricSettings()
 	Util::WeatherUI::SliderFloat(T(TKEY("volumetric_start_distance"), "Volumetric Start Distance"), this, "volumetricFogStartDistance", &settings.volumetricFogStartDistance, 0.0f, 20000.0f, "%.0f");
 	Util::WeatherUI::SliderFloat(T(TKEY("near_fade_in_distance"), "Near Fade In Distance"), this, "volumetricFogNearFadeInDistance", &settings.volumetricFogNearFadeInDistance, 0.0f, 20000.0f, "%.0f");
 	ImGui::EndDisabled();
+	Util::WeatherUI::SliderFloat(T(TKEY("volumetric_near_grid_distance"), "Near Grid Distance"), this, "volumetricNearGridDistance", &settings.volumetricNearGridDistance, 256.0f, 50000.0f, "%.0f");
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("volumetric_near_grid_distance_tooltip"),
+							  "Distance covered by the full-resolution near volume.\n"
+							  "A second, quarter-lattice far volume covers the remaining distance up to the Volumetric View Distance.\n"
+							  "Smaller values improve near-field resolution; larger values move the low-resolution far volume farther away."));
+	}
+	if (ImGui::TreeNode(T(TKEY("volumetric_noise"), "Volumetric Noise"))) {
+		Util::WeatherUI::SliderFloat(T(TKEY("volumetric_noise_scale"), "Noise Scale"), this, "volumetricFogNoiseScale", &settings.volumetricFogNoiseScale, 0.0f, 0.01f, "%.6f");
+		Util::WeatherUI::SliderFloat(T(TKEY("volumetric_noise_threshold"), "Noise Threshold"), this, "volumetricFogNoiseThreshold", &settings.volumetricFogNoiseThreshold, 0.0f, 1.0f, "%.2f");
+		ImGui::SliderFloat3(T(TKEY("volumetric_noise_velocity"), "Noise Velocity"), &settings.volumetricFogNoiseVelocity.x, -1.0f, 1.0f, "%.3f");
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("volumetric_noise_tooltip"),
+								  "Modulates the volumetric fog density with a 3D value noise field.\n"
+								  "Noise Scale: spatial frequency of the fog clumps (0 = disabled).\n"
+								  "Noise Threshold: soft cutoff that carves clumps out of the noise.\n"
+								  "Noise Velocity: animation drift of the noise field, scaled by time."));
+		}
+		ImGui::TreePop();
+	}
 
 	ImGui::SeparatorText(T(TKEY("color_lighting"), "Color and Lighting"));
 	Util::WeatherUI::ColorEdit4(T(TKEY("volumetric_albedo"), "Volumetric Albedo"), this, "volumetricFogAlbedo", (float*)&settings.volumetricFogAlbedo);
@@ -356,6 +412,8 @@ void ExponentialHeightFog::DrawVolumetricSettings()
 		uint32_t maxGridSizeZ = 160;
 		ImGui::SliderScalar(T(TKEY("grid_pixel_size"), "Grid Pixel Size"), ImGuiDataType_U32, &settings.volumetricGridPixelSize, &minGridPixelSize, &maxGridPixelSize, "%u", ImGuiSliderFlags_AlwaysClamp);
 		ImGui::SliderScalar(T(TKEY("grid_depth_slices"), "Grid Depth Slices"), ImGuiDataType_U32, &settings.volumetricGridSizeZ, &minGridSizeZ, &maxGridSizeZ, "%u", ImGuiSliderFlags_AlwaysClamp);
+		ImGui::SliderScalar(T(TKEY("far_grid_pixel_size"), "Far Grid Pixel Size"), ImGuiDataType_U32, &settings.volumetricFarGridPixelSize, &minGridPixelSize, &maxGridPixelSize, "%u", ImGuiSliderFlags_AlwaysClamp);
+		ImGui::SliderScalar(T(TKEY("far_grid_depth_slices"), "Far Grid Depth Slices"), ImGuiDataType_U32, &settings.volumetricFarGridSizeZ, &minGridSizeZ, &maxGridSizeZ, "%u", ImGuiSliderFlags_AlwaysClamp);
 		ImGui::SliderFloat(T(TKEY("depth_distribution_scale"), "Depth Distribution Scale"), &settings.volumetricDepthDistributionScale, 1.0f, 128.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
 		const bool temporalReprojection = Util::GetTemporal();
 		ImGui::BeginDisabled(!temporalReprojection);
@@ -368,17 +426,14 @@ void ExponentialHeightFog::DrawVolumetricSettings()
 		ImGui::SliderFloat(T(TKEY("sample_jitter_multiplier"), "Sample Jitter Multiplier"), &settings.volumetricSampleJitterMultiplier, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T(TKEY("sample_jitter_multiplier_tooltip"),
-								  "Matches UE's r.VolumetricFog.LightScatteringSampleJitterMultiplier.\n"
-								  "Adds per-voxel random offset on top of the Halton sequence.\n"
-								  "0 = UE default; nonzero values need stronger temporal filtering."));
+								  "Adds per-voxel random offset on top of the Halton sequence."));
 		}
 		ImGui::EndDisabled();
 		ImGui::SliderFloat(T(TKEY("upsample_jitter_multiplier"), "Upsample Jitter Multiplier"), &settings.volumetricUpsampleJitterMultiplier, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T(TKEY("upsample_jitter_multiplier_tooltip"),
-								  "Matches UE's r.VolumetricFog.UpsampleJitterMultiplier.\n"
 								  "Jitters the final 3D fog lookup in screen space to hide\n"
-								  "low-resolution froxel pixelization. 0 = UE default."));
+								  "low-resolution froxel pixelization."));
 		}
 		ImGui::TreePop();
 	}
@@ -412,17 +467,33 @@ void ExponentialHeightFog::ClearShaderCache()
 		materialSetupCS->Release();
 		materialSetupCS = nullptr;
 	}
+	if (farMaterialSetupCS) {
+		farMaterialSetupCS->Release();
+		farMaterialSetupCS = nullptr;
+	}
 	if (conservativeDepthCS) {
 		conservativeDepthCS->Release();
 		conservativeDepthCS = nullptr;
+	}
+	if (farConservativeDepthCS) {
+		farConservativeDepthCS->Release();
+		farConservativeDepthCS = nullptr;
 	}
 	if (lightScatteringCS) {
 		lightScatteringCS->Release();
 		lightScatteringCS = nullptr;
 	}
+	if (farLightScatteringCS) {
+		farLightScatteringCS->Release();
+		farLightScatteringCS = nullptr;
+	}
 	if (integrationCS) {
 		integrationCS->Release();
 		integrationCS = nullptr;
+	}
+	if (farIntegrationCS) {
+		farIntegrationCS->Release();
+		farIntegrationCS = nullptr;
 	}
 }
 
@@ -439,118 +510,184 @@ void ExponentialHeightFog::EnsureVolumetricResources()
 {
 	uint32_t pixelSize = std::clamp(settings.volumetricGridPixelSize, 4u, 64u);
 	const uint32_t gridZ = std::clamp(settings.volumetricGridSizeZ, 16u, 160u);
+	uint32_t farPixelSize = std::clamp(settings.volumetricFarGridPixelSize, 4u, 64u);
+	const uint32_t farGridZ = std::clamp(settings.volumetricFarGridSizeZ, 16u, 160u);
 	float2 screenSz{ (float)globals::game::graphicsState->screenWidth, (float)globals::game::graphicsState->screenHeight };
 	auto renderSize = Util::ConvertToDynamic(screenSz);
 
-	auto getGridSize = [&renderSize, gridZ](uint32_t a_pixelSize) {
+	auto getGridSize = [&renderSize](uint32_t a_pixelSize, uint32_t a_gridZ) {
 		return DirectX::XMUINT4{
 			std::max(1u, static_cast<uint32_t>(std::ceil(renderSize.x / static_cast<float>(a_pixelSize)))),
 			std::max(1u, static_cast<uint32_t>(std::ceil(renderSize.y / static_cast<float>(a_pixelSize)))),
-			gridZ,
+			a_gridZ,
 			0u
 		};
 	};
-	DirectX::XMUINT4 gridSize = getGridSize(pixelSize);
+	DirectX::XMUINT4 gridSize = getGridSize(pixelSize, gridZ);
 
 	constexpr uint64_t maxVolumeVoxels = 16ull * 1024ull * 1024ull;
 	while (pixelSize < 64u &&
 		   static_cast<uint64_t>(gridSize.x) * gridSize.y * gridSize.z > maxVolumeVoxels) {
 		pixelSize++;
-		gridSize = getGridSize(pixelSize);
+		gridSize = getGridSize(pixelSize, gridZ);
 	}
 
-	if (vBufferA && currentGridSize.x == gridSize.x && currentGridSize.y == gridSize.y && currentGridSize.z == gridSize.z)
+	// The far volume must be coarser than the near volume.
+	farPixelSize = std::max(farPixelSize, pixelSize);
+	DirectX::XMUINT4 farGridSize = getGridSize(farPixelSize, farGridZ);
+	while (farPixelSize < 64u &&
+		   static_cast<uint64_t>(farGridSize.x) * farGridSize.y * farGridSize.z > maxVolumeVoxels / 4ull) {
+		farPixelSize++;
+		farGridSize = getGridSize(farPixelSize, farGridZ);
+	}
+
+	if (vBufferA &&
+		currentGridSize.x == gridSize.x && currentGridSize.y == gridSize.y && currentGridSize.z == gridSize.z &&
+		currentFarGridSize.x == farGridSize.x && currentFarGridSize.y == farGridSize.y && currentFarGridSize.z == farGridSize.z)
 		return;
 
 	currentGridSize = gridSize;
+	currentFarGridSize = farGridSize;
 
-	D3D11_TEXTURE3D_DESC texDesc{};
-	texDesc.Width = gridSize.x;
-	texDesc.Height = gridSize.y;
-	texDesc.Depth = gridSize.z;
-	texDesc.MipLevels = 1;
-	texDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-	texDesc.Usage = D3D11_USAGE_DEFAULT;
-	texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+	auto make3D = [this](const DirectX::XMUINT4& a_size, const char* a_name) {
+		D3D11_TEXTURE3D_DESC texDesc{};
+		texDesc.Width = a_size.x;
+		texDesc.Height = a_size.y;
+		texDesc.Depth = a_size.z;
+		texDesc.MipLevels = 1;
+		texDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+		texDesc.Usage = D3D11_USAGE_DEFAULT;
+		texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
 
-	D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-	srvDesc.Format = texDesc.Format;
-	srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE3D;
-	srvDesc.Texture3D.MipLevels = 1;
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = texDesc.Format;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE3D;
+		srvDesc.Texture3D.MipLevels = 1;
 
-	D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
-	uavDesc.Format = texDesc.Format;
-	uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE3D;
-	uavDesc.Texture3D.MipSlice = 0;
-	uavDesc.Texture3D.FirstWSlice = 0;
-	uavDesc.Texture3D.WSize = gridSize.z;
+		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+		uavDesc.Format = texDesc.Format;
+		uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE3D;
+		uavDesc.Texture3D.MipSlice = 0;
+		uavDesc.Texture3D.FirstWSlice = 0;
+		uavDesc.Texture3D.WSize = a_size.z;
 
-	vBufferA = std::make_unique<Texture3D>(texDesc, "ExponentialHeightFog::VBufferA");
-	vBufferA->CreateSRV(srvDesc);
-	vBufferA->CreateUAV(uavDesc);
+		auto tex = std::make_unique<Texture3D>(texDesc, a_name);
+		tex->CreateSRV(srvDesc);
+		tex->CreateUAV(uavDesc);
+		return tex;
+	};
 
-	D3D11_TEXTURE2D_DESC conservativeDepthDesc{};
-	conservativeDepthDesc.Width = gridSize.x;
-	conservativeDepthDesc.Height = gridSize.y;
-	conservativeDepthDesc.MipLevels = 1;
-	conservativeDepthDesc.ArraySize = 1;
-	conservativeDepthDesc.Format = DXGI_FORMAT_R32_FLOAT;
-	conservativeDepthDesc.SampleDesc.Count = 1;
-	conservativeDepthDesc.Usage = D3D11_USAGE_DEFAULT;
-	conservativeDepthDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+	auto make2D = [this](const DirectX::XMUINT4& a_size, const char* a_name) {
+		D3D11_TEXTURE2D_DESC texDesc{};
+		texDesc.Width = a_size.x;
+		texDesc.Height = a_size.y;
+		texDesc.MipLevels = 1;
+		texDesc.ArraySize = 1;
+		texDesc.Format = DXGI_FORMAT_R32_FLOAT;
+		texDesc.SampleDesc.Count = 1;
+		texDesc.Usage = D3D11_USAGE_DEFAULT;
+		texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
 
-	D3D11_SHADER_RESOURCE_VIEW_DESC conservativeDepthSrvDesc{};
-	conservativeDepthSrvDesc.Format = conservativeDepthDesc.Format;
-	conservativeDepthSrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-	conservativeDepthSrvDesc.Texture2D.MipLevels = 1;
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = texDesc.Format;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MipLevels = 1;
 
-	D3D11_UNORDERED_ACCESS_VIEW_DESC conservativeDepthUavDesc{};
-	conservativeDepthUavDesc.Format = conservativeDepthDesc.Format;
-	conservativeDepthUavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+		uavDesc.Format = texDesc.Format;
+		uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
 
-	conservativeDepth = std::make_unique<Texture2D>(conservativeDepthDesc, "ExponentialHeightFog::ConservativeDepth");
-	conservativeDepth->CreateSRV(conservativeDepthSrvDesc);
-	conservativeDepth->CreateUAV(conservativeDepthUavDesc);
+		auto tex = std::make_unique<Texture2D>(texDesc, a_name);
+		tex->CreateSRV(srvDesc);
+		tex->CreateUAV(uavDesc);
+		return tex;
+	};
 
-	conservativeDepthHistory = std::make_unique<Texture2D>(conservativeDepthDesc, "ExponentialHeightFog::ConservativeDepthHistory");
-	conservativeDepthHistory->CreateSRV(conservativeDepthSrvDesc);
+	vBufferA = make3D(gridSize, "ExponentialHeightFog::VBufferA");
+	conservativeDepth = make2D(gridSize, "ExponentialHeightFog::ConservativeDepth");
+	lightScattering = make3D(gridSize, "ExponentialHeightFog::LightScattering");
+	integratedLightScattering = make3D(gridSize, "ExponentialHeightFog::IntegratedLightScattering");
 
-	lightScattering = std::make_unique<Texture3D>(texDesc, "ExponentialHeightFog::LightScattering");
-	lightScattering->CreateSRV(srvDesc);
-	lightScattering->CreateUAV(uavDesc);
+	conservativeDepthHistory = std::make_unique<Texture2D>(conservativeDepth->desc, "ExponentialHeightFog::ConservativeDepthHistory");
+	{
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = conservativeDepth->desc.Format;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MipLevels = 1;
+		conservativeDepthHistory->CreateSRV(srvDesc);
+	}
 
-	lightScatteringHistory = std::make_unique<Texture3D>(texDesc, "ExponentialHeightFog::LightScatteringHistory");
-	lightScatteringHistory->CreateSRV(srvDesc);
+	lightScatteringHistory = std::make_unique<Texture3D>(lightScattering->desc, "ExponentialHeightFog::LightScatteringHistory");
+	{
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = lightScattering->desc.Format;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE3D;
+		srvDesc.Texture3D.MipLevels = 1;
+		lightScatteringHistory->CreateSRV(srvDesc);
+	}
 
-	integratedLightScattering = std::make_unique<Texture3D>(texDesc, "ExponentialHeightFog::IntegratedLightScattering");
-	integratedLightScattering->CreateSRV(srvDesc);
-	integratedLightScattering->CreateUAV(uavDesc);
+	vBufferAFar = make3D(farGridSize, "ExponentialHeightFog::VBufferAFar");
+	conservativeDepthFar = make2D(farGridSize, "ExponentialHeightFog::ConservativeDepthFar");
+	lightScatteringFar = make3D(farGridSize, "ExponentialHeightFog::LightScatteringFar");
+	integratedLightScatteringFar = make3D(farGridSize, "ExponentialHeightFog::IntegratedLightScatteringFar");
+
+	conservativeDepthFarHistory = std::make_unique<Texture2D>(conservativeDepthFar->desc, "ExponentialHeightFog::ConservativeDepthFarHistory");
+	{
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = conservativeDepthFar->desc.Format;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MipLevels = 1;
+		conservativeDepthFarHistory->CreateSRV(srvDesc);
+	}
+
+	lightScatteringFarHistory = std::make_unique<Texture3D>(lightScatteringFar->desc, "ExponentialHeightFog::LightScatteringFarHistory");
+	{
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = lightScatteringFar->desc.Format;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE3D;
+		srvDesc.Texture3D.MipLevels = 1;
+		lightScatteringFarHistory->CreateSRV(srvDesc);
+	}
 
 	hasLightScatteringHistory = false;
 	hasConservativeDepthHistory = false;
+	hasLightScatteringFarHistory = false;
+	hasConservativeDepthFarHistory = false;
 	lastPrepassFrame = UINT32_MAX;
 }
 
 void ExponentialHeightFog::ReleaseVolumetricResources()
 {
 	vBufferA.reset();
+	vBufferAFar.reset();
 	conservativeDepth.reset();
 	conservativeDepthHistory.reset();
+	conservativeDepthFar.reset();
+	conservativeDepthFarHistory.reset();
 	lightScattering.reset();
 	lightScatteringHistory.reset();
+	lightScatteringFar.reset();
+	lightScatteringFarHistory.reset();
 	integratedLightScattering.reset();
+	integratedLightScatteringFar.reset();
 	currentGridSize = {};
+	currentFarGridSize = {};
 	hasLightScatteringHistory = false;
 	hasConservativeDepthHistory = false;
+	hasLightScatteringFarHistory = false;
+	hasConservativeDepthFarHistory = false;
 	lastPrepassFrame = UINT32_MAX;
 	ID3D11ShaderResourceView* nullSRV = nullptr;
 	globals::d3d::context->PSSetShaderResources(19, 1, &nullSRV);
+	globals::d3d::context->PSSetShaderResources(22, 1, &nullSRV);
 }
 
 void ExponentialHeightFog::BindIntegratedLightScattering()
 {
 	ID3D11ShaderResourceView* srv = integratedLightScattering ? integratedLightScattering->srv.get() : nullptr;
 	globals::d3d::context->PSSetShaderResources(19, 1, &srv);
+	ID3D11ShaderResourceView* farSrv = integratedLightScatteringFar ? integratedLightScatteringFar->srv.get() : nullptr;
+	globals::d3d::context->PSSetShaderResources(22, 1, &farSrv);
 }
 
 ID3D11ComputeShader* ExponentialHeightFog::GetMaterialSetupCS()
@@ -585,11 +722,51 @@ ID3D11ComputeShader* ExponentialHeightFog::GetLightScatteringCS()
 	return lightScatteringCS;
 }
 
+ID3D11ComputeShader* ExponentialHeightFog::GetFarLightScatteringCS()
+{
+	if (!farLightScatteringCS) {
+		std::vector<std::pair<const char*, const char*>> defines;
+		defines.emplace_back("VOLUMETRIC_FOG_FAR_GRID", "");
+		if (globals::features::lightLimitFix.loaded) {
+			defines.emplace_back("LIGHT_LIMIT_FIX", "");
+		}
+		if (globals::features::terrainShadows.loaded) {
+			defines.emplace_back("TERRAIN_SHADOWS", "");
+		}
+		if (globals::features::cloudShadows.loaded) {
+			defines.emplace_back("CLOUD_SHADOWS", "");
+		}
+		farLightScatteringCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\ExponentialHeightFog\\VolumetricFogLightScatteringCS.hlsl", defines, "cs_5_0"));
+	}
+	return farLightScatteringCS;
+}
+
+ID3D11ComputeShader* ExponentialHeightFog::GetFarMaterialSetupCS()
+{
+	if (!farMaterialSetupCS)
+		farMaterialSetupCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\ExponentialHeightFog\\VolumetricFogMaterialCS.hlsl", { { "VOLUMETRIC_FOG_FAR_GRID", "" } }, "cs_5_0"));
+	return farMaterialSetupCS;
+}
+
+ID3D11ComputeShader* ExponentialHeightFog::GetFarConservativeDepthCS()
+{
+	if (!farConservativeDepthCS)
+		farConservativeDepthCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\ExponentialHeightFog\\VolumetricFogConservativeDepthCS.hlsl", { { "VOLUMETRIC_FOG_FAR_GRID", "" } }, "cs_5_0"));
+	return farConservativeDepthCS;
+}
+
 ID3D11ComputeShader* ExponentialHeightFog::GetIntegrationCS()
 {
 	if (!integrationCS)
 		integrationCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\ExponentialHeightFog\\VolumetricFogIntegrationCS.hlsl", {}, "cs_5_0"));
 	return integrationCS;
+}
+
+ID3D11ComputeShader* ExponentialHeightFog::GetFarIntegrationCS()
+{
+	if (!farIntegrationCS)
+		farIntegrationCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\ExponentialHeightFog\\VolumetricFogIntegrationCS.hlsl", { { "VOLUMETRIC_FOG_FAR_GRID", "" } }, "cs_5_0"));
+	return farIntegrationCS;
 }
 
 void ExponentialHeightFog::Prepass()
@@ -610,10 +787,18 @@ void ExponentialHeightFog::Prepass()
 	}
 	const Settings frameSettings = GetCommonBufferData();
 	const float fogDensity = frameSettings.useVanillaFogSettings ? frameSettings.vanillaFogDensity * frameSettings.vanillaFogStrength : frameSettings.fogDensity;
-	if (fogDensity <= 0.0f) {
+	if (fogDensity <= 0.0f && frameSettings.fogDensity2 <= 0.0f) {
 		ReleaseVolumetricResources();
 		return;
 	}
+
+	const double nearPlane = std::max(static_cast<double>(cameraData.y), static_cast<double>(volumeStart));
+	const double totalFarPlane = std::max(nearPlane + 1.0, static_cast<double>(settings.volumetricFogDistance));
+	const double nearEndDepth = std::min(
+		std::max(static_cast<double>(std::max(settings.volumetricNearGridDistance, 0.0f)), nearPlane + 1.0),
+		totalFarPlane);
+	const bool farGridEnabled = nearEndDepth + 1.0 < totalFarPlane;
+
 	auto* conservativeDepthShader = GetConservativeDepthCS();
 	auto* materialSetupShader = GetMaterialSetupCS();
 	auto* lightScatteringShader = GetLightScatteringCS();
@@ -622,9 +807,14 @@ void ExponentialHeightFog::Prepass()
 		ReleaseVolumetricResources();
 		return;
 	}
+	if (farGridEnabled && (!GetFarConservativeDepthCS() || !GetFarMaterialSetupCS() || !GetFarLightScatteringCS() || !GetFarIntegrationCS())) {
+		ReleaseVolumetricResources();
+		return;
+	}
 	EnsureVolumetricResources();
 	if (lastPrepassFrame == UINT32_MAX || !CanReuseFogHistory(frameSettings, previousFogSettings)) {
 		hasLightScatteringHistory = false;
+		hasLightScatteringFarHistory = false;
 	}
 	previousFogSettings = frameSettings;
 
@@ -651,6 +841,27 @@ void ExponentialHeightFog::Prepass()
 		hasLightScatteringHistory &&
 		lastPrepassFrame != UINT32_MAX &&
 		globals::state->frameCount == lastPrepassFrame + 1u;
+	const bool temporalHistoryValidFar =
+		temporalReprojection &&
+		hasLightScatteringFarHistory &&
+		lastPrepassFrame != UINT32_MAX &&
+		globals::state->frameCount == lastPrepassFrame + 1u;
+
+	auto computeGridZParams = [](double a_nearPlane, double a_farPlane, uint32_t a_gridZ, float a_distributionScale) {
+		const double nearWithOffset = a_nearPlane + 0.095 * 100.0;
+		const double depthDistributionScale = std::max(static_cast<double>(a_distributionScale), static_cast<double>(a_gridZ) / 120.0);
+		const double farExp = std::exp2(std::min(static_cast<double>(a_gridZ) / depthDistributionScale, 120.0));
+		const double gridZOffset = (a_farPlane - nearWithOffset * farExp) / (a_farPlane - nearWithOffset);
+		const double gridZScale = (1.0 - gridZOffset) / nearWithOffset;
+		return DirectX::XMFLOAT4{
+			static_cast<float>(gridZScale),
+			static_cast<float>(gridZOffset),
+			static_cast<float>(depthDistributionScale),
+			0.0f
+		};
+	};
+
+	const float nearFadeInDistanceInv = !settings.useVanillaFogSettings && settings.volumetricFogNearFadeInDistance > 0.0f ? 1.0f / settings.volumetricFogNearFadeInDistance : 100000000.0f;
 
 	VolumetricFogCB cb{};
 	cb.gridSizeAndFlags = {
@@ -668,24 +879,28 @@ void ExponentialHeightFog::Prepass()
 		1.0f / static_cast<float>(currentGridSize.x),
 		1.0f / static_cast<float>(currentGridSize.y),
 		1.0f / static_cast<float>(currentGridSize.z),
-		!settings.useVanillaFogSettings && settings.volumetricFogNearFadeInDistance > 0.0f ? 1.0f / settings.volumetricFogNearFadeInDistance : 100000000.0f
+		nearFadeInDistanceInv
 	};
+	cb.gridZParams = computeGridZParams(nearPlane, nearEndDepth, currentGridSize.z, settings.volumetricDepthDistributionScale);
 
-	const double nearPlane = std::max(static_cast<double>(cameraData.y), static_cast<double>(volumeStart));
-	const double farPlane = std::max(nearPlane + 1.0, static_cast<double>(settings.volumetricFogDistance));
-	const double nearWithOffset = nearPlane + 0.095 * 100.0;
-	const double depthDistributionScale = std::max(
-		static_cast<double>(settings.volumetricDepthDistributionScale),
-		static_cast<double>(currentGridSize.z) / 120.0);
-	const double farExp = std::exp2(std::min(static_cast<double>(currentGridSize.z) / depthDistributionScale, 120.0));
-	const double gridZOffset = (farPlane - nearWithOffset * farExp) / (farPlane - nearWithOffset);
-	const double gridZScale = (1.0 - gridZOffset) / nearWithOffset;
-	cb.gridZParams = {
-		static_cast<float>(gridZScale),
-		static_cast<float>(gridZOffset),
-		static_cast<float>(depthDistributionScale),
-		0.0f
+	cb.farGridSizeAndFlags = {
+		currentFarGridSize.x,
+		currentFarGridSize.y,
+		currentFarGridSize.z,
+		(directionalShadowMap && directionalShadowLightData ? 1u : 0u) |
+			(depthSrv ? 2u : 0u) |
+			(hasIBL ? 4u : 0u) |
+			(hasSkylighting ? 8u : 0u) |
+			(depthSrv && temporalHistoryValidFar && hasConservativeDepthFarHistory ? 16u : 0u)
 	};
+	cb.farInvGridSizeAndNearFade = {
+		1.0f / static_cast<float>(currentFarGridSize.x),
+		1.0f / static_cast<float>(currentFarGridSize.y),
+		1.0f / static_cast<float>(currentFarGridSize.z),
+		nearFadeInDistanceInv
+	};
+	cb.farGridZParams = computeGridZParams(nearEndDepth, totalFarPlane, currentFarGridSize.z, settings.volumetricDepthDistributionScale);
+	cb.farRange = { static_cast<float>(nearEndDepth), static_cast<float>(totalFarPlane), 0.0f, 0.0f };
 
 	cb.clipToWorld = globals::game::frameBufferCached.GetCameraViewProjUnjittered().Invert();
 
@@ -701,7 +916,7 @@ void ExponentialHeightFog::Prepass()
 	cb.historyParameters = {
 		temporalHistoryValid ? std::clamp(settings.volumetricHistoryWeight, 0.0f, 0.99f) : 0.0f,
 		static_cast<float>(std::clamp(settings.volumetricHistoryMissSampleCount, 1u, 16u)),
-		0.0f,
+		temporalHistoryValidFar ? std::clamp(settings.volumetricHistoryWeight, 0.0f, 0.99f) : 0.0f,
 		0.0f
 	};
 	cb.jitterParameters = {
@@ -725,10 +940,6 @@ void ExponentialHeightFog::Prepass()
 	ID3D11SamplerState* samplers[2]{ linearSampler.get(), shadowSampler.get() };
 	context->CSSetSamplers(0, 2, samplers);
 
-	const uint32_t groupX = (currentGridSize.x + 7) / 8;
-	const uint32_t groupY = (currentGridSize.y + 7) / 8;
-	const uint32_t groupZ = (currentGridSize.z + 3) / 4;
-
 	context->CSSetShaderResources(17, 1, &depthSrv);
 	ID3D11ShaderResourceView* skylightingSrv = hasSkylighting ? skylighting.texProbeArray->srv.get() : nullptr;
 	ID3D11ShaderResourceView* iblSrvs[2]{
@@ -738,55 +949,121 @@ void ExponentialHeightFog::Prepass()
 	context->CSSetShaderResources(50, 1, &skylightingSrv);
 	context->CSSetShaderResources(76, 2, iblSrvs);
 
-	if (depthSrv) {
-		ID3D11UnorderedAccessView* uavs[1]{ conservativeDepth->uav.get() };
-		context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
-		context->CSSetShader(conservativeDepthShader, nullptr, 0);
-		context->Dispatch(groupX, groupY, 1);
-		uavs[0] = nullptr;
-		context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
-	}
-
+	struct VolumetricPassDesc
 	{
-		ID3D11UnorderedAccessView* uavs[1]{ vBufferA->uav.get() };
-		context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
-		context->CSSetShader(materialSetupShader, nullptr, 0);
-		context->Dispatch(groupX, groupY, groupZ);
-		uavs[0] = nullptr;
-		context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
-	}
+		DirectX::XMUINT4 gridSize;
+		Texture3D* vBuffer;
+		Texture2D* conservativeDepth;
+		Texture2D* conservativeDepthHistory;  // may be null
+		Texture3D* scattering;
+		Texture3D* scatteringHistory;  // may be null
+		Texture3D* integrated;
+		ID3D11ComputeShader* materialSetupCS;
+		ID3D11ComputeShader* conservativeDepthCS;
+		ID3D11ComputeShader* lightScatteringCS;
+		ID3D11ComputeShader* integrationCS;
+		bool hasPrevConservativeDepth;
+		const char* name;
+	};
 
-	{
-		ID3D11ShaderResourceView* srvs[5]{
-			vBufferA->srv.get(),
-			directionalShadowMap.get(),
-			temporalHistoryValid ? lightScatteringHistory->srv.get() : nullptr,
-			conservativeDepth->srv.get(),
-			temporalHistoryValid && hasConservativeDepthHistory ? conservativeDepthHistory->srv.get() : nullptr
-		};
-		ID3D11ShaderResourceView* localLightSrvs[3]{
-			hasLocalLightData ? lightLimitFix.lights->srv.get() : nullptr,
-			hasLocalLightData ? lightLimitFix.lightIndexList->srv.get() : nullptr,
-			hasLocalLightData ? lightLimitFix.lightGrid->srv.get() : nullptr
-		};
-		ID3D11UnorderedAccessView* uavs[1]{ lightScattering->uav.get() };
-		context->CSSetShaderResources(0, 5, srvs);
-		context->CSSetShaderResources(35, 3, localLightSrvs);
-		context->CSSetShaderResources(98, 1, &directionalShadowLightData);
-		context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
-		context->CSSetShader(lightScatteringShader, nullptr, 0);
-		context->Dispatch(groupX, groupY, groupZ);
-		uavs[0] = nullptr;
-		context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
-	}
+	auto runVolumetricPass = [&](const VolumetricPassDesc& p) {
+		const uint32_t groupX = (p.gridSize.x + 7) / 8;
+		const uint32_t groupY = (p.gridSize.y + 7) / 8;
+		const uint32_t groupZ = (p.gridSize.z + 3) / 4;
 
-	{
-		ID3D11ShaderResourceView* srvs[1]{ lightScattering->srv.get() };
-		ID3D11UnorderedAccessView* uavs[1]{ integratedLightScattering->uav.get() };
-		context->CSSetShaderResources(0, 1, srvs);
-		context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
-		context->CSSetShader(integrationShader, nullptr, 0);
-		context->Dispatch(groupX, groupY, 1);
+		if (depthSrv) {
+			ID3D11UnorderedAccessView* uavs[1]{ p.conservativeDepth->uav.get() };
+			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+			context->CSSetShader(p.conservativeDepthCS, nullptr, 0);
+			globals::profiler->BeginPass(p.name);
+			context->Dispatch(groupX, groupY, 1);
+			globals::profiler->EndPass();
+			uavs[0] = nullptr;
+			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+		}
+
+		{
+			ID3D11UnorderedAccessView* uavs[1]{ p.vBuffer->uav.get() };
+			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+			context->CSSetShader(p.materialSetupCS, nullptr, 0);
+			globals::profiler->BeginPass(p.name);
+			context->Dispatch(groupX, groupY, groupZ);
+			globals::profiler->EndPass();
+			uavs[0] = nullptr;
+			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+		}
+
+		{
+			ID3D11ShaderResourceView* srvs[5]{
+				p.vBuffer->srv.get(),
+				directionalShadowMap.get(),
+				p.scatteringHistory ? p.scatteringHistory->srv.get() : nullptr,
+				p.conservativeDepth->srv.get(),
+				p.hasPrevConservativeDepth && p.conservativeDepthHistory ? p.conservativeDepthHistory->srv.get() : nullptr
+			};
+			ID3D11ShaderResourceView* localLightSrvs[3]{
+				hasLocalLightData ? lightLimitFix.lights->srv.get() : nullptr,
+				hasLocalLightData ? lightLimitFix.lightIndexList->srv.get() : nullptr,
+				hasLocalLightData ? lightLimitFix.lightGrid->srv.get() : nullptr
+			};
+			ID3D11UnorderedAccessView* uavs[1]{ p.scattering->uav.get() };
+			context->CSSetShaderResources(0, 5, srvs);
+			context->CSSetShaderResources(35, 3, localLightSrvs);
+			context->CSSetShaderResources(98, 1, &directionalShadowLightData);
+			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+			context->CSSetShader(p.lightScatteringCS, nullptr, 0);
+			globals::profiler->BeginPass(p.name);
+			context->Dispatch(groupX, groupY, groupZ);
+			globals::profiler->EndPass();
+			uavs[0] = nullptr;
+			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+		}
+
+		{
+			ID3D11ShaderResourceView* srvs[1]{ p.scattering->srv.get() };
+			ID3D11UnorderedAccessView* uavs[1]{ p.integrated->uav.get() };
+			context->CSSetShaderResources(0, 1, srvs);
+			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+			context->CSSetShader(p.integrationCS, nullptr, 0);
+			globals::profiler->BeginPass(p.name);
+			context->Dispatch(groupX, groupY, 1);
+			globals::profiler->EndPass();
+		}
+	};
+
+	runVolumetricPass({ currentGridSize,
+		vBufferA.get(),
+		conservativeDepth.get(),
+		temporalHistoryValid && hasConservativeDepthHistory ? conservativeDepthHistory.get() : nullptr,
+		lightScattering.get(),
+		temporalHistoryValid ? lightScatteringHistory.get() : nullptr,
+		integratedLightScattering.get(),
+		materialSetupShader,
+		conservativeDepthShader,
+		lightScatteringShader,
+		integrationShader,
+		temporalHistoryValid && hasConservativeDepthHistory,
+		"ExponentialHeightFog::NearVolume" });
+
+	if (farGridEnabled) {
+		runVolumetricPass({ currentFarGridSize,
+			vBufferAFar.get(),
+			conservativeDepthFar.get(),
+			temporalHistoryValidFar && hasConservativeDepthFarHistory ? conservativeDepthFarHistory.get() : nullptr,
+			lightScatteringFar.get(),
+			temporalHistoryValidFar ? lightScatteringFarHistory.get() : nullptr,
+			integratedLightScatteringFar.get(),
+			GetFarMaterialSetupCS(),
+			GetFarConservativeDepthCS(),
+			GetFarLightScatteringCS(),
+			GetFarIntegrationCS(),
+			temporalHistoryValidFar && hasConservativeDepthFarHistory,
+			"ExponentialHeightFog::FarVolume" });
+	} else {
+		const float clearValue[4]{ 0.0f, 0.0f, 0.0f, 1.0f };
+		context->ClearUnorderedAccessViewFloat(integratedLightScatteringFar->uav.get(), clearValue);
+		hasLightScatteringFarHistory = false;
+		hasConservativeDepthFarHistory = false;
 	}
 
 	ID3D11ShaderResourceView* nullSrvs[5]{ nullptr, nullptr, nullptr, nullptr, nullptr };
@@ -814,9 +1091,24 @@ void ExponentialHeightFog::Prepass()
 		} else {
 			hasConservativeDepthHistory = false;
 		}
+		if (farGridEnabled) {
+			context->CopyResource(lightScatteringFarHistory->resource.get(), lightScatteringFar->resource.get());
+			hasLightScatteringFarHistory = true;
+			if (depthSrv) {
+				context->CopyResource(conservativeDepthFarHistory->resource.get(), conservativeDepthFar->resource.get());
+				hasConservativeDepthFarHistory = true;
+			} else {
+				hasConservativeDepthFarHistory = false;
+			}
+		} else {
+			hasLightScatteringFarHistory = false;
+			hasConservativeDepthFarHistory = false;
+		}
 	} else {
 		hasLightScatteringHistory = false;
 		hasConservativeDepthHistory = false;
+		hasLightScatteringFarHistory = false;
+		hasConservativeDepthFarHistory = false;
 	}
 
 	lastPrepassFrame = globals::state->frameCount;
@@ -871,6 +1163,30 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Overall density of the fog",
 		&settings.fogDensity,
 		0.02f,
+		0.0f, 1.0f));
+
+	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
+		"fogHeight2",
+		"Fog Height 2",
+		"Base height of the second fog layer",
+		&settings.fogHeight2,
+		0.0f,
+		-22000.0f, 22000.0f));
+
+	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
+		"fogHeightFalloff2",
+		"Fog Height Falloff 2",
+		"Height density factor of the second fog layer controlling how the density increases as height decreases",
+		&settings.fogHeightFalloff2,
+		0.2f,
+		0.001f, 2.0f));
+
+	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
+		"fogDensity2",
+		"Fog Density 2",
+		"Overall density of the second fog layer",
+		&settings.fogDensity2,
+		0.0f,
 		0.0f, 1.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -941,6 +1257,37 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		&settings.volumetricFogDistance,
 		60000.0f,
 		1000.0f, 200000.0f));
+
+	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
+		"volumetricNearGridDistance",
+		"Volumetric Near Grid Distance",
+		"Distance covered by the full-resolution near volume; a quarter-lattice far volume covers the rest",
+		&settings.volumetricNearGridDistance,
+		8000.0f,
+		256.0f, 50000.0f));
+
+	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
+		"volumetricFogNoiseScale",
+		"Volumetric Fog Noise Scale",
+		"Spatial frequency of the volumetric fog noise field (0 = disabled)",
+		&settings.volumetricFogNoiseScale,
+		0.0f,
+		0.0f, 0.01f));
+
+	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
+		"volumetricFogNoiseThreshold",
+		"Volumetric Fog Noise Threshold",
+		"Soft cutoff that carves clumps out of the volumetric fog noise field",
+		&settings.volumetricFogNoiseThreshold,
+		0.5f,
+		0.0f, 1.0f));
+
+	registry->RegisterVariable(std::make_shared<WeatherVariables::Float3Variable>(
+		"volumetricFogNoiseVelocity",
+		"Volumetric Fog Noise Velocity",
+		"Animation drift of the volumetric fog noise field",
+		&settings.volumetricFogNoiseVelocity,
+		float3{ 0.0f, 0.0f, 0.0f }));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
 		"volumetricFogStartDistance",

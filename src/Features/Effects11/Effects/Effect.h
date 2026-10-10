@@ -258,7 +258,7 @@ public:
 	TechniqueSequenceResult ExecuteTechniqueSequence(const std::string& a_baseTechniqueName, ID3D11ShaderResourceView* a_input, TextureManager::Texture& a_output, TextureManager::Texture& a_temp);
 
 	// Execute a single technique
-	void ExecuteTechnique(const std::string& techniqueName, TextureManager::Texture& output);
+	bool ExecuteTechnique(const std::string& techniqueName, TextureManager::Texture& output);
 
 	// Allow EffectManager to setup common variables
 	ID3DX11Effect* GetEffect() const { return effect.get(); }

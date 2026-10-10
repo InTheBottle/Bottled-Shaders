@@ -21,7 +21,6 @@
 #include "Features/HorizonFix.h"
 #include "Features/IBL.h"
 #include "Features/InteriorSun.h"
-#include "Features/InverseSquareLighting.h"
 #include "Features/LODBlending.h"
 #include "Features/LandscapeSeams.h"
 #include "Features/LightLimitFix.h"
@@ -87,7 +86,6 @@ namespace globals
 		HiZOcclusion hiZOcclusion{};
 		HorizonFix horizonFix{};
 		InteriorSun interiorSun{};
-		InverseSquareLighting inverseSquareLighting{};
 		ScreenSpaceGI screenSpaceGI{};
 		ScreenSpaceShadows screenSpaceShadows{};
 		Skylighting skylighting{};

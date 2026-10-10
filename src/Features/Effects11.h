@@ -195,6 +195,7 @@ public:
 
 	float3 scatteringSunColor = { 1.0f, 1.0f, 1.0f };
 	float3 scatteringSunDirection = { 0.0f, 0.0f, 1.0f };
+	bool hasScatteringSunDirection = false;
 
 	winrt::com_ptr<ID3D11Texture2D> raindropTexture;
 	winrt::com_ptr<ID3D11ShaderResourceView> raindropSRV;

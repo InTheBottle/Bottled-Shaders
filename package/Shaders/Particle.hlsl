@@ -214,10 +214,6 @@ struct PS_OUTPUT
 #		include "LightLimitFix/LightLimitFix.hlsli"
 #	endif
 
-#	if defined(ISL) && defined(LIGHT_LIMIT_FIX)
-#		include "InverseSquareLighting/InverseSquareLighting.hlsli"
-#	endif
-
 SamplerState SampSourceTexture : register(s0);
 #	if defined(GRAYSCALE_TO_COLOR) || defined(GRAYSCALE_TO_ALPHA)
 SamplerState SampGrayscaleTexture : register(s1);
@@ -280,12 +276,7 @@ float GetPointLightIntensity(LightLimitFix::Light light, float3 positionWS, out 
 	float lightDist = length(lightDirection);
 	lightDirection /= max(lightDist, 1e-5);
 
-#		if defined(ISL)
-	float intensity = InverseSquareLighting::GetAttenuation(lightDist, light);
-#		else
-	float intensityFactor = saturate(lightDist / light.radius);
-	float intensity = 1 - intensityFactor * intensityFactor;
-#		endif
+	float intensity = LightLimitFix::GetAttenuation(lightDist, light);
 	intensity *= light.fade;
 	if (intensity < 1e-5)
 		return 0.0;

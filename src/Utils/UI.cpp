@@ -2360,6 +2360,7 @@ namespace Util
 		const char* recordingLabel)
 	{
 		bool changed = false;
+		ImGui::AlignTextToFramePadding();
 		ImGui::Text("%s", label);
 		ImGui::SameLine();
 
