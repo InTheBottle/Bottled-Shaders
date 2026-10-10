@@ -168,16 +168,12 @@ void Effects11::UpdateSkyScattering(PerFrame& a_data)
 		return settingManager.GetInterpolatedTimeOfDayValue(a_key, a_category);
 	};
 
-	const bool sunVisible = ProceduralSun::GetSunVisibility() > 0.0f;
-
 	auto sky = globals::game::sky;
 	if (sky && sky->sun) {
-		const auto direction = globals::features::skySync.GetCelestialDirection(sky, SkySync::Caster::Sun);
-		const float length = direction.Length();
-		if (length > 1e-6f && (sunVisible || direction.z < 0.0f || !hasScatteringSunDirection)) {
-			scatteringSunDirection = { direction.x / length, direction.y / length, direction.z / length };
-			hasScatteringSunDirection = true;
-		}
+		auto direction = globals::features::skySync.GetCelestialDirection(sky, SkySync::Caster::Sun);
+		if (ProceduralSun::GetSunVisibility() <= 0.0f && direction.z > 0.0f)
+			direction.z = -direction.z;
+		scatteringSunDirection = { direction.x, direction.y, direction.z };
 	}
 
 	const float sunHeight = scatteringSunDirection.z;
@@ -220,7 +216,7 @@ void Effects11::UpdateSkyScattering(PerFrame& a_data)
 	a_data.SkyScatteringAtmosphereThickness = 100.0f / std::max(atmosphereThickness * atmosphereThickness, 1e-6f);
 	a_data.SkyScatteringAirGlowIntensity = timeOfDay("AirGlowIntensity");
 	a_data.SkyScatteringAirGlowRange = 1.0f / std::max(airGlowRange * airGlowRange, 1e-6f);
-	a_data.SkyScatteringSunGlowIntensity = sunVisible ? timeOfDay("SunGlowIntensity") : 0.0f;
+	a_data.SkyScatteringSunGlowIntensity = timeOfDay("SunGlowIntensity");
 	a_data.SkyScatteringSunGlowRange = 10.0f / std::max(sunGlowRange * sunGlowRange, 1e-6f);
 	a_data.SkyScatteringMoonGlowAmount = timeOfDay("MoonGlowAmount");
 	a_data.SkyScatteringMoonGlowRange = 10.0f / std::max(moonGlowRange * moonGlowRange, 1e-6f);
