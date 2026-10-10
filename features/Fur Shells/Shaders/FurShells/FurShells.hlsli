@@ -47,6 +47,11 @@ namespace FurShells
 	{
 		return saturate((ShellCount - float(instanceID)) / max(ShellCount, 1.0));
 	}
+
+	float GetDarkening(float shell, float facing)
+	{
+		return lerp(1.0, lerp(RootDarkening, 1.0, shell), smoothstep(0.0, 0.5, facing));
+	}
 }
 
 #endif  // __FUR_SHELLS_HLSLI__

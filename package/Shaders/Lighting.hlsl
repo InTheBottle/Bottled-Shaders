@@ -1067,7 +1067,11 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 #		if !defined(TREE_ANIM) && !defined(LOD)
 	// Fix incorrect vertex normals on double-sided meshes
-	if (!frontFace && nearFactor > 0.5)
+	bool flipBackFace = !frontFace && nearFactor > 0.5;
+#			if defined(FUR_SHELLS)
+	flipBackFace = flipBackFace && input.FurShell <= 0.0;
+#			endif
+	if (flipBackFace)
 		tbn = -tbn;
 #		endif
 
@@ -1118,6 +1122,12 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	if defined(FUR_SHELLS)
 	float4 furSample = FurShells::TexShell.SampleBias(SampColorSampler, uv, SharedData::MipBias);
 	bool furRootCovered = FurShells::IsRootCovered(input.FurRoot, fwidth(input.FurRoot.w));
+#		if defined(MODELSPACENORMALS)
+	float3 furFacingNormal = cross(ddx(input.WorldPosition.xyz), ddy(input.WorldPosition.xyz));
+#		else
+	float3 furFacingNormal = tbnTr[2];
+#		endif
+	float furFacing = abs(dot(furFacingNormal, viewDirection)) * rsqrt(max(dot(furFacingNormal, furFacingNormal), 1e-12));
 	if (input.FurShell > 0.0 && (furRootCovered || furSample.w < lerp(FurShells::RootThreshold, FurShells::TipThreshold, input.FurShell)))
 		discard;
 #	endif
@@ -1581,7 +1591,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	MESH_TV_SAMPLE_BIAS(rawBaseColor, TexColorSampler, SampColorSampler, diffuseUv);
 #		if defined(FUR_SHELLS)
 	if (input.FurShell > 0.0)
-		rawBaseColor.rgb = lerp(rawBaseColor.rgb, furSample.rgb, FurShells::ShellColor) * lerp(FurShells::RootDarkening, 1.0, input.FurShell);
+		rawBaseColor.rgb = lerp(rawBaseColor.rgb, furSample.rgb, FurShells::ShellColor) * FurShells::GetDarkening(input.FurShell, furFacing);
 #		endif
 	baseColor = float4(Color::Diffuse(rawBaseColor.rgb), rawBaseColor.a);
 	float4 normalColor;
