@@ -138,7 +138,7 @@ struct HiZOcclusion : OverlayFeature
 		bool cullNoEarlyOut = true;  // cull depth-test-failed objects (red)
 
 		uint32_t consecutiveOccludedThreshold = 1;  // 1-100, cull after N consecutive occluded tests
-		float shadowSweepDistance = 128.0f;
+		float shadowSweepDistance = 2048.0f;
 		float guardAngle = 10.0f;
 		float motionMarginFrames = 10.0f;
 
