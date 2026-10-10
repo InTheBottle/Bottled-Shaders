@@ -272,7 +272,7 @@ PS_OUTPUT main(PS_INPUT input)
 		float2 edge = abs(input.TexCoord0.xy * 2.0 - 1.0);
 		baseColor.xyz = pow(max(baseColor.xyz, 0.0), SharedData::enbSettings.MoonCurve);
 		if (max(edge.x, edge.y) > 0.985)
-			baseColor.xyz = 0.0;
+			baseColor = 0.0;
 	}
 #			endif
 	baseColor.xyz = Color::Sky(baseColor.xyz);

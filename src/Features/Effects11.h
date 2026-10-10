@@ -166,6 +166,7 @@ public:
 	static_assert(offsetof(PerFrame, SkyScatteringSunIntensity) % 16 == 0);
 	static_assert(offsetof(PerFrame, CloudsColorFilter) % 16 == 0);
 	static_assert(offsetof(PerFrame, MasserBillboardTan) % 16 == 0);
+	static_assert(offsetof(PerFrame, AuroraCurve) % 16 == 0);
 
 	struct Settings
 	{

@@ -340,6 +340,10 @@ public:
 	 * @param a_pass The render pass to inspect.
 	 */
 	void UpdateSkyShaderPermutation(RE::BSRenderPass* a_pass);
+	/**
+	 * @brief Flags effect shader passes that draw the aurora (sky objects under the sky's aurora root).
+	 * @param a_pass The render pass to inspect.
+	 */
 	void UpdateEffectShaderPermutation(RE::BSRenderPass* a_pass);
 	/**
 	 * @brief Checks whether directional shadows are available for the current scene.
