@@ -26,6 +26,20 @@ namespace FurShells
 		float bias = 0.03 + rootSlope + 2e-8 * rootPosition.w * rootPosition.w;
 		return RootTest > 0.0 && rootPosition.w > 0.0 && all(uv == saturate(uv)) && sceneDepth < rootPosition.w - bias;
 	}
+
+	static const float CoverageSpread = 0.75;
+	static const float CoverageLod = 3.0;
+
+	float GetCoverage(float alpha, float threshold, float2 uv)
+	{
+		uint width, height, levels;
+		TexShell.GetDimensions(0, width, height, levels);
+		float2 dx = ddx(uv) * float2(width, height);
+		float2 dy = ddy(uv) * float2(width, height);
+		float lod = 0.5 * log2(max(max(dot(dx, dx), dot(dy, dy)), 1e-8)) + SharedData::MipBias;
+		float spread = CoverageSpread * saturate(lod / CoverageLod) * alpha;
+		return saturate((alpha + spread - threshold) / max(2.0 * spread, 1e-4));
+	}
 #endif
 
 #if defined(VSHADER) && defined(MODELSPACENORMALS)

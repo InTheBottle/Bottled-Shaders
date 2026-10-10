@@ -1128,7 +1128,8 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float3 furFacingNormal = tbnTr[2];
 #		endif
 	float furFacing = abs(dot(furFacingNormal, viewDirection)) * rsqrt(max(dot(furFacingNormal, furFacingNormal), 1e-12));
-	if (input.FurShell > 0.0 && (furRootCovered || furSample.w < lerp(FurShells::RootThreshold, FurShells::TipThreshold, input.FurShell)))
+	float furCoverage = FurShells::GetCoverage(furSample.w, lerp(FurShells::RootThreshold, FurShells::TipThreshold, input.FurShell), uv);
+	if (input.FurShell > 0.0 && (furRootCovered || furCoverage < screenNoise))
 		discard;
 #	endif
 
