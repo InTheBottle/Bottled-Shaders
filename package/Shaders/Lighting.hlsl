@@ -2323,13 +2323,18 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float snowOcclusion = inWorld;
 #		endif
 
+#		if !defined(TREE_ANIM)
+	bool snowBillboard = false;
+#		endif
 #		if defined(DO_ALPHA_TEST) && defined(LOD_BLENDING) && !defined(TREE_ANIM)  // should only match object lod trees (ultra trees), they have no special define
+	float3 snowCardNormal = normalize(cross(ddx(input.WorldPosition.xyz), ddy(input.WorldPosition.xyz)));
 	if (HasSoftLighting()) {
 		float rx;
 		float ry;
 		TexColorSampler.GetDimensions(rx, ry);
+		snowBillboard = abs(dot(snowCardNormal, vertexNormal)) < 0.5;
 		float hasAlpha = 1 - TexColorSampler.SampleLevel(SampColorSampler, uv, 6).a;
-		if (hasAlpha > 0.001) {
+		if (snowBillboard || hasAlpha > 0.001) {
 			snowOcclusion = 1 - TexColorSampler.Sample(SampColorSampler, uv - float2(0, 2. / ry)).a;
 		}
 	}
@@ -2370,6 +2375,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		if (SharedData::snowCoverSettings.AffectTreeTint && !(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::NoFoliageTint))
 			SnowCover::ApplyFoliageColor(material.BaseColor, SnowCover::GetEnvironmentalMultiplier(adjustedWorldPos));
 #		endif
+#		if defined(DO_ALPHA_TEST) && defined(LOD_BLENDING) && !defined(TREE_ANIM)
+		if (snowBillboard)
+			snowNormal = normalize(float3(snowCardNormal.xy, abs(snowCardNormal.z) + 0.5));
+#		endif
 #		if defined(LODLANDSCAPE) || defined(LODLANDNOISE)
 		snowNormal = normalize(lerp(snowNormal, float3(0, 0, 1), 0.5));
 #		endif
@@ -2386,7 +2395,8 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		elif defined(TREE_ANIM)
 			worldNormal = normalize(lerp(worldNormal, treeSnowNormal, snowFactor * 0.75));
 #		else
-			worldNormal = normalize(lerp(worldNormal, normalize(mul(tbn, snowNormal)), snowFactor * 0.75));
+			if (!snowBillboard)
+				worldNormal = normalize(lerp(worldNormal, normalize(mul(tbn, snowNormal)), snowFactor * 0.75));
 #		endif
 		}
 #		if defined(LODLANDNOISE)
