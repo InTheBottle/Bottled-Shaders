@@ -742,6 +742,8 @@ const FurShells::DepthStates* FurShells::GetDepthStates(ID3D11DepthStencilState*
 		a_source->GetDesc(&desc);
 
 		D3D11_DEPTH_STENCIL_DESC overlayDesc = desc;
+		overlayDesc.DepthEnable = TRUE;
+		overlayDesc.DepthFunc = D3D11_COMPARISON_EQUAL;
 		overlayDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
 		overlayDesc.StencilWriteMask = 0;
 

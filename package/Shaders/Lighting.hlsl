@@ -1591,7 +1591,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	MESH_TV_SAMPLE_BIAS(rawBaseColor, TexColorSampler, SampColorSampler, diffuseUv);
 #		if defined(FUR_SHELLS)
 	if (input.FurShell > 0.0)
-		rawBaseColor.rgb = lerp(rawBaseColor.rgb, furSample.rgb, FurShells::ShellColor) * FurShells::GetDarkening(input.FurShell, furFacing);
+		rawBaseColor.rgb = lerp(rawBaseColor.rgb, furSample.rgb, FurShells::ShellColor);
 #		endif
 	baseColor = float4(Color::Diffuse(rawBaseColor.rgb), rawBaseColor.a);
 	float4 normalColor;
@@ -1748,6 +1748,11 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		baseColor.xyz = Color::SkyrimGammaToLinear(GetFacegenRGBTintBaseColor(Color::LinearToSkyrimGamma(baseColor.xyz), uv));
 	}
 #	endif  // FACEGEN
+
+#	if defined(FUR_SHELLS)
+	if (input.FurShell > 0.0)
+		baseColor.xyz *= FurShells::GetDarkening(input.FurShell, furFacing);
+#	endif
 
 #	if defined(CS_SKIN_SHADING)
 	if (skinEnabled) {
@@ -1986,6 +1991,11 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	if defined(WORLD_MAP)
 	baseColor.xyz = GetWorldMapBaseColor(rawBaseColor.xyz, baseColor.xyz, projWeight);
 #	endif  // WORLD_MAP
+
+#	if defined(FUR_SHELLS)
+	if (input.FurShell > 0.0)
+		worldNormal = normalize(worldNormal - viewDirection * (min(dot(worldNormal, viewDirection), 0.0) - 1e-3));
+#	endif
 
 #	if defined(MODELSPACENORMALS)
 	float3 vertexNormal = worldNormal;
