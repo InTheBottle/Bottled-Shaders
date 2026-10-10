@@ -30,6 +30,8 @@ struct DisplacementParams
 namespace ExtendedMaterials
 {
 	static const float ShadowIntensity = 2.0;
+	static const float ParallaxShadowBias = 0.015;
+	static const float ParallaxShadowMinLightZ = 0.1;
 	// Terrain shadow strengths: point lights match the 4/tapCount object scale, directional uses half.
 	static const float TerrainPointShadowStrength = 4.0;
 	static const float TerrainDirectionalShadowStrength = 2.0;
@@ -42,16 +44,15 @@ namespace ExtendedMaterials
 	static const float NormalMapShadowMinNormalZ = 0.35;
 	static const float NormalMapShadowPointLightQuality = 0.5;
 
-	inline uint ParallaxShadowTapCount(float quality)
+	inline float ParallaxDensity()
 	{
-		uint taps = 1;
-		if (quality > 0.25)
-			taps++;
-		if (quality > 0.5)
-			taps++;
-		if (quality > 0.75)
-			taps++;
-		return taps;
+		const float quality = SharedData::extendedMaterialSettings.ParallaxQuality;
+		return quality * max(quality, 1.0);
+	}
+
+	inline uint ParallaxShadowTaps(float shadowQuality, uint maxTaps)
+	{
+		return clamp((uint)(4.0 * shadowQuality * max(ParallaxDensity(), 1.0) + 0.5), 2u, maxTaps);
 	}
 
 	float ScaleDisplacement(float displacement, DisplacementParams params)
@@ -71,26 +72,16 @@ namespace ExtendedMaterials
 	
 	float GetMipLevelFromDims(float2 coords, float2 textureDims)
 	{
-#	if !defined(PARALLAX) && !defined(TRUE_PBR)
-		textureDims /= 2.0;
-#	endif
-
 		float2 texCoordsPerSize = coords * textureDims;
-
-		// Compute the current gradients:
 		float2 dxSize = ddx(texCoordsPerSize);
 		float2 dySize = ddy(texCoordsPerSize);
-
-		// Standard mipmapping uses max here
 		float minTexCoordDelta = min(dot(dxSize, dxSize), dot(dySize, dySize));
-
-		// Compute the current mip level  (* 0.5 is effectively computing a square root before )
-		float mipLevel = max(0.5 * log2(minTexCoordDelta), 0);
-
+		float mipLevel = 0.5 * log2(minTexCoordDelta);
 #	if !defined(PARALLAX) && !defined(TRUE_PBR)
-		mipLevel++;
+		mipLevel = max(mipLevel, saturate(2.0 - SharedData::extendedMaterialSettings.ParallaxQuality));
+#	else
+		mipLevel = max(mipLevel, 0);
 #	endif
-
 		return max(mipLevel + SharedData::MipBias, 0);
 	}
 

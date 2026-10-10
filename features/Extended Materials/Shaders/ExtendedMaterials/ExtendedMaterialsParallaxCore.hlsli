@@ -11,16 +11,13 @@
 	{
 		float3 viewDirTS = normalize(mul(tbn, viewDir));
 		float ndotv = saturate(viewDirTS.z);
-	
+		float softZ = SharedData::extendedMaterialSettings.EnableParallaxWarpingFix ? abs(viewDirTS.z) * 0.7 + 0.3 : max(abs(viewDirTS.z), 0.15);
 #if defined(LANDSCAPE)
-		//Softened view-Z with FlattenAmount; abs + floor limit silhouette stretch.
-		float parallaxZ = max(abs(viewDirTS.z) * 0.7 + 0.3 + params[0].FlattenAmount, 0.0625);
-		float2 parallaxDir = viewDirTS.xy / parallaxZ;
+		float parallaxZ = max(softZ + params[0].FlattenAmount, 0.0625);
 #else
-		// Same soft denom as landscape; abs avoids negative-TS-Z blowups on curved meshes.
-		float parallaxZ = max(abs(viewDirTS.z) * 0.7 + 0.3 + params.FlattenAmount, 0.0625);
-		float2 parallaxDir = viewDirTS.xy / parallaxZ;
+		float parallaxZ = max(softZ + params.FlattenAmount, 0.0625);
 #endif
+		float2 parallaxDir = viewDirTS.xy / parallaxZ;
 
 #if defined(LANDSCAPE)
 		float4 w1 = input.LandBlendWeights1;
@@ -66,12 +63,12 @@
 		[branch] if (scale > 0.001)
 #endif
 		{
-			const float quality = SharedData::extendedMaterialSettings.ParallaxQuality;
+			const float density = ParallaxDensity();
 			const uint minSteps = 4;
 #if defined(LANDSCAPE)
-			const uint maxStepsCap = clamp((uint)(40.0 * quality + 0.5), 8u, 64u);
+			const uint maxStepsCap = clamp((uint)(40.0 * density + 0.5), 8u, 128u);
 #else
-			const uint maxStepsCap = clamp((uint)(32.0 * quality + 0.5), 8u, 64u);
+			const uint maxStepsCap = clamp((uint)(32.0 * density + 0.5), 8u, 128u);
 			const float baseMaxSteps = 8;
 #endif
 
@@ -91,13 +88,13 @@
 			float uvMarchSpan = dot(abs(parallaxDir), maxHeight + minHeight);
 			float marchTexels = uvMarchSpan * mipTexDim;
 #if defined(LANDSCAPE)
-			float texelsPerStep = lerp(3.5, 1.75, grazing) * rcp(quality);
+			float texelsPerStep = lerp(3.5, 1.75, grazing) * rcp(density);
 			uint angleSteps = (uint)(lerp((float)minSteps, (float)maxStepsCap, grazing) + 0.5);
 #else
-			float texelsPerStep = lerp(7.0, 3.5, grazing) * rcp(quality);
+			float texelsPerStep = lerp(7.0, 3.5, grazing) * rcp(density);
 			float grazingStepBoost = lerp(1.0, 1.65, grazing);
 			float angleStepMul = clamp(0.5 * rcp(max(ndotv, 0.0625)), 0.5, 2.5);
-			uint angleSteps = (uint)(scale * baseMaxSteps * angleStepMul * grazingStepBoost * quality);
+			uint angleSteps = (uint)(scale * baseMaxSteps * angleStepMul * grazingStepBoost * density);
 #endif
 			uint uvSteps = (uint)(marchTexels * rcp(texelsPerStep) + 0.5);
 			// Past one step per texel the extra taps land in a texel already read.
@@ -269,42 +266,54 @@
 	}
 
 #	if !defined(LANDSCAPE)
-	// https://advances.realtimerendering.com/s2006/Tatarchuk-POM.pdf
-	float GetParallaxSoftShadowMultiplier(float2 coords, float mipLevel, float3 L, float sh0, Texture2D<float4> tex, SamplerState texSampler, uint channel, float quality, float noise, DisplacementParams params, bool applyMeshTV, StochasticOffsets meshOffset)
+	float GetParallaxSoftShadowMultiplier(float2 coords, float mipLevel, float3 L, float sh0, Texture2D<float4> tex, SamplerState texSampler, uint channel, float quality, float noise, DisplacementParams params, bool applyMeshTV, StochasticOffsets meshOffset, uint maxTaps)
 	{
-		[branch] if (quality > 0.0)
+		float shadow = 1.0;
+		sh0 = AdjustDisplacementNormalized(sh0, params);
+		float rise = AdjustDisplacementNormalized(1.0, params) - sh0;
+		float horizon = saturate(L.z * rcp(ParallaxShadowMinLightZ));
+		[branch] if (quality > 0.0 && rise > 0.0 && horizon > 0.0)
 		{
-			sh0 = AdjustDisplacementNormalized(sh0, params);
-			uint tapCount = ParallaxShadowTapCount(quality);
-			float shadowStrength = ShadowIntensity * (4.0 / tapCount);
-			float2 rayDir = L.xy * 0.1 * params.HeightScale;
-			float4 multipliers = rcp((float4(1, 2, 3, 4) + noise));
-			float4 sh = sh0.xxxx;
+			uint taps = ParallaxShadowTaps(quality, maxTaps);
+			float invTaps = rcp((float)taps);
+			float2 rayUV = L.xy * rcp(max(L.z, ParallaxShadowMinLightZ)) * (0.1 * params.HeightScale * rise);
+			float occlusion = 0.0;
+			[loop] for (uint i = 0; i < taps; i += 4)
+			{
+				bool4 valid = (uint4(0, 1, 2, 3) + i) < taps;
+				float4 t = (float4(0, 1, 2, 3) + (float)i + noise) * invTaps;
+				float4 rayHeight = sh0 + rise * t;
+				float4 h = 0.0;
 #		if defined(TERRAIN_VARIATION)
-			[branch] if (applyMeshTV)
-			{
-				sh.x = AdjustDisplacementNormalized(StochasticHeightChannel(tex, texSampler, coords + rayDir * multipliers.x, mipLevel, channel, meshOffset), params);
-				if (quality > 0.25)
-					sh.y = AdjustDisplacementNormalized(StochasticHeightChannel(tex, texSampler, coords + rayDir * multipliers.y, mipLevel, channel, meshOffset), params);
-				if (quality > 0.5)
-					sh.z = AdjustDisplacementNormalized(StochasticHeightChannel(tex, texSampler, coords + rayDir * multipliers.z, mipLevel, channel, meshOffset), params);
-				if (quality > 0.75)
-					sh.w = AdjustDisplacementNormalized(StochasticHeightChannel(tex, texSampler, coords + rayDir * multipliers.w, mipLevel, channel, meshOffset), params);
-			}
-			else
+				[branch] if (applyMeshTV)
+				{
+					h.x = StochasticHeightChannel(tex, texSampler, coords + rayUV * t.x, mipLevel, channel, meshOffset);
+					if (valid.y)
+						h.y = StochasticHeightChannel(tex, texSampler, coords + rayUV * t.y, mipLevel, channel, meshOffset);
+					if (valid.z)
+						h.z = StochasticHeightChannel(tex, texSampler, coords + rayUV * t.z, mipLevel, channel, meshOffset);
+					if (valid.w)
+						h.w = StochasticHeightChannel(tex, texSampler, coords + rayUV * t.w, mipLevel, channel, meshOffset);
+				}
+				else
 #		endif
-			{
-				sh.x = AdjustDisplacementNormalized(tex.SampleLevel(texSampler, coords + rayDir * multipliers.x, mipLevel)[channel], params);
-				if (quality > 0.25)
-					sh.y = AdjustDisplacementNormalized(tex.SampleLevel(texSampler, coords + rayDir * multipliers.y, mipLevel)[channel], params);
-				if (quality > 0.5)
-					sh.z = AdjustDisplacementNormalized(tex.SampleLevel(texSampler, coords + rayDir * multipliers.z, mipLevel)[channel], params);
-				if (quality > 0.75)
-					sh.w = AdjustDisplacementNormalized(tex.SampleLevel(texSampler, coords + rayDir * multipliers.w, mipLevel)[channel], params);
+				{
+					h.x = tex.SampleLevel(texSampler, coords + rayUV * t.x, mipLevel)[channel];
+					if (valid.y)
+						h.y = tex.SampleLevel(texSampler, coords + rayUV * t.y, mipLevel)[channel];
+					if (valid.z)
+						h.z = tex.SampleLevel(texSampler, coords + rayUV * t.z, mipLevel)[channel];
+					if (valid.w)
+						h.w = tex.SampleLevel(texSampler, coords + rayUV * t.w, mipLevel)[channel];
+				}
+				h = AdjustDisplacementNormalized(h, params);
+				float4 blocked = max(0.0, h - rayHeight - ParallaxShadowBias) * (1.0 - t);
+				blocked = valid ? blocked : 0.0;
+				occlusion = max(occlusion, max(max(blocked.x, blocked.y), max(blocked.z, blocked.w)));
 			}
-			return 1.0 - saturate(dot(max(0, sh - sh0), shadowStrength));
+			shadow = 1.0 - saturate(occlusion * ShadowIntensity * 4.0) * horizon;
 		}
-		return 1.0;
+		return shadow;
 	}
 
 #	endif

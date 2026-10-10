@@ -2631,13 +2631,13 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		}
 #		elif defined(PARALLAX)
 		[branch] if (SharedData::extendedMaterialSettings.EnableParallax)
-			dirDetailedShadow *= ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, dirLightDirectionTS, sh0, TexParallaxSampler, SampParallaxSampler, 0, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset);
+			dirDetailedShadow *= ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, dirLightDirectionTS, sh0, TexParallaxSampler, SampParallaxSampler, 0, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset, 16u);
 #		elif defined(EMAT_ENVMAP)
 		[branch] if (complexMaterialParallax)
-			dirDetailedShadow *= ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, dirLightDirectionTS, sh0, TexEnvMaskSampler, SampEnvMaskSampler, 3, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset);
+			dirDetailedShadow *= ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, dirLightDirectionTS, sh0, TexEnvMaskSampler, SampEnvMaskSampler, 3, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset, 16u);
 #		elif defined(TRUE_PBR) && !defined(LODLANDSCAPE) && !defined(FACEGEN)
 		[branch] if (PBRParallax)
-			dirDetailedShadow *= ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, dirLightDirectionTS, sh0, TexParallaxSampler, SampParallaxSampler, 0, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset);
+			dirDetailedShadow *= ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, dirLightDirectionTS, sh0, TexParallaxSampler, SampParallaxSampler, 0, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset, 16u);
 #		endif  // LANDSCAPE
 	}
 #	endif  // defined(EMAT) && (defined(SKINNED) || !defined(MODELSPACENORMALS))
@@ -2865,16 +2865,16 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 			float3 lightDirectionTS = normalize(mul(refractedLightDirection, tbn).xyz);
 #				if defined(PARALLAX)
 			[branch] if (SharedData::extendedMaterialSettings.EnableParallax)
-				parallaxShadow = ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, lightDirectionTS, sh0, TexParallaxSampler, SampParallaxSampler, 0, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset);
+				parallaxShadow = ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, lightDirectionTS, sh0, TexParallaxSampler, SampParallaxSampler, 0, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset, 8u);
 #				elif defined(LANDSCAPE)
 			[branch] if (hasTerrainParallaxShadow)
 				parallaxShadow = ExtendedMaterials::GetTerrainParallaxShadowMultiplier(input, uv, terrainShadowMipLevel, lightDirectionTS, sh0, terrainDirectionalShadowQuality, screenNoise, displacementParams, sharedOffset, ExtendedMaterials::TerrainPointShadowStrength);
 #				elif defined(EMAT_ENVMAP)
 			[branch] if (complexMaterialParallax)
-				parallaxShadow = ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, lightDirectionTS, sh0, TexEnvMaskSampler, SampEnvMaskSampler, 3, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset);
+				parallaxShadow = ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, lightDirectionTS, sh0, TexEnvMaskSampler, SampEnvMaskSampler, 3, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset, 8u);
 #				elif defined(TRUE_PBR) && !defined(LODLANDSCAPE) && !defined(FACEGEN)
 			[branch] if (PBRParallax)
-				parallaxShadow = ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, lightDirectionTS, sh0, TexParallaxSampler, SampParallaxSampler, 0, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset);
+				parallaxShadow = ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, lightDirectionTS, sh0, TexParallaxSampler, SampParallaxSampler, 0, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset, 8u);
 #				endif
 		}
 #			endif  // defined(EMAT) && (defined(SKINNED) || !defined(MODELSPACENORMALS))
