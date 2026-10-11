@@ -220,7 +220,8 @@ public:
 		uint LocalShadowSamples;
 		float LocalShadowFilterRadius;
 		float LocalShadowTexelSize;
-		float pad1[2];
+		uint ContactShadowSubSamples;
+		float pad1;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
 
@@ -412,6 +413,7 @@ public:
 		float ContactShadowLength = 8.0f;
 		float ContactShadowDepthThickness = 16.0f;
 		float ContactShadowStrength = 1.0f;
+		uint ContactShadowSubSamples = 1;
 		bool EnableLocalShadows = true;
 		uint LocalShadowSlots = 16;
 		uint LocalShadowResolution = 0;

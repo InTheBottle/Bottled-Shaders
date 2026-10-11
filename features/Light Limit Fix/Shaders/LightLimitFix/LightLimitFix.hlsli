@@ -205,6 +205,14 @@ namespace LightLimitFix
 
 	static const float CONTACT_SHADOW_DEPTH_BIAS = 2.0 / 65536.0;
 
+	// Rotated-grid sub-pixel offsets in pixels; 2x uses entries 0 and 2.
+	static const float2 CONTACT_SHADOW_SUBSAMPLE_OFFSETS[4] = {
+		float2(-0.375, -0.125),
+		float2(0.125, -0.375),
+		float2(0.375, 0.125),
+		float2(-0.125, 0.375)
+	};
+
 	struct ContactShadowRay
 	{
 		float2 uvOrigin;
@@ -315,28 +323,41 @@ namespace LightLimitFix
 
 			const ContactShadowRay ray = GetContactShadowRay(viewPosition, viewPosition + lightDirectionVS * max(rayLength, 0.0));
 			const uint marchSteps = GetPixelLimitedSteps(ray, contactShadowSteps);
+			const uint subSamples = clamp(SharedData::lightLimitFixSettings.ContactShadowSubSamples, 1u, 4u);
 
+			// The coarse test is skipped at the default step count so that path stays unchanged; with extra
+			// sub-pixel rays it is cheaper than the march it can reject.
 			bool march = true;
-			[branch] if (marchSteps > CONTACT_SHADOW_COARSE_STEPS)
+			[branch] if (marchSteps > CONTACT_SHADOW_COARSE_STEPS || subSamples > 1)
 				march = MayBeOccluded(ray, thickness);
 
 			[branch] if (march)
 			{
-				const float jitter = 1.0 - noise;
+				const float2 pixelUV = rcp(FrameBuffer::DynamicResolutionParams1.xy * SharedData::BufferDim.xy);
+				const float2x2 subSampleRotation = GetShadowRotationMatrix(noise);
 				const float stepScale = rcp(float(marchSteps));
-				[loop] for (uint i = 0; i < marchSteps; i++)
+				float occlusionSum = 0.0;
+				[loop] for (uint s = 0; s < subSamples; s++)
 				{
-					const float t = GetContactShadowRayT(ray, (float(i) + jitter) * stepScale);
-					const float rayDepth = GetContactShadowRayDepth(ray, t);
-					const float2 sceneDepths = GetContactShadowSceneDepths(samp, ray.uvOrigin + ray.uvDelta * t);
+					float2 uvOrigin = ray.uvOrigin;
+					[branch] if (subSamples > 1)
+						uvOrigin += mul(CONTACT_SHADOW_SUBSAMPLE_OFFSETS[(subSamples == 2 ? s * 2 : s) & 3], subSampleRotation) * pixelUV;
+					const float jitter = 1.0 - frac(noise + float(s) * 0.3819660113);
+					[loop] for (uint i = 0; i < marchSteps; i++)
+					{
+						const float t = GetContactShadowRayT(ray, (float(i) + jitter) * stepScale);
+						const float rayDepth = GetContactShadowRayDepth(ray, t);
+						const float2 sceneDepths = GetContactShadowSceneDepths(samp, uvOrigin + ray.uvDelta * t);
 
-					const bool behindSurface = rayDepth > sceneDepths.x * (1.0 + sceneDepths.x * depthBias);
-					const bool withinThickness = rayDepth - sceneDepths.y < thickness;
-					if (sceneDepths.y > CONTACT_SHADOW_FIRST_PERSON_MAX_DEPTH && behindSurface && withinThickness) {
-						occlusion = saturate((1.0 - t) * CONTACT_SHADOW_RAY_END_FADE);
-						break;
+						const bool behindSurface = rayDepth > sceneDepths.x * (1.0 + sceneDepths.x * depthBias);
+						const bool withinThickness = rayDepth - sceneDepths.y < thickness;
+						if (sceneDepths.y > CONTACT_SHADOW_FIRST_PERSON_MAX_DEPTH && behindSurface && withinThickness) {
+							occlusionSum += saturate((1.0 - t) * CONTACT_SHADOW_RAY_END_FADE);
+							break;
+						}
 					}
 				}
+				occlusion = occlusionSum / float(subSamples);
 			}
 		}
 

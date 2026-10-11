@@ -28,6 +28,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	ContactShadowLength,
 	ContactShadowDepthThickness,
 	ContactShadowStrength,
+	ContactShadowSubSamples,
 	EnableLocalShadows,
 	LocalShadowSlots,
 	LocalShadowResolution,
@@ -113,6 +114,14 @@ void LightLimitFix::DrawSettings()
 		}
 
 		ImGui::SliderFloat(T(TKEY("contact_shadow_strength"), "Strength"), &settings.ContactShadowStrength, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+
+		static const char* edgeQualityOptions[] = { "1x", "2x", "4x" };
+		int edgeQualityIndex = settings.ContactShadowSubSamples >= 4 ? 2 : (settings.ContactShadowSubSamples >= 2 ? 1 : 0);
+		if (ImGui::Combo(T(TKEY("contact_shadow_edge_quality"), "Edge Quality"), &edgeQualityIndex, edgeQualityOptions, 3))
+			settings.ContactShadowSubSamples = edgeQualityIndex == 0 ? 1u : (edgeQualityIndex == 1 ? 2u : 4u);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("contact_shadow_edge_quality_tooltip"), "Rays traced per pixel, each starting from a different sub-pixel position. Edge pixels get partial coverage instead of being fully lit or fully shadowed, which removes the stair-stepped edges on faces and other close-up surfaces. 4x costs four times the contact shadow march, which only runs where a ray can hit something."));
+		}
 	}
 
 	ImGui::Spacing();
@@ -201,6 +210,7 @@ LightLimitFix::PerFrame LightLimitFix::GetCommonBufferData()
 	perFrame.ContactShadowLength = sanitize(settings.ContactShadowLength, 1.0f, 256.0f);
 	perFrame.ContactShadowDepthThickness = sanitize(settings.ContactShadowDepthThickness, 1.0f, 128.0f);
 	perFrame.ContactShadowStrength = sanitize(settings.ContactShadowStrength, 0.0f, 1.0f);
+	perFrame.ContactShadowSubSamples = settings.ContactShadowSubSamples >= 4 ? 4u : (settings.ContactShadowSubSamples >= 2 ? 2u : 1u);
 
 	const float texelSize = 1.0f / static_cast<float>(std::max(localShadowCacheResolution, 1u));
 	if (!poissonRadiusScaleLookedUp && globals::game::iniSettingCollection) {
