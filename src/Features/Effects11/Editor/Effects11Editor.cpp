@@ -1486,6 +1486,7 @@ void Effects11Editor::Revert()
 	}
 	EffectManager::GetSingleton().Load();
 	dirty = false;
+	shaderReloadNeeded = false;
 }
 
 void Effects11Editor::ReloadShaders()

@@ -326,6 +326,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 HRESULT DX12SwapChain::GetDevice(REFIID uuid, void** ppDevice)
 {
 	if (uuid == __uuidof(ID3D11Device) || uuid == __uuidof(ID3D11Device1) || uuid == __uuidof(ID3D11Device2) || uuid == __uuidof(ID3D11Device3) || uuid == __uuidof(ID3D11Device4) || uuid == __uuidof(ID3D11Device5)) {
+		// COM out-pointers carry a reference the caller releases
 		d3d11Device->AddRef();
 		*ppDevice = d3d11Device.get();
 		return S_OK;
@@ -534,6 +535,7 @@ HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::QueryInterface(REFIID riid, void**
 	if (!ppvObj)
 		return E_POINTER;
 
+	// The proxy only implements IDXGISwapChain; handing it out for IDXGISwapChain1+ would expose a short vtable
 	*ppvObj = nullptr;
 	if (riid != __uuidof(IUnknown) && riid != __uuidof(IDXGIObject) && riid != __uuidof(IDXGIDeviceSubObject) && riid != __uuidof(IDXGISwapChain))
 		return E_NOINTERFACE;

@@ -2,13 +2,13 @@
 
 #ifdef ENABLE_ENB_EXTENDER
 
-#include <sstream>
+#	include <sstream>
 
-#include "../EffectManager.h"
-#include "../PresetManager.h"
-#include "../SettingManager.h"
-#include "../WeatherManager.h"
-#include "Globals.h"
+#	include "../EffectManager.h"
+#	include "../PresetManager.h"
+#	include "../SettingManager.h"
+#	include "../WeatherManager.h"
+#	include "Globals.h"
 
 namespace
 {
@@ -44,9 +44,8 @@ int ExtendedEffect::ResolveTechniqueBinding(const std::string& variableName)
 
 	for (int i = 0; i < static_cast<int>(uiVariables.size()); ++i) {
 		auto& uiVar = uiVariables[i];
-		const std::string& uname = !uiVar.uniqueName.empty() ? uiVar.uniqueName
-		                           : !uiVar.group.empty()    ? uiVar.group + "." + uiVar.displayName
-		                                                     : uiVar.displayName;
+		const std::string& uname = !uiVar.uniqueName.empty() ? uiVar.uniqueName : !uiVar.group.empty() ? uiVar.group + "." + uiVar.displayName :
+		                                                                                                 uiVar.displayName;
 		if (uname == variableName) {
 			bindingCache[variableName] = i;
 			return i;
@@ -67,10 +66,18 @@ bool ExtendedEffect::IsTechniqueEnabled(TechniqueInfo& info)
 		auto& uiVar = uiVariables[idx];
 		bool val = false;
 		switch (uiVar.type) {
-		case UIVariableType::Bool: val = uiVar.boolValue; break;
-		case UIVariableType::Int: val = uiVar.intValue != 0; break;
-		case UIVariableType::Float: val = uiVar.floatValue != 0.0f; break;
-		default: val = true; break;
+		case UIVariableType::Bool:
+			val = uiVar.boolValue;
+			break;
+		case UIVariableType::Int:
+			val = uiVar.intValue != 0;
+			break;
+		case UIVariableType::Float:
+			val = uiVar.floatValue != 0.0f;
+			break;
+		default:
+			val = true;
+			break;
 		}
 
 		if (binding.inverted ? !val : val)
@@ -432,7 +439,8 @@ void ExtendedEffect::SyncWeatherVarFromUI(size_t index, uint32_t weatherID)
 		} else {
 			std::string val;
 			for (int c = 0; c < comps; ++c) {
-				if (c > 0) val += ", ";
+				if (c > 0)
+					val += ", ";
 				val += std::to_string(uiVar.vectorValue[c]);
 			}
 			updates.emplace_back(iniKey, val);
@@ -486,15 +494,15 @@ void ExtendedEffect::SaveWeatherOverrides()
 
 // Rendering
 
-#include <format>
+#	include <format>
 
-#include "../ENBExtender.h"
-#include "../Editor/EditorWidgets.h"
-#include "../UITree.h"
-#include "I18n/I18n.h"
-#include "Utils/UI.h"
+#	include "../ENBExtender.h"
+#	include "../Editor/EditorWidgets.h"
+#	include "../UITree.h"
+#	include "I18n/I18n.h"
+#	include "Utils/UI.h"
 
-#define I18N_KEY_PREFIX "feature.effects11.params."
+#	define I18N_KEY_PREFIX "feature.effects11.params."
 
 namespace
 {
@@ -516,14 +524,22 @@ namespace
 			return boundValue != 0.0f;
 		float cmp = SafeStofLocal(condStr.substr(valueStart));
 		char c0 = condStr[0], c1 = (condStr.size() >= 2) ? condStr[1] : '\0';
-		if (c0 == '=' && c1 == '=') return boundValue == cmp;
-		if (c0 == '!' && c1 == '=') return boundValue != cmp;
-		if (c0 == '<' && c1 == '=') return boundValue <= cmp;
-		if (c0 == '>' && c1 == '=') return boundValue >= cmp;
-		if (c0 == '=' && c1 == '<') return boundValue <= cmp;
-		if (c0 == '=' && c1 == '>') return boundValue >= cmp;
-		if (c0 == '<') return boundValue < cmp;
-		if (c0 == '>') return boundValue > cmp;
+		if (c0 == '=' && c1 == '=')
+			return boundValue == cmp;
+		if (c0 == '!' && c1 == '=')
+			return boundValue != cmp;
+		if (c0 == '<' && c1 == '=')
+			return boundValue <= cmp;
+		if (c0 == '>' && c1 == '=')
+			return boundValue >= cmp;
+		if (c0 == '=' && c1 == '<')
+			return boundValue <= cmp;
+		if (c0 == '=' && c1 == '>')
+			return boundValue >= cmp;
+		if (c0 == '<')
+			return boundValue < cmp;
+		if (c0 == '>')
+			return boundValue > cmp;
 		return false;
 	}
 
@@ -558,10 +574,17 @@ namespace
 			const auto& bv = boundRef->effect->uiVariables[boundRef->index];
 			float val = 0.0f;
 			switch (bv.type) {
-			case Effect::UIVariableType::Float: val = bv.floatValue; break;
-			case Effect::UIVariableType::Int: val = static_cast<float>(bv.intValue); break;
-			case Effect::UIVariableType::Bool: val = bv.boolValue ? 1.0f : 0.0f; break;
-			default: break;
+			case Effect::UIVariableType::Float:
+				val = bv.floatValue;
+				break;
+			case Effect::UIVariableType::Int:
+				val = static_cast<float>(bv.intValue);
+				break;
+			case Effect::UIVariableType::Bool:
+				val = bv.boolValue ? 1.0f : 0.0f;
+				break;
+			default:
+				break;
 			}
 
 			bool cond = EvaluateCondition(binding.condition, val);
@@ -570,11 +593,22 @@ namespace
 
 			std::string prop = binding.property;
 			std::transform(prop.begin(), prop.end(), prop.begin(), ::tolower);
-			if (prop == "hidden") { if (cond) visible = false; }
-			else if (prop == "visible") { if (!cond) visible = false; }
-			else if (prop == "readonly") { if (cond) readOnly = true; }
-			else if (prop == "readwrite") { if (!cond) readOnly = true; }
-			else { if (!cond) visible = false; }
+			if (prop == "hidden") {
+				if (cond)
+					visible = false;
+			} else if (prop == "visible") {
+				if (!cond)
+					visible = false;
+			} else if (prop == "readonly") {
+				if (cond)
+					readOnly = true;
+			} else if (prop == "readwrite") {
+				if (!cond)
+					readOnly = true;
+			} else {
+				if (!cond)
+					visible = false;
+			}
 		}
 
 		return { visible, readOnly };
@@ -889,6 +923,7 @@ namespace
 			const char* current = effect->uiTechniques[effect->selectedTechniqueIndex].displayName.c_str();
 			if (ImGui::BeginCombo("##technique", current)) {
 				for (uint32_t i = 0; i < effect->uiTechniques.size(); ++i) {
+					ImGui::PushID(static_cast<int>(i));
 					if (ImGui::Selectable(effect->uiTechniques[i].displayName.c_str(), effect->selectedTechniqueIndex == i)) {
 						effect->selectedTechniqueIndex = i;
 						ctx.changedEffects.insert(effect);
@@ -896,6 +931,7 @@ namespace
 					}
 					if (effect->selectedTechniqueIndex == i)
 						ImGui::SetItemDefaultFocus();
+					ImGui::PopID();
 				}
 				ImGui::EndCombo();
 			}
@@ -1047,6 +1083,6 @@ void ExtendedEffect::RenderMergedUI(std::span<Effect*> effects, UITree::FilterMo
 	}
 }
 
-#undef I18N_KEY_PREFIX
+#	undef I18N_KEY_PREFIX
 
 #endif
