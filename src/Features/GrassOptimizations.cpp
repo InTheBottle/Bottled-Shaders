@@ -568,12 +568,25 @@ void GrassOptimizations::UploadCullState(ID3D11Device* device, ID3D11DeviceConte
 
 	ctx->CSSetShader(cullCS, nullptr, 0);
 
+	const UINT zeros[4] = { 0, 0, 0, 0 };
+	for (auto& [key, b] : bucketStore.buckets) {
+		if (!b.cullVisible || b.cullSlot == UINT32_MAX)
+			continue;
+		ctx->ClearUnorderedAccessViewUint(b.argsUAV, zeros);
+		ctx->ClearUnorderedAccessViewUint(b.lodCounterUAV, zeros);
+	}
+
 	for (auto& [key, b] : bucketStore.buckets)
 		if (b.cullVisible)
-			CullBucket(b, ctx);
+			DispatchCullBucket(b, ctx);
 
 	ID3D11UnorderedAccessView* nullUAVs[4 + 2 * (size_t)GrassMeshLibrary::LODTier::kCount] = {};
 	ctx->CSSetUnorderedAccessViews(0, (UINT)std::size(nullUAVs), nullUAVs, nullptr);
+
+	for (auto& [key, b] : bucketStore.buckets)
+		if (b.cullVisible)
+			CopyCullBucketLODArgs(b, ctx);
+
 	ID3D11ShaderResourceView* nullSRVs[4] = {};
 	ctx->CSSetShaderResources(0, 4, nullSRVs);
 	ctx->CSSetShader(nullptr, nullptr, 0);
@@ -676,7 +689,7 @@ ID3D11ComputeShader* GrassOptimizations::GetCullCS()
 	return cullCS;
 }
 
-void GrassOptimizations::CullBucket(GrassBucket& b, ID3D11DeviceContext* ctx)
+void GrassOptimizations::DispatchCullBucket(GrassBucket& b, ID3D11DeviceContext* ctx)
 {
 	static_assert(
 		(size_t)GrassMeshLibrary::LODTier::kMiddle == 0 &&
@@ -687,12 +700,10 @@ void GrassOptimizations::CullBucket(GrassBucket& b, ID3D11DeviceContext* ctx)
 	if (b.cullSlot == UINT32_MAX)
 		return;
 
-	// Clearing the args view allows the instance count to be directly reset to zero for the draw.
-	const UINT zeros[4] = { 0, 0, 0, 0 };
-	ctx->ClearUnorderedAccessViewUint(b.argsUAV, zeros);
-	ctx->ClearUnorderedAccessViewUint(b.lodCounterUAV, zeros);
+	ID3D11ShaderResourceView* sliceTableSRV = sliceTable ? sliceTable->srv.get() : nullptr;
+	if (!b.visibleInstances || !b.sliceTableCount || !sliceTableSRV)
+		return;
 
-	// Main outputs, two outputs per LOD tier, then the shared LOD counter, matching u0-u7 in GrassCullingCS.
 	ID3D11UnorderedAccessView* uavs[4 + 2 * (size_t)GrassMeshLibrary::LODTier::kCount] = { b.compactedUAV, b.extrasUAV, b.argsUAV };
 	for (size_t tier = 0; tier < (size_t)GrassMeshLibrary::LODTier::kCount; ++tier) {
 		const GrassBucket::LODBin& bin = b.lodBins[tier];
@@ -702,7 +713,6 @@ void GrassOptimizations::CullBucket(GrassBucket& b, ID3D11DeviceContext* ctx)
 	uavs[std::size(uavs) - 1] = b.lodCounterUAV;
 	ctx->CSSetUnorderedAccessViews(0, (UINT)std::size(uavs), uavs, nullptr);
 
-	ID3D11ShaderResourceView* sliceTableSRV = sliceTable ? sliceTable->srv.get() : nullptr;
 	ID3D11ShaderResourceView* srvs[4] = { b.instanceSRV, b.originSRV,
 		hiZ.GetSRV(), sliceTableSRV };
 	ctx->CSSetShaderResources(0, 4, srvs);
@@ -712,13 +722,14 @@ void GrassOptimizations::CullBucket(GrassBucket& b, ID3D11DeviceContext* ctx)
 	UINT num = 16;
 	ctx1->CSSetConstantBuffers1(1, 1, &bucketCB, &first, &num);
 
-	// Skipping the dispatch keeps the instance count at zero for the draw.
-	if (b.visibleInstances && b.sliceTableCount && sliceTableSRV)
-		ctx->Dispatch((b.visibleInstances + 63) / 64, 1, 1);
+	ctx->Dispatch((b.visibleInstances + 63) / 64, 1, 1);
+}
 
-	// The LOD counter UAV must be unbound before its values can be copied into the draw arguments.
-	ID3D11UnorderedAccessView* nullUAVs[std::size(uavs)] = {};
-	ctx->CSSetUnorderedAccessViews(0, (UINT)std::size(nullUAVs), nullUAVs, nullptr);
+void GrassOptimizations::CopyCullBucketLODArgs(GrassBucket& b, ID3D11DeviceContext* ctx)
+{
+	if (b.cullSlot == UINT32_MAX)
+		return;
+
 	for (size_t tier = 0; tier < (size_t)GrassMeshLibrary::LODTier::kCount; ++tier) {
 		const GrassBucket::LODBin& bin = b.lodBins[tier];
 		if (!bin.active || !bin.argsBuf)
