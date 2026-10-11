@@ -6,7 +6,9 @@
 #include "Utils/Game.h"
 #include "Utils/UI.h"
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <shared_mutex>
 #include <unordered_map>
@@ -16,7 +18,9 @@
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	ReverseZ::Settings,
-	EnableReverseZ)
+	EnableReverseZ,
+	NearPlane,
+	ViewportBiasShift)
 
 namespace
 {
@@ -73,7 +77,7 @@ namespace
 		D3D11_VIEWPORT canonical = a_viewport;
 		if (a_viewport.MinDepth > 0.0f && a_viewport.MinDepth != a_viewport.MaxDepth) {
 			canonical.MinDepth = 0.0f;
-			canonical.MaxDepth = a_viewport.MaxDepth >= 1.0f ? 1.0f - a_viewport.MinDepth : a_viewport.MaxDepth;
+			canonical.MaxDepth = a_viewport.MaxDepth >= 1.0f ? 1.0f - a_viewport.MinDepth / globals::features::reverseZ.GetViewportBiasScale() : a_viewport.MaxDepth;
 		}
 		return canonical;
 	}
@@ -81,7 +85,7 @@ namespace
 	D3D11_VIEWPORT MirrorViewportDepth(const D3D11_VIEWPORT& a_viewport)
 	{
 		D3D11_VIEWPORT mirrored = a_viewport;
-		mirrored.MinDepth = 1.0f - a_viewport.MaxDepth;
+		mirrored.MinDepth = (1.0f - a_viewport.MaxDepth) * globals::features::reverseZ.GetViewportBiasScale();
 		mirrored.MaxDepth = 1.0f - a_viewport.MinDepth;
 		return mirrored;
 	}
@@ -190,6 +194,70 @@ std::pair<std::string, std::vector<std::string>> ReverseZ::GetFeatureSummary()
 void ReverseZ::LoadSettings(json& o_json)
 {
 	settings = o_json;
+	settings.NearPlane = std::isfinite(settings.NearPlane) ? std::clamp(settings.NearPlane, 0.0f, 15.0f) : 0.0f;
+	settings.ViewportBiasShift = std::clamp(settings.ViewportBiasShift, 0, 8);
+}
+
+namespace
+{
+	constexpr float kMinNearPlane = 2.0f;
+}
+
+float ReverseZ::GetViewportBiasScale() const
+{
+	return activeThisBoot && depthTargetsConverted ? std::ldexp(1.0f, -std::clamp(settings.ViewportBiasShift, 0, 8)) : 1.0f;
+}
+
+void ReverseZ::ApplyNearPlane(const RE::NiCamera* a_camera)
+{
+	if (!activeThisBoot || !depthTargetsConverted || !a_camera || a_camera != RE::Main::WorldRootCamera())
+		return;
+	auto* camera = RE::Main::WorldRootCamera();
+	auto* sceneGraph = RE::Main::WorldRootNode();
+	if (!nearPlaneSetting) {
+		auto* collection = globals::game::iniSettingCollection;
+		nearPlaneSetting = collection ? collection->GetSetting("fNearDistance:Display") : nullptr;
+	}
+	if (!camera || !sceneGraph || !nearPlaneSetting)
+		return;
+
+	auto& cameraData = camera->GetRuntimeData2();
+	const bool engineCustomNear = sceneGraph->GetRuntimeData().useCustomNear;
+	if (settings.NearPlane > 0.0f) {
+		if (!nearPlaneOverridden) {
+			engineNearPlane = nearPlaneSetting->GetFloat();
+			nearPlaneOverridden = true;
+		}
+		const float nearPlane = std::max(settings.NearPlane, std::max(cameraData.minNearPlaneDist, kMinNearPlane));
+		if (cameraData.viewFrustum.fFar > 0.0f && cameraData.viewFrustum.fFar / nearPlane > cameraData.maxFarNearRatio)
+			cameraData.maxFarNearRatio = cameraData.viewFrustum.fFar / nearPlane;
+		nearPlaneSetting->data.f = nearPlane;
+		if (!engineCustomNear && cameraData.viewFrustum.fNear != nearPlane)
+			cameraData.viewFrustum.fNear = nearPlane;
+
+		static float loggedNearPlane = 0.0f;
+		static uint32_t mismatchFrames = 0;
+		static bool mismatchLogged = false;
+		if (loggedNearPlane != nearPlane) {
+			loggedNearPlane = nearPlane;
+			mismatchFrames = 0;
+			logger::info("ReverseZ: near plane override {:.2f} (engine default {:.2f})", nearPlane, engineNearPlane);
+		}
+		const float* constantNear = globals::game::cameraNear;
+		if (!engineCustomNear && constantNear && std::abs(*constantNear - nearPlane) > 0.01f) {
+			if (++mismatchFrames > 120 && !mismatchLogged) {
+				mismatchLogged = true;
+				logger::warn("ReverseZ: CameraData near {:.2f} does not follow the near plane override {:.2f}; depth linearisation will be off", *constantNear, nearPlane);
+			}
+		} else {
+			mismatchFrames = 0;
+		}
+	} else if (nearPlaneOverridden) {
+		nearPlaneOverridden = false;
+		nearPlaneSetting->data.f = engineNearPlane;
+		if (!engineCustomNear && engineNearPlane > 0.0f)
+			cameraData.viewFrustum.fNear = engineNearPlane;
+	}
 }
 
 void ReverseZ::SaveSettings(json& o_json)
@@ -722,6 +790,8 @@ namespace
 		static void thunk(RE::BSGraphics::State* a_state, const RE::NiCamera* a_camera, std::uint32_t a_flags)
 		{
 			const bool renderingCubemap = globals::state && (globals::state->permutationData.ExtraShaderDescriptor & static_cast<uint32_t>(State::ExtraShaderDescriptors::IsReflections)) != 0;
+			if (!renderingCubemap)
+				globals::features::reverseZ.ApplyNearPlane(a_camera);
 			SetProjectionReversed(globals::features::reverseZ.ExpectPublishedReversal(a_camera, renderingCubemap));
 			func(a_state, a_camera, a_flags);
 			if (!renderingCubemap)
@@ -877,6 +947,25 @@ void ReverseZ::DrawSettings()
 
 	if (activeThisBoot && !depthTargetsConverted)
 		ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", T(TKEY("status_failed"), "The depth buffer could not be reallocated; see the log."));
+
+	{
+		Util::DisableGuard disable(!activeThisBoot);
+
+		if (ImGui::SliderFloat(T(TKEY("near_plane"), "Near Plane Override"), &settings.NearPlane, 0.0f, 15.0f, settings.NearPlane > 0.0f ? "%.1f" : T(TKEY("near_plane_off"), "Game default"), ImGuiSliderFlags_AlwaysClamp) && settings.NearPlane > 0.0f && settings.NearPlane < kMinNearPlane)
+			settings.NearPlane = kMinNearPlane;
+		Util::HelpMarker(T(TKEY("near_plane_tooltip"),
+			"Distance of the camera near plane in game units. The game default is 15.\n"
+			"A floating-point reverse depth buffer keeps full precision at any distance, so the near plane "
+			"can be moved closer to reduce the camera and first-person arms clipping through nearby geometry.\n"
+			"0 keeps the game's value, the minimum is 2. Applied to the world camera only."));
+
+		ImGui::SliderInt(T(TKEY("viewport_bias_shift"), "Depth Bias Reduction"), &settings.ViewportBiasShift, 0, 8, "%d", ImGuiSliderFlags_AlwaysClamp);
+		Util::HelpMarker(T(TKEY("viewport_bias_shift_tooltip"),
+			"Halves the game's fixed depth offsets for decals, water and similar overlays this many times.\n"
+			"Those offsets were sized for a 24-bit depth buffer and are far larger than the floating-point "
+			"buffer needs, which lets decals and water show through thin geometry at a distance.\n"
+			"Raise it until overlays start to flicker, then step back one. 0 keeps the game's offsets."));
+	}
 }
 
 #undef I18N_KEY_PREFIX

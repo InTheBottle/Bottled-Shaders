@@ -1,6 +1,7 @@
 #include "TerrainBlending.h"
 
 #include "Deferred.h"
+#include "Features/ReverseZ.h"
 #include "Globals.h"
 #include "I18n/I18n.h"
 #include "ShaderCache.h"
@@ -54,7 +55,10 @@ ID3D11ComputeShader* TerrainBlending::GetDepthBlendShader()
 {
 	if (!depthBlendShader) {
 		logger::debug("Compiling DepthBlend.hlsl");
-		depthBlendShader = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\TerrainBlending\\DepthBlend.hlsl", {}, "cs_5_0");
+		std::vector<std::pair<const char*, const char*>> defines;
+		if (!blendedDepthTexture16)
+			defines.push_back({ "NO_DEPTH16", "" });
+		depthBlendShader = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\TerrainBlending\\DepthBlend.hlsl", defines, "cs_5_0");
 	}
 	return depthBlendShader;
 }
@@ -103,13 +107,15 @@ void TerrainBlending::SetupResources()
 		uavDesc.Format = texDesc.Format;
 		blendedDepthTexture->CreateUAV(uavDesc);
 
-		texDesc.Format = DXGI_FORMAT_R16_UNORM;
-		srvDesc.Format = texDesc.Format;
-		uavDesc.Format = texDesc.Format;
+		if (!globals::features::reverseZ.IsActive()) {
+			texDesc.Format = DXGI_FORMAT_R16_UNORM;
+			srvDesc.Format = texDesc.Format;
+			uavDesc.Format = texDesc.Format;
 
-		blendedDepthTexture16 = new Texture2D(texDesc, "TerrainBlending::BlendedDepth16");
-		blendedDepthTexture16->CreateSRV(srvDesc);
-		blendedDepthTexture16->CreateUAV(uavDesc);
+			blendedDepthTexture16 = new Texture2D(texDesc, "TerrainBlending::BlendedDepth16");
+			blendedDepthTexture16->CreateSRV(srvDesc);
+			blendedDepthTexture16->CreateUAV(uavDesc);
+		}
 
 		auto& mainDepth = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN];
 		depthSRVBackup = mainDepth.depthSRV;
@@ -205,7 +211,7 @@ void TerrainBlending::BlendPrepassDepths()
 		ID3D11ShaderResourceView* views[2] = { depthSRVBackup, terrainDepth.depthSRV };
 		context->CSSetShaderResources(0, ARRAYSIZE(views), views);
 
-		ID3D11UnorderedAccessView* uavs[2] = { blendedDepthTexture->uav.get(), blendedDepthTexture16->uav.get() };
+		ID3D11UnorderedAccessView* uavs[2] = { blendedDepthTexture->uav.get(), blendedDepthTexture16 ? blendedDepthTexture16->uav.get() : nullptr };
 		context->CSSetUnorderedAccessViews(0, ARRAYSIZE(uavs), uavs, nullptr);
 
 		context->CSSetShader(GetDepthBlendShader(), nullptr, 0);

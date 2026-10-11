@@ -143,11 +143,14 @@ namespace Util
 	 * The caller does NOT own the returned pointer.
 	 *
 	 * Returns prepass depth until Deferred::DeferredPasses copies the finished opaque
-	 * depth, and that final depth (R24_UNORM_X8) for the rest of the frame.
+	 * depth, and that final depth (R24_UNORM_X8, or R32_FLOAT_X8X24 under Reverse Z) for
+	 * the rest of the frame.
 	 *
-	 * @param prefer16bit Before the final depth is available: when false (default) returns
-	 *        R32_FLOAT for compute shaders doing arithmetic on depth; when true returns
-	 *        R16_UNORM for pixel shaders via slot 17 / SharedData::GetDepth. Ignored after.
+	 * @param prefer16bit Before the final depth is available with Terrain Blending active:
+	 *        when false (default) returns R32_FLOAT for compute shaders doing arithmetic on
+	 *        depth; when true returns R16_UNORM for pixel shaders via slot 17 /
+	 *        SharedData::GetDepth. Ignored after, and ignored under Reverse Z, where a
+	 *        UNORM copy would discard the floating-point depth precision for every reader.
 	 * @return The depth SRV, or nullptr if unavailable.
 	 */
 	ID3D11ShaderResourceView* GetCurrentSceneDepthSRV(bool prefer16bit = false);
