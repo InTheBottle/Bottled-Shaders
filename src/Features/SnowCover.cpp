@@ -65,6 +65,14 @@ void SnowCover::DrawSettings()
 		}
 		ImGui::Text("Tracked fires: %u", static_cast<uint32_t>(trackedFires.size()));
 	}
+	ImGui::Checkbox("Survival Mode Cold", &survivalEnabled);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text(
+			"Snow-covered ground under the player counts as a Freezing area for Survival Mode\n"
+			"(Creation Club and Survival Mode Improved), so seasonal snow in mild regions makes you cold.");
+	}
+	if (survivalEnabled)
+		ImGui::Text("Snow at player: %.2f (%s)", survivalSnowAmount, survivalGlobal ? (survivalSnowy ? "freezing" : "clear") : "Survival Mode not found");
 	ImGui::Separator();
 	ImGui::Text("Each config applies to one worldspace or interior cell.");
 	ImGui::Text("Saved config will be applied when you enter the worldspace.");
@@ -320,8 +328,10 @@ SnowCover::PerFrame SnowCover::GetCommonBufferData()
 	perFrame.settings = settings;
 	perFrame.wsettings = wsettings;
 
-	if (fireMeltFrame.IsNewFrame())
+	if (fireMeltFrame.IsNewFrame()) {
 		UpdateFireMelt();
+		UpdateSurvival();
+	}
 
 	return perFrame;
 }
@@ -366,6 +376,8 @@ void SnowCover::ResetWorldConfig()
 	mapbuf[0] = '\0';
 	tbuf[0] = '\0';
 	altbuf[0] = '\0';
+	snowMapCpu.Release();
+	snowMapCpuPath.clear();
 }
 
 void SnowCover::UpdateMapTransform()
@@ -574,7 +586,8 @@ void SnowCover::Reload()
 
 		map_tex = std::filesystem::path(config["MapTexture"].get<std::string>());
 		copyString(map_tex.generic_string().c_str(), mapbuf, 256);
-		views[6] = loadDDS(std::filesystem::path(data_path / map_tex).concat(".dds"));
+		snowMapCpuPath = std::filesystem::path(data_path / map_tex).concat(".dds");
+		views[6] = loadDDS(snowMapCpuPath);
 		if (!views[6]) {
 			logger::warn("Snow Cover: Error loading {}.dds texture", map_tex.generic_string());
 			views[6] = loadDDS(data_path / "textures" / "gray.dds");
@@ -615,6 +628,7 @@ void SnowCover::LoadSettings(json& o_json)
 	fireMeltSettings.Enabled = o_json.value("FireMeltEnabled", defaults.Enabled);
 	fireMeltSettings.RadiusScale = std::clamp(o_json.value("FireMeltRadiusScale", defaults.RadiusScale), 1.0f, 16.0f);
 	fireMeltSettings.Strength = std::clamp(o_json.value("FireMeltStrength", defaults.Strength), 0.0f, 1.0f);
+	survivalEnabled = o_json.value("SurvivalEnabled", true);
 }
 
 void SnowCover::SaveSettings(json& o_json)
@@ -623,12 +637,14 @@ void SnowCover::SaveSettings(json& o_json)
 	o_json["FireMeltEnabled"] = fireMeltSettings.Enabled;
 	o_json["FireMeltRadiusScale"] = fireMeltSettings.RadiusScale;
 	o_json["FireMeltStrength"] = fireMeltSettings.Strength;
+	o_json["SurvivalEnabled"] = survivalEnabled;
 }
 
 void SnowCover::RestoreDefaultSettings()
 {
 	settings = {};
 	fireMeltSettings = {};
+	survivalEnabled = true;
 }
 
 bool SnowCover::IsWorldFireSource(RE::TESBoundObject* a_base)
@@ -890,4 +906,82 @@ bool SnowCover::IsHarvestableFlora(RE::TESObjectREFR* a_ref)
 	default:
 		return false;
 	}
+}
+
+void SnowCover::DataLoaded()
+{
+	auto* dataHandler = RE::TESDataHandler::GetSingleton();
+	auto* spell = dataHandler ? dataHandler->LookupForm<RE::SpellItem>(0x87F, "ccqdrsse001-survivalmode.esl") : nullptr;
+	if (!spell || spell->effects.size() < 3) {
+		logger::info("[Snow Cover] Survival Mode region spell not found, cold integration inactive");
+		return;
+	}
+	survivalGlobal = RE::IFormFactory::Create<RE::TESGlobal>();
+	if (!survivalGlobal)
+		return;
+	survivalGlobal->type = RE::TESGlobal::Type::kFloat;
+
+	const auto prepend = [this](RE::Effect* effect, RE::CONDITION_ITEM_DATA::OpCode op, bool isOR) {
+		auto* item = new RE::TESConditionItem();
+		item->data.comparisonValue.f = 1.0f;
+		item->data.functionData.function = RE::FUNCTION_DATA::FunctionID::kGetGlobalValue;
+		item->data.functionData.params[0] = survivalGlobal;
+		item->data.flags.isOR = isOR;
+		item->data.flags.opCode = op;
+		item->next = effect->conditions.head;
+		effect->conditions.head = item;
+	};
+	prepend(spell->effects[0], RE::CONDITION_ITEM_DATA::OpCode::kLessThan, false);
+	prepend(spell->effects[1], RE::CONDITION_ITEM_DATA::OpCode::kLessThan, false);
+	prepend(spell->effects[2], RE::CONDITION_ITEM_DATA::OpCode::kGreaterThanOrEqualTo, true);
+	logger::info("[Snow Cover] Survival Mode region conditions now read ground snow");
+}
+
+void SnowCover::UpdateSurvival()
+{
+	float amount = 0.0f;
+	if (survivalEnabled && survivalGlobal && wsettings.EnableSnowCover) {
+		if (!snowMapCpuPath.empty())
+			LoadSnowMapCpu();
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		auto* tes = RE::TES::GetSingleton();
+		if (player && tes && !tes->interiorCell && !globals::state->isLoadingMenuOpen) {
+			const auto p = player->GetPosition();
+			float map = 0.5f;
+			if (const auto* image = snowMapCpu.GetImage(0, 0, 0)) {
+				const float2 uv = float2(p.x, p.y) * wsettings.mapScale + wsettings.mapOffset;
+				const auto x = static_cast<size_t>(std::clamp(uv.x, 0.0f, 1.0f) * (image->width - 1) + 0.5f);
+				const auto y = static_cast<size_t>(std::clamp(uv.y, 0.0f, 1.0f) * (image->height - 1) + 0.5f);
+				map = image->pixels[y * image->rowPitch + x] / 255.0f;
+			}
+			const float env = (p.z - settings.SnowHeightOffset + (map - 0.5f) * wsettings.mapZscale + perFrame.SeasonalAltitude) / std::max(wsettings.BlendSmoothness, 1.0f);
+			const float snowTime = perFrame.TimeSnowing;
+			const float weather = snowTime * snowTime * snowTime * std::max(500.0f, perFrame.SnowingDensity) / 500.0f;
+			amount = std::clamp(std::max(env, weather), 0.0f, 1.0f);
+		}
+	}
+	survivalSnowAmount = amount;
+	if (amount <= SURVIVAL_SNOW_OFF)
+		survivalSnowy = false;
+	else if (amount >= SURVIVAL_SNOW_ON)
+		survivalSnowy = true;
+	if (survivalGlobal)
+		survivalGlobal->value = survivalSnowy ? 1.0f : 0.0f;
+}
+
+void SnowCover::LoadSnowMapCpu()
+{
+	DirectX::ScratchImage source;
+	if (SUCCEEDED(DirectX::LoadFromDDSFile(snowMapCpuPath.c_str(), DirectX::DDS_FLAGS_NONE, nullptr, source))) {
+		const auto& image = *source.GetImage(0, 0, 0);
+		if (image.format == DXGI_FORMAT_R8_UNORM)
+			snowMapCpu = std::move(source);
+		else if (DirectX::IsCompressed(image.format))
+			DirectX::Decompress(image, DXGI_FORMAT_R8_UNORM, snowMapCpu);
+		else
+			DirectX::Convert(image, DXGI_FORMAT_R8_UNORM, DirectX::TEX_FILTER_DEFAULT, DirectX::TEX_THRESHOLD_DEFAULT, snowMapCpu);
+	}
+	if (!snowMapCpu.GetImageCount())
+		logger::warn("[Snow Cover] Could not read {} on the CPU, Survival Mode ground snow ignores the altitude map here", snowMapCpuPath.generic_string());
+	snowMapCpuPath.clear();
 }

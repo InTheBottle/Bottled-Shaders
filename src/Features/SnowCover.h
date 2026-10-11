@@ -6,6 +6,7 @@
 #include "TruePBR.h"
 #include "Utils/FormIdParser.h"
 #include "Utils/Game.h"
+#include <DirectXTex.h>
 
 #pragma warning(push)
 #pragma warning(disable: 4324)
@@ -54,6 +55,8 @@ private:
 	static constexpr float FIRE_MELT_FADE_TIME = 1.0f;
 	static constexpr uint32_t FIRE_MELT_FOOTPRINT_SAMPLES = 32;
 	static constexpr float FIRE_MELT_FOOTPRINT_SMOOTHING = 0.5f;
+	static constexpr float SURVIVAL_SNOW_ON = 0.5f;
+	static constexpr float SURVIVAL_SNOW_OFF = 0.4f;
 
 public:
 	virtual inline std::string GetName() { return "Snow Cover"; }
@@ -187,6 +190,16 @@ public:
 	static bool IsFireGeometry(RE::BSGeometry* a_geometry);
 	static void CollectFireGeometry(RE::NiAVObject* a_object, bool a_hidden, bool& a_hasFire, std::vector<RE::NiBound>& a_samples);
 
+	bool survivalEnabled = true;
+	bool survivalSnowy = false;
+	float survivalSnowAmount = 0.0f;
+	RE::TESGlobal* survivalGlobal = nullptr;
+	DirectX::ScratchImage snowMapCpu;
+	std::filesystem::path snowMapCpuPath;
+
+	void UpdateSurvival();
+	void LoadSnowMapCpu();
+
 	PerFrame GetCommonBufferData();
 
 	std::array<winrt::com_ptr<ID3D11ShaderResourceView>, 7> views;
@@ -248,6 +261,7 @@ public:
 
 	virtual void SetupResources();
 	virtual void Prepass() override;
+	virtual void DataLoaded() override;
 
 	virtual void DrawSettings();
 
