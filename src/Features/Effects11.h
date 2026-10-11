@@ -170,7 +170,7 @@ public:
 
 	struct Settings
 	{
-		bool IgnorePresetParticles = false;
+		bool IgnorePresetParticles = true;
 	} settings;
 
 	bool enableEffect = false;

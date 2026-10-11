@@ -554,6 +554,18 @@ RE::NiColor F3ToNi(float3 color)
 	return { color.x, color.y, color.z };
 }
 
+namespace
+{
+	constexpr float minColorMean = 1e-4f;
+	constexpr float minEffectLightingScale = 0.25f;
+	constexpr float maxEffectLightingScale = 8.0f;
+
+	float ColorMean(float3 color)
+	{
+		return color.Dot({ 1.0f / 3.0f, 1.0f / 3.0f, 1.0f / 3.0f });
+	}
+}
+
 void Effects11::OverrideWeather(RE::Sky* a_sky)
 {
 	if (!a_sky) {
@@ -564,10 +576,13 @@ void Effects11::OverrideWeather(RE::Sky* a_sky)
 
 	auto& colors = a_sky->skyColor;
 
+	float rawSunMean = 0.0f;
+	float sunGradingRatio = 1.0f;
 	{
 		auto& dirLightColor = colors[(uint)RE::TESWeather::ColorTypes::kSunlight];
 
 		auto dirLightColorF3 = NiToF3(dirLightColor);
+		rawSunMean = ColorMean(dirLightColorF3);
 
 		// A near-zero scale would blow up the divide below, so treat it as unset
 		static constexpr float minSunlightScale = 1e-3f;
@@ -586,7 +601,18 @@ void Effects11::OverrideWeather(RE::Sky* a_sky)
 
 		dirLightColorF3 /= sunlightScale;
 
+		sunGradingRatio = rawSunMean > minColorMean ? ColorMean(dirLightColorF3) / rawSunMean : 1.0f;
 		dirLightColor = F3ToNi(dirLightColorF3);
+	}
+
+	{
+		auto& effectLightingColor = colors[(uint)RE::TESWeather::ColorTypes::kEffectLighting];
+		const float ambientMean = ColorMean(NiToF3(colors[(uint)RE::TESWeather::ColorTypes::kAmbient]));
+		const float ambientGradingRatio = settingManager.GetInterpolatedTimeOfDayValue("AmbientLightingIntensity", "ENVIRONMENT");
+		const float totalMean = rawSunMean + ambientMean;
+		const float sunShare = !Util::IsInterior() && totalMean > minColorMean ? rawSunMean / totalMean : 0.0f;
+		const float scale = std::clamp(std::lerp(ambientGradingRatio, sunGradingRatio, sunShare), minEffectLightingScale, maxEffectLightingScale);
+		effectLightingColor = F3ToNi(NiToF3(effectLightingColor) * scale);
 	}
 
 	{
