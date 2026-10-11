@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "RE/M/Moon.h"
 
 #include "Utils/Moon.h"
@@ -92,8 +92,8 @@ public:
 	RE::NiPoint3 GetCelestialDirection(const RE::Sky* sky, Caster caster) const;
 
 	/**
-	 * @brief Moon picked by the "Moon light source" setting (Masser, Secunda, or the brighter visible one).
-	 * @return Caster::Masser or Caster::Secunda, or Caster::None when the chosen moon is hidden or faded out.
+	 * @brief Moon that would cast shadows under the "Moon light source" setting, when it is currently visible.
+	 * @return Caster::Masser or Caster::Secunda, or Caster::None when that moon is hidden or faded out.
 	 */
 	Caster GetMoonLightCaster(const RE::Sky* sky) const;
 
@@ -127,33 +127,35 @@ private:
 		Count
 	};
 
-	const char* MoonLightSourceNames[static_cast<uint8_t>(MoonLightSource::Count)] = { "Brightest", "Masser", "Secunda" };
-	const char* SunPathNames[static_cast<uint8_t>(SunPath::Count)] = { "Southern Sky", "Northern Sky", "Vanilla", "Custom" };
+	/** @brief Where the current game hour sits relative to the climate's sunrise and sunset windows. */
+	struct DayPhase
+	{
+		float dim = 1.0f;
+		bool sunSetting = false;
+		bool sunRising = false;
+		bool sunBelowHorizon = false;
+	};
 
 	struct ShadowFader
 	{
 		RE::NiPoint3 currentDir = { 0.0f, 0.0f, 1.0f };
 		RE::NiPoint3 startDir = { 0.0f, 0.0f, 1.0f };
-		RE::NiPoint3 celestialDir = { 0.0f, 0.0f, 1.0f };  // currentDir before elevation locking
+		RE::NiPoint3 celestialDir = { 0.0f, 0.0f, 1.0f };
 		RE::NiPoint3 startCelestialDir = { 0.0f, 0.0f, 1.0f };
 		Caster target = Caster::Sun;
-		Caster previousTarget = Caster::Sun;
 		float fadeTimer = 0.0f;
-		float immediateTransitionRemaining = 0.0f;
 		bool transitioning = false;
 		bool sunriseReleased = false;
-		float frozenHeading = 0.0f;
 		bool sunsetHeadingLocked = false;
+		float frozenHeading = 0.0f;
 		float vlIntensityFactor = 1.0f;
 
-		void Update(const RE::Sky* sky, RE::NiPoint3 dirs[], float intensities[], float fadeDuration, float fadeAdvance, bool a_immediateTransition);
-		void LockSunElevation(RE::NiPoint3 dirs[]);
-		static void SetLighting(const RE::Sky* sky, RE::NiPoint3 dir);
+		void Update(const RE::Sky* sky, RE::NiPoint3 dirs[], Caster best, const DayPhase& phase, float minElevRadians, float fadeDuration, float fadeAdvance, bool snap);
+		void LockSunElevation(RE::NiPoint3& sunDir, const DayPhase& phase, float minElevRadians);
+		static void SetLighting(const RE::Sky* sky, RE::NiPoint3 dir, float minElevRadians);
 		static void SetDirection(RE::NiPoint3& dir, float headingRadians, float elevRadians);
 		static void SetElevation(RE::NiPoint3& dir, float elevRadians);
-		static void ClampDirection(RE::NiPoint3& dir);
 		static float ComputeVLFactor(const RE::NiPoint3& current, const RE::NiPoint3& target);
-		/** @brief Linearly interpolates two directions by @p t and renormalizes the result. */
 		static RE::NiPoint3 LerpDirection(const RE::NiPoint3& from, const RE::NiPoint3& to, float t);
 		void Reset();
 	};
@@ -170,9 +172,9 @@ private:
 	static constexpr float MaxHorizonFadeHours = 1.5f;
 
 	inline static RE::NiPoint3* gSunPosition = nullptr;
-	inline static RE::BSVolumetricLightingRenderData* gVolumetricLighting = nullptr;
 	inline static RE::Setting* gSunAlphaTransTime = nullptr;
 
+	std::string conflictingMod;
 	RE::TESObjectCELL* currentCell = nullptr;
 	bool currentCellInterior = false;
 	RE::TESWorldSpace* currentCellWorldspace = nullptr;
@@ -181,15 +183,13 @@ private:
 	float lastGameHour = -1.0f;
 	bool immediateTransitionReady = false;
 
-	float4 colors[3] = {};
-	RE::NiPoint3 rawDirections[3] = {};  // sky-local, before shadow elevation locking; zero when not computed this frame
-	float currentDim = 1.0f;
-	bool sunSetting = false;
-	bool sunRising = false;
-	bool sunBelowHorizon = false;
+	RE::NiPoint3 rawDirections[3] = {};
+	DayPhase dayPhase;
 	ShadowFader shadowFader;
 
 	void DisableOnConflict(std::string_view conflictName);
+
+	void ApplyConflictDisable();
 
 	void PreparePendingTransitions();
 
@@ -199,12 +199,26 @@ private:
 
 	void SetSkyRotation(const RE::Sky* sky, RE::TESObjectCELL* cell);
 
-	void ProcessSun(const RE::Sky* sky, RE::NiPoint3 dirs[], float intensities[]);
+	DayPhase ComputeDayPhase(const RE::TESClimate::Timing& timing, float hour) const;
+
+	void ProcessSun(const RE::Sky* sky, RE::NiPoint3& outDir);
 
 	/** @brief Zeroes the sun disc and glare alpha outside vanilla's sun fade window, whose exclusive bounds leave them opaque at the exact end hours. */
 	static void HideSunOutsideFadeWindow(const RE::Sky* sky);
 
-	void ProcessMoon(const RE::Sky* sky, Caster type, RE::NiPoint3 dirs[], float intensities[]);
+	/**
+	 * @brief Reads a moon's sky-local facing direction and blend alpha.
+	 * @return The moon's blend alpha, or a negative value when the moon is missing or hidden.
+	 */
+	static float ReadMoon(const RE::Moon* moon, RE::NiPoint3& outDir);
+
+	/**
+	 * @brief Applies the "Moon light source" preference to the two moons.
+	 * @param masserAlpha Masser's blend alpha, negative when it is unavailable.
+	 * @param secundaAlpha Secunda's blend alpha, negative when it is unavailable.
+	 * @return The preferred available moon, the brighter one for Brightest, or Caster::None when neither is available.
+	 */
+	Caster SelectMoonCaster(float masserAlpha, float secundaAlpha) const;
 
 	static void CalculateSunDirectionAndDistance(const RE::Sun* sun, RE::NiPoint3& outDir, float& outDistance);
 
