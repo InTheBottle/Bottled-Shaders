@@ -167,12 +167,14 @@ namespace SIE
 			Completed
 		};
 		ShaderCompilationTask(ShaderClass shaderClass, const RE::BSShader& shader,
-			uint32_t descriptor);
+			uint32_t descriptor, bool runtimeRequest = false);
 		/** @brief Compiles the shader, writing the result to the ShaderCache. */
 		void Perform() const;
 
 		/** @brief Returns a unique hash identifying this shader class, type, and descriptor combo. */
 		size_t GetId() const;
+		static size_t MakeId(ShaderClass shaderClass, RE::BSShader::Type type, uint32_t descriptor);
+		bool IsRuntimeRequest() const { return runtimeRequest; }
 		/** @brief Returns a human-readable string describing this task (shader file, class, defines). */
 		std::string GetString() const;
 
@@ -199,6 +201,7 @@ namespace SIE
 		static int ComputePriority(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor);
 		int cachedPriority;
 		int64_t enqueuedQpc = 0;
+		bool runtimeRequest = false;
 	};
 }
 
@@ -412,6 +415,9 @@ namespace SIE
 		void RemoveLegacyDiskCache();
 		void TrimDiskCache();
 		void InvalidateShaderSources();
+		void SetPrecompiling(bool value);
+		void PrecompileLearnedShaders(const RE::BSShader& shader);
+		void LearnShader(size_t id);
 		/** Gets whether the filesystem watcher for hot-reload is active. */
 		bool UseFileWatcher() const;
 		/** Sets whether the filesystem watcher for hot-reload is active. */
@@ -643,7 +649,7 @@ namespace SIE
 			MTLandLODBlend = 19,
 		};
 
-		enum class LightingShaderFlags
+		enum class LightingShaderFlags : uint32_t
 		{
 			VC = 1 << 0,
 			Skinned = 1 << 1,
@@ -671,7 +677,10 @@ namespace SIE
 			DoAlphaTest = 1 << 20,
 			Snow = 1 << 21,
 			CharacterLight = 1 << 22,
-			AdditionalAlphaMask = 1 << 23
+			AdditionalAlphaMask = 1 << 23,
+			NoWetness = 1u << 29,
+			NoSnowCover = 1u << 30,
+			NoLLFShadows = 1u << 31
 		};
 
 		enum class BloodSplatterShaderTechniques
@@ -864,6 +873,9 @@ namespace SIE
 		ShaderCache();
 		void ManageCompilationSet(std::stop_token stoken);
 		void ProcessCompilationSet(std::stop_token stoken, SIE::ShaderCompilationTask task);
+		bool IsRuntimeRequest(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor);
+		void LoadLearnedShaders();
+		void SaveLearnedShaders() const;
 
 		~ShaderCache();
 
@@ -903,6 +915,13 @@ namespace SIE
 		UpdateListener* listener = nullptr;
 
 		std::unique_ptr<ShaderFileDependencyTracker> dependencyTracker;
+
+		static constexpr size_t kMaxLearnedShaders = 4096;
+		std::atomic_bool precompiling = false;
+		std::mutex learnedShadersMutex;
+		std::set<size_t> learnedShaders;
+		ankerl::unordered_dense::set<size_t> precompiledShaders;
+		bool learnedShadersLoaded = false;
 	};
 
 	// Inherits from the abstract listener class, and implements the the file action handler

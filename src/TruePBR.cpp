@@ -799,7 +799,7 @@ struct BSLightingShaderProperty_GetRenderPasses
 				auto lightingTechnique = currentPass->passEnum - LightingTechniqueStart;
 				auto lightingFlags = lightingTechnique & ~(~0u << 24);
 				auto lightingType = static_cast<SIE::ShaderCache::LightingShaderTechniques>((lightingTechnique >> 24) & 0x3F);
-				lightingFlags &= ~(static_cast<uint32_t>(SIE::ShaderCache::LightingShaderFlags::TruePbr) | static_cast<uint32_t>(SIE::ShaderCache::LightingShaderFlags::Deferred));
+				lightingFlags &= ~(static_cast<uint32_t>(SIE::ShaderCache::LightingShaderFlags::TruePbr) | static_cast<uint32_t>(SIE::ShaderCache::LightingShaderFlags::Deferred) | static_cast<uint32_t>(SIE::ShaderCache::LightingShaderFlags::LandscapeSeams));
 				if (isPbr) {
 					lightingFlags |= static_cast<uint32_t>(SIE::ShaderCache::LightingShaderFlags::TruePbr);
 					lightingFlags &= ~static_cast<uint32_t>(SIE::ShaderCache::LightingShaderFlags::Specular);

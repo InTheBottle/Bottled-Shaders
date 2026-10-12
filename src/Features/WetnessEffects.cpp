@@ -2,6 +2,9 @@
 #include "CSEditor.h"
 #include "I18n/I18n.h"
 #include "Menu.h"
+#include "ShaderCache.h"
+#include "Skin.h"
+#include "State.h"
 
 #define I18N_KEY_PREFIX "feature.wetness_effects."
 
@@ -947,7 +950,47 @@ WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 	data.settings.RaindropInterval = 1.0f / settings.RaindropInterval;
 	data.settings.RippleLifetime = settings.RaindropInterval / settings.RippleLifetime;
 
+	lastPerFrame = data;
 	return data;
+}
+
+bool WetnessEffects::IsDry(RE::BSRenderPass* a_pass, uint32_t a_descriptor) const
+{
+	using Flags = SIE::ShaderCache::LightingShaderFlags;
+	using Techniques = SIE::ShaderCache::LightingShaderTechniques;
+	if (!a_pass || !a_pass->geometry)
+		return false;
+	if ((a_descriptor & (static_cast<uint32_t>(Flags::Skinned) | static_cast<uint32_t>(Flags::Reflections) | static_cast<uint32_t>(Flags::WorldMap))) != 0)
+		return false;
+	switch (static_cast<Techniques>(0x3F & (a_descriptor >> 24))) {
+	case Techniques::TreeAnim:
+	case Techniques::Eye:
+	case Techniques::Hair:
+	case Techniques::Facegen:
+	case Techniques::FacegenRGBTint:
+	case Techniques::LODLand:
+	case Techniques::LODLandNoise:
+	case Techniques::LODObjects:
+	case Techniques::LODObjectHD:
+		return false;
+	default:
+		break;
+	}
+
+	if (lastPerFrame.Raining > 0.0f || lastPerFrame.Wetness > 0.0f || lastPerFrame.PuddleWetness > 0.0f)
+		return false;
+
+	auto& skin = globals::features::skin;
+	if (skin.loaded && skin.settings.EnableSkin && (skin.currentWetness.x != 0.0f || skin.currentWetness.y != 0.0f))
+		return false;
+
+	if (lastPerFrame.settings.MaxShoreWetness > 0.0f) {
+		const auto& bound = a_pass->geometry->worldBound;
+		const float bottom = bound.center.z - std::max(0.0f, bound.radius);
+		if (!(bottom > globals::state->waterGridTop + static_cast<float>(lastPerFrame.settings.ShoreRange) + 64.0f))
+			return false;
+	}
+	return true;
 }
 
 void WetnessEffects::Prepass()

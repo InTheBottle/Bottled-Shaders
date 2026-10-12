@@ -1,6 +1,7 @@
 #include "SnowCover.h"
 
 #include "ShaderCache.h"
+#include "TruePBR/BSLightingShaderMaterialPBR.h"
 #include "Util.h"
 #include "Utils/FileSystem.h"
 #include <DDSTextureLoader.h>
@@ -280,6 +281,11 @@ SnowCover::PerFrame SnowCover::GetCommonBufferData()
 {
 	Reload();
 
+	if (wsettings.EnableSnowCover && !snowMapCpuPath.empty()) {
+		LoadSnowMapCpu();
+		BuildSnowMapMax();
+	}
+
 	bool snowing = false;
 	bool raining = false;
 	if (wsettings.EnableSnowCover) {
@@ -378,6 +384,7 @@ void SnowCover::ResetWorldConfig()
 	altbuf[0] = '\0';
 	snowMapCpu.Release();
 	snowMapCpuPath.clear();
+	snowMapMax.clear();
 }
 
 void SnowCover::UpdateMapTransform()
@@ -865,6 +872,137 @@ void SnowCover::Hooks::BSLightingShader_SetupGeometry::thunk(RE::BSShader* This,
 		globals::features::snowCover.BSLightingShader_Setup(Pass);
 	}
 	func(This, Pass, RenderFlags);
+}
+
+void SnowCover::BuildSnowMapMax()
+{
+	snowMapMax.clear();
+	const auto* image = snowMapCpu.GetImage(0, 0, 0);
+	if (!image || image->format != DXGI_FORMAT_R8_UNORM || image->width == 0 || image->height == 0)
+		return;
+
+	SnowMapLevel base;
+	base.width = static_cast<uint32_t>(image->width);
+	base.height = static_cast<uint32_t>(image->height);
+	base.texels.resize(static_cast<size_t>(base.width) * base.height);
+	for (uint32_t y = 0; y < base.height; ++y)
+		std::memcpy(base.texels.data() + static_cast<size_t>(y) * base.width, image->pixels + y * image->rowPitch, base.width);
+	snowMapMax.push_back(std::move(base));
+
+	while (snowMapMax.back().width > 1 || snowMapMax.back().height > 1) {
+		const auto& src = snowMapMax.back();
+		SnowMapLevel next;
+		next.width = std::max(1u, (src.width + 1) / 2);
+		next.height = std::max(1u, (src.height + 1) / 2);
+		next.texels.resize(static_cast<size_t>(next.width) * next.height);
+		for (uint32_t y = 0; y < next.height; ++y) {
+			const uint32_t y0 = std::min(src.height - 1, y * 2);
+			const uint32_t y1 = std::min(src.height - 1, y * 2 + 1);
+			for (uint32_t x = 0; x < next.width; ++x) {
+				const uint32_t x0 = std::min(src.width - 1, x * 2);
+				const uint32_t x1 = std::min(src.width - 1, x * 2 + 1);
+				next.texels[static_cast<size_t>(y) * next.width + x] = std::max(
+					std::max(src.texels[static_cast<size_t>(y0) * src.width + x0], src.texels[static_cast<size_t>(y0) * src.width + x1]),
+					std::max(src.texels[static_cast<size_t>(y1) * src.width + x0], src.texels[static_cast<size_t>(y1) * src.width + x1]));
+			}
+		}
+		snowMapMax.push_back(std::move(next));
+	}
+}
+
+bool SnowCover::GetSnowMapMax(float a_u0, float a_v0, float a_u1, float a_v1, float& a_value) const
+{
+	if (snowMapMax.empty())
+		return false;
+	const auto& base = snowMapMax.front();
+	const float uMin = std::min(a_u0, a_u1);
+	const float uMax = std::max(a_u0, a_u1);
+	const float vMin = std::min(a_v0, a_v1);
+	const float vMax = std::max(a_v0, a_v1);
+	const float x0f = std::floor(uMin * base.width - 0.5f);
+	const float x1f = std::floor(uMax * base.width - 0.5f) + 1.0f;
+	const float y0f = std::floor(vMin * base.height - 0.5f);
+	const float y1f = std::floor(vMax * base.height - 0.5f) + 1.0f;
+	if (!(x0f >= 0.0f && y0f >= 0.0f && x1f < static_cast<float>(base.width) && y1f < static_cast<float>(base.height)))
+		return false;
+
+	const auto x0 = static_cast<uint32_t>(x0f);
+	const auto x1 = static_cast<uint32_t>(x1f);
+	const auto y0 = static_cast<uint32_t>(y0f);
+	const auto y1 = static_cast<uint32_t>(y1f);
+	size_t level = 0;
+	while (level + 1 < snowMapMax.size() && ((x1 >> level) - (x0 >> level) > 1 || (y1 >> level) - (y0 >> level) > 1))
+		++level;
+
+	const auto& map = snowMapMax[level];
+	const uint32_t lx0 = std::min(map.width - 1, x0 >> level);
+	const uint32_t lx1 = std::min(map.width - 1, x1 >> level);
+	const uint32_t ly0 = std::min(map.height - 1, y0 >> level);
+	const uint32_t ly1 = std::min(map.height - 1, y1 >> level);
+	uint8_t result = 0;
+	for (uint32_t y = ly0; y <= ly1; ++y)
+		for (uint32_t x = lx0; x <= lx1; ++x)
+			result = std::max(result, map.texels[static_cast<size_t>(y) * map.width + x]);
+	a_value = result / 255.0f;
+	return true;
+}
+
+bool SnowCover::IsSnowFree(RE::BSRenderPass* a_pass, uint32_t a_descriptor, uint32_t a_vanillaDescriptor) const
+{
+	using Flags = SIE::ShaderCache::LightingShaderFlags;
+	using Techniques = SIE::ShaderCache::LightingShaderTechniques;
+
+	const auto technique = static_cast<Techniques>(0x3F & (a_descriptor >> 24));
+	if ((a_descriptor & static_cast<uint32_t>(Flags::Skinned)) != 0 || technique == Techniques::Eye || technique == Techniques::Hair)
+		return false;
+
+	const bool truePbr = (a_descriptor & static_cast<uint32_t>(Flags::TruePbr)) != 0;
+	if (truePbr && (a_vanillaDescriptor & static_cast<uint32_t>(Flags::AnisoLighting)) != 0)
+		return false;
+
+	if (!wsettings.EnableSnowCover)
+		return true;
+
+	if (technique == Techniques::MTLand || technique == Techniques::MTLandLODBlend || technique == Techniques::LODLand || technique == Techniques::LODLandNoise)
+		return false;
+
+	const auto extra = globals::state->permutationData.ExtraShaderDescriptor;
+	if (technique != Techniques::TreeAnim && (extra & static_cast<uint32_t>(State::ExtraShaderDescriptors::NoSnow)) != 0)
+		return true;
+
+	if (perFrame.TimeSnowing > 0.0f || !(wsettings.BlendSmoothness > 0.0f) || wsettings.mapZscale < 0.0f)
+		return false;
+
+	if (!a_pass || !a_pass->geometry)
+		return false;
+
+	float displacement = 0.0f;
+	if (truePbr) {
+		if (technique != Techniques::TreeAnim) {
+			auto* material = a_pass->shaderProperty ? static_cast<BSLightingShaderMaterialPBR*>(a_pass->shaderProperty->material) : nullptr;
+			displacement = 0.5f * std::max(0.0f, material ? material->GetDisplacementScale() : 1.0f);
+		}
+	} else if (technique == Techniques::Parallax || technique == Techniques::ParallaxOcc || technique == Techniques::Envmap || technique == Techniques::MultilayerParallax) {
+		displacement = 0.5f;
+	}
+
+	const auto& bound = a_pass->geometry->worldBound;
+	const float radius = std::max(0.0f, bound.radius);
+	float mapValue = 0.0f;
+	if (!GetSnowMapMax((bound.center.x - radius) * wsettings.mapScale.x + wsettings.mapOffset.x, (bound.center.y - radius) * wsettings.mapScale.y + wsettings.mapOffset.y,
+			(bound.center.x + radius) * wsettings.mapScale.x + wsettings.mapOffset.x, (bound.center.y + radius) * wsettings.mapScale.y + wsettings.mapOffset.y, mapValue))
+		return false;
+
+	const float top = bound.center.z + radius + 512.0f;
+	const float env = (top - settings.SnowHeightOffset + (mapValue + 2.0f / 255.0f - 0.5f) * wsettings.mapZscale + perFrame.SeasonalAltitude) / wsettings.BlendSmoothness;
+	if (env + 5.0f * displacement >= -0.01f)
+		return false;
+
+	if (technique == Techniques::TreeAnim && wsettings.AffectTreeTint && (extra & static_cast<uint32_t>(State::ExtraShaderDescriptors::NoFoliageTint)) == 0 &&
+		env >= wsettings.FoliageHeightOffset / 5000.0f - 0.01f)
+		return false;
+
+	return true;
 }
 
 void SnowCover::BSLightingShader_Setup(RE::BSRenderPass* a_pass)

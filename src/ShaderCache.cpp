@@ -7,6 +7,7 @@
 #	include <DevBenchAPI.h>
 #endif
 
+#include <charconv>
 #include <d3dcompiler.h>
 
 #include "Deferred.h"
@@ -14,7 +15,12 @@
 #include "Utils/D3D.h"
 
 #include "Features/DynamicCubemaps.h"
+#include "Features/FurShells.h"
+#include "Features/LandscapeSeams.h"
+#include "Features/LightLimitFix.h"
 #include "Features/ReverseZ.h"
+#include "Features/SnowCover.h"
+#include "Features/WetnessEffects.h"
 
 #include "ShaderDDC.h"
 
@@ -138,7 +144,7 @@ namespace SIE
 		static void GetLightingShaderDefines(uint32_t descriptor, std::span<D3D_SHADER_MACRO> defines)
 		{
 			static REL::Relocation<void(uint32_t, D3D_SHADER_MACRO*)> VanillaGetLightingShaderDefines(RELOCATION_ID(101631, 108698));
-			VanillaGetLightingShaderDefines(descriptor & ~static_cast<uint32_t>(ShaderCache::LightingShaderFlags::Reflections), defines.data());
+			VanillaGetLightingShaderDefines(descriptor & ~(static_cast<uint32_t>(ShaderCache::LightingShaderFlags::Reflections) | static_cast<uint32_t>(ShaderCache::LightingShaderFlags::NoSnowCover) | static_cast<uint32_t>(ShaderCache::LightingShaderFlags::NoLLFShadows) | static_cast<uint32_t>(ShaderCache::LightingShaderFlags::NoWetness)), defines.data());
 
 			size_t lastIndex = std::ranges::find_if(defines, [](const D3D_SHADER_MACRO& macro) { return macro.Name == nullptr; }) - defines.begin();
 
@@ -157,6 +163,9 @@ namespace SIE
 			if ((descriptor & static_cast<uint32_t>(ShaderCache::LightingShaderFlags::Reflections)) != 0) {
 				defines[lastIndex++] = { "CUBEMAP_REFLECTIONS", nullptr };
 			}
+			if ((descriptor & static_cast<uint32_t>(ShaderCache::LightingShaderFlags::NoLLFShadows)) != 0) {
+				defines[lastIndex++] = { "LLF_NO_SHADOWS", nullptr };
+			}
 			if ((descriptor & static_cast<uint32_t>(ShaderCache::LightingShaderFlags::FurShells)) != 0) {
 				defines[lastIndex++] = { "FUR_SHELLS", nullptr };
 				if ((descriptor & static_cast<uint32_t>(ShaderCache::LightingShaderFlags::FurShellsDepth)) != 0) {
@@ -164,8 +173,12 @@ namespace SIE
 				}
 			}
 
+			const bool noSnowCover = (descriptor & static_cast<uint32_t>(ShaderCache::LightingShaderFlags::NoSnowCover)) != 0;
+			const bool noWetness = (descriptor & static_cast<uint32_t>(ShaderCache::LightingShaderFlags::NoWetness)) != 0;
 			for (auto* feature : Feature::GetFeatureList()) {
 				if (feature->loaded && feature->HasShaderDefine(RE::BSShader::Type::Lighting)) {
+					if ((noSnowCover && feature == &globals::features::snowCover) || (noWetness && feature == &globals::features::wetnessEffects))
+						continue;
 					defines[lastIndex++] = { feature->GetShaderDefineName().data(), nullptr };
 				}
 			}
@@ -1884,10 +1897,14 @@ namespace SIE
 			}
 		}
 
+		const bool runtimeRequest = IsRuntimeRequest(ShaderClass::Vertex, shader, descriptor);
 		if (IsAsync()) {
-			compilationSet.Add({ ShaderClass::Vertex, shader, descriptor });
+			compilationSet.Add({ ShaderClass::Vertex, shader, descriptor, runtimeRequest });
 		} else {
-			return MakeAndAddVertexShader(shader, descriptor);
+			auto* vertexShader = MakeAndAddVertexShader(shader, descriptor);
+			if (vertexShader && runtimeRequest)
+				LearnShader(ShaderCompilationTask::MakeId(ShaderClass::Vertex, shader.shaderType.get(), descriptor));
+			return vertexShader;
 		}
 
 		return nullptr;
@@ -1929,10 +1946,14 @@ namespace SIE
 			}
 		}
 
+		const bool runtimeRequest = IsRuntimeRequest(ShaderClass::Pixel, shader, descriptor);
 		if (IsAsync()) {
-			compilationSet.Add({ ShaderClass::Pixel, shader, descriptor });
+			compilationSet.Add({ ShaderClass::Pixel, shader, descriptor, runtimeRequest });
 		} else {
-			return MakeAndAddPixelShader(shader, descriptor);
+			auto* pixelShader = MakeAndAddPixelShader(shader, descriptor);
+			if (pixelShader && runtimeRequest)
+				LearnShader(ShaderCompilationTask::MakeId(ShaderClass::Pixel, shader.shaderType.get(), descriptor));
+			return pixelShader;
 		}
 
 		return nullptr;
@@ -2616,6 +2637,137 @@ namespace SIE
 		compilationSet.EnqueueAux([] { ShaderDDC::Trim(); });
 	}
 
+	static std::filesystem::path GetLearnedShadersPath()
+	{
+		return Util::PathHelpers::GetCommunityShaderPath() / "ShaderPermutations.txt";
+	}
+
+	static bool IsLightingDescriptorAvailable(uint32_t descriptor)
+	{
+		using Flags = ShaderCache::LightingShaderFlags;
+		const auto available = [descriptor](Flags flag, const Feature& feature) {
+			return (descriptor & static_cast<uint32_t>(flag)) == 0 || feature.loaded;
+		};
+		return available(Flags::LandscapeSeams, globals::features::landscapeSeams) &&
+		       available(Flags::FurShells, globals::features::furShells) &&
+		       available(Flags::NoSnowCover, globals::features::snowCover) &&
+		       available(Flags::NoWetness, globals::features::wetnessEffects) &&
+		       available(Flags::NoLLFShadows, globals::features::lightLimitFix);
+	}
+
+	void ShaderCache::SetPrecompiling(bool value)
+	{
+		precompiling = value;
+	}
+
+	bool ShaderCache::IsRuntimeRequest(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor)
+	{
+		if (!IsDiskCache() || shader.shaderType.get() == RE::BSShader::Type::ImageSpace)
+			return false;
+		if (!precompiling)
+			return true;
+		std::scoped_lock lock(learnedShadersMutex);
+		precompiledShaders.insert(ShaderCompilationTask::MakeId(shaderClass, shader.shaderType.get(), descriptor));
+		return false;
+	}
+
+	void ShaderCache::LoadLearnedShaders()
+	{
+		if (learnedShadersLoaded)
+			return;
+		learnedShadersLoaded = true;
+
+		std::ifstream file(GetLearnedShadersPath());
+		if (!file)
+			return;
+
+		size_t rejected = 0;
+		std::string line;
+		while (std::getline(file, line) && learnedShaders.size() < kMaxLearnedShaders) {
+			if (line.empty() || line.front() == '#')
+				continue;
+			std::istringstream fields(line);
+			std::string typeName, className, descriptorText;
+			fields >> typeName >> className >> descriptorText;
+			const auto type = magic_enum::enum_cast<RE::BSShader::Type>(typeName);
+			const auto shaderClass = magic_enum::enum_cast<ShaderClass>(className);
+			uint32_t descriptor = 0;
+			const auto* end = descriptorText.data() + descriptorText.size();
+			const auto [parsedEnd, error] = std::from_chars(descriptorText.data(), end, descriptor, 16);
+			if (!type || !IsSupportedShader(*type) || *type == RE::BSShader::Type::ImageSpace ||
+				!shaderClass || (*shaderClass != ShaderClass::Vertex && *shaderClass != ShaderClass::Pixel) ||
+				descriptorText.empty() || error != std::errc{} || parsedEnd != end) {
+				++rejected;
+				continue;
+			}
+			learnedShaders.insert(ShaderCompilationTask::MakeId(*shaderClass, *type, descriptor));
+		}
+		logger::info("Loaded {} shader permutations first requested in game ({} invalid lines skipped)", learnedShaders.size(), rejected);
+	}
+
+	void ShaderCache::SaveLearnedShaders() const
+	{
+		std::string text = "# Shader permutations first requested in game; precompiled at startup. Safe to delete.\n";
+		for (const auto id : learnedShaders) {
+			const auto type = static_cast<RE::BSShader::Type>((id >> 32) & 0x0FFFFFFF);
+			const auto shaderClass = static_cast<ShaderClass>(id >> 60);
+			text += std::format("{} {} {:08X}\n", magic_enum::enum_name(type), magic_enum::enum_name(shaderClass), static_cast<uint32_t>(id));
+		}
+
+		const auto path = GetLearnedShadersPath();
+		auto temp = path;
+		temp += ".tmp";
+		std::error_code ec;
+		std::filesystem::create_directories(path.parent_path(), ec);
+		bool written = false;
+		{
+			std::ofstream file(temp, std::ios::binary | std::ios::trunc);
+			file.write(text.data(), static_cast<std::streamsize>(text.size()));
+			written = file.good();
+		}
+		if (written && MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING))
+			return;
+		logger::warn("Failed to save {} (error {})", Util::WStringToString(path.wstring()), GetLastError());
+		DeleteFileW(temp.c_str());
+	}
+
+	void ShaderCache::LearnShader(size_t id)
+	{
+		std::scoped_lock lock(learnedShadersMutex);
+		LoadLearnedShaders();
+		if (precompiledShaders.contains(id) || learnedShaders.size() >= kMaxLearnedShaders || !learnedShaders.insert(id).second)
+			return;
+		logger::debug("Learned in-game shader {} {} {:08X}", magic_enum::enum_name(static_cast<RE::BSShader::Type>((id >> 32) & 0x0FFFFFFF)),
+			magic_enum::enum_name(static_cast<ShaderClass>(id >> 60)), static_cast<uint32_t>(id));
+		SaveLearnedShaders();
+	}
+
+	void ShaderCache::PrecompileLearnedShaders(const RE::BSShader& shader)
+	{
+		const auto type = shader.shaderType.get();
+		std::vector<std::pair<ShaderClass, uint32_t>> queued;
+		{
+			std::scoped_lock lock(learnedShadersMutex);
+			LoadLearnedShaders();
+			for (const auto id : learnedShaders) {
+				const auto descriptor = static_cast<uint32_t>(id);
+				if (static_cast<RE::BSShader::Type>((id >> 32) & 0x0FFFFFFF) != type ||
+					(type == RE::BSShader::Type::Lighting && !IsLightingDescriptorAvailable(descriptor)))
+					continue;
+				queued.emplace_back(static_cast<ShaderClass>(id >> 60), descriptor);
+			}
+		}
+
+		for (const auto& [shaderClass, descriptor] : queued) {
+			if (shaderClass == ShaderClass::Vertex)
+				std::ignore = GetVertexShader(shader, descriptor);
+			else
+				std::ignore = GetPixelShader(shader, descriptor);
+		}
+		if (!queued.empty())
+			logger::info("Precompiling {} {} shaders first requested in game", queued.size(), magic_enum::enum_name(type));
+	}
+
 	ShaderCache::ShaderCache()
 	{
 		dependencyTracker = std::make_unique<ShaderFileDependencyTracker>();
@@ -3234,10 +3386,11 @@ namespace SIE
 
 	ShaderCompilationTask::ShaderCompilationTask(ShaderClass aShaderClass,
 		const RE::BSShader& aShader,
-		uint32_t aDescriptor) :
+		uint32_t aDescriptor, bool aRuntimeRequest) :
 		shaderClass(aShaderClass),
 		shader(aShader), descriptor(aDescriptor),
-		cachedPriority(ComputePriority(aShaderClass, aShader, aDescriptor))
+		cachedPriority(ComputePriority(aShaderClass, aShader, aDescriptor)),
+		runtimeRequest(aRuntimeRequest)
 	{}
 
 	void ShaderCompilationTask::Perform() const
@@ -3256,8 +3409,12 @@ namespace SIE
 
 	size_t ShaderCompilationTask::GetId() const
 	{
-		return descriptor + (static_cast<size_t>(shader.shaderType.underlying()) << 32) +
-		       (static_cast<size_t>(shaderClass) << 60);
+		return MakeId(shaderClass, shader.shaderType.get(), descriptor);
+	}
+
+	size_t ShaderCompilationTask::MakeId(ShaderClass shaderClass, RE::BSShader::Type type, uint32_t descriptor)
+	{
+		return descriptor + (static_cast<size_t>(type) << 32) + (static_cast<size_t>(shaderClass) << 60);
 	}
 
 	std::string ShaderCompilationTask::GetString() const
@@ -3540,6 +3697,9 @@ namespace SIE
 			processedTasks.insert(task);
 			tasksInProgress.erase(task);
 		}
+
+		if (shaderBlob && task.IsRuntimeRequest())
+			cache.LearnShader(task.GetId());
 
 		// Log completion outside the lock
 		if (shouldLogCompletion) {

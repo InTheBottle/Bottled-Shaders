@@ -2364,6 +2364,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float3 adjustedWorldPos = input.WorldPosition.xyz + FrameBuffer::CameraPosAdjust.xyz;
 
 	float snowFactor = 0;
+#		if defined(TRUE_PBR)
+	if (glintParameters.y < 0.01)
+		material.GlintLogMicrofacetDensity = 1;  // disables glint where there shouldn't be any
+#		endif
 	// Exclusion is via NoSnow (C++ hook, animation-aware); don't also test Skinned, as static props can carry it without real skinning.
 	if (SharedData::snowCoverSettings.EnableSnowCover
 #		if !defined(TREE_ANIM)
@@ -2371,8 +2375,6 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		endif
 	) {
 #		if defined(TRUE_PBR)
-		if (glintParameters.y < 0.01)
-			material.GlintLogMicrofacetDensity = 1;  // disables glint where there shouldn't be any
 #			if defined(TREE_ANIM)
 		float disp = 0;
 #			elif defined(LANDSCAPE)

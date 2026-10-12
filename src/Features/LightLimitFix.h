@@ -263,6 +263,20 @@ public:
 	float lightsFar = 16384;
 
 	RE::NiPoint3 eyePositionCached{};
+
+	struct LightSphere
+	{
+		RE::NiPoint3 center;
+		float radius;
+	};
+	std::vector<LightSphere> localShadowSpheres;
+	std::vector<LightSphere> contactShadowSpheres;
+	float4x4 contactViewMatrix;
+	float contactShadowDepth = 0.0f;
+
+	float GetViewDepth(const RE::NiPoint3& a_world) const;
+	bool IsLocalShadowFree(RE::BSRenderPass* a_pass, uint32_t a_descriptor) const;
+
 	bool wasEmpty = false;
 	bool wasWorld = false;
 	bool wasFirstPerson = false;

@@ -200,6 +200,18 @@ public:
 	void UpdateSurvival();
 	void LoadSnowMapCpu();
 
+	struct SnowMapLevel
+	{
+		uint32_t width = 0;
+		uint32_t height = 0;
+		std::vector<uint8_t> texels;
+	};
+	std::vector<SnowMapLevel> snowMapMax;
+
+	void BuildSnowMapMax();
+	bool GetSnowMapMax(float a_u0, float a_v0, float a_u1, float a_v1, float& a_value) const;
+	bool IsSnowFree(RE::BSRenderPass* a_pass, uint32_t a_descriptor, uint32_t a_vanillaDescriptor) const;
+
 	PerFrame GetCommonBufferData();
 
 	std::array<winrt::com_ptr<ID3D11ShaderResourceView>, 7> views;

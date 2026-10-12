@@ -12,6 +12,7 @@
 #include "Features/ExponentialHeightFog.h"
 #include "Features/HDRDisplay.h"
 #include "Features/InteriorSun.h"
+#include "Features/LightLimitFix.h"
 #include "Features/PerformanceOverlay.h"
 #include "Features/PostProcessing.h"
 #include "Features/Skin.h"
@@ -22,6 +23,7 @@
 #include "Features/TerrainHelper.h"
 #include "Features/Upscaling.h"
 #include "Features/VolumetricShadows.h"
+#include "Features/WetnessEffects.h"
 #include "Menu.h"
 #include "SceneSettingsManager.h"
 #include "SettingsOverrideManager.h"
@@ -48,6 +50,71 @@ void State::UpdateLightingShaderPermutation(RE::BSRenderPass* a_pass)
 	if (alphaProperty && alphaProperty->GetAlphaBlending() &&
 		alphaProperty->GetDestBlendMode() == RE::NiAlphaProperty::AlphaFunction::kOne) {
 		permutationData.ExtraShaderDescriptor |= additiveLighting;
+	}
+}
+
+void State::BeginLightingVariants(RE::BSShader* a_shader, bool a_skipPixelShader, bool a_shaderFound)
+{
+	lightingVariant = {};
+	auto shaderCache = globals::shaderCache;
+	if (!a_shaderFound || a_skipPixelShader || !a_shader || a_shader->shaderType.get() != RE::BSShader::Type::Lighting ||
+		!shaderCache->IsEnabled() || !shaderCache->IsAsync() || !ShaderEnabled(RE::BSShader::Type::Lighting))
+		return;
+
+	lightingVariant.shader = a_shader;
+	lightingVariant.descriptor = modifiedPixelDescriptor;
+	lightingVariant.vanillaDescriptor = currentPixelDescriptor;
+}
+
+ID3D11PixelShader* State::GetLightingVariant(uint a_index)
+{
+	auto& variant = lightingVariant;
+	if ((variant.queried & (1u << a_index)) == 0) {
+		variant.queried |= 1u << a_index;
+		auto shaderCache = globals::shaderCache;
+		if (!variant.full) {
+			auto* full = shaderCache->GetPixelShader(*variant.shader, variant.descriptor);
+			variant.full = full ? reinterpret_cast<ID3D11PixelShader*>(full->shader) : nullptr;
+		}
+		if (variant.full) {
+			uint descriptor = variant.descriptor;
+			if (a_index & 1)
+				descriptor |= static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::NoSnowCover);
+			if (a_index & 2)
+				descriptor |= static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::NoLLFShadows);
+			if (a_index & 4)
+				descriptor |= static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::NoWetness);
+			auto* shader = shaderCache->GetPixelShader(*variant.shader, descriptor);
+			variant.variants[a_index] = shader ? reinterpret_cast<ID3D11PixelShader*>(shader->shader) : nullptr;
+		}
+	}
+	return variant.variants[a_index];
+}
+
+void State::UpdateLightingVariant(RE::BSRenderPass* a_pass)
+{
+	auto& variant = lightingVariant;
+	if (!variant.shader)
+		return;
+
+	uint index = 0;
+	auto& snowCover = globals::features::snowCover;
+	if (snowCover.loaded && snowCover.IsSnowFree(a_pass, variant.descriptor, variant.vanillaDescriptor))
+		index |= 1;
+	auto& lightLimitFix = globals::features::lightLimitFix;
+	if (lightLimitFix.loaded && (variant.descriptor & static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::Reflections)) == 0 && lightLimitFix.IsLocalShadowFree(a_pass, variant.descriptor))
+		index |= 2;
+	auto& wetnessEffects = globals::features::wetnessEffects;
+	if (wetnessEffects.loaded && wetnessEffects.IsDry(a_pass, variant.descriptor))
+		index |= 4;
+
+	ID3D11PixelShader* target = index ? GetLightingVariant(index) : nullptr;
+	if (!target)
+		index = 0;
+
+	if (index != variant.bound) {
+		globals::d3d::context->PSSetShader(index ? target : variant.full, nullptr, 0);
+		variant.bound = index;
 	}
 }
 
@@ -1139,6 +1206,11 @@ void State::UpdateSharedData([[maybe_unused]] bool a_inWorld, [[maybe_unused]] b
 				}
 			}
 		}
+
+		float waterTop = -FLT_MAX;
+		for (const auto& water : data.WaterData)
+			waterTop = std::max(waterTop, water.w);
+		waterGridTop = Util::GetEyePosition().z + waterTop;
 
 		data.WaterSystemHeight = -RE::NI_INFINITY;
 

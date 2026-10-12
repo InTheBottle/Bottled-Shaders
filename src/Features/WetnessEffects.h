@@ -112,6 +112,9 @@ public:
 	/** @brief Builds the per-frame constant buffer data including weather state and settings. */
 	PerFrame GetCommonBufferData() const;
 
+	mutable PerFrame lastPerFrame{};
+	bool IsDry(RE::BSRenderPass* a_pass, uint32_t a_descriptor) const;
+
 	/** @brief Advances the rain animation clock; runs once per frame, however often the feature buffer is rebuilt. */
 	virtual void Reset() override;
 
