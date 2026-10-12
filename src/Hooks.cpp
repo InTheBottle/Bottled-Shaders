@@ -158,9 +158,6 @@ struct BSShader_LoadShaders
 					sharedRuntimeUnionDescriptor |
 						static_cast<std::uint32_t>(SIE::ShaderCache::EffectShaderFlags::Deferred));
 			}
-
-			if (shaderCache->IsDiskCache())
-				shaderCache->PrecompileLearnedShaders(*shader);
 		}
 		BSShaderHooks::hk_LoadShaders(shader, stream);
 	};
@@ -207,7 +204,7 @@ bool Hooks::BSShader_BeginTechnique::thunk(RE::BSShader* shader, uint32_t vertex
 		(state->permutationData.ExtraShaderDescriptor & static_cast<uint32_t>(State::ExtraShaderDescriptors::IsReflections)) != 0 &&
 		(state->modifiedPixelDescriptor & deferredFlag) == 0 &&
 		shaderCache->IsEnabled() && state->ShaderEnabled(RE::BSShader::Type::Lighting) &&
-		shaderCache->GetPixelShader(*shader, state->modifiedPixelDescriptor | reflectionsFlag) != nullptr) {
+		shaderCache->FindPixelShader(*shader, state->modifiedPixelDescriptor | reflectionsFlag) != nullptr) {
 		state->modifiedPixelDescriptor |= reflectionsFlag;
 	}
 

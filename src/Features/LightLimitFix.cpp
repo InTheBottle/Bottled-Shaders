@@ -669,11 +669,6 @@ void LightLimitFix::UpdateLights()
 		eyePositionCached = { eyePosition.x, eyePosition.y, eyePosition.z };
 	}
 
-	localShadowSpheres.clear();
-	contactShadowSpheres.clear();
-	contactViewMatrix = globals::game::frameBufferCached.GetCameraView().Transpose();
-	contactShadowDepth = settings.EnableContactShadows && settings.ContactShadowMaxSteps > 0 ? settings.ContactShadowMaxDistance + 64.0f : 0.0f;
-
 	eastl::vector<LightData> lightsData{};
 	lightsData.reserve(MAX_LIGHTS);
 
@@ -741,11 +736,6 @@ void LightLimitFix::UpdateLights()
 					const bool lit = !withheld && (light.color.x + light.color.y + light.color.z) * light.fade > 1e-4 && light.radius > 1e-4;
 					if (lit) {
 						lightsData.push_back(light);
-						const LightSphere sphere{ niLight->world.translate, light.radius };
-						if (light.lightFlags.any(LightFlags::LocalShadow))
-							localShadowSpheres.push_back(sphere);
-						if (contactShadowDepth > 0.0f && GetViewDepth(sphere.center) - sphere.radius < contactShadowDepth)
-							contactShadowSpheres.push_back(sphere);
 					}
 					if (shadowDiagnostics)
 						LocalShadowDiagnostics::NoteUploadedLight(bsLight, light, lit, withheld);
@@ -776,46 +766,6 @@ void LightLimitFix::UpdateLights()
 	UpdateStructure();
 
 	LocalShadowDiagnostics::EndFrame(*this);
-}
-
-float LightLimitFix::GetViewDepth(const RE::NiPoint3& a_world) const
-{
-	const auto relative = a_world - eyePositionCached;
-	return float4::Transform(float4(relative.x, relative.y, relative.z, 1.0f), contactViewMatrix).z;
-}
-
-bool LightLimitFix::IsLocalShadowFree(RE::BSRenderPass* a_pass, uint32_t a_descriptor) const
-{
-	using Flags = SIE::ShaderCache::LightingShaderFlags;
-	using Techniques = SIE::ShaderCache::LightingShaderTechniques;
-	if (!a_pass || !a_pass->geometry || (a_descriptor & static_cast<uint32_t>(Flags::Skinned)) != 0 || (a_descriptor & static_cast<uint32_t>(Flags::Deferred)) == 0 ||
-		(a_descriptor & static_cast<uint32_t>(Flags::WorldMap)) != 0)
-		return false;
-	const auto technique = static_cast<Techniques>(0x3F & (a_descriptor >> 24));
-	if (technique == Techniques::LODLand || technique == Techniques::LODLandNoise || technique == Techniques::LODObjects || technique == Techniques::LODObjectHD)
-		return false;
-	if (strictLightDataTemp.NumStrictLights != 0 || strictLightDataTemp.FirstPerson != 0)
-		return false;
-
-	const auto& bound = a_pass->geometry->worldBound;
-	const float radius = std::max(0.0f, bound.radius);
-	const auto overlaps = [&](const LightSphere& a_sphere) {
-		const float reach = radius + a_sphere.radius;
-		return bound.center.GetSquaredDistance(a_sphere.center) < reach * reach;
-	};
-
-	for (const auto& sphere : localShadowSpheres) {
-		if (overlaps(sphere))
-			return false;
-	}
-
-	if (!contactShadowSpheres.empty() && GetViewDepth(bound.center) - radius < contactShadowDepth) {
-		for (const auto& sphere : contactShadowSpheres) {
-			if (overlaps(sphere))
-				return false;
-		}
-	}
-	return true;
 }
 
 void LightLimitFix::UpdateStructure()

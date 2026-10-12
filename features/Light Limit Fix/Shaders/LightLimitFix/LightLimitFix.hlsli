@@ -127,9 +127,6 @@ namespace LightLimitFix
 	// position is relative to eyePosition; each cached projection is relative to its own Origin.
 	float GetLocalShadow(SamplerState samp, uint slice, float3 position, float3 eyePosition, float3 towardLight, bool skinnedReceiver, float2x2 rotationMatrix)
 	{
-#if defined(LLF_NO_SHADOWS)
-		return 1.0;
-#else
 		LocalShadowData data = LocalShadows[slice];
 		float rawShadow = 1.0;
 		float fade = 0.0;
@@ -186,7 +183,6 @@ namespace LightLimitFix
 		}
 
 		return lerp(1.0, rawShadow, fade);
-#endif
 	}
 
 	// The first-person viewmodel renders in a compressed depth range below this linearized
@@ -372,13 +368,11 @@ namespace LightLimitFix
 	{
 		uint steps = 0;
 		strengthScale = 0.0;
-#if !defined(LLF_NO_SHADOWS)
 		[branch] if (SharedData::lightLimitFixSettings.EnableContactShadows) {
 			const float requestedSteps = SharedData::lightLimitFixSettings.ContactShadowMaxSteps * (1.0 - saturate(viewDepth / SharedData::lightLimitFixSettings.ContactShadowMaxDistance));
 			steps = (uint)round(requestedSteps);
 			strengthScale = saturate(2.0 * requestedSteps - 1.0);
 		}
-#endif
 		return steps;
 	}
 }

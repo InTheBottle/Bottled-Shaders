@@ -167,14 +167,12 @@ namespace SIE
 			Completed
 		};
 		ShaderCompilationTask(ShaderClass shaderClass, const RE::BSShader& shader,
-			uint32_t descriptor, bool runtimeRequest = false);
+			uint32_t descriptor);
 		/** @brief Compiles the shader, writing the result to the ShaderCache. */
 		void Perform() const;
 
 		/** @brief Returns a unique hash identifying this shader class, type, and descriptor combo. */
 		size_t GetId() const;
-		static size_t MakeId(ShaderClass shaderClass, RE::BSShader::Type type, uint32_t descriptor);
-		bool IsRuntimeRequest() const { return runtimeRequest; }
 		/** @brief Returns a human-readable string describing this task (shader file, class, defines). */
 		std::string GetString() const;
 
@@ -201,7 +199,6 @@ namespace SIE
 		static int ComputePriority(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor);
 		int cachedPriority;
 		int64_t enqueuedQpc = 0;
-		bool runtimeRequest = false;
 	};
 }
 
@@ -416,8 +413,8 @@ namespace SIE
 		void TrimDiskCache();
 		void InvalidateShaderSources();
 		void SetPrecompiling(bool value);
-		void PrecompileLearnedShaders(const RE::BSShader& shader);
-		void LearnShader(size_t id);
+		static uint32_t GetLiteLightingDescriptor(uint32_t descriptor);
+		static bool IsReflectionsCandidate(uint32_t descriptor);
 		/** Gets whether the filesystem watcher for hot-reload is active. */
 		bool UseFileWatcher() const;
 		/** Sets whether the filesystem watcher for hot-reload is active. */
@@ -498,6 +495,7 @@ namespace SIE
 		RE::BSGraphics::VertexShader* GetVertexShader(const RE::BSShader& shader, uint32_t descriptor);
 		RE::BSGraphics::PixelShader* GetPixelShader(const RE::BSShader& shader,
 			uint32_t descriptor);
+		RE::BSGraphics::PixelShader* FindPixelShader(const RE::BSShader& shader, uint32_t descriptor);
 		RE::BSGraphics::ComputeShader* GetComputeShader(const RE::BSShader& shader,
 			uint32_t descriptor);
 
@@ -679,8 +677,7 @@ namespace SIE
 			CharacterLight = 1 << 22,
 			AdditionalAlphaMask = 1 << 23,
 			NoWetness = 1u << 29,
-			NoSnowCover = 1u << 30,
-			NoLLFShadows = 1u << 31
+			NoSnowCover = 1u << 30
 		};
 
 		enum class BloodSplatterShaderTechniques
@@ -873,9 +870,7 @@ namespace SIE
 		ShaderCache();
 		void ManageCompilationSet(std::stop_token stoken);
 		void ProcessCompilationSet(std::stop_token stoken, SIE::ShaderCompilationTask task);
-		bool IsRuntimeRequest(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor);
-		void LoadLearnedShaders();
-		void SaveLearnedShaders() const;
+		void QueueLightingDerivatives(const RE::BSShader& shader, uint32_t descriptor);
 
 		~ShaderCache();
 
@@ -916,12 +911,7 @@ namespace SIE
 
 		std::unique_ptr<ShaderFileDependencyTracker> dependencyTracker;
 
-		static constexpr size_t kMaxLearnedShaders = 4096;
 		std::atomic_bool precompiling = false;
-		std::mutex learnedShadersMutex;
-		std::set<size_t> learnedShaders;
-		ankerl::unordered_dense::set<size_t> precompiledShaders;
-		bool learnedShadersLoaded = false;
 	};
 
 	// Inherits from the abstract listener class, and implements the the file action handler

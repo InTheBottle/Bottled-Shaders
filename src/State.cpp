@@ -12,7 +12,6 @@
 #include "Features/ExponentialHeightFog.h"
 #include "Features/HDRDisplay.h"
 #include "Features/InteriorSun.h"
-#include "Features/LightLimitFix.h"
 #include "Features/PerformanceOverlay.h"
 #include "Features/PostProcessing.h"
 #include "Features/Skin.h"
@@ -61,34 +60,14 @@ void State::BeginLightingVariants(RE::BSShader* a_shader, bool a_skipPixelShader
 		!shaderCache->IsEnabled() || !shaderCache->IsAsync() || !ShaderEnabled(RE::BSShader::Type::Lighting))
 		return;
 
+	const auto liteDescriptor = SIE::ShaderCache::GetLiteLightingDescriptor(modifiedPixelDescriptor);
+	if (!liteDescriptor)
+		return;
+
 	lightingVariant.shader = a_shader;
 	lightingVariant.descriptor = modifiedPixelDescriptor;
 	lightingVariant.vanillaDescriptor = currentPixelDescriptor;
-}
-
-ID3D11PixelShader* State::GetLightingVariant(uint a_index)
-{
-	auto& variant = lightingVariant;
-	if ((variant.queried & (1u << a_index)) == 0) {
-		variant.queried |= 1u << a_index;
-		auto shaderCache = globals::shaderCache;
-		if (!variant.full) {
-			auto* full = shaderCache->GetPixelShader(*variant.shader, variant.descriptor);
-			variant.full = full ? reinterpret_cast<ID3D11PixelShader*>(full->shader) : nullptr;
-		}
-		if (variant.full) {
-			uint descriptor = variant.descriptor;
-			if (a_index & 1)
-				descriptor |= static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::NoSnowCover);
-			if (a_index & 2)
-				descriptor |= static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::NoLLFShadows);
-			if (a_index & 4)
-				descriptor |= static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::NoWetness);
-			auto* shader = shaderCache->GetPixelShader(*variant.shader, descriptor);
-			variant.variants[a_index] = shader ? reinterpret_cast<ID3D11PixelShader*>(shader->shader) : nullptr;
-		}
-	}
-	return variant.variants[a_index];
+	lightingVariant.liteDescriptor = liteDescriptor;
 }
 
 void State::UpdateLightingVariant(RE::BSRenderPass* a_pass)
@@ -97,24 +76,24 @@ void State::UpdateLightingVariant(RE::BSRenderPass* a_pass)
 	if (!variant.shader)
 		return;
 
-	uint index = 0;
-	auto& snowCover = globals::features::snowCover;
-	if (snowCover.loaded && snowCover.IsSnowFree(a_pass, variant.descriptor, variant.vanillaDescriptor))
-		index |= 1;
-	auto& lightLimitFix = globals::features::lightLimitFix;
-	if (lightLimitFix.loaded && (variant.descriptor & static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::Reflections)) == 0 && lightLimitFix.IsLocalShadowFree(a_pass, variant.descriptor))
-		index |= 2;
-	auto& wetnessEffects = globals::features::wetnessEffects;
-	if (wetnessEffects.loaded && wetnessEffects.IsDry(a_pass, variant.descriptor))
-		index |= 4;
+	constexpr auto noSnowCover = static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::NoSnowCover);
+	constexpr auto noWetness = static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::NoWetness);
+	bool useLite = ((variant.liteDescriptor & noSnowCover) == 0 || globals::features::snowCover.IsSnowFree(a_pass, variant.descriptor, variant.vanillaDescriptor)) &&
+	               ((variant.liteDescriptor & noWetness) == 0 || globals::features::wetnessEffects.IsDry(a_pass, variant.descriptor));
 
-	ID3D11PixelShader* target = index ? GetLightingVariant(index) : nullptr;
-	if (!target)
-		index = 0;
+	if (useLite && !variant.resolved) {
+		variant.resolved = true;
+		auto shaderCache = globals::shaderCache;
+		auto* full = shaderCache->FindPixelShader(*variant.shader, variant.descriptor);
+		auto* lite = full ? shaderCache->FindPixelShader(*variant.shader, variant.liteDescriptor) : nullptr;
+		variant.full = full ? reinterpret_cast<ID3D11PixelShader*>(full->shader) : nullptr;
+		variant.lite = lite ? reinterpret_cast<ID3D11PixelShader*>(lite->shader) : nullptr;
+	}
+	useLite = useLite && variant.lite;
 
-	if (index != variant.bound) {
-		globals::d3d::context->PSSetShader(index ? target : variant.full, nullptr, 0);
-		variant.bound = index;
+	if (useLite != variant.liteBound) {
+		globals::d3d::context->PSSetShader(useLite ? variant.lite : variant.full, nullptr, 0);
+		variant.liteBound = useLite;
 	}
 }
 
