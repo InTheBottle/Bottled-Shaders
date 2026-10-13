@@ -1191,13 +1191,12 @@ PS_OUTPUT main(PS_INPUT input)
 	if (LightLimitFix::GetClusterIndex(screenUV, viewPosition.z, clusterIndex)) {
 		lightCount = LightLimitFix::lightGrid[clusterIndex].lightCount;
 		uint lightOffset = LightLimitFix::lightGrid[clusterIndex].offset;
-		const bool localShadows = inWorld && !(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection) && SharedData::lightLimitFixSettings.EnableLocalShadows;
-		const float2x2 localShadowRotation = LightLimitFix::GetShadowRotationMatrix(Random::InterleavedGradientNoise(input.HPosition.xy, SharedData::FrameCount));
 		[loop] for (uint i = 0; i < lightCount; i++)
 		{
 			uint clusteredLightIndex = LightLimitFix::lightList[lightOffset + i];
 			LightLimitFix::Light light = LightLimitFix::lights[clusteredLightIndex];
-			const bool localShadow = localShadows && (light.lightFlags & LightLimitFix::LightFlags::LocalShadow);
+			// Water has no engine shadow mask, so only shadow casters with a cached local shadow can light it.
+			const bool localShadow = light.lightFlags & LightLimitFix::LightFlags::LocalShadow;
 			if (LightLimitFix::IsLightIgnored(light) || ((light.lightFlags & LightLimitFix::LightFlags::ShadowCaster) && !localShadow)) {
 				continue;
 			}
@@ -1211,9 +1210,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 			float lightShadow = 1.0;
 			[branch] if (localShadow)
-			{
-				lightShadow = LightLimitFix::GetLocalShadow(DepthSampler, light.localShadowIndex, input.WPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, normalizedLightDirection, false, localShadowRotation);
-			}
+				lightShadow = LightLimitFix::GetLocalShadow(DepthSampler, light.localShadowIndex, input.WPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, normalizedLightDirection, false, Random::InterleavedGradientNoise(input.HPosition.xy, SharedData::FrameCount));
 
 			float3 H = normalize(normalizedLightDirection - viewDirection);
 			float HdotN = saturate(dot(H, normal));

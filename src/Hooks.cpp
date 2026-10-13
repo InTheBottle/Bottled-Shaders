@@ -21,6 +21,8 @@
 #include "Features/LightLimitFix.h"
 #include "Features/PostProcessing.h"
 #include "Features/ReverseZ.h"
+#include "Features/RemoteControl/NvPerf.h"
+#include "Features/RenderDoc.h"
 #include "Features/ScreenshotFeature.h"
 #include "Features/Skin.h"
 #include "Features/SkySync.h"
@@ -435,6 +437,9 @@ struct IDXGISwapChain_Present
 {
 	static HRESULT WINAPI thunk(IDXGISwapChain* This, UINT SyncInterval, UINT Flags)
 	{
+		// Nsight Perf passes span one frame's rendering: ended before the overlay and Present, begun after.
+		NvPerf::OnPresentBegin();
+
 		globals::state->Reset();
 
 		globals::features::screenshotFeature.ProcessCaptureRequest(false);
@@ -448,6 +453,8 @@ struct IDXGISwapChain_Present
 			});
 
 		globals::features::screenshotFeature.ProcessCaptureRequest(true);
+
+		NvPerf::OnPresentEnd();
 
 		TracyD3D11Collect(globals::state->tracyCtx);
 
@@ -560,6 +567,19 @@ struct ID3D11Device_CreateSamplerState
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
+/** @brief Nulls the output buffer on failure like the native runtime; RenderDoc leaves it untouched and the game uses it unchecked (e.g. zero-triangle skin partitions). */
+struct ID3D11Device_CreateBuffer
+{
+	static HRESULT STDMETHODCALLTYPE thunk(ID3D11Device* This, const D3D11_BUFFER_DESC* pDesc, const D3D11_SUBRESOURCE_DATA* pInitialData, ID3D11Buffer** ppBuffer)
+	{
+		const HRESULT hr = func(This, pDesc, pInitialData, ppBuffer);
+		if (FAILED(hr) && ppBuffer)
+			*ppBuffer = nullptr;
+		return hr;
+	}
+	static inline REL::Relocation<decltype(thunk)> func;
+};
+
 struct BSShaderRenderTargets_Create
 {
 	/**
@@ -651,6 +671,9 @@ namespace Hooks
 			}
 
 			stl::detour_vfunc<23, ID3D11Device_CreateSamplerState>(globals::d3d::device);
+
+			if (RenderDoc::IsLoaded())
+				stl::detour_vfunc<3, ID3D11Device_CreateBuffer>(globals::d3d::device);
 
 			globals::InstallD3DHooks(globals::d3d::context);
 

@@ -5,6 +5,7 @@
 #include <pystring/pystring.h>
 
 #include "Deferred.h"
+#include "EngineFixes/LODBlendRingFix.h"
 #include "FeatureIssues.h"
 #include "Features/CSEditor.h"
 #include "Features/CloudShadows.h"
@@ -14,6 +15,7 @@
 #include "Features/InteriorSun.h"
 #include "Features/PerformanceOverlay.h"
 #include "Features/PostProcessing.h"
+#include "Features/RemoteControl/NvPerf.h"
 #include "Features/Skin.h"
 #include "Features/SkySync.h"
 #include "Features/Skylighting.h"
@@ -360,6 +362,7 @@ void State::Reset()
 	globals::profiler->EndFrame();
 
 	Feature::ForEachLoadedFeature("Reset", [](Feature* feature) { feature->Reset(); });
+	LODBlendRingFix::GetInstance().Update();
 
 	// Cache menu open states once per frame to avoid repeated IsMenuOpen calls
 	// (each call constructs a BSFixedString, which is expensive at scale).
@@ -976,13 +979,17 @@ void State::SetupResources()
 
 	globals::profiler->Initialize(globals::d3d::device, globals::d3d::context);
 
-	if (frameAnnotations) {
-		globals::profiler->SetPerfEventCallbacks(
-			[this](std::string_view name) { BeginPerfEvent(name); },
-			[this](std::string_view) { EndPerfEvent(); });
-	} else {
-		globals::profiler->SetPerfEventCallbacks({}, {});
-	}
+	// Checked per pass rather than bound once, so annotations forced on at runtime (RenderDoc capture, Nsight Perf)
+	// also cover the profiler's passes. Toggles happen between frames, so a pass's begin and end agree.
+	globals::profiler->SetPerfEventCallbacks(
+		[this](std::string_view name) {
+			if (frameAnnotations)
+				BeginPerfEvent(name);
+		},
+		[this](std::string_view) {
+			if (frameAnnotations)
+				EndPerfEvent();
+		});
 }
 
 void State::ModifyShaderLookup(const RE::BSShader& a_shader, uint& a_vertexDescriptor, uint& a_pixelDescriptor, bool a_forceDeferred)
@@ -1120,6 +1127,8 @@ void State::BeginPerfEvent(std::string_view title)
 	s_tracyPerfZones.push_back(ctx);
 #endif
 	pPerf->BeginEvent(std::wstring(title.begin(), title.end()).c_str());
+	if (NvPerf::RangesActive())
+		NvPerf::PushRange(title);
 }
 
 void State::EndPerfEvent()
@@ -1132,6 +1141,8 @@ void State::EndPerfEvent()
 		logger::warn("EndPerfEvent called without a matching BeginPerfEvent");
 	}
 #endif
+	if (NvPerf::RangesActive())
+		NvPerf::PopRange();
 	pPerf->EndEvent();
 }
 

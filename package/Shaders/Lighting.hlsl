@@ -1140,8 +1140,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	const bool applyMeshTV = (Permutation::ExtraFeatureDescriptor & Permutation::ExtraFeatureFlags::TVMeshVariation) != 0;
 	[branch] if (applyMeshTV)
 	{
-		g_terrainStochasticLodBase = ComputeTerrainStochasticLodBase(uvOriginal);
-		meshOffset = ComputeStochasticOffsetsMesh(uvOriginal);
+		meshOffset = ComputeStochasticOffsetsMesh(uvOriginal, input.Position.xy);
 	}
 #		else
 	const bool applyMeshTV = false;
@@ -1160,16 +1159,16 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 					DEST = TEX.Sample(SAMP, UV);                        \
 				}                                                       \
 			}
-#		define MESH_TV_SAMPLE_BIAS(DEST, TEX, SAMP, UV)                  \
-			{                                                             \
-				[branch] if (applyMeshTV)                                 \
-				{                                                         \
-					DEST = StochasticEffect(TEX, SAMP, UV, meshOffset);   \
-				}                                                         \
-				else                                                      \
-				{                                                         \
-					DEST = TEX.SampleBias(SAMP, UV, SharedData::MipBias); \
-				}                                                         \
+#		define MESH_TV_SAMPLE_BIAS(DEST, TEX, SAMP, UV)                                         \
+			{                                                                                    \
+				[branch] if (applyMeshTV)                                                        \
+				{                                                                                \
+					DEST = StochasticEffectBias(TEX, SAMP, UV, meshOffset, SharedData::MipBias); \
+				}                                                                                \
+				else                                                                             \
+				{                                                                                \
+					DEST = TEX.SampleBias(SAMP, UV, SharedData::MipBias);                        \
+				}                                                                                \
 			}
 #		define MESH_TV_HEIGHT(DEST, TEX, SAMP, UV, MIP, CHANNEL)                            \
 			{                                                                                \
@@ -1218,7 +1217,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	if defined(LANDSCAPE)
 #		if defined(TERRAIN_VARIATION) || defined(EMAT)
 #			if defined(TERRAIN_VARIATION)
-	StochasticOffsets sharedOffset = ComputeStochasticOffsets(input.TexCoord0.zw);
+	StochasticOffsets sharedOffset = ComputeStochasticOffsets(input.TexCoord0.zw, input.Position.xy);
 #			else
 	StochasticOffsets sharedOffset = (StochasticOffsets)0;
 #			endif
@@ -1556,8 +1555,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 #	if defined(LANDSCAPE)
 #		if defined(TERRAIN_VARIATION)
-	g_terrainStochasticLodBase = ComputeTerrainStochasticLodBase(uv);
-#			define SampleTerrain(TEX, SAMP, UV, OFFSET) StochasticEffect(TEX, SAMP, UV, OFFSET)
+#			define SampleTerrain(TEX, SAMP, UV, OFFSET) StochasticEffectBias(TEX, SAMP, UV, OFFSET, SharedData::MipBias)
 #		else
 #			define SampleTerrain(TEX, SAMP, UV, OFFSET) TEX.SampleBias(SAMP, UV, SharedData::MipBias)
 #		endif
@@ -2782,13 +2780,11 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		lightOffset = LightLimitFix::lightGrid[clusterIndex].offset;
 	}
 
-	const float3 localShadowEye = LightLimitFix::FirstPerson ? LightLimitFix::WorldEyePosition.xyz : FrameBuffer::CameraPosAdjust.xyz;
 #			if defined(SKINNED)
 	const bool localShadowSkinned = true;
 #			else
 	const bool localShadowSkinned = false;
 #			endif
-	const float2x2 localShadowRotation = LightLimitFix::GetShadowRotationMatrix(screenNoise);
 #			if defined(DEFERRED)
 	float contactShadowStrengthScale = 0.0;
 	const uint contactShadowSteps = LightLimitFix::GetContactShadowSteps(viewPosition.z, contactShadowStrengthScale);
@@ -2820,10 +2816,14 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		float3 normalizedLightDirection = normalize(lightDirection);
 
 		float shadowComponent = 1.0;
-		[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow) {
-			shadowComponent = LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, input.WorldPosition.xyz, localShadowEye, normalizedLightDirection, localShadowSkinned, localShadowRotation);
+		[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow)
+		{
+			const float3 localShadowEye = LightLimitFix::FirstPerson ? LightLimitFix::WorldEyePosition.xyz : FrameBuffer::CameraPosAdjust.xyz;
+			shadowComponent = LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, input.WorldPosition.xyz, localShadowEye, normalizedLightDirection, localShadowSkinned, screenNoise);
 			lightShadow *= shadowComponent;
-		} else if (Permutation::PixelShaderDescriptor & Permutation::LightingFlags::DefShadow) {
+		}
+		else if (Permutation::PixelShaderDescriptor & Permutation::LightingFlags::DefShadow)
+		{
 			if (light.lightFlags & LightLimitFix::LightFlags::Shadow) {
 				shadowComponent = shadowColor[light.shadowLightIndex];
 				lightShadow *= shadowComponent;
