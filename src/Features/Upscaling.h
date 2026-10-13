@@ -112,7 +112,6 @@ public:
 	bool d3d12SwapChainActive = false;
 	// Set by Main_PostProcessing when frame-generation inputs were copied; cleared after Present.
 	bool frameGenerationPrepared = false;
-	bool dlssOutputValid = false;
 
 	globals::FrameBufferCache worldCameraFrame{};
 	bool worldCameraFrameValid = false;
