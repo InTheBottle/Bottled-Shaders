@@ -1,10 +1,10 @@
 #pragma once
 
 /**
- * @brief Renders the compact text-only menu header: title and global action buttons.
+ * @brief Renders the menu chrome: the command bar above the page and the status bar below it.
  *
- * The header carries no imagery. When the window is docked the title bar already
- * names the window, so only the action row is drawn.
+ * The header carries no imagery beyond the logo. When the window is docked the title bar
+ * already names the window, so only the commands are drawn.
  */
 class MenuHeaderRenderer
 {
@@ -15,4 +15,7 @@ public:
 	 * @param isDocked True if the menu window is docked into a tab bar.
 	 */
 	static void RenderHeader(bool isDocked);
+
+	static float GetStatusBarHeight();
+	static void RenderStatusBar();
 };

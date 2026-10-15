@@ -92,6 +92,8 @@ public:
 	/** @return Current locale code, e.g. "en", "zh_CN" */
 	std::string GetCurrentLocale() const;
 
+	std::vector<std::pair<std::string, std::string>> CollectStrings(std::string_view keyPrefix) const;
+
 	/**
 	 * Switch to a different locale at runtime.
 	 * @param locale  Locale code matching a JSON filename (without extension)

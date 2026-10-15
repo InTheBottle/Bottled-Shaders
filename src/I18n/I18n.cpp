@@ -116,6 +116,19 @@ std::string I18n::GetCurrentLocale() const
 	return currentLocale_;
 }
 
+std::vector<std::pair<std::string, std::string>> I18n::CollectStrings(std::string_view keyPrefix) const
+{
+	std::shared_lock lock(mutex_);
+	std::vector<std::pair<std::string, std::string>> result;
+	for (const auto& [key, english] : fallback_) {
+		if (!key.starts_with(keyPrefix))
+			continue;
+		auto it = strings_.find(key);
+		result.emplace_back(key, it != strings_.end() && !it->second.empty() ? it->second : english);
+	}
+	return result;
+}
+
 void I18n::SetLocale(const std::string& locale)
 {
 	std::unique_lock lock(mutex_);

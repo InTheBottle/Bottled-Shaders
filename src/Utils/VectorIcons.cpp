@@ -1,6 +1,7 @@
 #include "VectorIcons.h"
 
 #include <array>
+#include <cmath>
 #include <imgui_internal.h>
 
 #include "Utils/UI.h"
@@ -109,6 +110,43 @@ namespace
 		StrokePolyline(drawList, lowerHead.data(), static_cast<int>(lowerHead.size()), color, thickness, false);
 	}
 
+	void DrawStarIcon(ImDrawList* drawList, const GridMapper& g, ImU32 color, float thickness, bool filled)
+	{
+		std::array<ImVec2, 10> points{};
+		for (size_t i = 0; i < points.size(); ++i) {
+			const float angle = -IM_PI * 0.5f + static_cast<float>(i) * IM_PI / 5.0f;
+			const float radius = (i % 2 == 0) ? 9.5f : 4.0f;
+			points[i] = g(12.0f + std::cos(angle) * radius, 12.5f + std::sin(angle) * radius);
+		}
+		if (filled)
+			drawList->AddConcavePolyFilled(points.data(), static_cast<int>(points.size()), color);
+		StrokePolyline(drawList, points.data(), static_cast<int>(points.size()), color, thickness, true);
+	}
+
+	void DrawCloseIcon(ImDrawList* drawList, const GridMapper& g, ImU32 color, float thickness)
+	{
+		drawList->AddLine(g(6, 6), g(18, 18), color, thickness);
+		drawList->AddLine(g(18, 6), g(6, 18), color, thickness);
+	}
+
+	void DrawSidePanelIcon(ImDrawList* drawList, const GridMapper& g, ImU32 color, float thickness)
+	{
+		drawList->AddRect(g(3, 4), g(21, 20), color, 2.0f * g.scale, 0, thickness);
+		drawList->AddRectFilled(g(3, 4), g(10, 20), color, 2.0f * g.scale, ImDrawFlags_RoundCornersLeft);
+	}
+
+	void DrawCenteredIcon(ImDrawList* drawList, const GridMapper& g, ImU32 color, float thickness)
+	{
+		drawList->AddRect(g(3, 4), g(21, 20), color, 2.0f * g.scale, 0, thickness);
+		drawList->AddRectFilled(g(7, 8), g(17, 16), color, 1.0f * g.scale);
+	}
+
+	void DrawMenuIcon(ImDrawList* drawList, const GridMapper& g, ImU32 color, float thickness)
+	{
+		for (const float y : { 6.0f, 12.0f, 18.0f })
+			drawList->AddLine(g(4, y), g(20, y), color, thickness);
+	}
+
 	/** @brief Width of an icon + label group, or of the label alone when there is no icon. */
 	float MeasureIconLabel(Util::Icons::Kind kind, const char* label, float iconSize, float gap)
 	{
@@ -156,6 +194,22 @@ namespace Util::Icons
 			break;
 		case Kind::Refresh:
 			DrawRefreshIcon(drawList, g, color, stroke);
+			break;
+		case Kind::Star:
+		case Kind::StarFilled:
+			DrawStarIcon(drawList, g, color, stroke, kind == Kind::StarFilled);
+			break;
+		case Kind::Close:
+			DrawCloseIcon(drawList, g, color, stroke);
+			break;
+		case Kind::SidePanel:
+			DrawSidePanelIcon(drawList, g, color, stroke);
+			break;
+		case Kind::Centered:
+			DrawCenteredIcon(drawList, g, color, stroke);
+			break;
+		case Kind::Menu:
+			DrawMenuIcon(drawList, g, color, stroke);
 			break;
 		default:
 			break;
@@ -205,6 +259,18 @@ namespace Util::Icons
 		const bool pressed = Button(label, kind, size);
 		if (pressed)
 			Util::NotifyButtonFlash(label);
+		return pressed;
+	}
+
+	bool IconButton(const char* id, Kind kind, ImU32 color)
+	{
+		const float side = ImGui::GetFrameHeight();
+		const bool pressed = ImGui::Button(id, ImVec2(side, side));
+		const ImVec2 rectMin = ImGui::GetItemRectMin();
+		const float iconSize = ImGui::GetFontSize() * 0.9f;
+		const float inset = (side - iconSize) * 0.5f;
+		Draw(ImGui::GetWindowDrawList(), kind, ImVec2(rectMin.x + inset, rectMin.y + inset), iconSize,
+			color != 0 ? color : ImGui::GetColorU32(ImGuiCol_Text));
 		return pressed;
 	}
 }

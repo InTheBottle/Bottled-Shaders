@@ -21,6 +21,7 @@
 #include <dxgi.h>
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <utility>
 #include <wrl/client.h>
 
 #include "../Feature.h"
@@ -115,6 +116,21 @@ namespace Util
 		}
 	}
 
+	namespace
+	{
+		bool g_escapeHandledByPopup = false;
+	}
+
+	void NotifyEscapeHandledByPopup()
+	{
+		g_escapeHandledByPopup = true;
+	}
+
+	bool ConsumeEscapeHandledByPopup()
+	{
+		return std::exchange(g_escapeHandledByPopup, false);
+	}
+
 	CenteredPopupModal::CenteredPopupModal(const char* name, bool* p_open, ImGuiWindowFlags flags, ImVec2 pos, ImVec2 pivot)
 	{
 		if (pos.x == -FLT_MAX && pos.y == -FLT_MAX)
@@ -125,6 +141,11 @@ namespace Util
 		// Setting an initial width gives TextWrapped a sensible wrap column on that frame.
 		ImGui::SetNextWindowSize(ImVec2(400.0f * GetUIScale(), 0.0f), ImGuiCond_Appearing);
 		isOpen = BeginPopupModalWithRoundedClose(name, p_open, flags | ImGuiWindowFlags_NoSavedSettings);
+		if (isOpen && p_open && !ImGui::GetIO().WantTextInput && ImGui::IsWindowFocused() && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+			*p_open = false;
+			ImGui::CloseCurrentPopup();
+			NotifyEscapeHandledByPopup();
+		}
 	}
 
 	CenteredPopupModal::~CenteredPopupModal()
@@ -1271,7 +1292,7 @@ namespace Util
 		state.needsFocus = true;
 	}
 
-	void DrawFeatureSearchBar(std::string& searchString, float availableWidth)
+	bool DrawFeatureSearchBar(std::string& searchString, float availableWidth, bool focus)
 	{
 		ImGui::PushID("FeatureSearchBar");
 
@@ -1307,9 +1328,14 @@ namespace Util
 		strncpy_s(buffer, searchString.c_str(), sizeof(buffer) - 1);
 		buffer[sizeof(buffer) - 1] = '\0';
 
-		if (ImGui::InputTextWithHint("##feature_search", T("ui.search_features", "Search Features..."), buffer, sizeof(buffer))) {
+		if (focus)
+			ImGui::SetKeyboardFocusHere();
+		if (ImGui::InputTextWithHint("##feature_search", T("ui.search_features", "Search Features..."), buffer, sizeof(buffer), ImGuiInputTextFlags_EscapeClearsAll)) {
 			searchString = buffer;
 		}
+		const bool submitted = ImGui::IsItemDeactivated() && (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
+		if (!ImGui::IsItemActive())
+			AddTooltip(T("ui.search_features_tooltip", "Find a feature by name, category or setting.\nCtrl+F to search, Enter opens the first result, Esc clears."));
 
 		// Draw search icon using the reusable function
 		ImVec2 iconPos = ImVec2(cursorPos.x + ThemeManager::Constants::SEARCH_ICON_OFFSET_X * scale, cursorPos.y + (frameHeight - iconSize) * 0.5f);
@@ -1318,6 +1344,7 @@ namespace Util
 		ImGui::PopStyleVar(2);
 		ImGui::PopStyleColor(5);
 		ImGui::PopID();
+		return submitted;
 	}
 
 	TableSortSpec ReadTableSortSpec(int defaultColumn, bool defaultAscending)

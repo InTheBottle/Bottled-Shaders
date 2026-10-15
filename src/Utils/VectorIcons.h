@@ -18,6 +18,12 @@ namespace Util::Icons
 		Save,     /**< @brief Floppy disk — write settings to disk. */
 		Reload,   /**< @brief Circular arrow — re-read settings from disk. */
 		Refresh,  /**< @brief Cycle arrows in a ring — rebuild/clear a cache. */
+		Star,
+		StarFilled,
+		Close,
+		SidePanel,
+		Centered,
+		Menu,
 	};
 
 	/** @brief Bottle logo width divided by its height. */
@@ -58,4 +64,6 @@ namespace Util::Icons
 
 	/** @brief Icon button variant that flashes on click, matching Util::ButtonWithFlash. */
 	bool ButtonWithFlash(const char* label, Kind kind, const ImVec2& size = ImVec2(0, 0), int flashDurationMs = 200);
+
+	bool IconButton(const char* id, Kind kind, ImU32 color = 0);
 }

@@ -14,7 +14,9 @@
 #include <imgui_internal.h>
 #include <imgui_stdlib.h>
 #include <iomanip>
+#include <ranges>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -39,6 +41,7 @@
 #include "State.h"
 #include "Util.h"
 #include "Utils/UI.h"
+#include "WeatherVariableRegistry.h"
 
 #include "CSEditor/EditorWindow.h"
 #include "Features/CSEditor.h"
@@ -675,16 +678,41 @@ void Menu::Init()
 	ImGuiSettingsHandler handler{};
 	handler.TypeName = "CommunityShaders";
 	handler.TypeHash = ImHashStr("CommunityShaders");
-	handler.UserData = &lastDisplaySize;
+	handler.UserData = this;
 	handler.ReadOpenFn = [](ImGuiContext*, ImGuiSettingsHandler*, const char*) -> void* { return (void*)1; };
 	handler.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler* h, void*, const char* line) {
+		auto* menu = static_cast<Menu*>(h->UserData);
+		const std::string_view text(line);
 		float w, ht;
-		if (sscanf(line, "DisplaySize=%f,%f", &w, &ht) == 2)
-			*static_cast<float2*>(h->UserData) = { w, ht };
+		int side;
+		if (sscanf(line, "DisplaySize=%f,%f", &w, &ht) == 2) {
+			menu->lastDisplaySize = { w, ht };
+		} else if (sscanf(line, "SidePanel=%d", &side) == 1) {
+			menu->sidePanelLayout = side != 0;
+		} else if (text.starts_with("Pinned=")) {
+			menu->pinnedFeatures.clear();
+			for (auto name : std::views::split(text.substr(7), ',')) {
+				std::string entry(name.begin(), name.end());
+				if (!entry.empty() && menu->pinnedFeatures.size() < ThemeManager::Constants::MAX_PINNED_FEATURES &&
+					std::ranges::find(menu->pinnedFeatures, entry) == menu->pinnedFeatures.end())
+					menu->pinnedFeatures.push_back(std::move(entry));
+			}
+		}
 	};
 	handler.WriteAllFn = [](ImGuiContext*, ImGuiSettingsHandler* h, ImGuiTextBuffer* buf) {
+		const auto* menu = static_cast<const Menu*>(h->UserData);
 		auto& ds = ImGui::GetIO().DisplaySize;
-		buf->appendf("[%s][Data]\nDisplaySize=%g,%g\n\n", h->TypeName, ds.x, ds.y);
+		buf->appendf("[%s][Data]\nDisplaySize=%g,%g\nSidePanel=%d\n", h->TypeName, ds.x, ds.y, menu->sidePanelLayout ? 1 : 0);
+		if (!menu->pinnedFeatures.empty()) {
+			std::string pinned = "Pinned=";
+			for (size_t i = 0; i < menu->pinnedFeatures.size(); ++i) {
+				if (i > 0)
+					pinned += ',';
+				pinned += menu->pinnedFeatures[i];
+			}
+			buf->appendf("%s\n", pinned.c_str());
+		}
+		buf->append("\n");
 	};
 	ImGui::GetCurrentContext()->SettingsHandlers.push_back(handler);
 
@@ -741,10 +769,17 @@ void Menu::DrawSettings()
 
 	ImGui::DockSpaceOverViewport(0, NULL, ImGuiDockNodeFlags_PassthruCentralNode);
 
-	const auto layoutCond = resetLayout ? ImGuiCond_Always : ImGuiCond_FirstUseEver;
-	ImGui::SetNextWindowPos(Util::GetNativeViewportSizeScaled(0.5f), layoutCond, ImVec2(0.5f, 0.5f));
-	ImGui::SetNextWindowSize(Util::GetNativeViewportSizeScaled(0.8f), layoutCond);
-	resetLayout = false;
+	ignoreEditsThisFrame = false;
+	if (unsavedResetPending.exchange(false, std::memory_order_relaxed)) {
+		unsavedChanges = false;
+		unsavedFeatures.clear();
+		pendingDiffFeature.clear();
+		++settingsGeneration;
+	}
+	if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && (ImGui::GetIO().WantTextInput || popupOpenLastFrame))
+		suppressNextEscape = true;
+
+	ApplyWindowLayout();
 	auto versionStr = Util::GetFormattedVersion(Plugin::VERSION);
 	auto displayTitle = I18n::GetSingleton()->Format("menu.window_title", { { "name", std::string(Plugin::DISPLAY_NAME) }, { "version", versionStr } }, "{name} {version}");
 	// Use ### to keep a stable window ID regardless of the title text, preserving docking state
@@ -767,6 +802,7 @@ void Menu::DrawSettings()
 		bool isDocked = ImGui::IsWindowDocked();
 		wasDocked = isDocked;
 
+		HandleMenuShortcuts();
 		MenuHeaderRenderer::RenderHeader(isDocked);
 
 		// Static storage for menu state - must persist across frames
@@ -777,15 +813,124 @@ void Menu::DrawSettings()
 		FeatureListRenderer::RenderFeatureList(
 			selectedMenu,
 			featureSearch,
+			focusFeatureSearch,
 			pendingFeatureSelection,
 			categoryExpansionStates,
 			[&]() { DrawGeneralSettings(); },
-			[&]() { DrawAdvancedSettings(); });
+			[&]() { DrawAdvancedSettings(); },
+			MenuHeaderRenderer::GetStatusBarHeight());
+
+		MenuHeaderRenderer::RenderStatusBar();
 
 		// Draw global popups (needs to be called once per frame)
 		Util::DrawClearShaderCacheConfirmation();
 	}
 	ImGui::End();
+
+	popupOpenLastFrame = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+}
+
+void Menu::ApplyWindowLayout()
+{
+	const auto layoutCond = (resetLayout || layoutChangeRequested) ? ImGuiCond_Always : ImGuiCond_FirstUseEver;
+	resetLayout = false;
+	layoutChangeRequested = false;
+
+	if (!sidePanelLayout) {
+		ImGui::SetNextWindowPos(Util::GetNativeViewportSizeScaled(0.5f), layoutCond, ImVec2(0.5f, 0.5f));
+		ImGui::SetNextWindowSize(Util::GetNativeViewportSizeScaled(ThemeManager::Constants::CENTERED_MENU_SIZE_RATIO), layoutCond);
+		return;
+	}
+
+	const auto* viewport = ImGui::GetMainViewport();
+	const float margin = ThemeManager::Constants::SIDE_PANEL_MARGIN * Util::GetUIScale();
+	const float maxWidth = viewport->WorkSize.x * ThemeManager::Constants::SIDE_PANEL_MAX_SCREEN_SHARE;
+	const float minWidth = (std::min)(ImGui::GetFontSize() * ThemeManager::Constants::SIDE_PANEL_MIN_WIDTH_EM, maxWidth);
+	const float width = std::clamp(viewport->WorkSize.x * ThemeManager::Constants::SIDE_PANEL_WIDTH_RATIO, minWidth, maxWidth);
+	ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + margin, viewport->WorkPos.y + margin), layoutCond);
+	ImGui::SetNextWindowSize(ImVec2(width, viewport->WorkSize.y - margin * 2.0f), layoutCond);
+}
+
+void Menu::HandleMenuShortcuts()
+{
+	if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+		return;
+	if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
+		SaveSettings();
+		Util::NotifyButtonFlash(T("menu.save_settings", "Save Settings"));
+	}
+	if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_F))
+		focusFeatureSearch = true;
+}
+
+void Menu::SaveSettings()
+{
+	globals::state->Save();
+}
+
+namespace
+{
+	json CaptureFeatureState(Feature* feature)
+	{
+		json state;
+		if (feature->loaded)
+			feature->SaveSettings(state["Settings"]);
+		state["DisabledAtBoot"] = globals::state->IsFeatureDisabled(feature->GetShortName());
+		return state;
+	}
+}
+
+void Menu::BeginFeatureEditTracking(Feature* feature)
+{
+	auto& baseline = featureBaselines[feature->GetShortName()];
+	if (baseline.generation == settingsGeneration)
+		return;
+	baseline.generation = settingsGeneration;
+	baseline.state = CaptureFeatureState(feature);
+}
+
+void Menu::EndFeatureEditTracking(Feature* feature, bool edited)
+{
+	const auto shortName = feature->GetShortName();
+	if (edited) {
+		unsavedFeatures.insert(shortName);
+		pendingDiffFeature = shortName;
+	}
+	if (pendingDiffFeature != shortName || ImGui::GetActiveID() != 0)
+		return;
+	pendingDiffFeature.clear();
+
+	auto* weatherRegistry = WeatherVariables::GlobalWeatherRegistry::GetSingleton();
+	const bool weatherDriven = weatherRegistry->HasWeatherSupport(shortName) && !weatherRegistry->IsFeaturePaused(shortName);
+	const auto baseline = featureBaselines.find(shortName);
+	if (!weatherDriven && baseline != featureBaselines.end() && CaptureFeatureState(feature) == baseline->second.state)
+		unsavedFeatures.erase(shortName);
+}
+
+bool Menu::IsFeaturePinned(const std::string& shortName) const
+{
+	return std::ranges::find(pinnedFeatures, shortName) != pinnedFeatures.end();
+}
+
+void Menu::SetFeaturePinned(const std::string& shortName, bool pinned)
+{
+	const auto it = std::ranges::find(pinnedFeatures, shortName);
+	if (pinned && it == pinnedFeatures.end() && pinnedFeatures.size() < ThemeManager::Constants::MAX_PINNED_FEATURES)
+		pinnedFeatures.push_back(shortName);
+	else if (!pinned && it != pinnedFeatures.end())
+		pinnedFeatures.erase(it);
+	else
+		return;
+	ImGui::MarkIniSettingsDirty();
+}
+
+void Menu::SetSidePanelLayout(bool enabled)
+{
+	if (sidePanelLayout == enabled)
+		return;
+	sidePanelLayout = enabled;
+	layoutChangeRequested = true;
+	ImGui::MarkIniSettingsDirty();
 }
 
 /**
@@ -1002,6 +1147,7 @@ void Menu::ProcessInputEventQueue()
 					{ settings.ToggleKey, [this]() {
 						 if (!SetupRenderer::ShouldShowFirstTimeSetup()) {
 							 IsEnabled = !IsEnabled;
+							 suppressNextEscape = false;
 							 if (IsEnabled)
 								 ImGui::GetIO().ClearInputKeys();  // Prevent toggle key from remaining "held" in ImGui after open.
 						 }
@@ -1123,6 +1269,7 @@ void Menu::ProcessInputEventQueue()
 						combo.push_back(InputCombo::Keyboard(key));
 
 						h.action(combo);
+						unsavedChanges = true;
 						handled = true;
 						break;
 					}
@@ -1137,8 +1284,11 @@ void Menu::ProcessInputEventQueue()
 
 				// Handle ESC key for menu and editor window
 				auto* editorWindow = EditorWindow::GetSingleton();
+				const bool escapeHandledByPopup = key == VK_ESCAPE && Util::ConsumeEscapeHandledByPopup();
+				if (escapeHandledByPopup)
+					suppressNextEscape = false;
 				// An Escape-bound Effects11 editor hotkey already toggled the editor this release
-				if (key == VK_ESCAPE && !effects11EditorToggled) {
+				if (key == VK_ESCAPE && !escapeHandledByPopup && !effects11EditorToggled) {
 					if (editorWindow && editorWindow->IsInPreviewMode()) {
 						editorWindow->ExitPreviewMode();
 					} else if (editorWindow && editorWindow->open && editorWindow->ShouldHandleEscapeKey()) {
@@ -1147,7 +1297,10 @@ void Menu::ProcessInputEventQueue()
 						if (effects11Editor.ShouldHandleEscapeKey())
 							effects11Editor.Close();
 					} else if (IsEnabled && (!editorWindow || !editorWindow->open)) {
-						IsEnabled = false;
+						if (suppressNextEscape)
+							suppressNextEscape = false;
+						else
+							IsEnabled = false;
 					}
 				}
 			} else if (event.IsDown() && !wasCapturingHotkey) {

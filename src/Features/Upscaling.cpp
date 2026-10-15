@@ -516,6 +516,10 @@ void Upscaling::DrawSettings()
 void Upscaling::SaveSettings(json& o_json)
 {
 	o_json = settings;
+}
+
+void Upscaling::WriteGameIniSettings()
+{
 	auto iniSettingCollection = globals::game::iniPrefSettingCollection;
 	if (iniSettingCollection) {
 		auto setting = iniSettingCollection->GetSetting("bUseTAA:Display");

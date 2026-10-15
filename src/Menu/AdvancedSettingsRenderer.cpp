@@ -77,6 +77,7 @@ void AdvancedSettingsRenderer::RenderAdvancedSettings(
 
 		// Profiling Tab
 		if (MenuFonts::BeginTabItemWithFont(T("menu.advanced.tab_profiling", "Profiling"), Menu::FontRole::Subheading)) {
+			globals::menu->IgnoreSettingEditsThisFrame();
 			if (ImGui::BeginChild("##ProfilingContent", ImVec2(0, 0), false)) {
 				ProfilingRenderer::RenderStatistics();
 			}
@@ -86,6 +87,7 @@ void AdvancedSettingsRenderer::RenderAdvancedSettings(
 
 		// Testing Tab (for A/B Testing and related settings)
 		if (MenuFonts::BeginTabItemWithFont(T("menu.advanced.tab_testing", "Testing"), Menu::FontRole::Subheading)) {
+			globals::menu->IgnoreSettingEditsThisFrame();
 			if (ImGui::BeginChild("##Testing", ImVec2(0, 0), false)) {
 				RenderTestingSection();
 			}

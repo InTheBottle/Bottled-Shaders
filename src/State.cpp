@@ -628,6 +628,8 @@ void State::Load(ConfigMode a_configMode, bool a_allowReload)
 
 		FeatureIssues::ScanForOrphanedFeatureINIs();
 
+		if (a_configMode == ConfigMode::USER)
+			globals::menu->ClearUnsavedChanges();
 		logger::info("Loading Settings Complete");
 	} catch (const json::exception& e) {
 		logger::info("General JSON error accessing settings: {}; recreating config", e.what());
@@ -674,6 +676,7 @@ void State::SaveToJson(nlohmann::json& settings)
 	auto& upscaling = globals::features::upscaling;
 	auto& upscalingJson = settings[upscaling.GetShortName()];
 	upscaling.SaveSettings(upscalingJson);
+	upscaling.WriteGameIniSettings();
 
 	json originalShaders;
 	ForEachShaderTypeWithIndex([&](auto type, int classIndex) {
@@ -816,6 +819,8 @@ void State::Save(ConfigMode a_configMode)
 	try {
 		o << settings.dump(1);
 		logger::info("Saving settings to {}", configPath);
+		if (a_configMode == ConfigMode::USER)
+			globals::menu->ClearUnsavedChanges();
 	} catch (const std::exception& e) {
 		logger::warn("Failed to write settings to file: {}. Error: {}", configPath, e.what());
 	}

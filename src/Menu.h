@@ -146,6 +146,7 @@ public:
 
 	// Search bar state
 	std::string featureSearch;  // For left pane feature search
+	bool focusFeatureSearch = false;
 	/** @brief Draws the in-game performance/debug overlay */
 	void DrawOverlay();
 	/** @brief Draws the detached weather details editor window */
@@ -447,6 +448,22 @@ public:
 	/** @brief Queues a feature to be selected in the left panel on the next frame */
 	void SelectFeatureMenu(const std::string& featureName);
 
+	bool HasUnsavedChanges() const { return unsavedChanges || !unsavedFeatures.empty(); }
+	void MarkUnsavedChanges() { unsavedChanges = true; }
+	void ClearUnsavedChanges() { unsavedResetPending.store(true, std::memory_order_relaxed); }
+	void IgnoreSettingEditsThisFrame() { ignoreEditsThisFrame = true; }
+	bool AreSettingEditsIgnored() const { return ignoreEditsThisFrame; }
+	void BeginFeatureEditTracking(Feature* feature);
+	void EndFeatureEditTracking(Feature* feature, bool edited);
+	void SaveSettings();
+
+	bool IsFeaturePinned(const std::string& shortName) const;
+	void SetFeaturePinned(const std::string& shortName, bool pinned);
+	const std::vector<std::string>& GetPinnedFeatures() const { return pinnedFeatures; }
+
+	bool IsSidePanelLayout() const { return sidePanelLayout; }
+	void SetSidePanelLayout(bool enabled);
+
 	bool overlayVisible = false;
 
 public:
@@ -507,6 +524,23 @@ private:
 
 	// Menu navigation
 	std::string pendingFeatureSelection;  // Feature to select on next frame
+	std::vector<std::string> pinnedFeatures;
+	bool sidePanelLayout = false;
+	bool layoutChangeRequested = false;
+	bool unsavedChanges = false;
+	bool ignoreEditsThisFrame = false;
+	uint64_t settingsGeneration = 1;
+	struct FeatureBaseline
+	{
+		uint64_t generation = 0;
+		json state;
+	};
+	std::unordered_map<std::string, FeatureBaseline> featureBaselines;
+	std::unordered_set<std::string> unsavedFeatures;
+	std::string pendingDiffFeature;
+	std::atomic<bool> unsavedResetPending = false;
+	bool suppressNextEscape = false;
+	bool popupOpenLastFrame = false;
 
 	// Input event handling
 	std::vector<KeyEvent> _keyEventQueue;
@@ -523,6 +557,8 @@ private:
 	void DrawGeneralSettings();
 	void DrawAdvancedSettings();
 	void DrawDisableAtBootSettings();
+	void ApplyWindowLayout();
+	void HandleMenuShortcuts();
 
 	void addToEventQueue(KeyEvent e);
 	void ProcessInputEventQueue();

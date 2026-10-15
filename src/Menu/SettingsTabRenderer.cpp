@@ -282,6 +282,7 @@ void SettingsTabRenderer::RenderActiveConstraintsSection()
 					if (ImGui::Selectable(std::format("{}##nav{}", row.constrainedBy, rowIdx).c_str())) {
 						if (auto* menu = Menu::GetSingleton()) {
 							menu->SelectFeatureMenu(row.firstSourceShortName);
+							menu->IgnoreSettingEditsThisFrame();
 						}
 					}
 					if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -640,6 +641,7 @@ void SettingsTabRenderer::RenderThemesTab()
 {
 	auto tabLabel = std::format("{}##{}", T("menu.settings.tab_themes", "Themes"), "InterfaceThemesTab");
 	if (BeginTabItemWithFont(tabLabel.c_str(), Menu::FontRole::Heading)) {
+		globals::menu->IgnoreSettingEditsThisFrame();
 		auto& themeSettings = globals::menu->GetSettings().Theme;
 
 		// Static variables for popup state and new theme creation
@@ -718,6 +720,7 @@ void SettingsTabRenderer::RenderThemesTab()
 				// Theme loaded successfully, update UI
 				currentThemePreset = selectedTheme;
 				showUpdateFeedback = false;
+				globals::menu->MarkUnsavedChanges();
 			}
 		}
 
@@ -982,6 +985,7 @@ void SettingsTabRenderer::RenderThemesTab()
 						logger::info("Theme saved successfully. Loading theme preset: '{}'", safeNewThemeName);
 						// Theme created successfully, load it and exit create mode
 						globals::menu->LoadThemePreset(safeNewThemeName);
+						globals::menu->MarkUnsavedChanges();
 						showValidationError = false;
 						showCreateThemePopup = false;
 						ImGui::CloseCurrentPopup();
@@ -1007,6 +1011,7 @@ void SettingsTabRenderer::RenderThemesTab()
 			if (result.success) {
 				themeManager->RefreshThemes();
 				globals::menu->LoadThemePreset("Default");
+				globals::menu->MarkUnsavedChanges();
 				currentThemePreset = "Default";
 			} else {
 				logger::warn("Failed to delete theme '{}': {}", currentThemePreset, result.errorMessage);
@@ -1021,6 +1026,7 @@ void SettingsTabRenderer::RenderFontsTab()
 {
 	auto tabLabel = std::format("{}##{}", T("menu.settings.tab_fonts", "Fonts"), "InterfaceFontsTab");
 	if (BeginTabItemWithFont(tabLabel.c_str(), Menu::FontRole::Heading)) {
+		globals::menu->IgnoreSettingEditsThisFrame();
 		auto* menuInstance = globals::menu;
 		auto& themeSettings = menuInstance->GetSettings().Theme;
 		RenderSaveInfoText();
@@ -1109,6 +1115,7 @@ void SettingsTabRenderer::RenderStylingTab()
 {
 	auto tabLabel = std::format("{}##{}", T("menu.settings.tab_styling", "Styling"), "InterfaceStylingTab");
 	if (BeginTabItemWithFont(tabLabel.c_str(), Menu::FontRole::Heading)) {
+		globals::menu->IgnoreSettingEditsThisFrame();
 		auto& themeSettings = globals::menu->GetSettings().Theme;
 		auto& style = themeSettings.Style;
 		RenderSaveInfoText();
@@ -1199,6 +1206,7 @@ void SettingsTabRenderer::RenderColorsTab()
 {
 	auto tabLabel = std::format("{}##{}", T("menu.settings.tab_colors", "Colors"), "InterfaceColorsTab");
 	if (BeginTabItemWithFont(tabLabel.c_str(), Menu::FontRole::Heading)) {
+		globals::menu->IgnoreSettingEditsThisFrame();
 		auto& themeSettings = globals::menu->GetSettings().Theme;
 		auto& colors = themeSettings.FullPalette;
 		RenderSaveInfoText();

@@ -9,11 +9,11 @@
 struct Feature;
 
 /**
- * @brief Renders the two-column feature list and settings panel in the main menu.
+ * @brief Renders the feature navigation and the settings page of the main menu.
  *
- * The left column shows a searchable, categorized list of built-in pages and
- * installed features. The right column displays the settings UI for whichever
- * item is currently selected.
+ * Wide windows show a searchable, categorized navigation column beside the page.
+ * Narrow windows (such as the side panel layout) collapse the navigation into a
+ * popup opened from a location bar above the page.
  */
 class FeatureListRenderer
 {
@@ -23,6 +23,7 @@ public:
 	{
 		std::string name;
 		std::function<void()> func;
+		std::string description;
 	};
 
 	/** @brief Represents a collapsible category header in the feature list. */
@@ -34,30 +35,35 @@ public:
 		bool expanded = true;
 	};
 
+	struct PinnedFeature
+	{
+		Feature* feature = nullptr;
+	};
+
 	/** @brief Variant type representing any entry in the menu list. */
-	using MenuFuncInfo = std::variant<BuiltInMenu, std::string, CategoryHeader, Feature*>;
+	using MenuFuncInfo = std::variant<BuiltInMenu, std::string, CategoryHeader, Feature*, PinnedFeature>;
 
 	/**
-	 * @brief Renders the full two-column feature list and settings panel.
-	 *
-	 * Builds the menu list from built-in pages and loaded features, handles
-	 * pending feature selection requests, then draws the left-column navigation
-	 * and right-column settings content.
+	 * @brief Renders the navigation and the selected page.
 	 *
 	 * @param selectedMenu Index of the currently selected menu item (updated on selection change).
 	 * @param featureSearch Current search filter string (updated by the search input).
+	 * @param focusSearch Request to move keyboard focus into the search box; cleared once handled.
 	 * @param pendingFeatureSelection Name of a feature to auto-select (cleared after processing).
 	 * @param categoryExpansionStates Map of category name to expanded/collapsed state.
 	 * @param drawGeneralSettings Callback that renders the General settings page content.
 	 * @param drawAdvancedSettings Callback that renders the Advanced settings page content.
+	 * @param reservedBottomHeight Height left free below the list for the status bar.
 	 */
 	static void RenderFeatureList(
 		size_t& selectedMenu,
 		std::string& featureSearch,
+		bool& focusSearch,
 		std::string& pendingFeatureSelection,
 		std::map<std::string, bool>& categoryExpansionStates,
 		const std::function<void()>& drawGeneralSettings,
-		const std::function<void()>& drawAdvancedSettings);
+		const std::function<void()>& drawAdvancedSettings,
+		float reservedBottomHeight);
 
 	/**
 	 * @brief Renders a single feature's settings page (header, action buttons and content).
@@ -82,15 +88,20 @@ private:
 		size_t listId;
 		size_t& selectedMenuRef;
 		std::map<std::string, bool>& categoryExpansionStates;
+		const std::string& currentKey;
+		bool selectOnNav;
+		bool& selectionMade;
 
 		void operator()(const BuiltInMenu& menu);
 		void operator()(const std::string& label);
 		void operator()(const CategoryHeader& header);
 		void operator()(Feature* feat);
+		void operator()(const PinnedFeature& pinned);
 
 	private:
 		/** @brief Marks this entry as selected, recording both its index and its stable key. */
 		void Select(const std::string& entryKey);
+		void DrawFeatureRow(Feature* feat, bool inPinnedSection);
 	};
 
 	struct DrawMenuVisitor
@@ -102,9 +113,11 @@ private:
 		void operator()(const std::string&);
 		void operator()(const CategoryHeader&);
 		void operator()(Feature* feat);
+		void operator()(const PinnedFeature& pinned);
 
 	private:
 		std::string& pendingFeatureSelection;
+		bool featureChanged = false;
 
 		// Helper methods for Feature rendering
 		void RenderFeatureHeader(Feature* feat, bool isDisabled, bool isLoaded, bool sceneControlled);
@@ -136,10 +149,19 @@ private:
 	/** @brief True when the named feature belongs to the Utility category. */
 	static bool IsUtilityFeature(const std::string& shortName);
 
-	static void RenderLeftColumn(
+	static bool RenderNavigation(
 		const std::vector<MenuFuncInfo>& menuList,
 		size_t& selectedMenu,
 		std::string& featureSearch,
+		bool& focusSearch,
+		std::map<std::string, bool>& categoryExpansionStates,
+		bool inPopup);
+
+	static void RenderNavigatorBar(
+		const std::vector<MenuFuncInfo>& menuList,
+		size_t& selectedMenu,
+		std::string& featureSearch,
+		bool& focusSearch,
 		std::map<std::string, bool>& categoryExpansionStates);
 
 	static void RenderRightColumn(
