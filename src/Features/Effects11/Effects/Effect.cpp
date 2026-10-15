@@ -14,6 +14,51 @@
 #include "Globals.h"
 #include "State.h"
 
+namespace
+{
+	HRESULT ExpandGrayToRGBA(DirectX::ScratchImage& a_image)
+	{
+		const auto format = a_image.GetMetadata().format;
+		if (format != DXGI_FORMAT_R8_UNORM && format != DXGI_FORMAT_R16_UNORM)
+			return S_OK;
+
+		const auto rgbaFormat = format == DXGI_FORMAT_R8_UNORM ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_UNORM;
+		DirectX::ScratchImage rgba;
+		HRESULT hr = DirectX::Convert(a_image.GetImages(), a_image.GetImageCount(), a_image.GetMetadata(), rgbaFormat, DirectX::TEX_FILTER_DEFAULT, DirectX::TEX_THRESHOLD_DEFAULT, rgba);
+		if (FAILED(hr))
+			return hr;
+
+		DirectX::ScratchImage replicated;
+		hr = DirectX::TransformImage(
+			rgba.GetImages(), rgba.GetImageCount(), rgba.GetMetadata(),
+			[](DirectX::XMVECTOR* a_out, const DirectX::XMVECTOR* a_in, size_t a_width, size_t) {
+				for (size_t i = 0; i < a_width; ++i)
+					a_out[i] = DirectX::XMVectorSelect(DirectX::g_XMOne, DirectX::XMVectorSplatX(a_in[i]), DirectX::g_XMSelect1110);
+			},
+			replicated);
+		if (SUCCEEDED(hr))
+			a_image = std::move(replicated);
+		return hr;
+	}
+
+	HRESULT GenerateMipChain(DirectX::ScratchImage& a_image)
+	{
+		const auto& metadata = a_image.GetMetadata();
+		if (metadata.mipLevels > 1 || DirectX::IsCompressed(metadata.format) || (metadata.width == 1 && metadata.height == 1 && metadata.depth == 1))
+			return S_OK;
+
+		DirectX::ScratchImage mipChain;
+		HRESULT hr;
+		if (metadata.dimension == DirectX::TEX_DIMENSION_TEXTURE3D)
+			hr = DirectX::GenerateMipMaps3D(a_image.GetImages(), a_image.GetImageCount(), metadata, DirectX::TEX_FILTER_BOX, 0, mipChain);
+		else
+			hr = DirectX::GenerateMipMaps(a_image.GetImages(), a_image.GetImageCount(), metadata, DirectX::TEX_FILTER_BOX, 0, mipChain);
+		if (SUCCEEDED(hr))
+			a_image = std::move(mipChain);
+		return hr;
+	}
+}
+
 std::filesystem::path Effect::GetFilePath() const
 {
 	return PresetManager::GetSingleton().GetENBSeriesPath() / GetName();
@@ -608,14 +653,25 @@ ID3D11ShaderResourceView* Effect::LoadTextureFromFile(const std::string& filenam
 		return cacheIt->second.get();
 
 	std::filesystem::path filepath = PresetManager::GetSingleton().GetENBSeriesPath() / filename;
+	std::error_code ec;
+	if (!std::filesystem::exists(filepath, ec)) {
+		const auto gameRootPath = std::filesystem::absolute(filename, ec);
+		if (!ec && std::filesystem::exists(gameRootPath, ec))
+			filepath = gameRootPath;
+	}
 
 	winrt::com_ptr<ID3D11ShaderResourceView> srv;
 
 	DirectX::ScratchImage image;
 	HRESULT hr = DirectX::LoadFromDDSFile(filepath.c_str(), DirectX::DDS_FLAGS_NONE, nullptr, image);
 	// PNG color-space metadata must not add hardware sRGB decoding to preset LUT values.
-	if (FAILED(hr))
+	if (FAILED(hr)) {
 		hr = DirectX::LoadFromWICFile(filepath.c_str(), DirectX::WIC_FLAGS_IGNORE_SRGB, nullptr, image);
+		if (SUCCEEDED(hr) && FAILED(ExpandGrayToRGBA(image)))
+			logger::warn("[EFFECTS11] Failed to expand grayscale texture '{}' to RGBA", filepath.string());
+	}
+	if (SUCCEEDED(hr) && FAILED(GenerateMipChain(image)))
+		logger::warn("[EFFECTS11] Failed to generate mipmaps for texture '{}'", filepath.string());
 	if (SUCCEEDED(hr))
 		hr = DirectX::CreateShaderResourceView(device, image.GetImages(), image.GetImageCount(), image.GetMetadata(), srv.put());
 
