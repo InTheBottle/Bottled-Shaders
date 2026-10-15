@@ -50,6 +50,7 @@ struct FootstepParticles;
 struct HairBacklighting;
 struct FurShells;
 struct LandscapeSeams;
+struct SnowDeformation;
 
 class State;
 class Deferred;
@@ -152,6 +153,7 @@ namespace globals
 		extern HairBacklighting hairBacklighting;
 		extern FurShells furShells;
 		extern LandscapeSeams landscapeSeams;
+		extern SnowDeformation snowDeformation;
 
 	}
 
