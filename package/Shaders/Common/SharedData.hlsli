@@ -555,6 +555,11 @@ namespace SharedData
 		float SnowHeightOffset;
 		uint2 pad;
 
+		float RooftopSnow;
+		float RooftopHeight;
+		float RooftopExposure;
+		uint pad1;
+
 		uint EnableSnowCover;
 		uint AffectGrassTint;
 		uint AffectTreeTint;

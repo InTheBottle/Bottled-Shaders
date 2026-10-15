@@ -57,6 +57,10 @@ private:
 	static constexpr float FIRE_MELT_FOOTPRINT_SMOOTHING = 0.5f;
 	static constexpr float SURVIVAL_SNOW_ON = 0.5f;
 	static constexpr float SURVIVAL_SNOW_OFF = 0.4f;
+	static constexpr float DEFAULT_ROOFTOP_SNOW = 3000.0f;
+	static constexpr float DEFAULT_ROOFTOP_HEIGHT = 192.0f;
+	static constexpr float DEFAULT_ROOFTOP_EXPOSURE = 0.7f;
+	static constexpr float MAX_ROOFTOP_SNOW = 20000.0f;
 
 public:
 	virtual inline std::string GetName() { return "Snow Cover"; }
@@ -72,6 +76,11 @@ public:
 		float SnowHeightOffset = 0.0f;
 		uint AffectHavok = 0;
 		uint AffectFloraTint = 0;
+
+		float RooftopSnow = DEFAULT_ROOFTOP_SNOW;
+		float RooftopHeight = DEFAULT_ROOFTOP_HEIGHT;
+		float RooftopExposure = DEFAULT_ROOFTOP_EXPOSURE;
+		uint pad = 0;
 	};
 	static_assert(sizeof(UserSettings) % 16 == 0);
 
@@ -139,7 +148,7 @@ public:
 		FireMeltData fireMelt;
 	};
 	static_assert(sizeof(PerFrame) % 16 == 0);
-	static_assert(sizeof(PerFrame) == 176 + sizeof(FireMeltData));
+	static_assert(sizeof(PerFrame) == 192 + sizeof(FireMeltData));
 
 	struct FireMeltSettings
 	{
@@ -290,6 +299,9 @@ public:
 
 	void BSLightingShader_Setup(RE::BSRenderPass* Pass);
 	static bool IsHarvestableFlora(RE::TESObjectREFR* a_ref);
+	bool IsBuilding(RE::TESObjectREFR* a_ref);
+
+	std::unordered_map<RE::FormID, bool> buildingBaseCache;
 
 	struct Hooks
 	{

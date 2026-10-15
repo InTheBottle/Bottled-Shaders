@@ -16,7 +16,10 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	EnableExpensiveFoliage,
 	AffectHavok,
 	AffectFloraTint,
-	SnowHeightOffset)
+	SnowHeightOffset,
+	RooftopSnow,
+	RooftopHeight,
+	RooftopExposure)
 
 void copyString(const std::string& input, char* dst, size_t dst_size)
 {
@@ -47,6 +50,21 @@ void SnowCover::DrawSettings()
 	ImGui::SliderFloat("Snow Offset", &settings.SnowHeightOffset, -20000.0f, 20000.0f);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("Moves the altitude that snow appears at. For testing purposes.");
+	}
+	ImGui::SliderFloat(T("feature.snow_cover.rooftop_snow", "Rooftop Snow"), &settings.RooftopSnow, 0.0f, MAX_ROOFTOP_SNOW, "%.0f", ImGuiSliderFlags_AlwaysClamp);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::TextWrapped("%s", T("feature.snow_cover.rooftop_snow_tooltip", "High, sky-exposed parts of buildings collect snow as if they were this many units higher (uses Skylighting). 0 disables it."));
+	}
+	{
+		Util::DisableGuard disable(settings.RooftopSnow <= 0.0f);
+		ImGui::SliderFloat(T("feature.snow_cover.rooftop_height", "Rooftop Height"), &settings.RooftopHeight, 32.0f, 1024.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::TextWrapped("%s", T("feature.snow_cover.rooftop_height_tooltip", "Height above the base of a building where the extra snow is fully applied. Keeps it off streets, steps and porches."));
+		}
+		ImGui::SliderFloat(T("feature.snow_cover.rooftop_exposure", "Rooftop Sky Exposure"), &settings.RooftopExposure, 0.0f, 0.95f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::TextWrapped("%s", T("feature.snow_cover.rooftop_exposure_tooltip", "How open to the sky a surface must be before it gets extra snow. Higher keeps it off eaves, balconies and covered walkways."));
+		}
 	}
 	ImGui::Checkbox("Melt Snow Near Fire", &fireMeltSettings.Enabled);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -546,6 +564,14 @@ void SnowCover::Reload()
 		auto data_path = Util::PathHelpers::GetDataPath();
 		auto loadDDS = [&](const std::filesystem::path& file) -> winrt::com_ptr<ID3D11ShaderResourceView> {
 			winrt::com_ptr<ID3D11ShaderResourceView> view;
+			RE::BSResourceNiBinaryStream stream(file.lexically_relative(data_path).make_preferred().string());
+			if (stream.good() && stream.stream->totalSize > 0) {
+				std::vector<uint8_t> buffer(stream.stream->totalSize);
+				if (stream.read(buffer.data(), stream.stream->totalSize) &&
+					SUCCEEDED(DirectX::CreateDDSTextureFromMemory(device, context, buffer.data(), buffer.size(), nullptr, view.put())))
+					return view;
+				view = nullptr;
+			}
 			if (FAILED(DirectX::CreateDDSTextureFromFile(device, context, file.native().c_str(), nullptr, view.put())))
 				return nullptr;
 			return view;
@@ -631,6 +657,12 @@ void SnowCover::Prepass()
 void SnowCover::LoadSettings(json& o_json)
 {
 	settings = o_json;
+	auto sanitize = [](float& a_value, float a_default, float a_min, float a_max) {
+		a_value = std::clamp(std::isfinite(a_value) ? a_value : a_default, a_min, a_max);
+	};
+	sanitize(settings.RooftopSnow, DEFAULT_ROOFTOP_SNOW, 0.0f, MAX_ROOFTOP_SNOW);
+	sanitize(settings.RooftopHeight, DEFAULT_ROOFTOP_HEIGHT, 32.0f, 1024.0f);
+	sanitize(settings.RooftopExposure, DEFAULT_ROOFTOP_EXPOSURE, 0.0f, 0.95f);
 	const FireMeltSettings defaults{};
 	fireMeltSettings.Enabled = o_json.value("FireMeltEnabled", defaults.Enabled);
 	fireMeltSettings.RadiusScale = std::clamp(o_json.value("FireMeltRadiusScale", defaults.RadiusScale), 1.0f, 16.0f);
@@ -993,7 +1025,8 @@ bool SnowCover::IsSnowFree(RE::BSRenderPass* a_pass, uint32_t a_descriptor, uint
 			(bound.center.x + radius) * wsettings.mapScale.x + wsettings.mapOffset.x, (bound.center.y + radius) * wsettings.mapScale.y + wsettings.mapOffset.y, mapValue))
 		return false;
 
-	const float top = bound.center.z + radius + 512.0f;
+	const bool rooftop = (extra & static_cast<uint32_t>(State::ExtraShaderDescriptors::SnowRooftop)) != 0;
+	const float top = bound.center.z + radius + 512.0f + (rooftop ? settings.RooftopSnow : 0.0f);
 	const float env = (top - settings.SnowHeightOffset + (mapValue + 2.0f / 255.0f - 0.5f) * wsettings.mapZscale + perFrame.SeasonalAltitude) / wsettings.BlendSmoothness;
 	if (env + 5.0f * displacement >= -0.01f)
 		return false;
@@ -1027,6 +1060,36 @@ void SnowCover::BSLightingShader_Setup(RE::BSRenderPass* a_pass)
 		state->permutationData.ExtraShaderDescriptor |= (uint)State::ExtraShaderDescriptors::NoFoliageTint;
 	else
 		state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::NoFoliageTint;
+
+	if (settings.RooftopSnow > 0.0f && IsBuilding(userData))
+		state->permutationData.ExtraShaderDescriptor |= (uint)State::ExtraShaderDescriptors::SnowRooftop;
+	else
+		state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::SnowRooftop;
+}
+
+bool SnowCover::IsBuilding(RE::TESObjectREFR* a_ref)
+{
+	if (!a_ref)
+		return false;
+	auto base = a_ref->GetObjectReference();
+	if (!base)
+		return false;
+	const auto id = base->GetFormID();
+	if (const auto cached = buildingBaseCache.find(id); cached != buildingBaseCache.end())
+		return cached->second;
+
+	bool building = false;
+	if (base->GetFormType() == RE::FormType::Static || base->GetFormType() == RE::FormType::MovableStatic) {
+		if (auto model = base->As<RE::TESModel>(); model && model->GetModel()) {
+			std::string path = model->GetModel();
+			std::transform(path.begin(), path.end(), path.begin(), [](unsigned char c) { return static_cast<char>(c == '/' ? '\\' : std::tolower(c)); });
+			building = path.find("architecture\\") != std::string::npos || path.find("dungeons\\") != std::string::npos;
+		}
+	}
+	if (buildingBaseCache.size() > 16384)
+		buildingBaseCache.clear();
+	buildingBaseCache.emplace(id, building);
+	return building;
 }
 
 bool SnowCover::IsHarvestableFlora(RE::TESObjectREFR* a_ref)

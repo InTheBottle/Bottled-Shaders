@@ -2337,8 +2337,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 #	if defined(SNOW_COVER)
 #		if defined(SKYLIGHTING)
-	float snowOcclusion = inWorld ? smoothstep(0, 0.75, SphericalHarmonics::Unproject(skylightingSH, float3(0, 0, 1))) : 0;
+	float snowSkyVisibility = inWorld ? SphericalHarmonics::Unproject(skylightingSH, float3(0, 0, 1)) : 0;
+	float snowOcclusion = smoothstep(0, 0.75, snowSkyVisibility);
 #		else
+	float snowSkyVisibility = inWorld;
 	float snowOcclusion = inWorld;
 #		endif
 
@@ -2403,10 +2405,15 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		if defined(LODLANDSCAPE) || defined(LODLANDNOISE)
 		snowNormal = normalize(lerp(snowNormal, float3(0, 0, 1), 0.5));
 #		endif
+		float rooftopLift = 0;
+#		if !defined(LANDSCAPE) && !defined(LOD) && !defined(TREE_ANIM) && !defined(LODLANDSCAPE) && !defined(LODLANDNOISE)
+		if (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::SnowRooftop)
+			rooftopLift = SnowCover::GetRooftopLift(input.ModelPosition.z, snowSkyVisibility);
+#		endif
 #		if defined(TRUE_PBR)
-		snowFactor = SnowCover::ApplySnowPBR(material, snowNormal, snowFactor, disp, adjustedWorldPos, snowOcclusion, input.WorldPosition.z - waterHeight, length(viewPosition.xyz), uv - uvOriginal);
+		snowFactor = SnowCover::ApplySnowPBR(material, snowNormal, snowFactor, disp, adjustedWorldPos, snowOcclusion, input.WorldPosition.z - waterHeight, length(viewPosition.xyz), uv - uvOriginal, rooftopLift);
 #		else
-		snowFactor = SnowCover::ApplySnow(material, snowNormal, disp, adjustedWorldPos, snowOcclusion, input.WorldPosition.z - waterHeight, length(viewPosition.xyz), uv - uvOriginal);
+		snowFactor = SnowCover::ApplySnow(material, snowNormal, disp, adjustedWorldPos, snowOcclusion, input.WorldPosition.z - waterHeight, length(viewPosition.xyz), uv - uvOriginal, rooftopLift);
 #		endif
 		if (snowFactor > 0) {
 			// The sd gradient term only stays on terrain; on foliage/statics ddx_fine(snowFactor) is noise and sparkles.
