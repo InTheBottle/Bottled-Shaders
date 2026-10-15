@@ -293,6 +293,7 @@ public:
 	void Reload();
 	void SaveConfig();
 	void ResetWorldConfig();
+	void ReleaseTextures();
 	void UpdateMapTransform();
 
 	virtual inline void PostPostLoad() override { Hooks::Install(); }

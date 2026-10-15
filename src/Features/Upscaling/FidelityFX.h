@@ -75,6 +75,7 @@ public:
 
 	/** @brief Creates FSR3 upscaling resources including scratch buffers and context. */
 	void CreateFSRResources();
+	void CreateHostFSRContext();
 
 	/** @brief Destroys FSR3 upscaling resources and frees the scratch buffer. */
 	void DestroyFSRResources();
@@ -180,6 +181,7 @@ private:
 
 	// FSR scratch buffer - needs to be freed in DestroyFSRResources
 	void* fsrScratchBuffer = nullptr;
+	bool hostFsrContextFailed = false;
 
 	// Flag to prevent spamming the log with FSR3 dispatch crash messages
 	bool fsrDispatchCrashLogged = false;

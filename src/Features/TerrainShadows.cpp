@@ -225,10 +225,7 @@ void TerrainShadows::DrawSettings()
 
 void TerrainShadows::ClearShaderCache()
 {
-	if (shadowUpdateProgram) {
-		shadowUpdateProgram->Release();
-		shadowUpdateProgram = nullptr;
-	}
+	shadowUpdateProgram = nullptr;
 
 	CompileComputeShaders();
 }
@@ -617,14 +614,33 @@ void TerrainShadows::ReflectionsPrepass()
 	}
 }
 
+void TerrainShadows::ReleaseHeightmap()
+{
+	if (!texHeightMap && !texShadowHeight)
+		return;
+
+	auto context = globals::d3d::context;
+	std::array<ID3D11ShaderResourceView*, 1> srvs = { nullptr };
+	context->PSSetShaderResources(60, (uint)srvs.size(), srvs.data());
+	context->CSSetShaderResources(60, (uint)srvs.size(), srvs.data());
+
+	texShadowHeight.reset();
+	texHeightMap.reset();
+	cachedHeightmap = nullptr;
+	needPrecompute = false;
+}
+
 void TerrainShadows::EarlyPrepass()
 {
+	if (!settings.EnableTerrainShadow) {
+		ReleaseHeightmap();
+		return;
+	}
+
 	LoadHeightmap();
 
 	const auto requestedRefreshGeneration = Util::GetCompletedCelestialTransitionGeneration();
 	const bool timeJumpRefresh = requestedRefreshGeneration != handledTimeJumpRefreshGeneration;
-	if (!settings.EnableTerrainShadow)
-		return;
 
 	const bool refreshImmediately = needPrecompute || timeJumpRefresh;
 	if (needPrecompute)

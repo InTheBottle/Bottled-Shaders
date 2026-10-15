@@ -104,43 +104,7 @@ HiZOcclusion::~HiZOcclusion()
 		hiZTestCSDebug = nullptr;
 	}
 
-	// Release GPU culling resources
-	if (geometryBoundsSRV) {
-		geometryBoundsSRV->Release();
-		geometryBoundsSRV = nullptr;
-	}
-	if (geometryBoundsBuffer) {
-		geometryBoundsBuffer->Release();
-		geometryBoundsBuffer = nullptr;
-	}
-	if (visibilityResultsUAV) {
-		visibilityResultsUAV->Release();
-		visibilityResultsUAV = nullptr;
-	}
-	if (visibilityResultsBuffer) {
-		visibilityResultsBuffer->Release();
-		visibilityResultsBuffer = nullptr;
-	}
-	if (hiZTestParamsBuffer) {
-		hiZTestParamsBuffer->Release();
-		hiZTestParamsBuffer = nullptr;
-	}
-	if (hiZSampler) {
-		hiZSampler->Release();
-		hiZSampler = nullptr;
-	}
-
-	// Release async readback staging buffers
-	for (int i = 0; i < AsyncReadbackState::BUFFER_COUNT; ++i) {
-		if (readbackState.stagingBuffers[i]) {
-			readbackState.stagingBuffers[i]->Release();
-			readbackState.stagingBuffers[i] = nullptr;
-		}
-		if (readbackState.completionQueries[i]) {
-			readbackState.completionQueries[i]->Release();
-			readbackState.completionQueries[i] = nullptr;
-		}
-	}
+	ReleaseGPUCullingResources();
 
 	// Release debug buffers
 	ReleaseDebugBuffer();
@@ -153,21 +117,37 @@ HiZOcclusion::~HiZOcclusion()
 		visibilityReadbackBuffer->Release();
 		visibilityReadbackBuffer = nullptr;
 	}
+}
 
-	// Release GPU timestamp queries
+void HiZOcclusion::ReleaseGPUCullingResources()
+{
+	auto release = [](auto*& a_object) {
+		if (a_object) {
+			a_object->Release();
+			a_object = nullptr;
+		}
+	};
+
+	release(geometryBoundsSRV);
+	release(geometryBoundsBuffer);
+	release(visibilityResultsUAV);
+	release(visibilityResultsBuffer);
+	release(hiZTestParamsBuffer);
+	release(hiZSampler);
+
+	for (int i = 0; i < AsyncReadbackState::BUFFER_COUNT; ++i) {
+		release(readbackState.stagingBuffers[i]);
+		release(readbackState.completionQueries[i]);
+		readbackState.hasPendingRead[i] = false;
+		readbackState.geometrySnapshots[i].clear();
+		readbackState.geometryCount[i] = 0;
+	}
+	readbackState.numPendingReads = 0;
+
 	for (uint32_t i = 0; i < GPU_TIMING_BUFFER_COUNT; ++i) {
-		if (gpuTimingQueries[i].disjointQuery) {
-			gpuTimingQueries[i].disjointQuery->Release();
-			gpuTimingQueries[i].disjointQuery = nullptr;
-		}
-		if (gpuTimingQueries[i].beginTimestamp) {
-			gpuTimingQueries[i].beginTimestamp->Release();
-			gpuTimingQueries[i].beginTimestamp = nullptr;
-		}
-		if (gpuTimingQueries[i].endTimestamp) {
-			gpuTimingQueries[i].endTimestamp->Release();
-			gpuTimingQueries[i].endTimestamp = nullptr;
-		}
+		release(gpuTimingQueries[i].disjointQuery);
+		release(gpuTimingQueries[i].beginTimestamp);
+		release(gpuTimingQueries[i].endTimestamp);
 		gpuTimingQueries[i].pending = false;
 	}
 }
@@ -700,7 +680,7 @@ void HiZOcclusion::Reset()
 	if (!settings.enableHiZCulling) {
 		if (wasEnabled) {
 			// Restore all app-culled geometry and clear occlusion tracking
-			ClearOcclusionState();
+			ReleaseGeometryReferences();
 
 			// Release and clear all resources
 			ReleaseBoundsOverlayResources();
@@ -724,6 +704,8 @@ void HiZOcclusion::Reset()
 		if (!wasEnabled) {
 			wasEnabled = true;
 		}
+		if (globals::state->IsMainOrLoadingMenuOpen())
+			ReleaseGeometryReferences();
 	}
 }
 
@@ -1196,6 +1178,8 @@ bool HiZOcclusion::SetupGPUCullingResources()
 	auto device = globals::d3d::device;
 	if (!device)
 		return false;
+
+	ReleaseGPUCullingResources();
 
 	// Create geometry bounds buffer (input)
 	D3D11_BUFFER_DESC bufferDesc = {};
@@ -1914,6 +1898,19 @@ void HiZOcclusion::ClearOcclusionState()
 void HiZOcclusion::ClearShadowOcclusionState()
 {
 	shadowOcclusion = {};
+}
+
+void HiZOcclusion::ReleaseGeometryReferences()
+{
+	ClearOcclusionState();
+	for (uint32_t i = 0; i < AsyncReadbackState::BUFFER_COUNT; ++i)
+		ReleaseReadbackSlot(i);
+	readbackState.readIndex = readbackState.writeIndex;
+	pendingGeometry.clear();
+	pendingPasses.clear();
+	pendingGeometryIndex.clear();
+	pendingGeometrySnapshot.clear();
+	geometryBounds.clear();
 }
 
 void HiZOcclusion::UpdateCameraMotion()

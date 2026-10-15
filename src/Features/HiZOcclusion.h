@@ -201,6 +201,7 @@ struct HiZOcclusion : OverlayFeature
 
 	// Hi-Z occlusion culling functionality
 	bool SetupGPUCullingResources();
+	void ReleaseGPUCullingResources();
 
 	void DispatchComputeShader();
 	void ProcessVisibilityResults(uint32_t bufferIndex);
@@ -403,6 +404,7 @@ struct HiZOcclusion : OverlayFeature
 	static void SetOccludedFlag(RE::BSGeometry* geometry, bool occluded);
 	void ClearOcclusionState();
 	void ClearShadowOcclusionState();
+	void ReleaseGeometryReferences();
 	void UpdateCameraMotion();
 	bool IsReadbackReady(uint32_t bufferIndex);
 	void ReleaseReadbackSlot(uint32_t bufferIndex);

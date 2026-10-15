@@ -642,6 +642,19 @@ void HDRDisplay::SetupResources()
 	// This ensures outputTexture matches the actual swap chain format for CopyResource
 	UpdateSwapChainColorSpace();
 
+	hdrDataCB = new ConstantBuffer(ConstantBufferDesc<HDRDataCB>(), "HDR::DataCB");
+
+	UpdateHDRData();
+
+	GetHDROutputCS();
+	GetUIBrightnessCS();
+
+	if (settings.enableHDR)
+		CreateHDRTextures();
+}
+
+void HDRDisplay::CreateHDRTextures()
+{
 	auto renderer = globals::game::renderer;
 	auto& main = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
 
@@ -713,13 +726,6 @@ void HDRDisplay::SetupResources()
 	rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
 	rtvDesc.Texture2D.MipSlice = 0;
 	uiTexture->CreateRTV(rtvDesc);
-
-	hdrDataCB = new ConstantBuffer(ConstantBufferDesc<HDRDataCB>(), "HDR::DataCB");
-
-	UpdateHDRData();
-
-	GetHDROutputCS();
-	GetUIBrightnessCS();
 
 	UpgradeLDRRenderTargets();
 }
@@ -916,6 +922,8 @@ void HDRDisplay::SyncFramebufferUIRedirect()
 		return;
 
 	auto& fb = globals::game::renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGET::kFRAMEBUFFER];
+	if (!savedFramebufferRTV && fb.RTV != uiTexture->rtv.get())
+		savedFramebufferRTV = fb.RTV;
 	fb.RTV = uiTexture->rtv.get();
 	globals::d3d::context->OMSetRenderTargets(1, &fb.RTV, nullptr);
 }
@@ -970,7 +978,10 @@ ID3D11BlendState* HDRDisplay::GetPatchedAlphaBlendState(ID3D11BlendState* origin
 {
 	auto it = patchedBlendStateCache.find(original);
 	if (it != patchedBlendStateCache.end())
-		return it->second ? it->second.get() : original;
+		return it->second.patched ? it->second.patched.get() : original;
+
+	auto& entry = patchedBlendStateCache[original];
+	entry.original.copy_from(original);
 
 	D3D11_BLEND_DESC desc{};
 	original->GetDesc(&desc);
@@ -989,7 +1000,6 @@ ID3D11BlendState* HDRDisplay::GetPatchedAlphaBlendState(ID3D11BlendState* origin
 	}
 
 	if (!needsPatch) {
-		patchedBlendStateCache[original] = nullptr;
 		return original;
 	}
 
@@ -1008,12 +1018,11 @@ ID3D11BlendState* HDRDisplay::GetPatchedAlphaBlendState(ID3D11BlendState* origin
 
 	winrt::com_ptr<ID3D11BlendState> patched;
 	if (FAILED(globals::d3d::device->CreateBlendState(&desc, patched.put()))) {
-		patchedBlendStateCache[original] = nullptr;
 		return original;
 	}
 
 	auto* raw = patched.get();
-	patchedBlendStateCache[original] = std::move(patched);
+	entry.patched = std::move(patched);
 	return raw;
 }
 
@@ -1113,7 +1122,12 @@ HRESULT HDRDisplay::HandleSwapChainPresent(
 	globals::menu->DrawOverlay();
 	globals::d3d::context->RSSetViewports(1, &savedViewport);
 
-	return RunPresentChainWithHDR(swapChain, syncInterval, flags, hdrReady, frameGenActive, presentChain);
+	const HRESULT result = RunPresentChainWithHDR(swapChain, syncInterval, flags, hdrReady, frameGenActive, presentChain);
+
+	if (loaded && settings.enableHDR && hdrDataCB && !hdrTexture)
+		CreateHDRTextures();
+
+	return result;
 }
 
 void HDRDisplay::ClearUIBuffer()

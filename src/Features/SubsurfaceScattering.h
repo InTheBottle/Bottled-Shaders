@@ -69,6 +69,7 @@ public:
 	bool validMaterials = false;
 
 	Texture2D* blurHorizontalTemp = nullptr;
+	void EnsureBlurHorizontalTemp();
 	Texture2D* diffuseNoAlbedoTex = nullptr;
 
 	ID3D11ComputeShader* prepassSS = nullptr;

@@ -436,6 +436,8 @@ void FurShells::Reset()
 	passCount = 0;
 	lastDiffuse = nullptr;
 	lastLookup = {};
+	if (!entries.empty() && globals::state->IsMainOrLoadingMenuOpen())
+		entries.clear();
 	deferredPasses.clear();
 	deferredOverlayPasses.clear();
 	frameBodies.clear();

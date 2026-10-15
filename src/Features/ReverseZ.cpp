@@ -49,11 +49,18 @@ namespace
 		return desc.Format == DXGI_FORMAT_R32G8X24_TYPELESS;
 	}
 
+	template <class T>
+	struct ReversedState
+	{
+		winrt::com_ptr<T> original;
+		winrt::com_ptr<T> reversed;
+	};
+
 	std::mutex g_stateMutex;
-	std::unordered_map<ID3D11DepthStencilState*, winrt::com_ptr<ID3D11DepthStencilState>> g_reversedStates;
+	std::unordered_map<ID3D11DepthStencilState*, ReversedState<ID3D11DepthStencilState>> g_reversedStates;
 
 	std::mutex g_rasterMutex;
-	std::unordered_map<ID3D11RasterizerState*, winrt::com_ptr<ID3D11RasterizerState>> g_reversedRasterStates;
+	std::unordered_map<ID3D11RasterizerState*, ReversedState<ID3D11RasterizerState>> g_reversedRasterStates;
 
 	ID3D11DepthStencilState* g_requestedState = nullptr;
 	ID3D11DepthStencilState* g_boundState = nullptr;
@@ -452,27 +459,25 @@ ID3D11RasterizerState* ReverseZ::GetReversedRasterizerState(ID3D11RasterizerStat
 
 	std::scoped_lock lock(g_rasterMutex);
 	if (auto it = g_reversedRasterStates.find(a_state); it != g_reversedRasterStates.end())
-		return it->second ? it->second.get() : a_state;
+		return it->second.reversed ? it->second.reversed.get() : a_state;
+
+	auto& entry = g_reversedRasterStates[a_state];
+	entry.original.copy_from(a_state);
 
 	D3D11_RASTERIZER_DESC desc{};
 	a_state->GetDesc(&desc);
-	if (desc.DepthBias == 0 && desc.SlopeScaledDepthBias == 0.0f && desc.DepthBiasClamp == 0.0f) {
-		g_reversedRasterStates.insert_or_assign(a_state, nullptr);
+	if (desc.DepthBias == 0 && desc.SlopeScaledDepthBias == 0.0f && desc.DepthBiasClamp == 0.0f)
 		return a_state;
-	}
 	desc.DepthBias = -desc.DepthBias;
 	desc.SlopeScaledDepthBias = -desc.SlopeScaledDepthBias;
 	desc.DepthBiasClamp = -desc.DepthBiasClamp;
 
-	winrt::com_ptr<ID3D11RasterizerState> reversed;
-	if (FAILED(globals::d3d::device->CreateRasterizerState(&desc, reversed.put()))) {
-		g_reversedRasterStates.insert_or_assign(a_state, nullptr);
+	if (FAILED(globals::d3d::device->CreateRasterizerState(&desc, entry.reversed.put()))) {
+		entry.reversed = nullptr;
 		return a_state;
 	}
-	Util::SetResourceName(reversed.get(), "ReverseZ::RasterizerState");
-	auto* raw = reversed.get();
-	g_reversedRasterStates.insert_or_assign(a_state, std::move(reversed));
-	return raw;
+	Util::SetResourceName(entry.reversed.get(), "ReverseZ::RasterizerState");
+	return entry.reversed.get();
 }
 
 ID3D11DepthStencilState* ReverseZ::GetReversedState(ID3D11DepthStencilState* a_state)
@@ -482,21 +487,21 @@ ID3D11DepthStencilState* ReverseZ::GetReversedState(ID3D11DepthStencilState* a_s
 
 	std::scoped_lock lock(g_stateMutex);
 	if (auto it = g_reversedStates.find(a_state); it != g_reversedStates.end())
-		return it->second ? it->second.get() : a_state;
+		return it->second.reversed ? it->second.reversed.get() : a_state;
+
+	auto& entry = g_reversedStates[a_state];
+	entry.original.copy_from(a_state);
 
 	D3D11_DEPTH_STENCIL_DESC desc{};
 	a_state->GetDesc(&desc);
 	desc.DepthFunc = FlipComparison(desc.DepthFunc);
 
-	winrt::com_ptr<ID3D11DepthStencilState> reversed;
-	if (FAILED(globals::d3d::device->CreateDepthStencilState(&desc, reversed.put()))) {
-		g_reversedStates.insert_or_assign(a_state, nullptr);
+	if (FAILED(globals::d3d::device->CreateDepthStencilState(&desc, entry.reversed.put()))) {
+		entry.reversed = nullptr;
 		return a_state;
 	}
-	Util::SetResourceName(reversed.get(), "ReverseZ::DepthStencilState");
-	auto* raw = reversed.get();
-	g_reversedStates.insert_or_assign(a_state, std::move(reversed));
-	return raw;
+	Util::SetResourceName(entry.reversed.get(), "ReverseZ::DepthStencilState");
+	return entry.reversed.get();
 }
 
 void ReverseZ::ApplyReverseProjection(void* a_cameraStateEntry, const RE::NiCamera* a_camera)

@@ -99,6 +99,11 @@ namespace
 
 	struct PipelineBackup
 	{
+		PipelineBackup() = default;
+		PipelineBackup(const PipelineBackup&) = delete;
+		PipelineBackup& operator=(const PipelineBackup&) = delete;
+		~PipelineBackup() { Release(); }
+
 		ID3D11ComputeShader* cs = nullptr;
 		ID3D11Buffer* csConstants[kConstantSlots] = {};
 		ID3D11ShaderResourceView* csResources[kCSResourceSlots] = {};

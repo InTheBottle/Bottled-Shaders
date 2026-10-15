@@ -1573,6 +1573,10 @@ bool LightLimitFix::FilterLocalShadowCaster(RE::BSShadowLight* a_light, const RE
 
 void LightLimitFix::ReleaseLocalShadowResources()
 {
+	if (localShadowCache || localShadowBuffer) {
+		ID3D11ShaderResourceView* nullViews[2] = {};
+		globals::d3d::context->PSSetShaderResources(102, ARRAYSIZE(nullViews), nullViews);
+	}
 	localShadowCache = nullptr;
 	localShadowBuffer = nullptr;
 	localShadowCacheSlots = 0;

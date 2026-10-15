@@ -376,6 +376,10 @@ void Effects11::ToggleEnabled()
 
 void Effects11::LoadRaindropTexture()
 {
+	if (raindropSRV) {
+		ID3D11ShaderResourceView* nullSRV = nullptr;
+		globals::d3d::context->PSSetShaderResources(80, 1, &nullSRV);
+	}
 	raindropTexture = nullptr;
 	raindropSRV = nullptr;
 	raindropStatus.clear();

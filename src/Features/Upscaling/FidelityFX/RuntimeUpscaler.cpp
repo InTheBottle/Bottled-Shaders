@@ -833,6 +833,8 @@ bool FidelityFX::EnsureRuntimeUpscalerInterop()
 		}
 
 		if (!runtimeD3D12Fence || !runtimeD3D11Fence) {
+			runtimeD3D12Fence = nullptr;
+			runtimeD3D11Fence = nullptr;
 			winrt::handle sharedFenceHandle;
 			DX::ThrowIfFailed(swapChain.d3d12Device->CreateFence(0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&runtimeD3D12Fence)));
 			DX::ThrowIfFailed(swapChain.d3d12Device->CreateSharedHandle(runtimeD3D12Fence.get(), nullptr, GENERIC_ALL, nullptr, sharedFenceHandle.put()));
@@ -1706,8 +1708,13 @@ bool FidelityFX::UpscaleRegion(uint32_t a_contextIndex, ID3D11Resource* a_color,
 	// A quarantined provider's contexts/resources are never dispatched into again; release
 	// them at this natural per-call boundary rather than inside the exception handler that
 	// discovered the quarantine, where GPU/command-list state is mid-teardown already.
-	if (runtimeUpscalerQuarantined && HasRuntimeUpscalerResources())
+	if (runtimeUpscalerQuarantined && HasRuntimeUpscalerResources()) {
 		ResetRuntimeUpscalerResources(false);
+	} else if (runtimeUpscalerFailureLatched && !runtimeAlreadyUsedThisFrame && HasRuntimeUpscalerResources()) {
+		WaitForRuntimeUpscalerIdle();
+		DestroyRuntimeUpscalerContexts(false);
+		DestroyRuntimeUpscalerResources(false);
+	}
 
 	const bool runtimeFsr4Requested = ShouldRequestRuntimeFsr4();
 	const bool runtimeRequested = runtimeFsr4Requested || ShouldUseRuntimeUpscalerForFSR();
@@ -1797,6 +1804,8 @@ bool FidelityFX::UpscaleRegion(uint32_t a_contextIndex, ID3D11Resource* a_color,
 	// std::size(fsrContext) is always 2; only fsrContext[0] is initialized in flat mode
 	// (CreateFSRResources' numContexts), so check against the actually-created count.
 	const uint32_t hostContextCount = 1u;
+	if (!fsrScratchBuffer && !hostFsrContextFailed)
+		CreateHostFSRContext();
 	if (!fsrScratchBuffer || a_contextIndex >= hostContextCount)
 		return false;
 

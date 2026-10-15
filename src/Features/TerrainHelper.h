@@ -37,6 +37,8 @@ public:
 
 	std::shared_mutex extendedSlotsMutex;
 	std::unordered_map<uint32_t, ExtendedSlots> extendedSlots;
+	std::unordered_map<uint32_t, std::vector<RE::BSGeometry*>> extendedSlotUsers;
+	std::unordered_map<RE::BSGeometry*, uint32_t> extendedSlotGeometries;
 	RE::BGSTextureSet* defaultLandTexture;
 	bool enabled = false;
 
@@ -46,6 +48,7 @@ public:
 	virtual void DataLoaded() override;
 	/** @brief Installs the BSLightingShader material setup hook after plugin load. */
 	virtual void PostPostLoad() override;
+	virtual void Reset() override;
 	virtual std::string GetFeatureModLink() override { return MakeNexusModURL(MOD_ID); }
 
 	/**

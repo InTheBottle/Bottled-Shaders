@@ -486,6 +486,14 @@ void SnowCover::SaveConfig()
 	status = std::format("Saved {}", path.generic_string());
 }
 
+void SnowCover::ReleaseTextures()
+{
+	for (auto& view : views)
+		view = nullptr;
+	ID3D11ShaderResourceView* srvs[std::tuple_size_v<decltype(views)>]{};
+	globals::d3d::context->PSSetShaderResources(FIRST_SRV_SLOT, (uint)views.size(), srvs);
+}
+
 void SnowCover::Reload()
 {
 	std::ifstream fileStream;
@@ -496,6 +504,7 @@ void SnowCover::Reload()
 			return;
 		last_worldspace = curr_worldspace;
 		ResetWorldConfig();
+		ReleaseTextures();
 		path = (Util::PathHelpers::GetShadersPath() / "SnowCover" / curr_worldspace).replace_extension(std::filesystem::path(".json"));
 		if (!std::filesystem::exists(path)) {
 			status = std::format("Config doesn't exist {}", path.generic_string());

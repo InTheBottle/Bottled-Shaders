@@ -241,11 +241,6 @@ void VolumetricLighting::EarlyPrepass()
 	int32_t width = static_cast<int32_t>(globals::game::graphicsState->screenWidth);
 	int32_t height = static_cast<int32_t>(globals::game::graphicsState->screenHeight);
 
-	if (width != fullScreenX || height != fullScreenY) {
-		blurHCS = nullptr;
-		blurVCS = nullptr;
-	}
-
 	fullScreenX = width;
 	fullScreenY = height;
 

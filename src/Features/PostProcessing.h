@@ -127,6 +127,7 @@ struct PostProcessing : Feature
 	virtual void ClearShaderCache() override;
 
 	virtual void SetupResources() override;
+	void EnsureEnabledResources();
 	virtual void Reset() override;
 
 	virtual void PostPostLoad() override;

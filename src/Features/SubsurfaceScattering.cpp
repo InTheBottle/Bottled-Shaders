@@ -292,7 +292,10 @@ void SubsurfaceScattering::DrawSSS()
 		views[0] = diffuseNoAlbedoTex->srv.get();
 		context->CSSetShaderResources(0, 1, views);
 
-		if (settings.SSMode == 0) {
+		if (settings.SSMode == 0)
+			EnsureBlurHorizontalTemp();
+
+		if (settings.SSMode == 0 && blurHorizontalTemp) {
 			// Horizontal pass: diffuseNoAlbedoTex -> blurHorizontalTemp
 			{
 				TracyD3D11Zone(globals::state->tracyCtx, "Subsurface Scattering - Horizontal");
@@ -384,14 +387,28 @@ void SubsurfaceScattering::SetupResources()
 		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
 		main.UAV->GetDesc(&uavDesc);
 
-		blurHorizontalTemp = new Texture2D(texDesc);
-		blurHorizontalTemp->CreateSRV(srvDesc);
-		blurHorizontalTemp->CreateUAV(uavDesc);
-
-		diffuseNoAlbedoTex = new Texture2D(texDesc);
+		diffuseNoAlbedoTex = new Texture2D(texDesc, "SSS::DiffuseNoAlbedo");
 		diffuseNoAlbedoTex->CreateSRV(srvDesc);
 		diffuseNoAlbedoTex->CreateUAV(uavDesc);
 	}
+
+	if (settings.SSMode == 0)
+		EnsureBlurHorizontalTemp();
+}
+
+void SubsurfaceScattering::EnsureBlurHorizontalTemp()
+{
+	if (blurHorizontalTemp || !diffuseNoAlbedoTex)
+		return;
+
+	D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+	diffuseNoAlbedoTex->srv->GetDesc(&srvDesc);
+	D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+	diffuseNoAlbedoTex->uav->GetDesc(&uavDesc);
+
+	blurHorizontalTemp = new Texture2D(diffuseNoAlbedoTex->desc, "SSS::BlurHorizontalTemp");
+	blurHorizontalTemp->CreateSRV(srvDesc);
+	blurHorizontalTemp->CreateUAV(uavDesc);
 }
 
 void SubsurfaceScattering::Reset()

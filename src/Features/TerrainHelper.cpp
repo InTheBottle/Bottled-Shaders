@@ -41,7 +41,7 @@ bool TerrainHelper::TESObjectLAND_SetupMaterial(RE::TESObjectLAND* land)
 		}
 
 		const auto& children = land->loadedData->mesh[quadI]->GetChildren();
-		auto geometry = children.empty() ? nullptr : static_cast<RE::BSGeometry*>(children[0].get());
+		RE::BSGeometry* geometry = children.empty() ? nullptr : static_cast<RE::BSGeometry*>(children[0].get());
 		if (geometry != nullptr) {
 			const auto shaderProp = static_cast<RE::BSLightingShaderProperty*>(geometry->GetGeometryRuntimeData().shaderProperty.get());
 			if (shaderProp != nullptr) {
@@ -101,6 +101,15 @@ bool TerrainHelper::TESObjectLAND_SetupMaterial(RE::TESObjectLAND* land)
 		{
 			const std::unique_lock lock(extendedSlotsMutex);
 			std::swap(extendedSlots[hashKey], slot);
+			auto [registered, isNew] = extendedSlotGeometries.try_emplace(geometry, hashKey);
+			if (isNew) {
+				geometry->IncRefCount();
+				extendedSlotUsers[hashKey].push_back(geometry);
+			} else if (registered->second != hashKey) {
+				std::erase(extendedSlotUsers[registered->second], geometry);
+				registered->second = hashKey;
+				extendedSlotUsers[hashKey].push_back(geometry);
+			}
 		}
 	}
 
@@ -127,7 +136,51 @@ struct THExtendedRendererState
 	{
 		std::fill(PSTexture.begin(), PSTexture.end(), nullptr);
 	}
+
+	void Clear()
+	{
+		std::fill(PSTexture.begin(), PSTexture.end(), nullptr);
+		PSResourceModifiedBits = (1u << NumPSTextures) - 1u;
+	}
 } thExtendedRendererState;
+
+void TerrainHelper::Reset()
+{
+	std::vector<RE::BSGeometry*> released;
+	std::vector<ExtendedSlots> releasedSlots;
+	{
+		const std::unique_lock lock(extendedSlotsMutex, std::try_to_lock);
+		if (!lock.owns_lock())
+			return;
+
+		for (auto it = extendedSlotUsers.begin(); it != extendedSlotUsers.end();) {
+			std::erase_if(it->second, [&](RE::BSGeometry* a_geometry) {
+				if (a_geometry->GetRefCount() > 1)
+					return false;
+				extendedSlotGeometries.erase(a_geometry);
+				released.push_back(a_geometry);
+				return true;
+			});
+
+			if (!it->second.empty()) {
+				++it;
+				continue;
+			}
+
+			if (auto slotIt = extendedSlots.find(it->first); slotIt != extendedSlots.end()) {
+				releasedSlots.push_back(std::move(slotIt->second));
+				extendedSlots.erase(slotIt);
+			}
+			it = extendedSlotUsers.erase(it);
+		}
+	}
+
+	if (!releasedSlots.empty())
+		thExtendedRendererState.Clear();
+
+	for (auto* geometry : released)
+		geometry->DecRefCount();
+}
 
 void TerrainHelper::SetShaderResources(ID3D11DeviceContext* a_context)
 {
