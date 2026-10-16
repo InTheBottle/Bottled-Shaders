@@ -36,7 +36,7 @@ struct ExtendedMaterials : Feature
 		uint EnableParallaxWarpingFix = 1;
 
 		float ParallaxQuality = 1.0f;
-		uint EnableNormalMapShadows = 1;
+		uint EnableNormalMapShadows = 0;
 
 		float NormalMapShadowHeightScale = 1.0f;
 		float NormalMapShadowLength = 0.05f;

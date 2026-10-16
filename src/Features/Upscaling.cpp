@@ -46,15 +46,6 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 
 decltype(&D3D11CreateDeviceAndSwapChain) ptrD3D11CreateDeviceAndSwapChainUpscaling;
 
-/**
- * @brief One-shot migration of fsr4RuntimeEnable for the detected adapter's FSR4 support class.
- *
- * RX 7000 (RDNA3 discrete) eligibility was added after fsr4RuntimeEnable already shipped
- * defaulting to off; auto-enable it once for those adapters so existing/new RX 7000 users
- * get the same experience as a fresh RX 9000 install. Leaves the user's own choice alone on
- * RX 9000 (already eligible pre-migration) and on Unsupported adapters, where the version is
- * deliberately left unstamped so the migration re-runs once a supported adapter is detected.
- */
 void ApplyLegacyFsr4RuntimeSelectionMigration(Upscaling::Settings& a_settings, FidelityFX::Fsr4AdapterSupport a_adapterSupport)
 {
 	if (a_settings.fsr4RuntimeSelectionSchemaVersion >= Upscaling::kFsr4RuntimeSelectionSchemaVersion)
@@ -62,11 +53,6 @@ void ApplyLegacyFsr4RuntimeSelectionMigration(Upscaling::Settings& a_settings, F
 
 	if (a_adapterSupport == FidelityFX::Fsr4AdapterSupport::Unsupported)
 		return;
-
-	if (a_adapterSupport == FidelityFX::Fsr4AdapterSupport::RadeonRx7000 && !a_settings.fsr4RuntimeEnable) {
-		a_settings.fsr4RuntimeEnable = true;
-		logger::info("[Upscaling] Auto-enabled Runtime FSR4 for detected RX 7000-class adapter");
-	}
 
 	a_settings.fsr4RuntimeSelectionSchemaVersion = Upscaling::kFsr4RuntimeSelectionSchemaVersion;
 }

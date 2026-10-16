@@ -2,7 +2,7 @@
 #define EXTENDED_MATERIALS_PARALLAX_CORE_HLSLI
 
 #if defined(LANDSCAPE)
-	float2 GetParallaxCoords(PS_INPUT input, float2 coords, float mipLevel, float maxTexDim, float3 viewDir, float3x3 tbn, float noise, DisplacementParams params[TERRAIN_LAYER_COUNT],
+	float2 GetParallaxCoords(PS_INPUT input, float distance, float2 coords, float mipLevel, float maxTexDim, float3 viewDir, float3x3 tbn, float noise, DisplacementParams params[TERRAIN_LAYER_COUNT],
 		StochasticOffsets sharedOffset,
 		out float weights[TERRAIN_LAYER_COUNT])
 #else
@@ -66,7 +66,8 @@
 			const float density = ParallaxDensity();
 			const uint minSteps = 4;
 #if defined(LANDSCAPE)
-			const uint maxStepsCap = clamp((uint)(40.0 * density + 0.5), 8u, 128u);
+			const float nearBlendToFar = smoothstep(1024.0 * 1024.0, 2048.0 * 2048.0, distance * distance);
+			const uint maxStepsCap = max(minSteps, (uint)(clamp((uint)(40.0 * density + 0.5), 8u, 128u) * (1.0 - nearBlendToFar) + 0.5));
 #else
 			const uint maxStepsCap = clamp((uint)(32.0 * density + 0.5), 8u, 128u);
 			const float baseMaxSteps = 8;

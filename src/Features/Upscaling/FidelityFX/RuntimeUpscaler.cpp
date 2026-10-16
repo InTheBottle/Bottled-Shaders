@@ -784,7 +784,7 @@ bool FidelityFX::IsRuntimeFsr4Available() const
 
 bool FidelityFX::ShouldUseRuntimeUpscalerForFSR() const
 {
-	return IsRuntimeUpscalerPresent() && IsAmdAdapterDetected();
+	return globals::features::upscaling.fsr4RuntimeEnableBoot && IsRuntimeUpscalerPresent() && IsAmdAdapterDetected();
 }
 
 bool FidelityFX::CanUseRuntimeUpscalerPath()

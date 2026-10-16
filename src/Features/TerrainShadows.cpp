@@ -7,7 +7,6 @@
 #include <DirectXTex.h>
 #include <pystring/pystring.h>
 
-#include "Features/SkySync.h"
 #include "I18n/I18n.h"
 #include "State.h"
 #include "Util.h"
@@ -235,7 +234,10 @@ void TerrainShadows::DrawSettings()
 
 void TerrainShadows::ClearShaderCache()
 {
-	shadowUpdateProgram = nullptr;
+	if (shadowUpdateProgram) {
+		shadowUpdateProgram->Release();
+		shadowUpdateProgram = nullptr;
+	}
 
 	CompileComputeShaders();
 }
@@ -485,7 +487,6 @@ bool TerrainShadows::UpdateShadow(bool a_refreshImmediately)
 	// don't forget to change NTHREADS in shader!
 	constexpr uint updateLength = 128u;
 	constexpr uint logUpdateLength = std::bit_width(128u) - 1;  // integer log2, https://stackoverflow.com/questions/994593/how-to-do-an-integer-log2-in-c
-	constexpr uint updatesPerFrame = 4u;
 
 	auto context = globals::d3d::context;
 
@@ -515,12 +516,7 @@ bool TerrainShadows::UpdateShadow(bool a_refreshImmediately)
 	if (a_refreshImmediately)
 		shadowUpdateIdx = 0;
 	if (shadowUpdateIdx == 0) {
-		// Sky Sync clamps the sun light's elevation, which would cast sunset terrain shadows from too high
-		const auto celestialDirection = globals::features::skySync.GetCelestialLightDirection(globals::game::sky);
-		auto worldDirection = celestialDirection ? -*celestialDirection : sunLight->GetWorldDirection();
-		// A sun below the horizon keeps grazing, since the flip below would cast from the opposite side
-		if (celestialDirection)
-			worldDirection.z = std::min(worldDirection.z, 0.0f);
+		const auto worldDirection = sunLight->GetWorldDirection();
 		float3 dirLightDir = { worldDirection.x, worldDirection.y, worldDirection.z };
 		if (dirLightDir.z > 0)
 			dirLightDir = -dirLightDir;
@@ -585,14 +581,12 @@ bool TerrainShadows::UpdateShadow(bool a_refreshImmediately)
 	context->CSSetConstantBuffers(0, 1, &newer.buffer);
 	context->CSSetShader(shadowUpdateProgram.get(), nullptr, 0);
 	globals::profiler->BeginPass("TerrainShadows::ShadowUpdate");
-	const uint updateCount = a_refreshImmediately ? maxUpdates : updatesPerFrame;
+	const uint updateCount = a_refreshImmediately ? maxUpdates : 1u;
 	for (uint update = 0; update < updateCount; ++update) {
 		shadowUpdateCBData.StartPxCoord = edgePxCoord + signDir * shadowUpdateIdx * updateLength;
 		shadowUpdateCB->Update(shadowUpdateCBData);
 		context->Dispatch(abs(shadowUpdateCBData.LightPxDir.x) >= abs(shadowUpdateCBData.LightPxDir.y) ? height : width, 1, 1);
 		shadowUpdateIdx = (shadowUpdateIdx + 1) % maxUpdates;
-		if (shadowUpdateIdx == 0)
-			break;
 	}
 	globals::profiler->EndPass();
 
@@ -615,33 +609,14 @@ void TerrainShadows::ReflectionsPrepass()
 	}
 }
 
-void TerrainShadows::ReleaseHeightmap()
-{
-	if (!texHeightMap && !texShadowHeight)
-		return;
-
-	auto context = globals::d3d::context;
-	std::array<ID3D11ShaderResourceView*, 1> srvs = { nullptr };
-	context->PSSetShaderResources(60, (uint)srvs.size(), srvs.data());
-	context->CSSetShaderResources(60, (uint)srvs.size(), srvs.data());
-
-	texShadowHeight.reset();
-	texHeightMap.reset();
-	cachedHeightmap = nullptr;
-	needPrecompute = false;
-}
-
 void TerrainShadows::EarlyPrepass()
 {
-	if (!settings.EnableTerrainShadow) {
-		ReleaseHeightmap();
-		return;
-	}
-
 	LoadHeightmap();
 
 	const auto requestedRefreshGeneration = Util::GetCompletedCelestialTransitionGeneration();
 	const bool timeJumpRefresh = requestedRefreshGeneration != handledTimeJumpRefreshGeneration;
+	if (!settings.EnableTerrainShadow)
+		return;
 
 	const bool refreshImmediately = needPrecompute || timeJumpRefresh;
 	if (needPrecompute)

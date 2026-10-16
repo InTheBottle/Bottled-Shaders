@@ -14,7 +14,7 @@ public:
 	/** @brief Returns the short identifier name. */
 	virtual inline std::string GetShortName() override { return "TerrainShadows"; }
 	virtual inline std::string_view GetShaderDefineName() override { return "TERRAIN_SHADOWS"; }
-	virtual std::string_view GetCategory() const override { return FeatureCategories::kShadows; }
+	virtual std::string_view GetCategory() const override { return FeatureCategories::kLandscapeAndTextures; }
 	/** @brief Returns a description and list of key features for the UI summary. */
 	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
 	{
@@ -109,7 +109,6 @@ public:
 	virtual void GameLoaded() override;
 	/** @brief Loads the heightmap DDS for the current worldspace if not already cached. */
 	void LoadHeightmap();
-	void ReleaseHeightmap();
 	/** @brief Creates the shadow height texture after a new heightmap is loaded. */
 	void Precompute();
 	/**

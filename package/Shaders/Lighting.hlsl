@@ -1479,11 +1479,11 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		weights[6] = weights[7] = weights[8] = weights[9] = 0.0;
 #			endif
 
-		const bool doTerrainPom = ExtendedMaterials::TerrainHasAnyDisplacement() &&
+		const bool doTerrainPom = viewPosition.z < 2048.0 && ExtendedMaterials::TerrainHasAnyDisplacement() &&
 		                          ExtendedMaterials::TerrainMaxWeightedHeightScale(input, displacementParams) > 0.01;
 		[branch] if (doTerrainPom)
 		{
-			uv = ExtendedMaterials::GetParallaxCoords(input, uv, terrainMipLevel, terrainMaxTexDim, viewDirection, tbnTr, screenNoise, displacementParams, sharedOffset, weights);
+			uv = ExtendedMaterials::GetParallaxCoords(input, viewPosition.z, uv, terrainMipLevel, terrainMaxTexDim, viewDirection, tbnTr, screenNoise, displacementParams, sharedOffset, weights);
 		}
 		else if (SharedData::extendedMaterialSettings.EnableHeightBlending)
 		{
@@ -2792,7 +2792,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #			else
 	const bool localShadowSkinned = false;
 #			endif
-#			if defined(DEFERRED)
+#			if defined(DEFERRED) && defined(LLF_CONTACT_SHADOWS)
 	float contactShadowStrengthScale = 0.0;
 	const uint contactShadowSteps = LightLimitFix::GetContactShadowSteps(viewPosition.z, contactShadowStrengthScale);
 #			endif
@@ -2844,7 +2844,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #			endif
 		float lightAngle = dot(shadowGateNormal, normalizedLightDirection.xyz);
 
-#			if defined(DEFERRED)
+#			if defined(DEFERRED) && defined(LLF_CONTACT_SHADOWS)
 		[branch] if (contactShadowSteps > 0 && shadowComponent > 0.0 && lightAngle > 0.0 && !(light.lightFlags & LightLimitFix::LightFlags::Simple))
 		{
 			float3 lightVectorVS = mul((float3x3)FrameBuffer::CameraView, lightDirection);

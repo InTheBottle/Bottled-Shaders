@@ -112,6 +112,8 @@ void LightLimitFix::DrawSettings()
 							  "Short screen-space shadows traced toward every point light.\n"
 							  "They add the contact detail shadow maps miss and give lights without a shadow map a shadow of their own."));
 	}
+	if (settings.EnableContactShadows != AreContactShadowsCompiled())
+		Util::Text::Warning("%s", T(TKEY("contact_shadows_restart"), "Restart the game to apply."));
 
 	if (settings.EnableContactShadows) {
 		ImGui::SliderInt(T(TKEY("contact_shadow_max_steps"), "Max Steps"), (int*)&settings.ContactShadowMaxSteps, 1, 32, "%d", ImGuiSliderFlags_AlwaysClamp);
@@ -205,6 +207,15 @@ void LightLimitFix::DrawOverlay()
 	ImGui::End();
 }
 
+bool LightLimitFix::AreContactShadowsCompiled()
+{
+	if (!contactShadowsLatched) {
+		contactShadowsLatched = true;
+		contactShadowsAtBoot = settings.EnableContactShadows;
+	}
+	return contactShadowsAtBoot;
+}
+
 LightLimitFix::PerFrame LightLimitFix::GetCommonBufferData()
 {
 	PerFrame perFrame{};
@@ -216,7 +227,7 @@ LightLimitFix::PerFrame LightLimitFix::GetCommonBufferData()
 		return std::isfinite(a_value) ? std::clamp(a_value, a_min, a_max) : a_min;
 	};
 
-	perFrame.EnableContactShadows = settings.EnableContactShadows;
+	perFrame.EnableContactShadows = settings.EnableContactShadows && AreContactShadowsCompiled();
 	perFrame.ContactShadowMaxSteps = std::clamp<uint>(settings.ContactShadowMaxSteps, 1u, 32u);
 	perFrame.ContactShadowMaxDistance = sanitize(settings.ContactShadowMaxDistance, 64.0f, 8192.0f);
 	perFrame.ContactShadowLength = sanitize(settings.ContactShadowLength, 1.0f, 256.0f);

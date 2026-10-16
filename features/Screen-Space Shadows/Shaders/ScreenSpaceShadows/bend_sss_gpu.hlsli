@@ -190,13 +190,6 @@ static void ComputeWavefrontExtents(DispatchParameters inParameters, int3 inGrou
 // Number of bilinear sample reads performed per-thread
 #define READ_COUNT (SAMPLE_COUNT / WAVE_SIZE + 2)
 
-#if SAMPLE_COUNT >= 32
-#	define FADE_OUT_SAMPLES 8
-#else
-#	define FADE_OUT_SAMPLES (SAMPLE_COUNT / 4)
-#endif
-#define MAIN_SAMPLES (SAMPLE_COUNT - FADE_OUT_SAMPLES)
-
 // Common shared data
 groupshared half DepthData[READ_COUNT * WAVE_SIZE];
 
@@ -354,7 +347,7 @@ void WriteScreenSpaceShadow(DispatchParameters inParameters, int3 inGroupID, int
 #else
 #	define SSS_MARCH_ATTRIBUTE [unroll]
 #endif
-	SSS_MARCH_ATTRIBUTE for (i = 0; i < (MAIN_SAMPLES & ~3); i += 4)
+	SSS_MARCH_ATTRIBUTE for (i = 0; i < SAMPLE_COUNT; i += 4)
 	{
 		[unroll] for (int j = 0; j < 4; j++)
 		{
@@ -368,27 +361,6 @@ void WriteScreenSpaceShadow(DispatchParameters inParameters, int3 inGroupID, int
 		}
 	}
 #undef SSS_MARCH_ATTRIBUTE
-
-	[unroll] for (i = (MAIN_SAMPLES & ~3); i < MAIN_SAMPLES; i++)
-	{
-		half shadow_depth = DepthData[sample_index + i] * depth_scale;
-		half front_depth_delta = abs(front_start_depth - shadow_depth);
-		half back_depth_delta = abs(back_start_depth - shadow_depth);
-
-		front_shadow_value[i & 3] = min(front_shadow_value[i & 3], front_depth_delta);
-		back_shadow_value[i & 3] = min(back_shadow_value[i & 3], back_depth_delta);
-	}
-
-	[unroll] for (i = MAIN_SAMPLES; i < SAMPLE_COUNT; i++)
-	{
-		half shadow_depth = DepthData[sample_index + i] * depth_scale;
-		half fade_out = (half)(i + 1 - MAIN_SAMPLES) / (half)(FADE_OUT_SAMPLES + 1) * 0.75;
-		half front_depth_delta = abs(front_start_depth - shadow_depth) + fade_out;
-		half back_depth_delta = abs(back_start_depth - shadow_depth) + fade_out;
-
-		front_shadow_value[i & 3] = min(front_shadow_value[i & 3], front_depth_delta);
-		back_shadow_value[i & 3] = min(back_shadow_value[i & 3], back_depth_delta);
-	}
 
 	// Apply the contrast value.
 	// A value of 0 indicates a sample was exactly matched to the reference depth (and the result is fully shadowed)

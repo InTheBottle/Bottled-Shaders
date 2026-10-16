@@ -15,6 +15,7 @@
 
 #include "Features/DynamicCubemaps.h"
 #include "Features/LandscapeSeams.h"
+#include "Features/LightLimitFix.h"
 #include "Features/ReverseZ.h"
 #include "Features/SnowCover.h"
 #include "Features/WetnessEffects.h"
@@ -176,6 +177,8 @@ namespace SIE
 					defines[lastIndex++] = { feature->GetShaderDefineName().data(), nullptr };
 				}
 			}
+			if (globals::features::lightLimitFix.loaded && globals::features::lightLimitFix.AreContactShadowsCompiled())
+				defines[lastIndex++] = { "LLF_CONTACT_SHADOWS", nullptr };
 
 			defines[lastIndex] = { nullptr, nullptr };
 		}

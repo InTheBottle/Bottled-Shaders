@@ -866,7 +866,14 @@ void ExponentialHeightFog::Prepass()
 	const Settings frameSettings = GetCommonBufferData();
 	const float fogDensity = frameSettings.useVanillaFogSettings ? frameSettings.vanillaFogDensity * frameSettings.vanillaFogStrength : frameSettings.fogDensity;
 	if (fogDensity <= 0.0f && frameSettings.fogDensity2 <= 0.0f) {
-		ReleaseVolumetricResources();
+		hasLightScatteringHistory = false;
+		hasConservativeDepthHistory = false;
+		hasLightScatteringFarHistory = false;
+		hasConservativeDepthFarHistory = false;
+		lastPrepassFrame = UINT32_MAX;
+		ID3D11ShaderResourceView* nullViews[1] = { nullptr };
+		globals::d3d::context->PSSetShaderResources(19, 1, nullViews);
+		globals::d3d::context->PSSetShaderResources(22, 1, nullViews);
 		return;
 	}
 

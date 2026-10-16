@@ -258,6 +258,8 @@ public:
 	/** @brief Populates and returns the per-frame constant buffer data for light visualization settings. */
 	PerFrame GetCommonBufferData();
 
+	bool AreContactShadowsCompiled();
+
 	struct alignas(16) StrictLightDataCB
 	{
 		uint NumStrictLights;
@@ -460,7 +462,7 @@ public:
 		bool EnableParticleLightsCulling = true;
 		bool EnableLightsVisualisation = false;
 		uint LightsVisualisationMode = 0;
-		bool EnableContactShadows = true;
+		bool EnableContactShadows = false;
 		uint ContactShadowMaxSteps = 4;
 		float ContactShadowMaxDistance = 1024.0f;
 		float ContactShadowLength = 8.0f;
@@ -614,6 +616,9 @@ public:
 	};
 
 private:
+	bool contactShadowsLatched = false;
+	bool contactShadowsAtBoot = false;
+
 	static constexpr float DefaultCutoff = 0.05f;
 	static constexpr float DefaultShadowCasterCutoff = 0.022f;
 
