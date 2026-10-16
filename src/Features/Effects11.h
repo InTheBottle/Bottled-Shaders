@@ -40,9 +40,7 @@ public:
 		float FireIntensity;
 
 		float FireCurve;
-		uint EnableRain;
-		float RainMotionStretch;
-		float RainMotionTransparency;
+		float pad0[3];
 
 		float CloudsCurve;
 		float CloudsDesaturation;
@@ -138,7 +136,7 @@ public:
 		uint VolumetricFogEnableLighting;
 
 		float3 VolumetricRaysSkyColor;
-		float VolumetricRaysPad0;
+		uint VolumetricFogEnableShadows;
 
 		float StarsCurve;
 		float StarsIntensity;
@@ -154,11 +152,24 @@ public:
 		uint FixBlackCrush;
 		float NightSkyPad0;
 		float NightSkyPad1;
+
+		uint VolumetricRaysSampleCount;
+		uint GameVolumetricRaysDisableDithering;
+		float2 GameVolumetricRaysPad0;
+
+		float3 GameVolumetricRaysLightScale;
+		float GameVolumetricRaysCustomContribution;
+
+		float3 GameVolumetricRaysCustomColor;
+		float GameVolumetricRaysPad1;
 	};
 	static_assert(sizeof(PerFrame) % 16 == 0);
 	static_assert(offsetof(PerFrame, StarsCurve) % 16 == 0);
 	static_assert(offsetof(PerFrame, VolumetricFogColorFilter) % 16 == 0);
 	static_assert(offsetof(PerFrame, VolumetricRaysSkyColor) % 16 == 0);
+	static_assert(offsetof(PerFrame, VolumetricRaysSampleCount) % 16 == 0);
+	static_assert(offsetof(PerFrame, GameVolumetricRaysLightScale) % 16 == 0);
+	static_assert(offsetof(PerFrame, GameVolumetricRaysCustomColor) % 16 == 0);
 	static_assert(offsetof(PerFrame, EnableCloudsScattering) % 16 == 0);
 	static_assert(offsetof(PerFrame, SkyScatteringColor) % 16 == 0);
 	static_assert(offsetof(PerFrame, SkyScatteringDustTint) % 16 == 0);
@@ -180,7 +191,6 @@ public:
 	ID3D11ComputeShader* blurHCS = nullptr;
 	ID3D11ComputeShader* blurVCS = nullptr;
 	winrt::com_ptr<ID3D11BlendState> scatteringBlendState;
-	winrt::com_ptr<ID3D11BlendState> alphaBlendState;
 
 	std::unique_ptr<Texture2D> vlTexA;
 	std::unique_ptr<Texture2D> vlTexB;
@@ -196,11 +206,7 @@ public:
 
 	float3 scatteringSunColor = { 1.0f, 1.0f, 1.0f };
 	float3 scatteringSunDirection = { 0.0f, 0.0f, 1.0f };
-
-	winrt::com_ptr<ID3D11Texture2D> raindropTexture;
-	winrt::com_ptr<ID3D11ShaderResourceView> raindropSRV;
-	std::string raindropStatus;
-	void LoadRaindropTexture();
+	float3 directLightingUngradeScale = { 1.0f, 1.0f, 1.0f };
 
 	PerFrame GetCommonBufferData();
 	void UpdateSkyScattering(PerFrame& a_data);
@@ -218,7 +224,7 @@ public:
 
 	void DrawVolumetricRays();
 
-	/** @brief Draws the ENB [RAYS] screen-space sun (or Masser) shafts additively onto the main target. */
+	/** @brief Draws the ENB [RAYS] screen-space shafts from the sun, or from a moon at night, additively onto the main target. */
 	void DrawSunRays();
 
 	void OnSkyUpdateColors(RE::Sky* a_sky);
@@ -235,11 +241,6 @@ public:
 		RE::NiColor directionalAmbientColors[3][2];
 	};
 	void OverrideAmbientLighting(DirectionalAmbientColors& DirectionalAmbientColors);
-
-	__declspec(noinline) void ModifyParticle(RE::BSRenderPass* Pass);
-	void ParticleShaderHacks();
-	/** @brief True when the effect is on, the raindrop texture loaded, and RAIN "Enable" is set. */
-	bool IsRainEnabled();
 
 	/**
 	 * @brief Whether Effects11 wants to replace the vanilla tonemap this frame.

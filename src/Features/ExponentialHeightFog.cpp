@@ -1210,13 +1210,14 @@ void ExponentialHeightFog::Prepass()
 
 void ExponentialHeightFog::RegisterWeatherVariables()
 {
+	const Settings defaults{};
 	auto* registry = WeatherVariables::GlobalWeatherRegistry::GetSingleton()->GetOrCreateFeatureRegistry(GetShortName());
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
 		"startDistance",
 		"Start Distance",
 		"Start distance of the fog, from the camera",
 		&settings.startDistance,
-		0.0f,
+		defaults.startDistance,
 		0.0f, 100000.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1224,7 +1225,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Fog Height",
 		"Base height of the fog effect",
 		&settings.fogHeight,
-		0.0f,
+		defaults.fogHeight,
 		-22000.0f, 22000.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1232,7 +1233,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Fog Height Falloff",
 		"Height density factor controls how the density increases as height decreases",
 		&settings.fogHeightFalloff,
-		0.2f,
+		defaults.fogHeightFalloff,
 		0.001f, 2.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::Float4Variable>(
@@ -1240,14 +1241,14 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Fog Inscattering Color",
 		"Color added to the fog inscattering contribution",
 		&settings.fogInscatteringColor,
-		float4{ 0.0f, 0.0f, 0.0f, 1.0f }));
+		defaults.fogInscatteringColor));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
 		"originalFogColorAmount",
 		"Original Fog Color Amount",
 		"Amount of the original fog color added to fog inscattering",
 		&settings.originalFogColorAmount,
-		1.0f,
+		defaults.originalFogColorAmount,
 		0.0f, 1.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1255,7 +1256,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Fog Density",
 		"Overall density of the fog",
 		&settings.fogDensity,
-		0.02f,
+		defaults.fogDensity,
 		0.0f, 1.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1263,7 +1264,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Fog Height 2",
 		"Base height of the second fog layer",
 		&settings.fogHeight2,
-		0.0f,
+		defaults.fogHeight2,
 		-22000.0f, 22000.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1271,7 +1272,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Fog Height Falloff 2",
 		"Height density factor of the second fog layer controlling how the density increases as height decreases",
 		&settings.fogHeightFalloff2,
-		0.2f,
+		defaults.fogHeightFalloff2,
 		0.001f, 2.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1279,7 +1280,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Fog Density 2",
 		"Overall density of the second fog layer",
 		&settings.fogDensity2,
-		0.0f,
+		defaults.fogDensity2,
 		0.0f, 1.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1287,7 +1288,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Directional Inscattering Multiplier",
 		"Multiplier for directional light inscattering",
 		&settings.directionalInscatteringMultiplier,
-		1.0f,
+		defaults.directionalInscatteringMultiplier,
 		0.0f, 10.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1295,7 +1296,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Sunlight Attenuation Amount",
 		"Amount of fog attenuation applied to direct sunlight",
 		&settings.sunlightAttenuationAmount,
-		1.0f,
+		defaults.sunlightAttenuationAmount,
 		0.0f, 1.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1303,7 +1304,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Directional Inscattering Anisotropy",
 		"Henyey-Greenstein asymmetry parameter. Positive = forward scattering, 0 = isotropic, negative = back scattering.",
 		&settings.directionalInscatteringAnisotropy,
-		0.2f,
+		defaults.directionalInscatteringAnisotropy,
 		-0.99f, 0.99f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::Float4Variable>(
@@ -1311,14 +1312,14 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Inscattering Cubemap Tint",
 		"RGB tint for the inscattering cubemap with alpha for intensity",
 		&settings.inscatteringTint,
-		float4{ 1.0f, 1.0f, 1.0f, 1.0f }));
+		defaults.inscatteringTint));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::WeatherVariable<bool>>(
 		"respectVanillaFogFade",
 		"Apply Vanilla Fade",
 		"Apply vanilla fade brightness to exponential height fog",
 		(bool*)&settings.respectVanillaFogFade,
-		false,
+		defaults.respectVanillaFogFade != 0,
 		[](const bool& from, const bool& to, float factor) {
 			return factor > 0.5f ? to : from;
 		}));
@@ -1328,7 +1329,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Disable Vanilla Fog",
 		"Disables vanilla fog entirely, only exponential height fog is applied",
 		(bool*)&settings.disableVanillaFog,
-		false,
+		defaults.disableVanillaFog != 0,
 		[](const bool& from, const bool& to, float factor) {
 			return factor > 0.5f ? to : from;
 		}));
@@ -1338,7 +1339,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Enable Volumetric Fog",
 		"Enables froxel-based volumetric fog for exponential height fog",
 		(bool*)&settings.volumetricFogEnabled,
-		false,
+		defaults.volumetricFogEnabled != 0,
 		[](const bool& from, const bool& to, float factor) {
 			return factor > 0.5f ? to : from;
 		}));
@@ -1348,7 +1349,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Volumetric View Distance",
 		"Maximum distance covered by exponential height volumetric fog",
 		&settings.volumetricFogDistance,
-		60000.0f,
+		defaults.volumetricFogDistance,
 		1000.0f, 200000.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1356,7 +1357,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Volumetric Near Grid Distance",
 		"Distance covered by the full-resolution near volume; a quarter-lattice far volume covers the rest",
 		&settings.volumetricNearGridDistance,
-		8000.0f,
+		defaults.volumetricNearGridDistance,
 		256.0f, 50000.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1364,7 +1365,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Volumetric Fog Noise Scale",
 		"Spatial frequency of the volumetric fog noise field (0 = disabled)",
 		&settings.volumetricFogNoiseScale,
-		0.0f,
+		defaults.volumetricFogNoiseScale,
 		0.0f, 0.01f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1372,7 +1373,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Volumetric Fog Noise Threshold",
 		"Soft cutoff that carves clumps out of the volumetric fog noise field",
 		&settings.volumetricFogNoiseThreshold,
-		0.5f,
+		defaults.volumetricFogNoiseThreshold,
 		0.0f, 1.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::Float3Variable>(
@@ -1380,14 +1381,14 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Volumetric Fog Noise Velocity",
 		"Animation drift of the volumetric fog noise field",
 		&settings.volumetricFogNoiseVelocity,
-		float3{ 0.0f, 0.0f, 0.0f }));
+		defaults.volumetricFogNoiseVelocity));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
 		"volumetricFogStartDistance",
 		"Volumetric Start Distance",
 		"Start distance of volumetric fog from the camera",
 		&settings.volumetricFogStartDistance,
-		0.0f,
+		defaults.volumetricFogStartDistance,
 		0.0f, 200000.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1395,7 +1396,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Volumetric Near Fade In Distance",
 		"Distance over which volumetric fog fades in near the camera",
 		&settings.volumetricFogNearFadeInDistance,
-		1000.0f,
+		defaults.volumetricFogNearFadeInDistance,
 		0.0f, 20000.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1403,7 +1404,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Volumetric Extinction Scale",
 		"Scale applied to volumetric fog extinction",
 		&settings.volumetricFogExtinctionScale,
-		1.0f,
+		defaults.volumetricFogExtinctionScale,
 		0.0f, 10.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1411,7 +1412,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Volumetric Scattering Distribution",
 		"Henyey-Greenstein scattering distribution for volumetric fog",
 		&settings.volumetricFogScatteringDistribution,
-		0.2f,
+		defaults.volumetricFogScatteringDistribution,
 		-0.9f, 0.9f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1419,7 +1420,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Volumetric Directional Scattering Intensity",
 		"Scale applied to volumetric fog directional light scattering",
 		&settings.volumetricDirectionalScatteringIntensity,
-		1.0f,
+		defaults.volumetricDirectionalScatteringIntensity,
 		0.0f, 10.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::Float4Variable>(
@@ -1427,21 +1428,21 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Volumetric Albedo",
 		"Volumetric fog albedo color",
 		&settings.volumetricFogAlbedo,
-		float4{ 1.0f, 1.0f, 1.0f, 1.0f }));
+		defaults.volumetricFogAlbedo));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::Float4Variable>(
 		"volumetricFogEmissive",
 		"Volumetric Emissive",
 		"Volumetric fog emissive color",
 		&settings.volumetricFogEmissive,
-		float4{ 0.0f, 0.0f, 0.0f, 0.0f }));
+		defaults.volumetricFogEmissive));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
 		"volumetricSkyLightingIntensity",
 		"Volumetric Sky Lighting Intensity",
 		"Scale applied to volumetric fog sky lighting",
 		&settings.volumetricSkyLightingIntensity,
-		1.0f,
+		defaults.volumetricSkyLightingIntensity,
 		0.0f, 10.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1449,7 +1450,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Volumetric Local Light Scattering Intensity",
 		"Scale applied to volumetric fog local light scattering",
 		&settings.volumetricLocalLightScatteringIntensity,
-		1.0f,
+		defaults.volumetricLocalLightScatteringIntensity,
 		0.0f, 100.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1457,7 +1458,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Weather Fog Strength",
 		"Scales the fog density derived from the active weather when following vanilla fog",
 		&settings.vanillaFogStrength,
-		1.25f,
+		defaults.vanillaFogStrength,
 		0.0f, 4.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1465,7 +1466,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Weather Lighting Influence",
 		"How strongly sun, sky and local lights shape fog that follows vanilla fog",
 		&settings.fogLightingInfluence,
-		0.35f,
+		defaults.fogLightingInfluence,
 		0.0f, 1.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1473,7 +1474,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Haze Maximum Opacity",
 		"Maximum opacity of distance haze added at all heights",
 		&settings.distanceHazeMaxOpacity,
-		0.0f,
+		defaults.distanceHazeMaxOpacity,
 		0.0f, 1.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1481,7 +1482,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Haze Start Distance",
 		"Horizontal distance from the camera where distance haze begins",
 		&settings.distanceHazeStartDistance,
-		15000.0f,
+		defaults.distanceHazeStartDistance,
 		0.0f, 200000.0f));
 
 	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
@@ -1489,7 +1490,7 @@ void ExponentialHeightFog::RegisterWeatherVariables()
 		"Haze Fade Distance",
 		"Distance over which distance haze reaches its maximum opacity",
 		&settings.distanceHazeFadeDistance,
-		60000.0f,
+		defaults.distanceHazeFadeDistance,
 		1.0f, 200000.0f));
 }
 #undef I18N_KEY_PREFIX

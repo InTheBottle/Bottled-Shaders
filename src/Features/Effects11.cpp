@@ -1,12 +1,9 @@
 #include "Effects11.h"
 
-#include <DirectXTex.h>
-
 #include "Effects11/D3D11StateBackup.h"
 #include "Effects11/ENBHelper.h"
 #include "Effects11/Editor/Effects11Editor.h"
 #include "Effects11/EffectManager.h"
-#include "Effects11/PresetManager.h"
 #include "Effects11/SettingManager.h"
 
 #include "CloudShadows.h"
@@ -270,7 +267,7 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 
 	data.CloudsCurve = settingManager.GetInterpolatedTimeOfDayValue("CloudsCurve", "SKY");
 	data.CloudsDesaturation = settingManager.GetInterpolatedTimeOfDayValue("CloudsDesaturation", "SKY");
-	data.CloudsEdgeIntensity = settingManager.GetValue<float>("CloudsEdgeIntensity", "SKY");
+	data.CloudsEdgeIntensity = settingManager.GetValue<bool>("EnableCloudsEdge", "SKYSCATTERING") ? settingManager.GetValue<float>("CloudsEdgeIntensity", "SKY") : 0.0f;
 	data.CloudsEdgeMoonMultiplier = settingManager.GetInterpolatedTimeOfDayValue("CloudsEdgeMoonMultiplier", "SKY");
 
 	data.StarsCurve = std::max((settingManager.GetInterpolatedTimeOfDayValue("StarsCurve", "SKY") - 1.0f) / 3.0f, 0.0f);
@@ -295,6 +292,13 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 	data.LightSpriteCurve = settingManager.GetInterpolatedTimeOfDayValue("Curve", "LIGHTSPRITE");
 
 	data.EnableParticle = enableEffect && !settings.IgnorePresetParticles;
+
+	data.GameVolumetricRaysDisableDithering = settingManager.GetValue<bool>("DisableGameDithering", "GAMEVOLUMETRICRAYS");
+	const auto& gameVolumetricLighting = VolumetricLighting::GetRenderData();
+	data.GameVolumetricRaysLightScale = Util::IsInterior() ? float3{ 1.0f, 1.0f, 1.0f } : directLightingUngradeScale;
+	data.GameVolumetricRaysCustomContribution = gameVolumetricLighting.customColor.contribution;
+	data.GameVolumetricRaysCustomColor = { gameVolumetricLighting.color.red, gameVolumetricLighting.color.green, gameVolumetricLighting.color.blue };
+
 	data.ParticleIntensity = settingManager.GetInterpolatedTimeOfDayValue("Intensity", "PARTICLE");
 	data.ParticleLightingInfluence = settingManager.GetInterpolatedTimeOfDayValue("LightingInfluence", "PARTICLE");
 	data.ParticleAmbientInfluence = settingManager.GetInterpolatedTimeOfDayValue("AmbientInfluence", "PARTICLE");
@@ -304,6 +308,8 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 	data.VolumetricRaysIntensity = settingManager.GetInterpolatedTimeOfDayValue("Intensity", "VOLUMETRICRAYS");
 	data.VolumetricRaysDensity = settingManager.GetInterpolatedTimeOfDayValue("Density", "VOLUMETRICRAYS");
 	data.VolumetricRaysSkyColorAmount = settingManager.GetInterpolatedTimeOfDayValue("SkyColorAmount", "VOLUMETRICRAYS");
+	static constexpr uint32_t volumetricRaysSamples[4] = { 24, 16, 12, 8 };
+	data.VolumetricRaysSampleCount = volumetricRaysSamples[std::clamp(static_cast<int>(std::lround(settingManager.GetValue<float>("Quality", "VOLUMETRICRAYS"))) + 1, 0, 3)];
 	if (const auto sky = globals::game::sky) {
 		const auto& horizonColor = sky->skyColor[RE::TESWeather::ColorTypes::kHorizon];
 		data.VolumetricRaysSkyColor = { horizonColor.red, horizonColor.green, horizonColor.blue };
@@ -311,10 +317,6 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 
 	data.EnableCloudsScattering = enableEffect && settingManager.GetValue<bool>("EnableCloudsScattering", "EFFECT");
 	UpdateSkyScattering(data);
-
-	data.EnableRain = IsRainEnabled();
-	data.RainMotionStretch = settingManager.GetInterpolatedTimeOfDayValue("MotionStretch", "RAIN");
-	data.RainMotionTransparency = settingManager.GetInterpolatedTimeOfDayValue("MotionTransparency", "RAIN");
 
 	data.FireIntensity = settingManager.GetInterpolatedTimeOfDayValue("Intensity", "FIRE");
 	data.FireCurve = settingManager.GetInterpolatedTimeOfDayValue("Curve", "FIRE");
@@ -326,6 +328,7 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 	data.VolumetricFogOpacity = settingManager.GetInterpolatedTimeOfDayValue("Opacity", "VOLUMETRICFOG");
 	data.VolumetricFogShadowAmount = settingManager.GetInterpolatedTimeOfDayValue("ShadowAmount", "VOLUMETRICFOG");
 	data.VolumetricFogEnableLighting = settingManager.GetValue<bool>("EnableLighting", "VOLUMETRICFOG");
+	data.VolumetricFogEnableShadows = settingManager.GetValue<bool>("EnableShadows", "VOLUMETRICFOG");
 
 	data.EnableWater = enableEffect && settingManager.GetValue<bool>("EnableWater", "EFFECT");
 	data.WaterWavesAmplitude = settingManager.GetInterpolatedTimeOfDayValue("WavesAmplitude", "WATER");
@@ -374,92 +377,8 @@ void Effects11::ToggleEnabled()
 	settingManager.SetValue<bool>(id, !settingManager.GetValue<bool>(id));
 }
 
-void Effects11::LoadRaindropTexture()
-{
-	if (raindropSRV) {
-		ID3D11ShaderResourceView* nullSRV = nullptr;
-		globals::d3d::context->PSSetShaderResources(80, 1, &nullSRV);
-	}
-	raindropTexture = nullptr;
-	raindropSRV = nullptr;
-	raindropStatus.clear();
-
-	auto& presetManager = PresetManager::GetSingleton();
-	auto enbPath = presetManager.GetENBSeriesPath();
-	auto raindropPath = enbPath / "enbraindrops.png";
-
-	if (!std::filesystem::exists(raindropPath)) {
-		raindropStatus = "Texture not found: enbraindrops.png";
-		logger::debug("[Effects11] Raindrop texture not found: {}", raindropPath.string());
-		return;
-	}
-
-	std::wstring widePath = raindropPath.wstring();
-
-	DirectX::ScratchImage image;
-	HRESULT hr = DirectX::LoadFromWICFile(widePath.c_str(), DirectX::WIC_FLAGS_IGNORE_SRGB, nullptr, image);
-	if (FAILED(hr)) {
-		raindropStatus = std::format("Failed to load texture (invalid image, HRESULT 0x{:08X})", static_cast<uint32_t>(hr));
-		logger::error("[Effects11] Failed to load raindrop texture: {}", raindropPath.string());
-		return;
-	}
-
-	DirectX::ScratchImage mipImage;
-	hr = DirectX::GenerateMipMaps(image.GetImages(), image.GetImageCount(), image.GetMetadata(),
-		DirectX::TEX_FILTER_DEFAULT, 0, mipImage);
-	if (FAILED(hr)) {
-		raindropStatus = std::format("Failed to generate mipmaps (HRESULT 0x{:08X})", static_cast<uint32_t>(hr));
-		logger::error("[Effects11] Failed to generate mipmaps for raindrop texture");
-		return;
-	}
-
-	DirectX::ScratchImage bc7Image;
-	hr = DirectX::Compress(mipImage.GetImages(), mipImage.GetImageCount(), mipImage.GetMetadata(),
-		DXGI_FORMAT_BC7_UNORM, DirectX::TEX_COMPRESS_BC7_QUICK, 1.0f, bc7Image);
-	if (FAILED(hr)) {
-		raindropStatus = std::format("Failed to compress texture (HRESULT 0x{:08X})", static_cast<uint32_t>(hr));
-		logger::error("[Effects11] Failed to compress raindrop texture to BC7");
-		return;
-	}
-
-	auto device = globals::d3d::device;
-	hr = DirectX::CreateTexture(device,
-		bc7Image.GetImages(), bc7Image.GetImageCount(), bc7Image.GetMetadata(),
-		reinterpret_cast<ID3D11Resource**>(raindropTexture.put()));
-	if (FAILED(hr)) {
-		raindropStatus = std::format("Failed to create GPU texture (HRESULT 0x{:08X})", static_cast<uint32_t>(hr));
-		logger::error("[Effects11] Failed to create raindrop GPU texture");
-		return;
-	}
-
-	Util::SetResourceName(raindropTexture.get(), "Effects11::RaindropTexture");
-
-	D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-	srvDesc.Format = DXGI_FORMAT_BC7_UNORM;
-	srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-	srvDesc.Texture2D.MipLevels = static_cast<UINT>(bc7Image.GetMetadata().mipLevels);
-	srvDesc.Texture2D.MostDetailedMip = 0;
-
-	hr = device->CreateShaderResourceView(raindropTexture.get(), &srvDesc, raindropSRV.put());
-	if (FAILED(hr)) {
-		raindropStatus = std::format("Failed to create shader resource view (HRESULT 0x{:08X})", static_cast<uint32_t>(hr));
-		logger::error("[Effects11] Failed to create raindrop SRV");
-		raindropTexture = nullptr;
-		return;
-	}
-
-	Util::SetResourceName(raindropSRV.get(), "Effects11::RaindropTexture SRV");
-
-	logger::info("[Effects11] Loaded raindrop texture: {} ({}x{}, BC7, {} mips)",
-		raindropPath.string(),
-		bc7Image.GetMetadata().width,
-		bc7Image.GetMetadata().height,
-		bc7Image.GetMetadata().mipLevels);
-}
-
 void Effects11::SetupResources()
 {
-	// Initialize() -> Apply() already loads the raindrop texture; do not load it again here.
 	EffectManager::GetSingleton().Initialize();
 }
 
@@ -601,6 +520,7 @@ void Effects11::OverrideWeather(RE::Sky* a_sky)
 
 		auto dirLightColorF3 = NiToF3(dirLightColor);
 		rawSunMean = ColorMean(dirLightColorF3);
+		const float3 ungradedDirLightColor = dirLightColorF3;
 
 		// A near-zero scale would blow up the divide below, so treat it as unset
 		static constexpr float minSunlightScale = 1e-3f;
@@ -624,6 +544,12 @@ void Effects11::OverrideWeather(RE::Sky* a_sky)
 		dirLightColorF3 /= sunlightScale;
 
 		sunGradingRatio = rawSunMean > minColorMean ? ColorMean(dirLightColorF3) / rawSunMean : 1.0f;
+
+		static constexpr float minGradedChannel = 1e-6f;
+		auto ungradeScale = [](float a_ungraded, float a_graded) { return a_graded > minGradedChannel ? a_ungraded / a_graded : 1.0f; };
+		directLightingUngradeScale = { ungradeScale(ungradedDirLightColor.x, dirLightColorF3.x), ungradeScale(ungradedDirLightColor.y, dirLightColorF3.y),
+			ungradeScale(ungradedDirLightColor.z, dirLightColorF3.z) };
+
 		dirLightColor = F3ToNi(dirLightColorF3);
 	}
 
@@ -972,70 +898,6 @@ bool Effects11::ReplacedTonemapperThisFrame() const
 	return tonemapReplacedFrame == globals::state->frameCount;
 }
 
-bool Effects11::IsRainEnabled()
-{
-	// Queried for every rain particle pass, so the cached id skips the string-keyed lookup
-	return enableEffect && raindropSRV && SettingManager::GetSingleton().GetValue<bool>(EffectManager::GetSingleton().ids.enableRain);
-}
-
-void Effects11::ModifyParticle(RE::BSRenderPass* Pass)
-{
-	if (!enableEffect || !raindropSRV)
-		return;
-
-	if (!Pass)
-		return;
-
-	auto state = globals::state;
-	if (state->currentPixelDescriptor != static_cast<uint32_t>(SIE::ShaderCache::ParticleShaderTechniques::EnvCubeRain))
-		return;
-
-	if (!IsRainEnabled())
-		return;
-
-	auto context = globals::d3d::context;
-	ID3D11ShaderResourceView* srv = raindropSRV.get();
-	context->PSSetShaderResources(80, 1, &srv);
-
-	ID3D11Buffer* cbs[] = { globals::state->sharedDataCB->CB(), globals::state->featureDataCB->CB() };
-	context->VSSetConstantBuffers(5, 2, cbs);
-}
-
-void Effects11::ParticleShaderHacks()
-{
-	if (!enableEffect || !raindropSRV)
-		return;
-
-	auto state = globals::state;
-	if (!state->currentShader || state->currentShader->shaderType.get() != RE::BSShader::Type::Particle)
-		return;
-	if (state->currentPixelDescriptor != static_cast<uint32_t>(SIE::ShaderCache::ParticleShaderTechniques::EnvCubeRain))
-		return;
-	if (!IsRainEnabled())
-		return;
-
-	auto context = globals::d3d::context;
-
-	if (!alphaBlendState) {
-		D3D11_BLEND_DESC blendDesc{};
-		blendDesc.RenderTarget[0].BlendEnable = TRUE;
-		blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
-		blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-		blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
-		blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
-		blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
-		blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
-		blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-		if (FAILED(globals::d3d::device->CreateBlendState(&blendDesc, alphaBlendState.put())))
-			return;
-		Util::SetResourceName(alphaBlendState.get(), "Effects11::RainAlphaBlendState");
-	}
-
-	float blendFactor[4] = { 0, 0, 0, 0 };
-	context->OMSetBlendState(alphaBlendState.get(), blendFactor, 0xFFFFFFFF);
-	globals::game::stateUpdateFlags->set(RE::BSGraphics::ShaderFlags::DIRTY_ALPHA_BLEND);
-}
-
 void Effects11::DrawVolumetricRays()
 {
 	if (!enableEffect)
@@ -1044,7 +906,8 @@ void Effects11::DrawVolumetricRays()
 	if (Util::IsInterior())
 		return;
 
-	if (globals::game::sky && globals::game::sky->flags.any(RE::Sky::Flags::kHideSky))
+	auto sky = globals::game::sky;
+	if (!sky || sky->flags.any(RE::Sky::Flags::kHideSky))
 		return;
 
 	if (globals::state->IsFullScreenMenuOpen() || globals::state->isMapMenuOpen)
@@ -1335,7 +1198,7 @@ void Effects11::DrawSunRays()
 	static constexpr float shortBlur[5] = { 0.15f, 0.3f, 0.6f, 0.3f, 0.9f };
 	static constexpr float longBlur[5] = { 0.4f, 0.7f, 0.6f, 1.0f, 0.9f };
 	const int qualityIndex = std::clamp(static_cast<int>(std::lround(settingManager.GetValue<float>("Quality", "RAYS"))) + 2, 0, 4);
-	const int type = std::clamp(static_cast<int>(std::lround(settingManager.GetValue<float>("Type", "RAYS"))), 0, 4);
+	const int type = std::clamp(static_cast<int>(std::lround(settingManager.GetValue<float>(light.isSun ? "Type" : "MoonType", "RAYS"))), 0, 4);
 
 	SunRaysData data{};
 	data.lightUV = { lightNdc.x * 0.5f + 0.5f, 0.5f - lightNdc.y * 0.5f };

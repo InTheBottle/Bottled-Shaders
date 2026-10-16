@@ -29,7 +29,7 @@ struct VS_OUTPUT
 #if defined(ENVCUBE)
 	float4 PrecipitationOcclusionTexCoord: TEXCOORD1;
 #endif
-#if defined(ENVCUBE) && defined(RAIN) && defined(EFFECTS11)
+#if defined(ENVCUBE) && defined(RAIN) && defined(RAIN_REFRACTION)
 	float2 RaindropData: TEXCOORD2;
 #endif
 };
@@ -91,12 +91,12 @@ VS_OUTPUT main(VS_INPUT input)
 	float4 viewPosition = mul(WorldViewProj, msPosition);
 #		if defined(RAIN)
 	float3 rainVelocity = Velocity.xyz;
-#			if defined(EFFECTS11)
-	if (SharedData::enbSettings.EnableRain) {
+#			if defined(RAIN_REFRACTION)
+	if (SharedData::rainRefractionSettings.Enable) {
 		float velLen = length(rainVelocity);
 		if (velLen > 0) {
 			float3 normVel = rainVelocity / velLen;
-			rainVelocity = lerp(normVel, rainVelocity, SharedData::enbSettings.RainMotionStretch);
+			rainVelocity = lerp(normVel, rainVelocity, SharedData::rainRefractionSettings.MotionStretch);
 		}
 	}
 #			endif
@@ -191,7 +191,7 @@ VS_OUTPUT main(VS_INPUT input)
 	vsout.Color.xyz = color.xyz;
 #	endif
 
-#	if defined(ENVCUBE) && defined(RAIN) && defined(EFFECTS11)
+#	if defined(ENVCUBE) && defined(RAIN) && defined(RAIN_REFRACTION)
 	// Corner offsets are +-particle size; their sign is the UV within the quad's atlas cell, so one drop fills each particle
 	vsout.RaindropData.xy = step(0, input.TexCoord1.xy);
 #	endif
@@ -231,7 +231,7 @@ Texture2D<float4> TexGrayscaleTexture : register(t1);
 Texture2D<float4> TexPrecipitationOcclusionTexture : register(t2);
 Texture2D<float4> TexUnderwaterMask : register(t3);
 #	endif
-#	if defined(ENVCUBE) && defined(RAIN) && defined(EFFECTS11)
+#	if defined(ENVCUBE) && defined(RAIN) && defined(RAIN_REFRACTION)
 Texture2D<float4> TexRaindropNormals : register(t80);
 #	endif
 
@@ -253,6 +253,20 @@ cbuffer PerGeometry : register(b2)
 #		define SampColorSampler SampSourceTexture
 #		include "DynamicCubemaps/DynamicCubemaps.hlsli"
 #	endif
+
+#	if defined(ENVCUBE) && defined(RAIN) && defined(DYNAMIC_CUBEMAPS) && defined(RAIN_REFRACTION)
+#		define REFRACTIVE_RAIN
+#	endif
+
+float3 GetDirLightColor(float3 positionWS)
+{
+	float unusedDetailedShadow;
+	float3 dirLightColor = SharedData::DirLightColor.xyz * ShadowSampling::GetLightingShadow(positionWS, unusedDetailedShadow);
+	// Menu and reflection passes don't match the world heightmap and cloud state
+	if (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InWorld)
+		dirLightColor *= ShadowSampling::GetWorldShadow(positionWS, FrameBuffer::CameraPosAdjust.xyz);
+	return dirLightColor;
+}
 
 #	if defined(LIGHT_LIMIT_FIX)
 bool GetLightCluster(float3 positionWS, out uint lightOffset, out uint lightCount)
@@ -302,10 +316,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	}
 #	endif
 
-#	if defined(ENVCUBE) && defined(RAIN) && defined(DYNAMIC_CUBEMAPS) && defined(EFFECTS11)
-	if (SharedData::enbSettings.EnableRain) {
+#	if defined(REFRACTIVE_RAIN)
+	if (SharedData::rainRefractionSettings.Enable) {
 		float4 raindropNormal = TexRaindropNormals.Sample(SampSourceTexture, input.RaindropData.xy);
-		float alpha = saturate(raindropNormal.w * (1.0 - SharedData::enbSettings.RainMotionTransparency));
+		float alpha = saturate(raindropNormal.w * (1.0 - SharedData::rainRefractionSettings.MotionTransparency));
 		clip(alpha - (4.0 / 255.0));
 		raindropNormal.y = 1.0 - raindropNormal.y;
 
@@ -398,11 +412,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	positionWS = mul(FrameBuffer::CameraViewProjInverse, positionWS);
 	positionWS.xyz = positionWS.xyz / positionWS.w;
 
-	float unusedDetailedShadow;
-	float3 dirLightColor = SharedData::DirLightColor.xyz * ShadowSampling::GetLightingShadow(positionWS.xyz, unusedDetailedShadow);
-	// Menu and reflection passes don't match the world heightmap and cloud state
-	if (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InWorld)
-		dirLightColor *= ShadowSampling::GetWorldShadow(positionWS.xyz, FrameBuffer::CameraPosAdjust.xyz);
+	float3 dirLightColor = GetDirLightColor(positionWS.xyz);
 	float3 ambientColor = max(0, SharedData::GetAmbient(float3(0, 0, 1)));
 #	if defined(IBL)
 	if (SharedData::iblSettings.EnableIBL) {
