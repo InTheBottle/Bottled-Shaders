@@ -83,6 +83,8 @@ namespace SnowCover
 	void ApplyFoliageColor(inout float3 color, float env_mult)
 	{
 		float gmult = saturate(env_mult - SharedData::snowCoverSettings.FoliageHeightOffset / 5000);
+		if (gmult <= 0)
+			return;
 		float3 hsv = Color::RGBtoHSV(color);
 		if (hsv.x > 0.55)
 			hsv.x = frac(lerp(hsv.x, 1.1, gmult));
@@ -92,12 +94,16 @@ namespace SnowCover
 		color = Color::HSVtoRGB(hsv);
 	}
 
-	void ApplySnowFoliage(inout float3 color, float3 worldNormal, float3 p, float skylight, float viewDist, float distMult)
+	float GetFoliageSnowBase(float3 worldNormal, float3 p, float viewDist, float distMult, out float env_mult)
 	{
-		float env_mult = GetEnvironmentalMultiplier(p);
+		env_mult = GetEnvironmentalMultiplier(p);
 		float weatherMult = GetWeatherRange(p, viewDist) * SharedData::snowCoverSettings.TimeSnowing * max(500, SharedData::snowCoverSettings.SnowingDensity) / 500;
 		float mult = SharedData::snowCoverSettings.MainTint.a * saturate(env_mult);
-		mult = distMult * skylight * saturate(mult + weatherMult) * smoothstep(SharedData::snowCoverSettings.minAngle, SharedData::snowCoverSettings.maxAngle, worldNormal.z);
+		return distMult * saturate(mult + weatherMult) * smoothstep(SharedData::snowCoverSettings.minAngle, SharedData::snowCoverSettings.maxAngle, worldNormal.z);
+	}
+
+	void ApplySnowFoliageBase(inout float3 color, float3 worldNormal, float3 p, float env_mult, float mult)
+	{
 		[branch] if (mult > 0)
 			mult *= 1 - GetFireMelt(p);
 #	if defined(GRASS)
@@ -118,6 +124,13 @@ namespace SnowCover
 #	endif
 
 		color = lerp(color, diffuse, mult);
+	}
+
+	void ApplySnowFoliage(inout float3 color, float3 worldNormal, float3 p, float skylight, float viewDist, float distMult)
+	{
+		float env_mult;
+		float mult = GetFoliageSnowBase(worldNormal, p, viewDist, distMult, env_mult) * skylight;
+		ApplySnowFoliageBase(color, worldNormal, p, env_mult, mult);
 	}
 
 #	if !defined(BASIC_SNOW_COVER)

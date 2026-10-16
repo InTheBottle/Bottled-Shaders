@@ -873,11 +873,8 @@ PS_OUTPUT main(PS_INPUT input)
 	float3 vanillaFogColor = fogColor;
 	float expFogFactor = 0;
 	if (SharedData::exponentialHeightFogSettings.enabled) {
-		float4 exponentialHeightFog;
-		if (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection)
-			exponentialHeightFog = ExponentialHeightFog::GetExponentialHeightFogNoVolumetric(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, fogColor, float4(input.Position.xy * FrameBuffer::DynamicResolutionParams2.xy, input.Position.z, 1));
-		else
-			exponentialHeightFog = ExponentialHeightFog::GetExponentialHeightFog(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, fogColor, float4(input.Position.xy * FrameBuffer::DynamicResolutionParams2.xy, input.Position.z, 1));
+		const bool inReflection = Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection;
+		float4 exponentialHeightFog = ExponentialHeightFog::GetExponentialHeightFogInternal(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, fogColor, true, float4(input.Position.xy * FrameBuffer::DynamicResolutionParams2.xy, input.Position.z, 1), !inReflection);
 		expFogFactor = exponentialHeightFog.w;
 		fogColor = exponentialHeightFog.xyz;
 		fogFactor = exponentialHeightFog.w;

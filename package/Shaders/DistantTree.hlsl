@@ -232,18 +232,27 @@ PS_OUTPUT main(PS_INPUT input)
 
 #			if defined(SNOW_COVER)
 	if (SharedData::snowCoverSettings.EnableSnowCover) {
-		float skylight = 0.15;
-		if (SharedData::snowCoverSettings.EnableExpensiveFoliage) {
-			float rx;
-			float ry;
-			TexDiffuse.GetDimensions(rx, ry);
-			skylight = 1 - TexDiffuse.Sample(SampDiffuse, input.TexCoord.xy - float2(0, 2. / ry)).a;
-		}
-		skylight *= saturate(input.WorldPosition.z - SharedData::GetWaterData(input.WorldPosition.xyz).w);
 		// A LOD billboard is a vertical quad, so the raw geometric normal has z == 0 and the angle mask rejects it outright.
 		float3 snowNormal = normalize(normal + float3(0, 0, 0.5));
 		float snowViewDist = length(viewPosition);
-		SnowCover::ApplySnowFoliage(baseColor.xyz, snowNormal, input.WorldPosition.xyz + FrameBuffer::CameraPosAdjust.xyz, skylight, snowViewDist, SnowCover::GetObjectFade(snowViewDist));
+		float3 snowPosition = input.WorldPosition.xyz + FrameBuffer::CameraPosAdjust.xyz;
+		float snowEnvMult;
+		float snowMult = SnowCover::GetFoliageSnowBase(snowNormal, snowPosition, snowViewDist, SnowCover::GetObjectFade(snowViewDist), snowEnvMult);
+		float skylight = 0;
+		float2 snowTexDdx = ddx(input.TexCoord.xy);
+		float2 snowTexDdy = ddy(input.TexCoord.xy);
+		[branch] if (snowMult >= 0.01)
+		{
+			skylight = 0.15;
+			if (SharedData::snowCoverSettings.EnableExpensiveFoliage) {
+				float rx;
+				float ry;
+				TexDiffuse.GetDimensions(rx, ry);
+				skylight = 1 - TexDiffuse.SampleGrad(SampDiffuse, input.TexCoord.xy - float2(0, 2. / ry), snowTexDdx, snowTexDdy).a;
+			}
+			skylight *= saturate(input.WorldPosition.z - SharedData::GetWaterData(input.WorldPosition.xyz).w);
+		}
+		SnowCover::ApplySnowFoliageBase(baseColor.xyz, snowNormal, snowPosition, snowEnvMult, snowMult * skylight);
 	}
 #			endif
 
@@ -289,18 +298,27 @@ PS_OUTPUT main(PS_INPUT input)
 
 #			if defined(SNOW_COVER)
 	if (SharedData::snowCoverSettings.EnableSnowCover) {
-		float skylight = 0.15;
-		if (SharedData::snowCoverSettings.EnableExpensiveFoliage) {
-			float rx;
-			float ry;
-			TexDiffuse.GetDimensions(rx, ry);
-			skylight = 1 - TexDiffuse.Sample(SampDiffuse, input.TexCoord.xy - float2(0, 2. / ry)).a;
-		}
-		skylight *= saturate(input.WorldPosition.z - SharedData::GetWaterData(input.WorldPosition.xyz).w);
 		// A LOD billboard is a vertical quad, so the raw geometric normal has z == 0 and the angle mask rejects it outright.
 		float3 snowNormal = normalize(normal + float3(0, 0, 0.5));
 		float snowViewDist = length(mul(FrameBuffer::CameraView, float4(input.WorldPosition.xyz, 1)).xyz);
-		SnowCover::ApplySnowFoliage(baseColor.xyz, snowNormal, input.WorldPosition.xyz + FrameBuffer::CameraPosAdjust.xyz, skylight, snowViewDist, SnowCover::GetObjectFade(snowViewDist));
+		float3 snowPosition = input.WorldPosition.xyz + FrameBuffer::CameraPosAdjust.xyz;
+		float snowEnvMult;
+		float snowMult = SnowCover::GetFoliageSnowBase(snowNormal, snowPosition, snowViewDist, SnowCover::GetObjectFade(snowViewDist), snowEnvMult);
+		float skylight = 0;
+		float2 snowTexDdx = ddx(input.TexCoord.xy);
+		float2 snowTexDdy = ddy(input.TexCoord.xy);
+		[branch] if (snowMult >= 0.01)
+		{
+			skylight = 0.15;
+			if (SharedData::snowCoverSettings.EnableExpensiveFoliage) {
+				float rx;
+				float ry;
+				TexDiffuse.GetDimensions(rx, ry);
+				skylight = 1 - TexDiffuse.SampleGrad(SampDiffuse, input.TexCoord.xy - float2(0, 2. / ry), snowTexDdx, snowTexDdy).a;
+			}
+			skylight *= saturate(input.WorldPosition.z - SharedData::GetWaterData(input.WorldPosition.xyz).w);
+		}
+		SnowCover::ApplySnowFoliageBase(baseColor.xyz, snowNormal, snowPosition, snowEnvMult, snowMult * skylight);
 	}
 #			endif
 

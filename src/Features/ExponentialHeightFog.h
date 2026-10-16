@@ -156,6 +156,8 @@ private:
 	ID3D11ComputeShader* GetFarLightScatteringCS();
 	ID3D11ComputeShader* GetIntegrationCS();
 	ID3D11ComputeShader* GetFarIntegrationCS();
+	ID3D11ComputeShader* GetFogIBLColorCS();
+	void UpdateFogIBLColor();
 
 	std::unique_ptr<Texture3D> vBufferA;
 	std::unique_ptr<Texture3D> vBufferAFar;
@@ -182,6 +184,8 @@ private:
 	ID3D11ComputeShader* farLightScatteringCS = nullptr;
 	ID3D11ComputeShader* integrationCS = nullptr;
 	ID3D11ComputeShader* farIntegrationCS = nullptr;
+	ID3D11ComputeShader* fogIBLColorCS = nullptr;
+	std::unique_ptr<Texture2D> fogIBLColor;
 	DirectX::XMUINT4 currentGridSize = {};
 	DirectX::XMUINT4 currentFarGridSize = {};
 	bool hasLightScatteringHistory = false;
