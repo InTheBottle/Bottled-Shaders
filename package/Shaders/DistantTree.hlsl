@@ -239,8 +239,8 @@ PS_OUTPUT main(PS_INPUT input)
 		float snowEnvMult;
 		float snowMult = SnowCover::GetFoliageSnowBase(snowNormal, snowPosition, snowViewDist, SnowCover::GetObjectFade(snowViewDist), snowEnvMult);
 		float skylight = 0;
-		float2 snowTexDdx = ddx(input.TexCoord.xy);
-		float2 snowTexDdy = ddy(input.TexCoord.xy);
+		float2 snowTexDdx = ddx_coarse(input.TexCoord.xy);
+		float2 snowTexDdy = ddy_coarse(input.TexCoord.xy);
 		[branch] if (snowMult >= 0.01)
 		{
 			skylight = 0.15;
@@ -305,8 +305,8 @@ PS_OUTPUT main(PS_INPUT input)
 		float snowEnvMult;
 		float snowMult = SnowCover::GetFoliageSnowBase(snowNormal, snowPosition, snowViewDist, SnowCover::GetObjectFade(snowViewDist), snowEnvMult);
 		float skylight = 0;
-		float2 snowTexDdx = ddx(input.TexCoord.xy);
-		float2 snowTexDdy = ddy(input.TexCoord.xy);
+		float2 snowTexDdx = ddx_coarse(input.TexCoord.xy);
+		float2 snowTexDdy = ddy_coarse(input.TexCoord.xy);
 		[branch] if (snowMult >= 0.01)
 		{
 			skylight = 0.15;
