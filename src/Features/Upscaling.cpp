@@ -1539,7 +1539,7 @@ void Upscaling::Upscale()
 
 		if (upscaleMethod == UpscaleMethod::kDLSS) {
 			// Neural Rendering seam S1: Before/Separate Upscaling may substitute the DLSS input.
-			dlssOutputValid = streamline.Upscale(globals::features::neuralRendering.PrepareUpscaleInput(main.texture, motionVectorCopyTexture->resource.get()), reactiveMaskTexture->resource.get(), transparencyCompositionMaskTexture->resource.get(), motionVectorCopyTexture->resource.get());
+			streamline.Upscale(globals::features::neuralRendering.PrepareUpscaleInput(main.texture, motionVectorCopyTexture->resource.get()), reactiveMaskTexture->resource.get(), transparencyCompositionMaskTexture->resource.get(), motionVectorCopyTexture->resource.get());
 		} else if (upscaleMethod == UpscaleMethod::kFSR) {
 			auto& depthStencil = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN];
 			ID3D11Resource* fsrDepth = runtimeFsrDepthTexture ? runtimeFsrDepthTexture->resource.get() : depthStencil.texture;
