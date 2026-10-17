@@ -27,8 +27,11 @@ namespace FootstepParticles
 	static const uint FrameFlagSnowCover = 1u << 1;
 	static const uint FrameFlagFog = 1u << 2;
 	static const uint FrameFlagInterior = 1u << 3;
+	static const uint FrameFlagBlanket = 1u << 4;
+	static const uint FrameFlagField = 1u << 5;
 
 	static const uint EventFlagLanding = 1u << 0;
+	static const uint EventFlagWade = 1u << 1;
 
 	struct Particle
 	{
@@ -55,7 +58,8 @@ namespace FootstepParticles
 		float Scale;
 		uint Seed;
 		uint Flags;
-		float2 Pad;
+		uint SlotCount;
+		float Clearance;
 	};
 
 	cbuffer FootstepFrame : register(b0)
@@ -77,7 +81,12 @@ namespace FootstepParticles
 		uint FrameFlags;
 		float2 Wind;
 		float Time;
-		float FramePad;
+		float WadeIntensity;
+		int2 BlanketCell;
+		int2 FieldTile;
+		float4 SurfaceParams;
+		uint2 SurfaceMasks;
+		float2 WadeCounts;
 	};
 
 	float Hash(uint seed)

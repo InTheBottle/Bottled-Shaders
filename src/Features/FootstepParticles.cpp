@@ -8,6 +8,7 @@
 #include "Features/LightLimitFix.h"
 #include "Features/Skylighting.h"
 #include "Features/SnowCover.h"
+#include "Features/SnowDeformation.h"
 #include "Features/TerrainBlending.h"
 #include "Features/TerrainShadows.h"
 #include "Features/WetnessEffects.h"
@@ -30,6 +31,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	DustIntensity,
 	SnowIntensity,
 	SplashIntensity,
+	WadeIntensity,
 	ParticleSize,
 	Lifetime,
 	Opacity,
@@ -46,6 +48,17 @@ namespace
 	constexpr float kMaxParticleLifetime = 2.2f;
 	constexpr float kTeleportDistance = 4096.0f;
 	constexpr float kSoftDistance = 12.0f;
+	constexpr uint32_t kWadeSlots = 32;
+	constexpr uint32_t kMaxWadesPerOwner = 2;
+	constexpr uint32_t kMaxWadeEventsPerFrame = 32;
+	constexpr uint32_t kWadeForgetFrames = 30;
+	constexpr float kWadeSpacing = 32.0f;
+	constexpr float kWadeMinSpeed = 60.0f;
+	constexpr float kMaxWadeSpeed = 900.0f;
+	constexpr float kWadeFrontMargin = 3.0f;
+	constexpr float kWadeSpeedSmoothing = 0.08f;
+	constexpr float kWadePowder = 11.0f;
+	constexpr float kWadeClods = 5.0f;
 
 	constexpr uint32_t kTagLeft = 1u << 0;
 	constexpr uint32_t kTagRight = 1u << 1;
@@ -60,10 +73,13 @@ namespace
 	constexpr uint32_t kFrameFlagSnowCover = 1u << 1;
 	constexpr uint32_t kFrameFlagFog = 1u << 2;
 	constexpr uint32_t kFrameFlagInterior = 1u << 3;
+	constexpr uint32_t kFrameFlagBlanket = 1u << 4;
+	constexpr uint32_t kFrameFlagField = 1u << 5;
 	constexpr uint32_t kEventFlagLanding = 1u << 0;
+	constexpr uint32_t kEventFlagWade = 1u << 1;
 
 	constexpr uint32_t kConstantSlots = 13;
-	constexpr uint32_t kCSResourceSlots = 6;
+	constexpr uint32_t kCSResourceSlots = 8;
 	constexpr uint32_t kPSResourceSlots = 2;
 
 	constexpr std::array<const char*, static_cast<size_t>(FootstepParticles::Surface::Count) + 1> kSurfaceNames{
@@ -573,7 +589,7 @@ bool FootstepParticles::BuildEvent(const PendingFootstep& a_pending, const RE::N
 	eventSeed = eventSeed * 1664525u + 1013904223u;
 
 	a_event.Position = { footPosition.x, footPosition.y, footPosition.z };
-	a_event.FirstSlot = nextSlot;
+	a_event.FirstSlot = ReserveSlots(kSlotsPerEvent);
 	a_event.Velocity = { velocity.x, velocity.y, velocity.z };
 	a_event.Surface = static_cast<uint>(surface);
 	a_event.Forward = { forward.x, forward.y };
@@ -581,10 +597,132 @@ bool FootstepParticles::BuildEvent(const PendingFootstep& a_pending, const RE::N
 	a_event.Scale = scale;
 	a_event.Seed = eventSeed;
 	a_event.Flags = flags;
-	a_event.Pad = { 0.0f, 0.0f };
-
-	nextSlot = (nextSlot + kSlotsPerEvent) % kMaxParticles;
+	a_event.SlotCount = kSlotsPerEvent;
+	a_event.Clearance = 0.0f;
 	return true;
+}
+
+uint32_t FootstepParticles::ReserveSlots(uint32_t a_count)
+{
+	const uint32_t first = nextSlot;
+	nextSlot = (nextSlot + a_count) % kMaxParticles;
+	return first;
+}
+
+void FootstepParticles::BuildWadeEvents(const RE::NiPoint3& a_cameraPosition, float a_deltaTime)
+{
+	auto& snowDeformation = globals::features::snowDeformation;
+	const uint32_t frame = globals::state->frameCount;
+	if (settings.WadeIntensity <= 0.0f || settings.SnowIntensity <= 0.0f || !snowDeformation.loaded || snowDeformation.GetWadeFrame() != frame) {
+		wadeTravel.clear();
+		return;
+	}
+	if (a_deltaTime <= 0.0f)
+		return;
+
+	const auto& emitters = snowDeformation.GetWadeEmitters();
+	auto tes = globals::game::tes;
+	const float maxDistance = std::max(settings.MaxDistance, 256.0f);
+	const RE::FormID playerID = globals::game::player ? globals::game::player->GetFormID() : 0;
+	auto random = [this]() {
+		eventSeed = eventSeed * 1664525u + 1013904223u;
+		return static_cast<float>((eventSeed >> 8) & 0xFFFFu) / 65535.0f;
+	};
+	uint32_t wadeEvents = 0;
+
+	for (size_t i = 0; i < emitters.size(); ++i) {
+		const RE::FormID owner = emitters[i].owner;
+		if (std::any_of(emitters.begin(), emitters.begin() + i, [owner](const auto& a_emitter) { return a_emitter.owner == owner; }))
+			continue;
+		if (owner != playerID && !settings.IncludeNPCs)
+			continue;
+
+		const SnowDeformation::WadeEmitter* source = nullptr;
+		float sourceScore = -1.0f;
+		float sourceMotion = 0.0f;
+		float travel = 0.0f;
+		for (size_t j = i; j < emitters.size(); ++j) {
+			const auto& emitter = emitters[j];
+			if (emitter.owner != owner)
+				continue;
+			const float motion = std::sqrt(emitter.motionX * emitter.motionX + emitter.motionY * emitter.motionY);
+			travel = std::max(travel, motion);
+			const float score = emitter.trail ? motion * 0.75f : motion;
+			if (score > sourceScore) {
+				source = &emitter;
+				sourceScore = score;
+				sourceMotion = motion;
+			}
+		}
+		if (!source)
+			continue;
+
+		auto& state = wadeTravel[owner];
+		if (state.frame + 1 != frame) {
+			state.distance = kWadeSpacing * 0.6f;
+			state.speed = 0.0f;
+		}
+		state.frame = frame;
+		const float rawSpeed = std::min(travel / a_deltaTime, kMaxWadeSpeed);
+		state.speed += (rawSpeed - state.speed) * (1.0f - std::exp(-a_deltaTime / kWadeSpeedSmoothing));
+		state.distance += state.speed * a_deltaTime;
+
+		const RE::NiPoint3 sourcePosition{ source->x, source->y, source->landZ };
+		const float speed = state.speed;
+		const float strength = std::clamp((speed - kWadeMinSpeed) / 500.0f, 0.0f, 1.5f);
+		const float amount = strength * settings.WadeIntensity * settings.SnowIntensity;
+		const uint32_t slots = std::min(kWadeSlots, static_cast<uint32_t>(std::lround(kWadePowder * amount) + std::lround(kWadeClods * amount)));
+		if (slots == 0 || sourceMotion <= 1e-3f || a_cameraPosition.GetSquaredDistance(sourcePosition) > maxDistance * maxDistance) {
+			state.distance = std::min(state.distance, kWadeSpacing);
+			continue;
+		}
+
+		const float directionX = source->motionX / sourceMotion;
+		const float directionY = source->motionY / sourceMotion;
+		const float radius = std::max(source->radius, 1.0f);
+		const float halfWidth = source->halfWidth > 0.0f ? source->halfWidth : radius;
+		float extent = radius;
+		if (source->halfWidth > 0.0f) {
+			const float along = (directionX * source->forwardX + directionY * source->forwardY) / radius;
+			const float across = (directionY * source->forwardX - directionX * source->forwardY) / halfWidth;
+			extent = 1.0f / std::max(std::sqrt(along * along + across * across), 1e-3f);
+		}
+		const float width = std::clamp(halfWidth, 2.0f, 48.0f);
+		const float scale = std::clamp((source->trail ? width * 0.5f : width) / 9.0f, 0.6f, 2.5f);
+		const float bottomZ = source->landZ + source->clearance;
+
+		uint32_t emitted = 0;
+		while (state.distance >= kWadeSpacing && emitted < kMaxWadesPerOwner && wadeEvents < kMaxWadeEventsPerFrame && frameEvents.size() < kMaxEventsPerFrame) {
+			state.distance -= kWadeSpacing;
+			const float ahead = extent + kWadeFrontMargin * (1.0f + random());
+			const float side = (random() - 0.5f) * width * 1.2f;
+			RE::NiPoint3 front{ source->x + directionX * ahead + directionY * side, source->y + directionY * ahead - directionX * side, source->landZ };
+			float frontLandZ = 0.0f;
+			if (tes && tes->GetLandHeight(front, frontLandZ) && std::abs(frontLandZ - source->landZ) < 2.0f * ahead)
+				front.z = frontLandZ;
+
+			FootstepEvent wadeEvent{};
+			wadeEvent.Position = { front.x, front.y, front.z };
+			wadeEvent.FirstSlot = ReserveSlots(slots);
+			wadeEvent.Velocity = { directionX * speed, directionY * speed, 0.0f };
+			wadeEvent.Surface = static_cast<uint>(Surface::Snow);
+			wadeEvent.Forward = { directionX, directionY };
+			wadeEvent.Strength = strength;
+			wadeEvent.Scale = scale;
+			wadeEvent.Seed = eventSeed;
+			wadeEvent.Flags = kEventFlagWade;
+			wadeEvent.SlotCount = slots;
+			wadeEvent.Clearance = bottomZ - front.z;
+			frameEvents.push_back(wadeEvent);
+			++emitted;
+			++wadeEvents;
+		}
+		state.distance = std::min(state.distance, kWadeSpacing);
+		debug.wadesThisSecond += emitted;
+	}
+
+	for (auto it = wadeTravel.begin(); it != wadeTravel.end();)
+		it = it->second.frame + kWadeForgetFrames < frame ? wadeTravel.erase(it) : std::next(it);
 }
 
 void FootstepParticles::BuildEvents(const RE::NiPoint3& a_cameraPosition)
@@ -659,6 +797,7 @@ FootstepParticles::FrameData FootstepParticles::BuildFrameData(float a_deltaTime
 	data.DustIntensity = settings.DustIntensity;
 	data.SnowIntensity = settings.SnowIntensity;
 	data.SplashIntensity = settings.SplashIntensity;
+	data.WadeIntensity = settings.WadeIntensity;
 	data.SizeScale = settings.ParticleSize;
 	data.LifetimeScale = settings.Lifetime;
 	data.Opacity = settings.Opacity;
@@ -710,6 +849,8 @@ void FootstepParticles::Render(RE::BSShaderAccumulator* a_accumulator)
 	if (debug.secondTimer >= 1.0f) {
 		debug.eventsLastSecond = debug.eventsThisSecond;
 		debug.eventsThisSecond = 0;
+		debug.wadesLastSecond = debug.wadesThisSecond;
+		debug.wadesThisSecond = 0;
 		debug.secondTimer = 0.0f;
 	}
 
@@ -721,6 +862,7 @@ void FootstepParticles::Render(RE::BSShaderAccumulator* a_accumulator)
 	hasLastCamera = true;
 
 	BuildEvents(cameraPosition);
+	BuildWadeEvents(cameraPosition, deltaTime);
 	if (!frameEvents.empty())
 		lastSpawnTime = simulationTime;
 
@@ -770,7 +912,25 @@ void FootstepParticles::Dispatch(float a_deltaTime, bool a_clear)
 		clearRequested = false;
 	}
 
-	frameConstants->Update(BuildFrameData(a_deltaTime, eventCount));
+	auto& snowDeformation = globals::features::snowDeformation;
+	const auto surface = snowDeformation.loaded ? snowDeformation.GetSurfaceView() : SnowDeformation::SurfaceView{};
+
+	auto frameData = BuildFrameData(a_deltaTime, eventCount);
+	if (surface.blanket) {
+		frameData.FrameFlags |= kFrameFlagBlanket;
+		frameData.BlanketCell[0] = surface.blanketMinX;
+		frameData.BlanketCell[1] = surface.blanketMinY;
+	}
+	if (surface.field) {
+		frameData.FrameFlags |= kFrameFlagField;
+		frameData.FieldTile[0] = surface.fieldTileX;
+		frameData.FieldTile[1] = surface.fieldTileY;
+	}
+	frameData.SurfaceParams = { SnowDeformation::kBlanketCell, SnowDeformation::kCellSize, static_cast<float>(SnowDeformation::kTileTexels), static_cast<float>(SnowDeformation::kWindowTiles) };
+	frameData.SurfaceMasks[0] = static_cast<uint32_t>(SnowDeformation::kBlanketTexels - 1);
+	frameData.SurfaceMasks[1] = SnowDeformation::kTexels - 1;
+	frameData.WadeCounts = { kWadePowder, kWadeClods };
+	frameConstants->Update(frameData);
 
 	if (eventCount > 0) {
 		D3D11_MAPPED_SUBRESOURCE mapped{};
@@ -800,7 +960,9 @@ void FootstepParticles::Dispatch(float a_deltaTime, bool a_clear)
 			normalRoughness.SRV,
 			snowCover.loaded ? snowCover.views[6].get() : nullptr,
 			eventBuffer->srv.get(),
-			skylighting.loaded && skylighting.texProbeArray ? skylighting.texProbeArray->srv.get() : nullptr
+			skylighting.loaded && skylighting.texProbeArray ? skylighting.texProbeArray->srv.get() : nullptr,
+			surface.blanket,
+			surface.field
 		};
 		context->CSSetShaderResources(0, kCSResourceSlots, resources);
 		context->CSSetShader(spawn, nullptr, 0);
@@ -866,6 +1028,12 @@ void FootstepParticles::DrawSettings()
 		ImGui::SliderFloat(T(TKEY("snow_intensity"), "Snow"), &settings.SnowIntensity, 0.0f, 3.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 		ImGui::SliderFloat(T(TKEY("splash_intensity"), "Splashes"), &settings.SplashIntensity, 0.0f, 3.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 
+		ImGui::BeginDisabled(!globals::features::snowDeformation.loaded);
+		ImGui::SliderFloat(T(TKEY("wade_intensity"), "Snow Wading"), &settings.WadeIntensity, 0.0f, 3.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		ImGui::EndDisabled();
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::TextWrapped("%s", T(TKEY("wade_intensity_tooltip"), "Snow poofs from legs ploughing through the Snow Deformation blanket. 0 turns them off."));
+
 		ImGui::BeginDisabled(!globals::features::snowCover.loaded);
 		ImGui::Checkbox(T(TKEY("use_snow_cover"), "Snow Cover Kicks Up Snow"), &settings.UseSnowCover);
 		ImGui::EndDisabled();
@@ -898,6 +1066,7 @@ void FootstepParticles::DrawSettings()
 			testBurstQueued = true;
 
 		ImGui::Text("%s: %u", T(TKEY("footsteps_per_second"), "Footsteps per second"), debug.eventsLastSecond);
+		ImGui::Text("%s: %u", T(TKEY("wades_per_second"), "Snow poofs per second"), debug.wadesLastSecond);
 		ImGui::Text("%s: %s (%s)", T(TKEY("player_surface"), "Player surface"), kSurfaceNames[static_cast<size_t>(debug.lastPlayerSurface) + 1], debug.lastPlayerMaterial.empty() ? "-" : debug.lastPlayerMaterial.c_str());
 		ImGui::Text("%s: %llu", T(TKEY("rendered_frames"), "Rendered frames"), debug.renderedFrames);
 		ImGui::TreePop();
@@ -915,6 +1084,7 @@ void FootstepParticles::LoadSettings(json& o_json)
 	sanitize(settings.DustIntensity, defaults.DustIntensity, 0.0f, 3.0f);
 	sanitize(settings.SnowIntensity, defaults.SnowIntensity, 0.0f, 3.0f);
 	sanitize(settings.SplashIntensity, defaults.SplashIntensity, 0.0f, 3.0f);
+	sanitize(settings.WadeIntensity, defaults.WadeIntensity, 0.0f, 3.0f);
 	sanitize(settings.ParticleSize, defaults.ParticleSize, 0.25f, 3.0f);
 	sanitize(settings.Lifetime, defaults.Lifetime, 0.25f, 2.0f);
 	sanitize(settings.Opacity, defaults.Opacity, 0.0f, 2.0f);
