@@ -916,10 +916,6 @@ float GetSnowParameterY(float texProjTmp, float alpha)
 #		include "LightLimitFix/LightLimitFix.hlsli"
 #	endif
 
-#	if defined(ISL) && defined(LIGHT_LIMIT_FIX)
-#		include "InverseSquareLighting/InverseSquareLighting.hlsli"
-#	endif
-
 #	if defined(TREE_ANIM)
 #		undef WETNESS_EFFECTS
 #	endif
@@ -1074,7 +1070,11 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 #		if !defined(TREE_ANIM) && !defined(LOD)
 	// Fix incorrect vertex normals on double-sided meshes
-	if (!frontFace && nearFactor > 0.5)
+	bool flipBackFace = !frontFace && nearFactor > 0.5;
+#			if defined(FUR_SHELLS)
+	flipBackFace = flipBackFace && input.FurShell <= 0.0;
+#			endif
+	if (flipBackFace)
 		tbn = -tbn;
 #		endif
 
@@ -1125,7 +1125,14 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	if defined(FUR_SHELLS)
 	float4 furSample = FurShells::TexShell.SampleBias(SampColorSampler, uv, SharedData::MipBias);
 	bool furRootCovered = FurShells::IsRootCovered(input.FurRoot, fwidth(input.FurRoot.w));
-	if (input.FurShell > 0.0 && (furRootCovered || furSample.w < lerp(FurShells::RootThreshold, FurShells::TipThreshold, input.FurShell)))
+#		if defined(MODELSPACENORMALS)
+	float3 furFacingNormal = cross(ddx(input.WorldPosition.xyz), ddy(input.WorldPosition.xyz));
+#		else
+	float3 furFacingNormal = tbnTr[2];
+#		endif
+	float furFacing = abs(dot(furFacingNormal, viewDirection)) * rsqrt(max(dot(furFacingNormal, furFacingNormal), 1e-12));
+	float furCoverage = FurShells::GetCoverage(furSample.w, lerp(FurShells::RootThreshold, FurShells::TipThreshold, input.FurShell), uv);
+	if (input.FurShell > 0.0 && (furRootCovered || furCoverage < screenNoise))
 		discard;
 #	endif
 
@@ -1136,8 +1143,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	const bool applyMeshTV = (Permutation::ExtraFeatureDescriptor & Permutation::ExtraFeatureFlags::TVMeshVariation) != 0;
 	[branch] if (applyMeshTV)
 	{
-		g_terrainStochasticLodBase = ComputeTerrainStochasticLodBase(uvOriginal);
-		meshOffset = ComputeStochasticOffsetsMesh(uvOriginal);
+		meshOffset = ComputeStochasticOffsetsMesh(uvOriginal, input.Position.xy);
 	}
 #		else
 	const bool applyMeshTV = false;
@@ -1156,16 +1162,16 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 					DEST = TEX.Sample(SAMP, UV);                        \
 				}                                                       \
 			}
-#		define MESH_TV_SAMPLE_BIAS(DEST, TEX, SAMP, UV)                  \
-			{                                                             \
-				[branch] if (applyMeshTV)                                 \
-				{                                                         \
-					DEST = StochasticEffect(TEX, SAMP, UV, meshOffset);   \
-				}                                                         \
-				else                                                      \
-				{                                                         \
-					DEST = TEX.SampleBias(SAMP, UV, SharedData::MipBias); \
-				}                                                         \
+#		define MESH_TV_SAMPLE_BIAS(DEST, TEX, SAMP, UV)                                         \
+			{                                                                                    \
+				[branch] if (applyMeshTV)                                                        \
+				{                                                                                \
+					DEST = StochasticEffectBias(TEX, SAMP, UV, meshOffset, SharedData::MipBias); \
+				}                                                                                \
+				else                                                                             \
+				{                                                                                \
+					DEST = TEX.SampleBias(SAMP, UV, SharedData::MipBias);                        \
+				}                                                                                \
 			}
 #		define MESH_TV_HEIGHT(DEST, TEX, SAMP, UV, MIP, CHANNEL)                            \
 			{                                                                                \
@@ -1214,7 +1220,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	if defined(LANDSCAPE)
 #		if defined(TERRAIN_VARIATION) || defined(EMAT)
 #			if defined(TERRAIN_VARIATION)
-	StochasticOffsets sharedOffset = ComputeStochasticOffsets(input.TexCoord0.zw);
+	StochasticOffsets sharedOffset = ComputeStochasticOffsets(input.TexCoord0.zw, input.Position.xy);
 #			else
 	StochasticOffsets sharedOffset = (StochasticOffsets)0;
 #			endif
@@ -1476,11 +1482,12 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		weights[6] = weights[7] = weights[8] = weights[9] = 0.0;
 #			endif
 
-		const bool doTerrainPom = ExtendedMaterials::TerrainHasAnyDisplacement() &&
-		                          ExtendedMaterials::TerrainMaxWeightedHeightScale(input, displacementParams) > 0.01;
+		const bool terrainHasDisplacement = ExtendedMaterials::TerrainHasAnyDisplacement() &&
+		                                    ExtendedMaterials::TerrainMaxWeightedHeightScale(input, displacementParams) > 0.01;
+		const bool doTerrainPom = viewPosition.z < 2048.0 && terrainHasDisplacement;
 		[branch] if (doTerrainPom)
 		{
-			uv = ExtendedMaterials::GetParallaxCoords(input, uv, terrainMipLevel, terrainMaxTexDim, viewDirection, tbnTr, screenNoise, displacementParams, sharedOffset, weights);
+			uv = ExtendedMaterials::GetParallaxCoords(input, viewPosition.z, uv, terrainMipLevel, terrainMaxTexDim, viewDirection, tbnTr, screenNoise, displacementParams, sharedOffset, weights);
 		}
 		else if (SharedData::extendedMaterialSettings.EnableHeightBlending)
 		{
@@ -1504,9 +1511,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 			ExtendedMaterials::TerrainHasAnyDisplacement() &&
 			ExtendedMaterials::TerrainMaxWeightedHeightScale(input, displacementParams) > 0.01;
 		// sh0 feeds point-light terrain shadows (hasTerrainParallaxShadow), not only POM.
-		if ((doTerrainPom || hasTerrainParallaxShadow) && parallaxShadowsEnabled && terrainDirectionalShadowQuality > 0.0) {
+		if ((terrainHasDisplacement || hasTerrainParallaxShadow) && parallaxShadowsEnabled && terrainDirectionalShadowQuality > 0.0) {
 			hasCachedTerrainShadowBaseHeight = COMPUTE_TERRAIN_SHADOW_BASE(sh0);
-			if (doTerrainPom && hasCachedTerrainShadowBaseHeight) {
+			if (terrainHasDisplacement && hasCachedTerrainShadowBaseHeight) {
 				float3 dirLightDirectionTS = mul(DirLightDirection, tbn).xyz;
 				cachedDirectionalTerrainParallaxShadow = EVAL_TERRAIN_DIR_SHADOW(sh0, dirLightDirectionTS);
 				hasCachedDirectionalTerrainParallaxShadow = true;
@@ -1552,8 +1559,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 #	if defined(LANDSCAPE)
 #		if defined(TERRAIN_VARIATION)
-	g_terrainStochasticLodBase = ComputeTerrainStochasticLodBase(uv);
-#			define SampleTerrain(TEX, SAMP, UV, OFFSET) StochasticEffect(TEX, SAMP, UV, OFFSET)
+#			define SampleTerrain(TEX, SAMP, UV, OFFSET) StochasticEffectBias(TEX, SAMP, UV, OFFSET, SharedData::MipBias)
 #		else
 #			define SampleTerrain(TEX, SAMP, UV, OFFSET) TEX.SampleBias(SAMP, UV, SharedData::MipBias)
 #		endif
@@ -1588,7 +1594,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	MESH_TV_SAMPLE_BIAS(rawBaseColor, TexColorSampler, SampColorSampler, diffuseUv);
 #		if defined(FUR_SHELLS)
 	if (input.FurShell > 0.0)
-		rawBaseColor.rgb = lerp(rawBaseColor.rgb, furSample.rgb, FurShells::ShellColor) * lerp(FurShells::RootDarkening, 1.0, input.FurShell);
+		rawBaseColor.rgb = lerp(rawBaseColor.rgb, furSample.rgb, FurShells::ShellColor);
 #		endif
 	baseColor = float4(Color::Diffuse(rawBaseColor.rgb), rawBaseColor.a);
 	float4 normalColor;
@@ -1745,6 +1751,11 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		baseColor.xyz = Color::SkyrimGammaToLinear(GetFacegenRGBTintBaseColor(Color::LinearToSkyrimGamma(baseColor.xyz), uv));
 	}
 #	endif  // FACEGEN
+
+#	if defined(FUR_SHELLS)
+	if (input.FurShell > 0.0)
+		baseColor.xyz *= FurShells::GetDarkening(input.FurShell, furFacing);
+#	endif
 
 #	if defined(CS_SKIN_SHADING)
 	if (skinEnabled) {
@@ -1976,13 +1987,18 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 	if (HasSpecular())
 		useSnowSpecular = useSnowDecalSpecular;
-#		endif  // SPARKLE
+#		endif      // SPARKLE
 
 #	endif  // SNOW
 
 #	if defined(WORLD_MAP)
 	baseColor.xyz = GetWorldMapBaseColor(rawBaseColor.xyz, baseColor.xyz, projWeight);
 #	endif  // WORLD_MAP
+
+#	if defined(FUR_SHELLS)
+	if (input.FurShell > 0.0)
+		worldNormal = normalize(worldNormal - viewDirection * (min(dot(worldNormal, viewDirection), 0.0) - 1e-3));
+#	endif
 
 #	if defined(MODELSPACENORMALS)
 	float3 vertexNormal = worldNormal;
@@ -2325,18 +2341,25 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 #	if defined(SNOW_COVER)
 #		if defined(SKYLIGHTING)
-	float snowOcclusion = inWorld ? smoothstep(0, 0.75, SphericalHarmonics::Unproject(skylightingSH, float3(0, 0, 1))) : 0;
+	float snowSkyVisibility = inWorld ? SphericalHarmonics::Unproject(skylightingSH, float3(0, 0, 1)) : 0;
+	float snowOcclusion = smoothstep(0, 0.75, snowSkyVisibility);
 #		else
+	float snowSkyVisibility = inWorld;
 	float snowOcclusion = inWorld;
 #		endif
 
+#		if !defined(TREE_ANIM)
+	bool snowBillboard = false;
+#		endif
 #		if defined(DO_ALPHA_TEST) && defined(LOD_BLENDING) && !defined(TREE_ANIM)  // should only match object lod trees (ultra trees), they have no special define
-	if (HasSoftLighting()) {
+	float3 snowCardNormal = normalize(cross(ddx(input.WorldPosition.xyz), ddy(input.WorldPosition.xyz)));
+	if (SharedData::snowCoverSettings.EnableSnowCover && HasSoftLighting()) {
 		float rx;
 		float ry;
 		TexColorSampler.GetDimensions(rx, ry);
+		snowBillboard = abs(dot(snowCardNormal, vertexNormal)) < 0.5;
 		float hasAlpha = 1 - TexColorSampler.SampleLevel(SampColorSampler, uv, 6).a;
-		if (hasAlpha > 0.001) {
+		if (snowBillboard || hasAlpha > 0.001) {
 			snowOcclusion = 1 - TexColorSampler.Sample(SampColorSampler, uv - float2(0, 2. / ry)).a;
 		}
 	}
@@ -2345,6 +2368,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float3 adjustedWorldPos = input.WorldPosition.xyz + FrameBuffer::CameraPosAdjust.xyz;
 
 	float snowFactor = 0;
+#		if defined(TRUE_PBR)
+	if (glintParameters.y < 0.01)
+		material.GlintLogMicrofacetDensity = 1;  // disables glint where there shouldn't be any
+#		endif
 	// Exclusion is via NoSnow (C++ hook, animation-aware); don't also test Skinned, as static props can carry it without real skinning.
 	if (SharedData::snowCoverSettings.EnableSnowCover
 #		if !defined(TREE_ANIM)
@@ -2352,8 +2379,6 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		endif
 	) {
 #		if defined(TRUE_PBR)
-		if (glintParameters.y < 0.01)
-			material.GlintLogMicrofacetDensity = 1;  // disables glint where there shouldn't be any
 #			if defined(TREE_ANIM)
 		float disp = 0;
 #			elif defined(LANDSCAPE)
@@ -2376,14 +2401,26 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		float3 treeSnowNormal = snowNormal;
 		if (SharedData::snowCoverSettings.AffectTreeTint && !(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::NoFoliageTint))
 			SnowCover::ApplyFoliageColor(material.BaseColor, SnowCover::GetEnvironmentalMultiplier(adjustedWorldPos));
+#		elif defined(DO_ALPHA_TEST)
+		if (SharedData::snowCoverSettings.AffectTreeTint && (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::SnowLODTree))
+			SnowCover::ApplyFoliageColor(material.BaseColor, SnowCover::GetEnvironmentalMultiplier(adjustedWorldPos));
+#		endif
+#		if defined(DO_ALPHA_TEST) && defined(LOD_BLENDING) && !defined(TREE_ANIM)
+		if (snowBillboard)
+			snowNormal = normalize(float3(snowCardNormal.xy, abs(snowCardNormal.z) + 0.5));
 #		endif
 #		if defined(LODLANDSCAPE) || defined(LODLANDNOISE)
 		snowNormal = normalize(lerp(snowNormal, float3(0, 0, 1), 0.5));
 #		endif
+		float rooftopLift = 0;
+#		if !defined(LANDSCAPE) && !defined(LOD) && !defined(TREE_ANIM) && !defined(LODLANDSCAPE) && !defined(LODLANDNOISE)
+		if (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::SnowRooftop)
+			rooftopLift = SnowCover::GetRooftopLift(input.ModelPosition.z, snowSkyVisibility);
+#		endif
 #		if defined(TRUE_PBR)
-		snowFactor = SnowCover::ApplySnowPBR(material, snowNormal, snowFactor, disp, adjustedWorldPos, snowOcclusion, input.WorldPosition.z - waterHeight, length(viewPosition.xyz), uv - uvOriginal);
+		snowFactor = SnowCover::ApplySnowPBR(material, snowNormal, snowFactor, disp, adjustedWorldPos, snowOcclusion, input.WorldPosition.z - waterHeight, length(viewPosition.xyz), uv - uvOriginal, rooftopLift);
 #		else
-		snowFactor = SnowCover::ApplySnow(material, snowNormal, disp, adjustedWorldPos, snowOcclusion, input.WorldPosition.z - waterHeight, length(viewPosition.xyz), uv - uvOriginal);
+		snowFactor = SnowCover::ApplySnow(material, snowNormal, disp, adjustedWorldPos, snowOcclusion, input.WorldPosition.z - waterHeight, length(viewPosition.xyz), uv - uvOriginal, rooftopLift);
 #		endif
 		if (snowFactor > 0) {
 			// The sd gradient term only stays on terrain; on foliage/statics ddx_fine(snowFactor) is noise and sparkles.
@@ -2393,7 +2430,8 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		elif defined(TREE_ANIM)
 			worldNormal = normalize(lerp(worldNormal, treeSnowNormal, snowFactor * 0.75));
 #		else
-			worldNormal = normalize(lerp(worldNormal, normalize(mul(tbn, snowNormal)), snowFactor * 0.75));
+			if (!snowBillboard)
+				worldNormal = normalize(lerp(worldNormal, normalize(mul(tbn, snowNormal)), snowFactor * 0.75));
 #		endif
 		}
 #		if defined(LODLANDNOISE)
@@ -2535,7 +2573,8 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	endif
 
 #	if defined(WATER_EFFECTS)
-	dirLightColor *= WaterEffects::ComputeCaustics(waterData, input.WorldPosition.xyz);
+	if (inWorld || inReflection)
+		dirLightColor *= WaterEffects::ComputeCaustics(waterData, input.WorldPosition.xyz);
 #	endif
 
 	// Apply world shadow (terrain shadows, cloud shadows) directly to light color
@@ -2607,13 +2646,13 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		}
 #		elif defined(PARALLAX)
 		[branch] if (SharedData::extendedMaterialSettings.EnableParallax)
-			dirDetailedShadow *= ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, dirLightDirectionTS, sh0, TexParallaxSampler, SampParallaxSampler, 0, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset);
+			dirDetailedShadow *= ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, dirLightDirectionTS, sh0, TexParallaxSampler, SampParallaxSampler, 0, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset, 16u);
 #		elif defined(EMAT_ENVMAP)
 		[branch] if (complexMaterialParallax)
-			dirDetailedShadow *= ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, dirLightDirectionTS, sh0, TexEnvMaskSampler, SampEnvMaskSampler, 3, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset);
+			dirDetailedShadow *= ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, dirLightDirectionTS, sh0, TexEnvMaskSampler, SampEnvMaskSampler, 3, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset, 16u);
 #		elif defined(TRUE_PBR) && !defined(LODLANDSCAPE) && !defined(FACEGEN)
 		[branch] if (PBRParallax)
-			dirDetailedShadow *= ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, dirLightDirectionTS, sh0, TexParallaxSampler, SampParallaxSampler, 0, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset);
+			dirDetailedShadow *= ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, dirLightDirectionTS, sh0, TexParallaxSampler, SampParallaxSampler, 0, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset, 16u);
 #		endif  // LANDSCAPE
 	}
 #	endif  // defined(EMAT) && (defined(SKINNED) || !defined(MODELSPACENORMALS))
@@ -2755,14 +2794,12 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		lightOffset = LightLimitFix::lightGrid[clusterIndex].offset;
 	}
 
-	const float3 localShadowEye = LightLimitFix::FirstPerson ? LightLimitFix::WorldEyePosition.xyz : FrameBuffer::CameraPosAdjust.xyz;
 #			if defined(SKINNED)
 	const bool localShadowSkinned = true;
 #			else
 	const bool localShadowSkinned = false;
 #			endif
-	const float2x2 localShadowRotation = LightLimitFix::GetShadowRotationMatrix(screenNoise);
-#			if defined(DEFERRED)
+#			if defined(DEFERRED) && defined(LLF_CONTACT_SHADOWS)
 	float contactShadowStrengthScale = 0.0;
 	const uint contactShadowSteps = LightLimitFix::GetContactShadowSteps(viewPosition.z, contactShadowStrengthScale);
 #			endif
@@ -2783,16 +2820,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		float3 lightDirection = light.positionWS.xyz - input.WorldPosition.xyz;
 		float lightDist = length(lightDirection);
 
-#			if defined(ISL)
-		float intensityMultiplier = InverseSquareLighting::GetAttenuation(lightDist, light);
+		float intensityMultiplier = LightLimitFix::GetAttenuation(lightDist, light);
 		if (intensityMultiplier < 1e-5)
 			continue;
-#			else
-		float intensityFactor = saturate(lightDist / light.radius);
-		if (intensityFactor == 1)
-			continue;
-		float intensityMultiplier = 1 - intensityFactor * intensityFactor;
-#			endif
 
 		const bool isPointLightLinear = light.lightFlags & LightLimitFix::LightFlags::Linear;
 		float3 lightColor = Color::PointLight(light.color.xyz, isPointLightLinear) * intensityMultiplier * light.fade;
@@ -2800,10 +2830,14 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		float3 normalizedLightDirection = normalize(lightDirection);
 
 		float shadowComponent = 1.0;
-		[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow) {
-			shadowComponent = LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, input.WorldPosition.xyz, localShadowEye, normalizedLightDirection, localShadowSkinned, localShadowRotation);
+		[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow)
+		{
+			const float3 localShadowEye = LightLimitFix::FirstPerson ? LightLimitFix::WorldEyePosition.xyz : FrameBuffer::CameraPosAdjust.xyz;
+			shadowComponent = LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, input.WorldPosition.xyz, localShadowEye, normalizedLightDirection, localShadowSkinned, screenNoise);
 			lightShadow *= shadowComponent;
-		} else if (Permutation::PixelShaderDescriptor & Permutation::LightingFlags::DefShadow) {
+		}
+		else if (Permutation::PixelShaderDescriptor & Permutation::LightingFlags::DefShadow)
+		{
 			if (light.lightFlags & LightLimitFix::LightFlags::Shadow) {
 				shadowComponent = shadowColor[light.shadowLightIndex];
 				lightShadow *= shadowComponent;
@@ -2817,7 +2851,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #			endif
 		float lightAngle = dot(shadowGateNormal, normalizedLightDirection.xyz);
 
-#			if defined(DEFERRED)
+#			if defined(DEFERRED) && defined(LLF_CONTACT_SHADOWS)
 		[branch] if (contactShadowSteps > 0 && shadowComponent > 0.0 && lightAngle > 0.0 && !(light.lightFlags & LightLimitFix::LightFlags::Simple))
 		{
 			float3 lightVectorVS = mul((float3x3)FrameBuffer::CameraView, lightDirection);
@@ -2848,16 +2882,16 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 			float3 lightDirectionTS = normalize(mul(refractedLightDirection, tbn).xyz);
 #				if defined(PARALLAX)
 			[branch] if (SharedData::extendedMaterialSettings.EnableParallax)
-				parallaxShadow = ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, lightDirectionTS, sh0, TexParallaxSampler, SampParallaxSampler, 0, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset);
+				parallaxShadow = ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, lightDirectionTS, sh0, TexParallaxSampler, SampParallaxSampler, 0, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset, 8u);
 #				elif defined(LANDSCAPE)
 			[branch] if (hasTerrainParallaxShadow)
 				parallaxShadow = ExtendedMaterials::GetTerrainParallaxShadowMultiplier(input, uv, terrainShadowMipLevel, lightDirectionTS, sh0, terrainDirectionalShadowQuality, screenNoise, displacementParams, sharedOffset, ExtendedMaterials::TerrainPointShadowStrength);
 #				elif defined(EMAT_ENVMAP)
 			[branch] if (complexMaterialParallax)
-				parallaxShadow = ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, lightDirectionTS, sh0, TexEnvMaskSampler, SampEnvMaskSampler, 3, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset);
+				parallaxShadow = ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, lightDirectionTS, sh0, TexEnvMaskSampler, SampEnvMaskSampler, 3, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset, 8u);
 #				elif defined(TRUE_PBR) && !defined(LODLANDSCAPE) && !defined(FACEGEN)
 			[branch] if (PBRParallax)
-				parallaxShadow = ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, lightDirectionTS, sh0, TexParallaxSampler, SampParallaxSampler, 0, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset);
+				parallaxShadow = ExtendedMaterials::GetParallaxSoftShadowMultiplier(uv, mipLevel, lightDirectionTS, sh0, TexParallaxSampler, SampParallaxSampler, 0, parallaxShadowQuality, screenNoise, displacementParams, applyMeshTV, meshOffset, 8u);
 #				endif
 		}
 #			endif  // defined(EMAT) && (defined(SKINNED) || !defined(MODELSPACENORMALS))

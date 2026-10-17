@@ -24,6 +24,8 @@ struct ReverseZ : Feature
 	struct Settings
 	{
 		bool EnableReverseZ = true;
+		float NearPlane = 0.0f;
+		int ViewportBiasShift = 0;
 	};
 
 	Settings settings;
@@ -52,13 +54,13 @@ struct ReverseZ : Feature
 	[[nodiscard]] bool ExpectPublishedReversal(const RE::NiCamera* a_camera, bool a_renderingCubemap) const;
 
 	[[nodiscard]] bool IsActive() const { return activeThisBoot; }
+	[[nodiscard]] float GetViewportBiasScale() const;
+	void ApplyNearPlane(const RE::NiCamera* a_camera);
 
 	[[nodiscard]] bool IsReverseDepthView(ID3D11DepthStencilView* a_view) const;
 	[[nodiscard]] ID3D11DepthStencilView* ResolveCubemapFaceDepthView(ID3D11RenderTargetView* a_renderTarget, ID3D11DepthStencilView* a_depthView) const;
 	[[nodiscard]] ID3D11DepthStencilState* GetReversedState(ID3D11DepthStencilState* a_state);
 	[[nodiscard]] ID3D11RasterizerState* GetReversedRasterizerState(ID3D11RasterizerState* a_state);
-
-	static void SetHookPassthrough(bool a_passthrough);
 
 	[[nodiscard]] static bool IsReversedUploadedProjection(const Matrix& a_projection);
 	static void FlipUploadedProjection(Matrix& a_matrix);
@@ -69,5 +71,8 @@ private:
 	bool activeThisBoot = false;
 	bool depthTargetsConverted = false;
 	bool runtimeHooksInstalled = false;
+	bool nearPlaneOverridden = false;
+	float engineNearPlane = 0.0f;
+	RE::Setting* nearPlaneSetting = nullptr;
 	uint32_t convertedTargetMask = 0;
 };

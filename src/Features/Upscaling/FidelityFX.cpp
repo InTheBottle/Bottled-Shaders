@@ -365,11 +365,21 @@ void FidelityFX::CreateFSRResources()
 	DestroyRuntimeUpscalerResources(false);
 	ResetRuntimeUpscalerTracking(true);
 
+	hostFsrContextFailed = false;
+	if (ShouldUseRuntimeUpscalerForFSR() || ShouldRequestRuntimeFsr4())
+		return;
+
+	CreateHostFSRContext();
+}
+
+void FidelityFX::CreateHostFSRContext()
+{
 	// Prevent multiple allocations
 	if (fsrScratchBuffer) {
 		logger::warn("[FidelityFX] FSR resources already created, skipping allocation");
 		return;
 	}
+	hostFsrContextFailed = true;
 
 	auto fsrDevice = ffxGetDeviceDX11_Fsr31(globals::d3d::device);
 
@@ -422,6 +432,7 @@ void FidelityFX::CreateFSRResources()
 		fsrScratchBuffer = nullptr;
 		return;
 	}
+	hostFsrContextFailed = false;
 	logger::info("[FidelityFX] Created FSR3 context (Display: {}x{}, Render: {}x{})",
 		displayWidth, displayHeight, renderWidth, renderHeight);
 }

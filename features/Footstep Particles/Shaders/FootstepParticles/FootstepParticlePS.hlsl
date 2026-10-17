@@ -34,10 +34,6 @@ Texture2D<float4> ShadowMaskTexture : register(t1);
 #	include "LightLimitFix/LightLimitFix.hlsli"
 #endif
 
-#if defined(ISL) && defined(LIGHT_LIMIT_FIX)
-#	include "InverseSquareLighting/InverseSquareLighting.hlsli"
-#endif
-
 struct PS_INPUT
 {
 	float4 Position : SV_POSITION;
@@ -68,12 +64,7 @@ float3 GetPointLighting(float3 positionWS)
 			if (light.lightFlags & LightLimitFix::LightFlags::ShadowCaster)
 				continue;
 			float lightDistance = length(light.positionWS.xyz - positionWS);
-#	if defined(ISL)
-			float attenuation = InverseSquareLighting::GetAttenuation(lightDistance, light);
-#	else
-			float intensityFactor = saturate(lightDistance / light.radius);
-			float attenuation = 1.0 - intensityFactor * intensityFactor;
-#	endif
+			float attenuation = LightLimitFix::GetAttenuation(lightDistance, light);
 			const bool isLinear = light.lightFlags & LightLimitFix::LightFlags::Linear;
 			lighting += Color::PointLight(light.color.xyz, isLinear) * attenuation * 0.5 * light.fade * Color::EffectLightingMult();
 		}

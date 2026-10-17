@@ -201,6 +201,19 @@ public:
 		static constexpr float AUTOHIDE_EXPAND_DELAY = 0.25f;           // Delay before expanding panel (seconds)
 		static constexpr float AUTOHIDE_PANEL_WIDTH_RATIO = 0.2f;       // Ratio of window width for panel (2/10)
 
+		static constexpr float CENTERED_MENU_SIZE_RATIO = 0.8f;
+		static constexpr float SIDE_PANEL_WIDTH_RATIO = 0.34f;
+		static constexpr float SIDE_PANEL_MAX_SCREEN_SHARE = 0.5f;
+		static constexpr float SIDE_PANEL_MIN_WIDTH_EM = 22.0f;
+		static constexpr float SIDE_PANEL_MARGIN = 12.0f;
+		static constexpr float NARROW_LAYOUT_WIDTH_EM = 44.0f;
+		static constexpr float FEATURE_LIST_WIDTH_WEIGHT = 2.0f;
+		static constexpr float FEATURE_PAGE_WIDTH_WEIGHT = 8.0f;
+		static constexpr float NAVIGATOR_POPUP_HEIGHT_RATIO = 0.75f;
+		static constexpr size_t MAX_PINNED_FEATURES = 32;
+		static constexpr size_t MIN_SETTING_SEARCH_LENGTH = 3;
+		static constexpr size_t MAX_SEARCHABLE_LABEL_LENGTH = 48;
+
 		// Scene settings panel constants
 		static constexpr float SCENE_VALUE_INPUT_WIDTH = 240.0f;       // Width for float/int value inputs
 		static constexpr float SCENE_DELETE_BUTTON_WIDTH = 40.0f;      // Width for delete (X) buttons

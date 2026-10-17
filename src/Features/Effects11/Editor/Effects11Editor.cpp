@@ -18,6 +18,7 @@
 #include "Features/Effects11/UITree.h"
 #include "Features/Effects11/WeatherManager.h"
 #include "Features/PostProcessing.h"
+#include "Features/RainRefraction.h"
 #include "Globals.h"
 #include "I18n/I18n.h"
 #include "Menu.h"
@@ -156,7 +157,7 @@ namespace
 		if (a_category == "VOLUMETRICRAYS")
 			return { T("feature.effects11.category.volumetricrays", "Volumetric Rays"), T("feature.effects11.category.volumetricrays_desc", "Effects 11 sun rays.") };
 		if (a_category == "RAYS")
-			return { T("feature.effects11.category.rays", "Sun Rays"), T("feature.effects11.category.rays_desc", "Screen-space light shafts streaming from the sun, or from Masser at night.") };
+			return { T("feature.effects11.category.rays", "Sun Rays"), T("feature.effects11.category.rays_desc", "Screen-space light shafts streaming from the sun, or from a moon at night.") };
 		if (a_category == "GAMEVOLUMETRICRAYS")
 			return { T("feature.effects11.category.gamevolumetricrays", "Game Volumetric Rays"), T("feature.effects11.category.gamevolumetricrays_desc", "Adjustments to the game's own god rays.") };
 		if (a_category == "ADAPTATION")
@@ -864,12 +865,16 @@ void Effects11Editor::DrawCategory(const std::string& a_category, const char* a_
 		}
 	}
 
-	// Rain needs enbraindrops.png; without it the section cannot do anything
-	const auto& raindropStatus = globals::features::effects11.raindropStatus;
-	const bool usable = a_category != "RAIN" || raindropStatus.empty();
+	// Rain is drawn by Rain Refraction, which needs a raindrop texture from the preset or its own default
+	const auto& rainRefraction = globals::features::rainRefraction;
+	const bool usable = a_category != "RAIN" || (rainRefraction.loaded && rainRefraction.GetRaindropSRV());
 	if (!usable) {
-		const auto unavailable = I18n::GetSingleton()->Format(TKEY("rain_unavailable"), { { "reason", raindropStatus } }, "Rain is unavailable: {reason}");
+		const std::string reason = rainRefraction.loaded ? rainRefraction.defaultRaindrops.status : T(TKEY("rain_refraction_disabled"), "Rain Refraction is disabled");
+		const auto unavailable = I18n::GetSingleton()->Format(TKEY("rain_unavailable"), { { "reason", reason } }, "Rain is unavailable: {reason}");
 		Util::Text::WrappedWarning("%s", unavailable.c_str());
+	} else if (a_category == "RAIN" && !rainRefraction.presetRaindrops.status.empty()) {
+		const auto fallback = I18n::GetSingleton()->Format(TKEY("rain_bundled_texture"), { { "reason", rainRefraction.presetRaindrops.status } }, "Using the bundled raindrop texture: {reason}");
+		Util::Text::WrappedInfo("%s", fallback.c_str());
 	}
 
 	if (a_category == "NIGHTEYE") {
@@ -931,7 +936,7 @@ void Effects11Editor::DrawParticleOwnershipToggle()
 {
 	ImGui::Checkbox(T(TKEY("cs_particles"), "Let Community Shaders handle particles"), &globals::features::effects11.settings.IgnorePresetParticles);
 	Util::AddTooltip(T(TKEY("cs_particles_tip"),
-		"Ignores the preset's [PARTICLE] values so smoke, mist and waterfalls are lit as with Effects 11 off.\n"
+		"Lights smoke, mist and waterfalls with the weather's own Effect Lighting colour, scaled to follow the preset's direct and ambient lighting intensities, instead of the preset's [PARTICLE] values.\n"
 		"Saved with Community Shaders' Save Settings, not with the preset."));
 }
 
@@ -1486,6 +1491,7 @@ void Effects11Editor::Revert()
 	}
 	EffectManager::GetSingleton().Load();
 	dirty = false;
+	shaderReloadNeeded = false;
 }
 
 void Effects11Editor::ReloadShaders()
@@ -1560,7 +1566,7 @@ void Effects11Editor::DrawLauncher()
 {
 	auto& effectManager = EffectManager::GetSingleton();
 	auto& settingManager = SettingManager::GetSingleton();
-	const auto& menuSettings = globals::menu->GetSettings();
+	auto& menuSettings = globals::menu->GetSettings();
 	const bool presetLoaded = effectManager.IsPresetLoaded();
 
 	if (presetLoaded)
@@ -1580,7 +1586,7 @@ void Effects11Editor::DrawLauncher()
 		Open(true);
 	if (!menuSettings.Effects11EditorKey.empty()) {
 		ImGui::SameLine();
-		ImGui::AlignTextToFramePadding();
+		ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (buttonSize.y - ImGui::GetTextLineHeight()) * 0.5f);
 		const auto hotkey = I18n::GetSingleton()->Format(TKEY("editor_hotkey"),
 			{ { "key", Util::Input::KeyIdToString(menuSettings.Effects11EditorKey) } }, "Hotkey: {key}");
 		Util::TextUnformattedDisabled(hotkey.c_str());
@@ -1620,6 +1626,12 @@ void Effects11Editor::DrawLauncher()
 	DrawParticleOwnershipToggle();
 
 	DrawTonemapWarning();
+
+	ImGui::SeparatorText(T("menu.settings.tab_keybindings", "Keybindings"));
+	Util::InputComboWidget(T("menu.settings.effects11_editor_key", "Effects 11 Editor Key:"), menuSettings.Effects11EditorKey,
+		globals::menu->settingEffects11EditorKey, "Change##Effects11EditorKey");
+	Util::InputComboWidget(T("menu.settings.effects11_toggle_key", "Effects 11 Toggle Key:"), menuSettings.Effects11ToggleKey,
+		globals::menu->settingEffects11ToggleKey, "Change##Effects11ToggleKey");
 
 	if (!effectManager.enbEffect.IsFilePresent())
 		return;

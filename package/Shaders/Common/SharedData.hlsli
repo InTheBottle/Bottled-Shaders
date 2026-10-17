@@ -95,14 +95,6 @@ namespace SharedData
 		float4 CubemapColor;
 	};
 
-	struct LODShadowCapture
-	{
-		float4 AxisX;
-		float4 AxisY;
-		float4 AxisZ;
-		float4 Cascades[3];
-	};
-
 	struct TerraOccSettings
 	{
 		bool EnableTerrainShadow;
@@ -110,11 +102,7 @@ namespace SharedData
 		float2 ZRange;
 		float2 Offset;
 		float ZBlur;
-		float LODShadowStrength;
-		float LODShadowResolution;
-		float LODShadowBlend;
-		LODShadowCapture LODShadowCaptures[2];
-		float4 LODShadowDepthBias;
+		float3 pad0;
 	};
 
 	struct LightLimitFixSettings
@@ -133,7 +121,8 @@ namespace SharedData
 		uint LocalShadowSamples;
 		float LocalShadowFilterRadius;
 		float LocalShadowTexelSize;
-		float2 pad1;
+		uint ContactShadowSubSamples;
+		float pad1;
 	};
 
 	struct WetnessEffectsSettings
@@ -184,7 +173,7 @@ namespace SharedData
 	struct SkylightingSettings
 	{
 		row_major float4x4 OcclusionViewProj;
-		float4 OcclusionDir;
+		float4 OcclusionSHBasis4Pi;  // SH basis of the occlusion direction, times 4 pi (Monte Carlo weight)
 
 		float4 PosOffset;   // xyz: cell origin in camera model space
 		uint4 ArrayOrigin;  // xyz: array origin
@@ -325,9 +314,7 @@ namespace SharedData
 		float FireIntensity;
 
 		float FireCurve;
-		uint EnableRain;
-		float RainMotionStretch;
-		float RainMotionTransparency;
+		float3 pad0;
 
 		float CloudsCurve;
 		float CloudsDesaturation;
@@ -423,7 +410,7 @@ namespace SharedData
 		uint VolumetricFogEnableLighting;
 
 		float3 VolumetricRaysSkyColor;
-		float VolumetricRaysPad0;
+		uint VolumetricFogEnableShadows;
 
 		float StarsCurve;
 		float StarsIntensity;
@@ -439,6 +426,16 @@ namespace SharedData
 		uint FixBlackCrush;
 		float NightSkyPad0;
 		float NightSkyPad1;
+
+		uint VolumetricRaysSampleCount;
+		uint GameVolumetricRaysDisableDithering;
+		float2 GameVolumetricRaysPad0;
+
+		float3 GameVolumetricRaysLightScale;
+		float GameVolumetricRaysCustomContribution;
+
+		float3 GameVolumetricRaysCustomColor;
+		float GameVolumetricRaysPad1;
 	};
 	struct TerrainBlendingSettings
 	{
@@ -454,8 +451,12 @@ namespace SharedData
 		float fogHeight;
 		float fogHeightFalloff;
 		float fogDensity;
+		float fogHeight2;
+		float fogHeightFalloff2;
+		float fogDensity2;
 		float directionalInscatteringMultiplier;
 		float directionalInscatteringAnisotropy;
+		uint useSkyIBL;
 		float4 inscatteringTint;
 		float cubemapMipLevel;
 		float sunlightAttenuationAmount;
@@ -481,7 +482,15 @@ namespace SharedData
 		uint volumetricHistoryMissSampleCount;
 		float volumetricSampleJitterMultiplier;
 		float volumetricUpsampleJitterMultiplier;
+		float volumetricNearGridDistance;
+		uint volumetricFarGridPixelSize;
+		uint volumetricFarGridSizeZ;
 		float volumetricLocalLightScatteringIntensity;
+		float volumetricFogNoiseScale;
+		float volumetricFogNoiseThreshold;
+		float pad3;
+		float3 volumetricFogNoiseVelocity;
+		float pad0;
 		uint useVanillaFogSettings;
 		float vanillaFogMaxOpacity;
 		float vanillaFogDensity;
@@ -489,7 +498,7 @@ namespace SharedData
 		float vanillaFogFar;
 		float vanillaFogPower;
 		float vanillaFogStrength;
-		float3 pad0;
+		float pad4;
 		float4 vanillaFogNearColor;
 		float4 vanillaFogFarColor;
 		float fogLightingInfluence;
@@ -553,6 +562,11 @@ namespace SharedData
 		uint EnableExpensiveFoliage;
 		float SnowHeightOffset;
 		uint2 pad;
+
+		float RooftopSnow;
+		float RooftopHeight;
+		float RooftopExposure;
+		uint pad1;
 
 		uint EnableSnowCover;
 		uint AffectGrassTint;
@@ -625,6 +639,14 @@ namespace SharedData
 		uint3 pad;
 	};
 
+	struct RainRefractionSettings
+	{
+		uint Enable;
+		float MotionStretch;
+		float MotionTransparency;
+		float pad0;
+	};
+
 	cbuffer FeatureData : register(b6)
 	{
 		GrassLightingSettings grassLightingSettings;
@@ -654,6 +676,7 @@ namespace SharedData
 		VolumetricLightingSettings volumetricLightingSettings;
 		HorizonFixSettings horizonFixSettings;
 		HairBacklightingSettings hairBacklightingSettings;
+		RainRefractionSettings rainRefractionSettings;
 	};
 
 	Texture2D<float4> DepthTexture : register(t17);

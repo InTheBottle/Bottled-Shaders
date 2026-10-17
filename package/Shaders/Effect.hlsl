@@ -10,9 +10,9 @@
 #define EFFECT
 
 #if defined(SOFT) && defined(NORMALS) && defined(TEXTURE) && defined(FALLOFF) && defined(VC) && \
-    !defined(LIGHTING) && !defined(PARTICLES) && !defined(STRIP_PARTICLES) &&                    \
-    !defined(BLOOD) && !defined(MEMBRANE) && !defined(ADDBLEND) && !defined(MULTBLEND) &&        \
-    !defined(MULTBLEND_DECAL) && !defined(ALPHA_TEST) && !defined(DEFERRED) && !defined(SKINNED)
+	!defined(LIGHTING) && !defined(PARTICLES) && !defined(STRIP_PARTICLES) &&                   \
+	!defined(BLOOD) && !defined(MEMBRANE) && !defined(ADDBLEND) && !defined(MULTBLEND) &&       \
+	!defined(MULTBLEND_DECAL) && !defined(ALPHA_TEST) && !defined(DEFERRED) && !defined(SKINNED)
 #	define IS_VOLUMETRIC_FOG
 #endif
 
@@ -462,10 +462,6 @@ cbuffer PerGeometry : register(b2)
 #		include "LightLimitFix/LightLimitFix.hlsli"
 #	endif
 
-#	if defined(ISL) && defined(LIGHT_LIMIT_FIX)
-#		include "InverseSquareLighting/InverseSquareLighting.hlsli"
-#	endif
-
 #	define LinearSampler SampBaseSampler
 
 #	if defined(SKYLIGHTING)
@@ -686,7 +682,7 @@ PS_OUTPUT main(PS_INPUT input)
 	bool isFire = false;
 #		if defined(ADDBLEND)
 #			if defined(SOFT)
-    if (Permutation::PixelShaderDescriptor & Permutation::EffectFlags::GrayscaleToColor && Permutation::PixelShaderDescriptor & Permutation::EffectFlags::GrayscaleToAlpha)
+	if (Permutation::PixelShaderDescriptor & Permutation::EffectFlags::GrayscaleToColor && Permutation::PixelShaderDescriptor & Permutation::EffectFlags::GrayscaleToAlpha)
 		isFire = true;
 #			elif defined(PARTICLES) && defined(TEXCOORD_INDEX) && defined(INDEXED_TEXTURE)
 	isFire = true;
@@ -733,12 +729,7 @@ PS_OUTPUT main(PS_INPUT input)
 			float3 lightDirection = light.positionWS.xyz - input.WorldPosition.xyz;
 			float lightDist = length(lightDirection);
 
-#			if defined(ISL)
-			float intensityMultiplier = InverseSquareLighting::GetAttenuation(lightDist, light);
-#			else
-			float intensityFactor = saturate(lightDist / light.radius);
-			float intensityMultiplier = 1 - intensityFactor * intensityFactor;
-#			endif
+			float intensityMultiplier = LightLimitFix::GetAttenuation(lightDist, light);
 
 			const bool isPointLightLinear = light.lightFlags & LightLimitFix::LightFlags::Linear;
 			float3 lightColor = Color::PointLight(light.color.xyz, isPointLightLinear) * intensityMultiplier * 0.5 * light.fade * Color::EffectLightingMult();
@@ -832,7 +823,9 @@ PS_OUTPUT main(PS_INPUT input)
 	[branch] if (isEnbVolumetricFog)
 	{
 		alpha = saturate(alpha * SharedData::enbSettings.VolumetricFogOpacity);
-		float volumetricFogShadow = GetViewRayShadow(input.WorldPosition.xyz, input.Position.xy, nativeDepth);
+		float volumetricFogShadow = 1.0;
+		[branch] if (SharedData::enbSettings.VolumetricFogEnableShadows)
+			volumetricFogShadow = GetViewRayShadow(input.WorldPosition.xyz, input.Position.xy, nativeDepth);
 		float3 volumetricFogScale = SharedData::enbSettings.VolumetricFogIntensity * SharedData::enbSettings.VolumetricFogColorFilter;
 		[branch] if (SharedData::enbSettings.VolumetricFogEnableLighting)
 		{
@@ -880,11 +873,8 @@ PS_OUTPUT main(PS_INPUT input)
 	float3 vanillaFogColor = fogColor;
 	float expFogFactor = 0;
 	if (SharedData::exponentialHeightFogSettings.enabled) {
-		float4 exponentialHeightFog;
-		if (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection)
-			exponentialHeightFog = ExponentialHeightFog::GetExponentialHeightFogNoVolumetric(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, fogColor, float4(input.Position.xy * FrameBuffer::DynamicResolutionParams2.xy, input.Position.z, 1));
-		else
-			exponentialHeightFog = ExponentialHeightFog::GetExponentialHeightFog(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, fogColor, float4(input.Position.xy * FrameBuffer::DynamicResolutionParams2.xy, input.Position.z, 1));
+		const bool inReflection = Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection;
+		float4 exponentialHeightFog = ExponentialHeightFog::GetExponentialHeightFogInternal(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, fogColor, true, float4(input.Position.xy * FrameBuffer::DynamicResolutionParams2.xy, input.Position.z, 1), !inReflection);
 		expFogFactor = exponentialHeightFog.w;
 		fogColor = exponentialHeightFog.xyz;
 		fogFactor = exponentialHeightFog.w;
@@ -898,20 +888,20 @@ PS_OUTPUT main(PS_INPUT input)
 		}
 	}
 #		endif
-#        if defined(ADDBLEND)
-#            if defined(EXP_HEIGHT_FOG)
-    float3 blendedColor = lightColor * (1 - vanillaFogFactor) * (1 - expFogFactor);
-#            else
-    float3 blendedColor = lightColor * (1 - fogFactor);
-#            endif
-#	if defined(EFFECTS11)
+#		if defined(ADDBLEND)
+#			if defined(EXP_HEIGHT_FOG)
+	float3 blendedColor = lightColor * (1 - vanillaFogFactor) * (1 - expFogFactor);
+#			else
+	float3 blendedColor = lightColor * (1 - fogFactor);
+#			endif
+#			if defined(EFFECTS11)
 	if (SharedData::enbSettings.Enable) {
 		if (isFire)
 			blendedColor = pow(abs(blendedColor), SharedData::enbSettings.FireCurve) * SharedData::enbSettings.FireIntensity;
 		else
 			blendedColor = pow(abs(blendedColor), SharedData::enbSettings.LightSpriteCurve) * SharedData::enbSettings.LightSpriteIntensity;
 	}
-#	endif
+#			endif
 #		elif defined(MULTBLEND) || defined(MULTBLEND_DECAL)
 #			if defined(EXP_HEIGHT_FOG)
 	float3 blendedColor = lerp(lightColor, 1.0.xxx, saturate(1.5 * vanillaFogFactor).xxx);
@@ -942,7 +932,7 @@ PS_OUTPUT main(PS_INPUT input)
 #	else
 	finalColor *= fogMul;
 #	endif
-#	if defined(EFFECTS11) && defined(SKY_OBJECT)
+#	if defined(EFFECTS11)
 	[branch] if (SharedData::enbSettings.Enable && (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsAurora))
 		finalColor.xyz = pow(max(finalColor.xyz, 0.0), SharedData::enbSettings.AuroraCurve) * SharedData::enbSettings.AuroraIntensity;
 #	endif

@@ -13,8 +13,8 @@ cbuffer VLData : register(b1)
 
 struct VS_OUTPUT_POST
 {
-	float4 pos : SV_POSITION;
-	float2 txcoord0 : TEXCOORD0;
+	float4 pos: SV_POSITION;
+	float2 txcoord0: TEXCOORD0;
 };
 
 // Joint bilateral upsample of the half-res scattering: four bilinear taps weighted by
@@ -36,8 +36,8 @@ float UpsampleScattering(float2 fullResPixel, float fullResDepth)
 
 	float weightedSum = 0.0;
 	float weightSum = 0.0;
-	[unroll]
-	for (uint i = 0; i < 4; i++) {
+	[unroll] for (uint i = 0; i < 4; i++)
+	{
 		int2 tap = clamp(basePixel + offsets[i], int2(0, 0), ScreenSizeMin1);
 		float tapDepth = RaymarchDepthTexture[tap];
 		float relativeDelta = abs(referenceDepth - tapDepth) / max(referenceDepth, 1e-4);

@@ -73,9 +73,18 @@ namespace SnowCover
 		return (GetHeightMult(p) + SharedData::snowCoverSettings.SeasonalAltitude) / SharedData::snowCoverSettings.BlendSmoothness;
 	}
 
+	float GetRooftopLift(float modelHeight, float skyVisibility)
+	{
+		float height = max(SharedData::snowCoverSettings.RooftopHeight, 1.0);
+		float exposure = smoothstep(SharedData::snowCoverSettings.RooftopExposure, 1.0, skyVisibility);
+		return SharedData::snowCoverSettings.RooftopSnow * exposure * smoothstep(0.5 * height, height, modelHeight);
+	}
+
 	void ApplyFoliageColor(inout float3 color, float env_mult)
 	{
 		float gmult = saturate(env_mult - SharedData::snowCoverSettings.FoliageHeightOffset / 5000);
+		if (gmult <= 0)
+			return;
 		float3 hsv = Color::RGBtoHSV(color);
 		if (hsv.x > 0.55)
 			hsv.x = frac(lerp(hsv.x, 1.1, gmult));
@@ -85,12 +94,16 @@ namespace SnowCover
 		color = Color::HSVtoRGB(hsv);
 	}
 
-	void ApplySnowFoliage(inout float3 color, float3 worldNormal, float3 p, float skylight, float viewDist, float distMult)
+	float GetFoliageSnowBase(float3 worldNormal, float3 p, float viewDist, float distMult, out float env_mult)
 	{
-		float env_mult = GetEnvironmentalMultiplier(p);
+		env_mult = GetEnvironmentalMultiplier(p);
 		float weatherMult = GetWeatherRange(p, viewDist) * SharedData::snowCoverSettings.TimeSnowing * max(500, SharedData::snowCoverSettings.SnowingDensity) / 500;
 		float mult = SharedData::snowCoverSettings.MainTint.a * saturate(env_mult);
-		mult = distMult * skylight * saturate(mult + weatherMult) * smoothstep(SharedData::snowCoverSettings.minAngle, SharedData::snowCoverSettings.maxAngle, worldNormal.z);
+		return distMult * saturate(mult + weatherMult) * smoothstep(SharedData::snowCoverSettings.minAngle, SharedData::snowCoverSettings.maxAngle, worldNormal.z);
+	}
+
+	void ApplySnowFoliageBase(inout float3 color, float3 worldNormal, float3 p, float env_mult, float mult)
+	{
 		[branch] if (mult > 0)
 			mult *= 1 - GetFireMelt(p);
 #	if defined(GRASS)
@@ -113,8 +126,15 @@ namespace SnowCover
 		color = lerp(color, diffuse, mult);
 	}
 
+	void ApplySnowFoliage(inout float3 color, float3 worldNormal, float3 p, float skylight, float viewDist, float distMult)
+	{
+		float env_mult;
+		float mult = GetFoliageSnowBase(worldNormal, p, viewDist, distMult, env_mult) * skylight;
+		ApplySnowFoliageBase(color, worldNormal, p, env_mult, mult);
+	}
+
 #	if !defined(BASIC_SNOW_COVER)
-	float ApplySnowBase(float3 worldNormal, inout float2 uv, out bool alt, float disp, float3 p, float skylight, float waterDist, float viewDist)
+	float ApplySnowBase(float3 worldNormal, inout float2 uv, out bool alt, float disp, float3 p, float skylight, float waterDist, float viewDist, float lift)
 	{
 		// the range in which water level affects snow
 		waterDist = smoothstep(-64, 8, -waterDist - disp);
@@ -122,7 +142,7 @@ namespace SnowCover
 		float weatherMult = GetWeatherRange(p, viewDist) * pow(SharedData::snowCoverSettings.TimeSnowing, 3) * max(500, SharedData::snowCoverSettings.SnowingDensity) / 500;
 		weatherMult = clamp((weatherMult) * max(SharedData::snowCoverSettings.minAngle, worldNormal.z), -1, 1);
 		// the amount of snow based on season and weather
-		float env_mult = saturate(max((GetEnvironmentalMultiplier(p) + disp * 5), weatherMult)) - waterDist;
+		float env_mult = saturate(max((GetEnvironmentalMultiplier(p + float3(0, 0, lift)) + disp * 5), weatherMult)) - waterDist;
 		// LODLANDNOISE is the LOD4 ring; without it that ring gets snow halved and pops at the cell seam
 #		if !defined(LANDSCAPE) && !defined(LOD) && !defined(LODLANDSCAPE) && !defined(LODLANDNOISE)
 		float distMult = GetObjectFade(viewDist);
@@ -145,10 +165,10 @@ namespace SnowCover
 	}
 
 #		if defined(TRUE_PBR)
-	float ApplySnowPBR(inout MaterialProperties material, inout float3 worldNormal, out float mult, float disp, float3 p, float skylight, float waterDist, float viewDist, float2 uv)
+	float ApplySnowPBR(inout MaterialProperties material, inout float3 worldNormal, out float mult, float disp, float3 p, float skylight, float waterDist, float viewDist, float2 uv, float lift = 0)
 	{
 		bool alt;
-		mult = ApplySnowBase(worldNormal, uv, alt, disp, p, skylight, waterDist, viewDist);
+		mult = ApplySnowBase(worldNormal, uv, alt, disp, p, skylight, waterDist, viewDist, lift);
 		if (mult <= 0)
 			return mult;
 		float4 rmaos;
@@ -186,10 +206,10 @@ namespace SnowCover
 	}
 #		else
 
-	float ApplySnow(inout MaterialProperties material, inout float3 worldNormal, float disp, float3 p, float skylight, float waterDist, float viewDist, float2 uv)
+	float ApplySnow(inout MaterialProperties material, inout float3 worldNormal, float disp, float3 p, float skylight, float waterDist, float viewDist, float2 uv, float lift = 0)
 	{
 		bool alt;
-		float mult = ApplySnowBase(worldNormal, uv, alt, disp, p, skylight, waterDist, viewDist);
+		float mult = ApplySnowBase(worldNormal, uv, alt, disp, p, skylight, waterDist, viewDist, lift);
 		if (mult <= 0.0)
 			return 0;
 		float4 rmaos;

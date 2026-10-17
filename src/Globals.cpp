@@ -21,7 +21,6 @@
 #include "Features/HorizonFix.h"
 #include "Features/IBL.h"
 #include "Features/InteriorSun.h"
-#include "Features/InverseSquareLighting.h"
 #include "Features/LODBlending.h"
 #include "Features/LandscapeSeams.h"
 #include "Features/LightLimitFix.h"
@@ -30,6 +29,7 @@
 #include "Features/NeuralRendering.h"
 #include "Features/PostProcessing.h"
 #include "Features/ProceduralSun.h"
+#include "Features/RainRefraction.h"
 #include "Features/RemoteControl.h"
 #include "Features/RenderDoc.h"
 #include "Features/ScreenSpaceGI.h"
@@ -37,6 +37,7 @@
 #include "Features/ScreenshotFeature.h"
 #include "Features/Skin.h"
 #include "Features/SnowCover.h"
+#include "Features/SnowDeformation.h"
 #include "Features/SkySync.h"
 #include "Features/Skylighting.h"
 #include "Features/SubsurfaceScattering.h"
@@ -88,7 +89,7 @@ namespace globals
 		HiZOcclusion hiZOcclusion{};
 		HorizonFix horizonFix{};
 		InteriorSun interiorSun{};
-		InverseSquareLighting inverseSquareLighting{};
+		RainRefraction rainRefraction{};
 		ScreenSpaceGI screenSpaceGI{};
 		ScreenSpaceShadows screenSpaceShadows{};
 		Skylighting skylighting{};
@@ -123,6 +124,7 @@ namespace globals
 		HairBacklighting hairBacklighting{};
 		FurShells furShells{};
 		LandscapeSeams landscapeSeams{};
+		SnowDeformation snowDeformation{};
 
 		namespace llf
 		{

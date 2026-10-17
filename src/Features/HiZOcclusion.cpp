@@ -104,43 +104,7 @@ HiZOcclusion::~HiZOcclusion()
 		hiZTestCSDebug = nullptr;
 	}
 
-	// Release GPU culling resources
-	if (geometryBoundsSRV) {
-		geometryBoundsSRV->Release();
-		geometryBoundsSRV = nullptr;
-	}
-	if (geometryBoundsBuffer) {
-		geometryBoundsBuffer->Release();
-		geometryBoundsBuffer = nullptr;
-	}
-	if (visibilityResultsUAV) {
-		visibilityResultsUAV->Release();
-		visibilityResultsUAV = nullptr;
-	}
-	if (visibilityResultsBuffer) {
-		visibilityResultsBuffer->Release();
-		visibilityResultsBuffer = nullptr;
-	}
-	if (hiZTestParamsBuffer) {
-		hiZTestParamsBuffer->Release();
-		hiZTestParamsBuffer = nullptr;
-	}
-	if (hiZSampler) {
-		hiZSampler->Release();
-		hiZSampler = nullptr;
-	}
-
-	// Release async readback staging buffers
-	for (int i = 0; i < AsyncReadbackState::BUFFER_COUNT; ++i) {
-		if (readbackState.stagingBuffers[i]) {
-			readbackState.stagingBuffers[i]->Release();
-			readbackState.stagingBuffers[i] = nullptr;
-		}
-		if (readbackState.completionQueries[i]) {
-			readbackState.completionQueries[i]->Release();
-			readbackState.completionQueries[i] = nullptr;
-		}
-	}
+	ReleaseGPUCullingResources();
 
 	// Release debug buffers
 	ReleaseDebugBuffer();
@@ -153,21 +117,37 @@ HiZOcclusion::~HiZOcclusion()
 		visibilityReadbackBuffer->Release();
 		visibilityReadbackBuffer = nullptr;
 	}
+}
 
-	// Release GPU timestamp queries
+void HiZOcclusion::ReleaseGPUCullingResources()
+{
+	auto release = [](auto*& a_object) {
+		if (a_object) {
+			a_object->Release();
+			a_object = nullptr;
+		}
+	};
+
+	release(geometryBoundsSRV);
+	release(geometryBoundsBuffer);
+	release(visibilityResultsUAV);
+	release(visibilityResultsBuffer);
+	release(hiZTestParamsBuffer);
+	release(hiZSampler);
+
+	for (int i = 0; i < AsyncReadbackState::BUFFER_COUNT; ++i) {
+		release(readbackState.stagingBuffers[i]);
+		release(readbackState.completionQueries[i]);
+		readbackState.hasPendingRead[i] = false;
+		readbackState.geometrySnapshots[i].clear();
+		readbackState.geometryCount[i] = 0;
+	}
+	readbackState.numPendingReads = 0;
+
 	for (uint32_t i = 0; i < GPU_TIMING_BUFFER_COUNT; ++i) {
-		if (gpuTimingQueries[i].disjointQuery) {
-			gpuTimingQueries[i].disjointQuery->Release();
-			gpuTimingQueries[i].disjointQuery = nullptr;
-		}
-		if (gpuTimingQueries[i].beginTimestamp) {
-			gpuTimingQueries[i].beginTimestamp->Release();
-			gpuTimingQueries[i].beginTimestamp = nullptr;
-		}
-		if (gpuTimingQueries[i].endTimestamp) {
-			gpuTimingQueries[i].endTimestamp->Release();
-			gpuTimingQueries[i].endTimestamp = nullptr;
-		}
+		release(gpuTimingQueries[i].disjointQuery);
+		release(gpuTimingQueries[i].beginTimestamp);
+		release(gpuTimingQueries[i].endTimestamp);
 		gpuTimingQueries[i].pending = false;
 	}
 }
@@ -260,6 +240,46 @@ void HiZOcclusion::DrawSettings()
 
 	ImGui::Separator();
 
+	const auto drawRenderModeTable = [&](const char* tableId, bool advanced) {
+		if (!ImGui::BeginTable(tableId, 3, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg))
+			return;
+		ImGui::TableSetupColumn(T(TKEY("render_mode_column_pass"), "Pass"));
+		ImGui::TableSetupColumn(T(TKEY("render_mode_column_test"), "Test"));
+		ImGui::TableSetupColumn(T(TKEY("render_mode_column_calls"), "Calls"));
+		ImGui::TableHeadersRow();
+		for (uint32_t i = 0; i < static_cast<uint32_t>(settings.cullRenderMode.size()); i++) {
+			if (IsAdvancedRenderMode(i) != advanced)
+				continue;
+
+			const uint8_t pass = GetPassKind(i);
+			const uint32_t calls = stats.renderModeCalls[i].load();
+			if (!pass && !calls)
+				continue;
+
+			ImGui::PushID(static_cast<int>(i));
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+			{
+				auto _disabled = Util::DisableGuard(!pass);
+				const auto label = std::format("{} ({})", GetRenderModeName(i), i);
+				bool enabled = pass && settings.cullRenderMode[i];
+				if (ImGui::Checkbox(label.c_str(), &enabled))
+					settings.cullRenderMode[i] = enabled;
+			}
+			ImGui::TableNextColumn();
+			if (pass == kCameraPass)
+				ImGui::TextUnformatted(T(TKEY("render_mode_test_camera"), "Camera occlusion"));
+			else if (pass == kSunShadowPass)
+				ImGui::TextUnformatted(T(TKEY("render_mode_test_shadow"), "Shadow + caster occlusion"));
+			else
+				ImGui::TextDisabled("%s", T(TKEY("render_mode_test_unsupported"), "Not cullable"));
+			ImGui::TableNextColumn();
+			ImGui::Text("%u", calls);
+			ImGui::PopID();
+		}
+		ImGui::EndTable();
+	};
+
 	if (ImGui::BeginTabBar("##HiZTabs", ImGuiTabBarFlags_None)) {
 		// General Settings Tab
 		if (MenuFonts::BeginTabItemWithFont(T(TKEY("tab_settings"), "Settings"), Menu::FontRole::Subheading)) {
@@ -275,56 +295,8 @@ void HiZOcclusion::DrawSettings()
 										  "Higher = safer, fewer artifacts, but less performance gain."));
 				}
 
-				// Render mode culling toggles
 				ImGui::Text("%s", T(TKEY("render_mode_culling"), "Render Mode Culling:"));
-				if (ImGui::BeginTable("##HiZRenderModes", 3, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg)) {
-					ImGui::TableSetupColumn(T(TKEY("render_mode_column_pass"), "Pass"));
-					ImGui::TableSetupColumn(T(TKEY("render_mode_column_test"), "Test"));
-					ImGui::TableSetupColumn(T(TKEY("render_mode_column_calls"), "Calls"));
-					ImGui::TableHeadersRow();
-					for (uint32_t i = 0; i < static_cast<uint32_t>(settings.cullRenderMode.size()); i++) {
-						const uint8_t pass = GetPassKind(i);
-						const uint32_t calls = stats.renderModeCalls[i].load();
-						if (!pass && !calls)
-							continue;
-
-						ImGui::PushID(static_cast<int>(i));
-						ImGui::TableNextRow();
-						ImGui::TableNextColumn();
-						{
-							auto _disabled = Util::DisableGuard(!pass);
-							const auto label = std::format("{} ({})", GetRenderModeName(i), i);
-							bool enabled = pass && settings.cullRenderMode[i];
-							if (ImGui::Checkbox(label.c_str(), &enabled))
-								settings.cullRenderMode[i] = enabled;
-						}
-						ImGui::TableNextColumn();
-						if (pass == kCameraPass)
-							ImGui::TextUnformatted(T(TKEY("render_mode_test_camera"), "Camera occlusion"));
-						else if (pass == kSunShadowPass)
-							ImGui::TextUnformatted(T(TKEY("render_mode_test_shadow"), "Shadow + caster occlusion"));
-						else
-							ImGui::TextDisabled("%s", T(TKEY("render_mode_test_unsupported"), "Not cullable"));
-						ImGui::TableNextColumn();
-						ImGui::Text("%u", calls);
-						ImGui::PopID();
-					}
-					ImGui::EndTable();
-				}
-
-				ImGui::SliderFloat(T(TKEY("shadow_sweep_distance"), "Shadow Reach"), &settings.shadowSweepDistance, 0.0f, 16384.0f, "%.0f");
-				if (auto _tt = Util::HoverTooltipWrapper()) {
-					ImGui::Text("%s", T(TKEY("shadow_sweep_distance_tooltip"),
-										  "How far a caster's shadow is followed along the sun direction.\n"
-										  "A caster is only dropped from the shadow map when it and its shadow are hidden. 0 disables shadow culling."));
-				}
-
-				ImGui::SliderFloat(T(TKEY("guard_angle"), "Turn Guard (degrees)"), &settings.guardAngle, 0.0f, 45.0f, "%.1f");
-				if (auto _tt = Util::HoverTooltipWrapper()) {
-					ImGui::Text("%s", T(TKEY("guard_angle_tooltip"),
-										  "Shadows just outside the view are kept so turning does not reveal missing shadows.\n"
-										  "Shadow culling also resets when the camera turns further than this before new results arrive."));
-				}
+				drawRenderModeTable("##HiZRenderModes", false);
 
 				ImGui::SliderFloat(T(TKEY("motion_margin_frames"), "Motion Margin (frames)"), &settings.motionMarginFrames, 0.0f, 10.0f, "%.1f");
 				if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -366,6 +338,32 @@ void HiZOcclusion::DrawSettings()
 				ImGui::Indent();
 				ImGui::Text("%s %u", T(TKEY("main_pass"), "Main pass:"), stats.accumRegisterCalls.load());
 				ImGui::Unindent();
+			}
+			ImGui::EndChild();
+			ImGui::EndTabItem();
+		}
+
+		if (MenuFonts::BeginTabItemWithFont(T(TKEY("tab_advanced"), "Advanced"), Menu::FontRole::Subheading)) {
+			if (ImGui::BeginChild("##HiZAdvancedFrame", { 0, 0 }, ImGuiChildFlags_Borders)) {
+				ImGui::SeparatorText(T(TKEY("sun_shadow_culling"), "Sun Shadow Culling"));
+				ImGui::TextDisabled("%s", T(TKEY("sun_shadow_culling_hint"), "Off by default. May cause missing or popping shadows."));
+
+				drawRenderModeTable("##HiZAdvancedRenderModes", true);
+
+				auto _disabled = Util::DisableGuard(!settings.cullRenderMode[14]);
+				ImGui::SliderFloat(T(TKEY("shadow_sweep_distance"), "Shadow Reach"), &settings.shadowSweepDistance, 0.0f, 16384.0f, "%.0f");
+				if (auto _tt = Util::HoverTooltipWrapper()) {
+					ImGui::Text("%s", T(TKEY("shadow_sweep_distance_tooltip"),
+										  "How far a caster's shadow is followed along the sun direction.\n"
+										  "A caster is only dropped from the shadow map when it and its shadow are hidden. 0 disables shadow culling."));
+				}
+
+				ImGui::SliderFloat(T(TKEY("guard_angle"), "Turn Guard (degrees)"), &settings.guardAngle, 0.0f, 45.0f, "%.1f");
+				if (auto _tt = Util::HoverTooltipWrapper()) {
+					ImGui::Text("%s", T(TKEY("guard_angle_tooltip"),
+										  "Shadows just outside the view are kept so turning does not reveal missing shadows.\n"
+										  "Shadow culling also resets when the camera turns further than this before new results arrive."));
+				}
 			}
 			ImGui::EndChild();
 			ImGui::EndTabItem();
@@ -682,7 +680,7 @@ void HiZOcclusion::Reset()
 	if (!settings.enableHiZCulling) {
 		if (wasEnabled) {
 			// Restore all app-culled geometry and clear occlusion tracking
-			ClearOcclusionState();
+			ReleaseGeometryReferences();
 
 			// Release and clear all resources
 			ReleaseBoundsOverlayResources();
@@ -706,6 +704,8 @@ void HiZOcclusion::Reset()
 		if (!wasEnabled) {
 			wasEnabled = true;
 		}
+		if (globals::state->IsMainOrLoadingMenuOpen())
+			ReleaseGeometryReferences();
 	}
 }
 
@@ -1178,6 +1178,8 @@ bool HiZOcclusion::SetupGPUCullingResources()
 	auto device = globals::d3d::device;
 	if (!device)
 		return false;
+
+	ReleaseGPUCullingResources();
 
 	// Create geometry bounds buffer (input)
 	D3D11_BUFFER_DESC bufferDesc = {};
@@ -1898,6 +1900,19 @@ void HiZOcclusion::ClearShadowOcclusionState()
 	shadowOcclusion = {};
 }
 
+void HiZOcclusion::ReleaseGeometryReferences()
+{
+	ClearOcclusionState();
+	for (uint32_t i = 0; i < AsyncReadbackState::BUFFER_COUNT; ++i)
+		ReleaseReadbackSlot(i);
+	readbackState.readIndex = readbackState.writeIndex;
+	pendingGeometry.clear();
+	pendingPasses.clear();
+	pendingGeometryIndex.clear();
+	pendingGeometrySnapshot.clear();
+	geometryBounds.clear();
+}
+
 void HiZOcclusion::UpdateCameraMotion()
 {
 	auto* camera = RE::Main::WorldRootCamera();
@@ -1940,6 +1955,11 @@ uint8_t HiZOcclusion::GetPassKind(uint32_t renderMode)
 	default:
 		return 0;
 	}
+}
+
+bool HiZOcclusion::IsAdvancedRenderMode(uint32_t renderMode)
+{
+	return renderMode == 12 || renderMode == 14;
 }
 
 const char* HiZOcclusion::GetRenderModeName(uint32_t renderMode)

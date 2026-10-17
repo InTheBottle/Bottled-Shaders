@@ -29,7 +29,7 @@ struct VS_OUTPUT
 #if defined(ENVCUBE)
 	float4 PrecipitationOcclusionTexCoord: TEXCOORD1;
 #endif
-#if defined(ENVCUBE) && defined(RAIN) && defined(EFFECTS11)
+#if defined(ENVCUBE) && defined(RAIN) && defined(RAIN_REFRACTION)
 	float2 RaindropData: TEXCOORD2;
 #endif
 };
@@ -91,15 +91,15 @@ VS_OUTPUT main(VS_INPUT input)
 	float4 viewPosition = mul(WorldViewProj, msPosition);
 #		if defined(RAIN)
 	float3 rainVelocity = Velocity.xyz;
-#		if defined(EFFECTS11)
-	if (SharedData::enbSettings.EnableRain) {
+#			if defined(RAIN_REFRACTION)
+	if (SharedData::rainRefractionSettings.Enable) {
 		float velLen = length(rainVelocity);
 		if (velLen > 0) {
 			float3 normVel = rainVelocity / velLen;
-			rainVelocity = lerp(normVel, rainVelocity, SharedData::enbSettings.RainMotionStretch);
+			rainVelocity = lerp(normVel, rainVelocity, SharedData::rainRefractionSettings.MotionStretch);
 		}
 	}
-#		endif
+#			endif
 	float4 adjustedMsPosition = msPosition - float4(rainVelocity, 0);
 	float positionBlendParam = 0.5 * (1 + input.TexCoord1.y);
 	float4 adjustedViewPosition = mul(WorldViewProj, adjustedMsPosition);
@@ -191,10 +191,10 @@ VS_OUTPUT main(VS_INPUT input)
 	vsout.Color.xyz = color.xyz;
 #	endif
 
-#		if defined(ENVCUBE) && defined(RAIN) && defined(EFFECTS11)
+#	if defined(ENVCUBE) && defined(RAIN) && defined(RAIN_REFRACTION)
 	// Corner offsets are +-particle size; their sign is the UV within the quad's atlas cell, so one drop fills each particle
 	vsout.RaindropData.xy = step(0, input.TexCoord1.xy);
-#		endif
+#	endif
 
 	return vsout;
 }
@@ -214,10 +214,6 @@ struct PS_OUTPUT
 #		include "LightLimitFix/LightLimitFix.hlsli"
 #	endif
 
-#	if defined(ISL) && defined(LIGHT_LIMIT_FIX)
-#		include "InverseSquareLighting/InverseSquareLighting.hlsli"
-#	endif
-
 SamplerState SampSourceTexture : register(s0);
 #	if defined(GRAYSCALE_TO_COLOR) || defined(GRAYSCALE_TO_ALPHA)
 SamplerState SampGrayscaleTexture : register(s1);
@@ -235,7 +231,7 @@ Texture2D<float4> TexGrayscaleTexture : register(t1);
 Texture2D<float4> TexPrecipitationOcclusionTexture : register(t2);
 Texture2D<float4> TexUnderwaterMask : register(t3);
 #	endif
-#	if defined(ENVCUBE) && defined(RAIN) && defined(EFFECTS11)
+#	if defined(ENVCUBE) && defined(RAIN) && defined(RAIN_REFRACTION)
 Texture2D<float4> TexRaindropNormals : register(t80);
 #	endif
 
@@ -257,6 +253,20 @@ cbuffer PerGeometry : register(b2)
 #		define SampColorSampler SampSourceTexture
 #		include "DynamicCubemaps/DynamicCubemaps.hlsli"
 #	endif
+
+#	if defined(ENVCUBE) && defined(RAIN) && defined(DYNAMIC_CUBEMAPS) && defined(RAIN_REFRACTION)
+#		define REFRACTIVE_RAIN
+#	endif
+
+float3 GetDirLightColor(float3 positionWS)
+{
+	float unusedDetailedShadow;
+	float3 dirLightColor = SharedData::DirLightColor.xyz * ShadowSampling::GetLightingShadow(positionWS, unusedDetailedShadow);
+	// Menu and reflection passes don't match the world heightmap and cloud state
+	if (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InWorld)
+		dirLightColor *= ShadowSampling::GetWorldShadow(positionWS, FrameBuffer::CameraPosAdjust.xyz);
+	return dirLightColor;
+}
 
 #	if defined(LIGHT_LIMIT_FIX)
 bool GetLightCluster(float3 positionWS, out uint lightOffset, out uint lightCount)
@@ -280,18 +290,13 @@ float GetPointLightIntensity(LightLimitFix::Light light, float3 positionWS, out 
 	float lightDist = length(lightDirection);
 	lightDirection /= max(lightDist, 1e-5);
 
-#		if defined(ISL)
-	float intensity = InverseSquareLighting::GetAttenuation(lightDist, light);
-#		else
-	float intensityFactor = saturate(lightDist / light.radius);
-	float intensity = 1 - intensityFactor * intensityFactor;
-#		endif
+	float intensity = LightLimitFix::GetAttenuation(lightDist, light);
 	intensity *= light.fade;
 	if (intensity < 1e-5)
 		return 0.0;
 
 	[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow)
-		intensity *= LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, positionWS, FrameBuffer::CameraPosAdjust.xyz, lightDirection, false, float2x2(1, 0, 0, 1));
+		intensity *= LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, positionWS, FrameBuffer::CameraPosAdjust.xyz, lightDirection, false, 0.0);
 
 	return intensity;
 }
@@ -311,12 +316,12 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	}
 #	endif
 
-#	if defined(ENVCUBE) && defined(RAIN) && defined(DYNAMIC_CUBEMAPS) && defined(EFFECTS11)
-if (SharedData::enbSettings.EnableRain) {
-	float4 raindropNormal = TexRaindropNormals.Sample(SampSourceTexture, input.RaindropData.xy);
-    float alpha = saturate(raindropNormal.w * (1.0 - SharedData::enbSettings.RainMotionTransparency));
-   	clip(alpha - (4.0 / 255.0));
-	raindropNormal.y = 1.0 - raindropNormal.y;
+#	if defined(REFRACTIVE_RAIN)
+	if (SharedData::rainRefractionSettings.Enable) {
+		float4 raindropNormal = TexRaindropNormals.Sample(SampSourceTexture, input.RaindropData.xy);
+		float alpha = saturate(raindropNormal.w * (1.0 - SharedData::rainRefractionSettings.MotionTransparency));
+		clip(alpha - (4.0 / 255.0));
+		raindropNormal.y = 1.0 - raindropNormal.y;
 
     // Reconstruct camera-relative worldspace position (camera at origin).
     float2 uv = input.Position.xy * SharedData::BufferDim.zw * FrameBuffer::DynamicResolutionParams2.xy;
@@ -324,30 +329,30 @@ if (SharedData::enbSettings.EnableRain) {
     float4 posWS = mul(FrameBuffer::CameraViewProjInverse, posCS);
     posWS.xyz /= posWS.w;
 
-    // Build worldspace TBN from screen-space derivatives. The billboard is camera-aligned,
-    // so dPdx/dPdy lie in the billboard plane along screen X/Y.
-    float3 T = normalize(ddx(posWS.xyz));
-    float3 N = normalize(cross(T, -ddy(posWS.xyz)));
-    float3 B = cross(N, T);
-    float3x3 TBN = float3x3(T, B, N);
+		// Build worldspace TBN from screen-space derivatives. The billboard is camera-aligned,
+		// so dPdx/dPdy lie in the billboard plane along screen X/Y.
+		float3 T = normalize(ddx(posWS.xyz));
+		float3 N = normalize(cross(T, -ddy(posWS.xyz)));
+		float3 B = cross(N, T);
+		float3x3 TBN = float3x3(T, B, N);
 
-    float3 normalTS = normalize(raindropNormal.xyz * 2.0 - 1.0);
-    float3 normalWS = normalize(mul(normalTS, TBN));
+		float3 normalTS = normalize(raindropNormal.xyz * 2.0 - 1.0);
+		float3 normalWS = normalize(mul(normalTS, TBN));
 
-	if (frontFace)
-		normalWS = -normalWS;
+		if (frontFace)
+			normalWS = -normalWS;
 
-    float3 V = normalize(-posWS.xyz);
-    float NdotV = saturate(dot(normalWS, V));
-    float fresnel = 0.02 + 0.98 * pow(1.0 - NdotV, 5.0);
+		float3 V = normalize(-posWS.xyz);
+		float NdotV = saturate(dot(normalWS, V));
+		float fresnel = 0.02 + 0.98 * pow(1.0 - NdotV, 5.0);
 
-    float3 reflectDir = reflect(-V, normalWS);
-    float3 refractDir = refract(-V, normalWS, 1.0 / 1.33);
-    if (dot(refractDir, refractDir) < 1e-4)
-        refractDir = -V;
+		float3 reflectDir = reflect(-V, normalWS);
+		float3 refractDir = refract(-V, normalWS, 1.0 / 1.33);
+		if (dot(refractDir, refractDir) < 1e-4)
+			refractDir = -V;
 
-    float3 reflectColor = Color::IrradianceToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(SampSourceTexture, reflectDir, 0).xyz);
-    float3 refractColor = Color::IrradianceToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(SampSourceTexture, refractDir, 0).xyz);
+		float3 reflectColor = Color::IrradianceToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(SampSourceTexture, reflectDir, 0).xyz);
+		float3 refractColor = Color::IrradianceToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(SampSourceTexture, refractDir, 0).xyz);
 
 	float3 raindropColor = lerp(refractColor, reflectColor, fresnel);
 
@@ -407,11 +412,7 @@ if (SharedData::enbSettings.EnableRain) {
 	positionWS = mul(FrameBuffer::CameraViewProjInverse, positionWS);
 	positionWS.xyz = positionWS.xyz / positionWS.w;
 
-	float unusedDetailedShadow;
-	float3 dirLightColor = SharedData::DirLightColor.xyz * ShadowSampling::GetLightingShadow(positionWS.xyz, unusedDetailedShadow);
-	// Menu and reflection passes don't match the world heightmap and cloud state
-	if (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InWorld)
-		dirLightColor *= ShadowSampling::GetWorldShadow(positionWS.xyz, FrameBuffer::CameraPosAdjust.xyz);
+	float3 dirLightColor = GetDirLightColor(positionWS.xyz);
 	float3 ambientColor = max(0, SharedData::GetAmbient(float3(0, 0, 1)));
 #	if defined(IBL)
 	if (SharedData::iblSettings.EnableIBL) {

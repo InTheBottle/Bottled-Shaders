@@ -819,35 +819,36 @@ WaterNormalData GetWaterNormal(PS_INPUT input, float distanceFactor, float norma
 	return result;
 }
 
-float3 GetWaterSpecularColor(PS_INPUT input, float3 normal, float3 viewDirection, float skylightingSpecular)
+float3 GetWaterSpecularColor(PS_INPUT input, float3 normal, float3 viewDirection, float distanceFactor, float skylightingSpecular)
 {
+#			if !defined(DYNAMIC_CUBEMAPS)
 	if (!(Permutation::PixelShaderDescriptor & Permutation::WaterFlags::Reflections))
 		return ReflectionColor.xyz * VarAmounts.y;
+#			endif
 
 	float3 R = reflect(viewDirection, WaterParams.y * normal + float3(0, 0, 1 - WaterParams.y));
-	float3 reflectionColor = CubeMapTex.SampleLevel(CubeMapSampler, R, 0).xyz;
 
 #			if defined(DYNAMIC_CUBEMAPS)
-	float3 dynamicCubemap;
-	if (SharedData::InInterior) {
-		dynamicCubemap = DynamicCubemaps::EnvTexture.SampleLevel(CubeMapSampler, R, 0).xyz;
-	} else {
-		float3 specularIrradiance = 1.0;
-		if (skylightingSpecular < 1.0)
-			specularIrradiance = Color::IrradianceToLinear(DynamicCubemaps::EnvTexture.SampleLevel(CubeMapSampler, R, 0).xyz);
+	if (SharedData::InInterior)
+		return DynamicCubemaps::EnvTexture.SampleLevel(CubeMapSampler, R, 0).xyz;
 
-		float3 specularIrradianceReflections = 1.0;
-		if (skylightingSpecular > 0.0)
-			specularIrradianceReflections = Color::IrradianceToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(CubeMapSampler, R, 0).xyz);
+	float3 specularIrradiance = 0.0;
+	if (skylightingSpecular < 1.0)
+		specularIrradiance = Color::IrradianceToLinear(DynamicCubemaps::EnvTexture.SampleLevel(CubeMapSampler, R, 0).xyz);
 
-		dynamicCubemap = Color::IrradianceToGamma(lerp(specularIrradiance, specularIrradianceReflections, skylightingSpecular));
+	float3 specularIrradianceReflections = 0.0;
+	if (skylightingSpecular > 0.0)
+		specularIrradianceReflections = Color::IrradianceToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(CubeMapSampler, R, 0).xyz);
+
+	float3 dynamicCubemap = Color::IrradianceToGamma(lerp(specularIrradiance, specularIrradianceReflections, skylightingSpecular));
+
+	float3 reflectionColor = dynamicCubemap;
+	if ((Permutation::PixelShaderDescriptor & Permutation::WaterFlags::Reflections) && !SharedData::HideSky) {
+		float reflectionAmount = saturate(length(input.WPosition.xyz) / 1024.0);
+		reflectionColor = lerp(dynamicCubemap, CubeMapTex.SampleLevel(CubeMapSampler, R, 0).xyz, reflectionAmount);
 	}
-
-	float reflectionAmount = saturate(length(input.WPosition.xyz) / 1024.0);
-
-	if (SharedData::HideSky)
-		reflectionAmount = 0.0;
-	reflectionColor = lerp(dynamicCubemap, reflectionColor, reflectionAmount);
+#			else
+	float3 reflectionColor = CubeMapTex.SampleLevel(CubeMapSampler, R, 0).xyz;
 #			endif
 
 #			if !defined(LOD) && NUM_SPECULAR_LIGHTS == 0
@@ -860,7 +861,7 @@ float3 GetWaterSpecularColor(PS_INPUT input, float3 normal, float3 viewDirection
 	float4 ssrReflectionColorRaw = RawSSRReflectionTex.Sample(RawSSRReflectionSampler, ssrReflectionUvDR);
 	float4 ssrReflectionColor = lerp(ssrReflectionColorBlurred, ssrReflectionColorRaw, ssrAmount * 0.7);
 	float3 finalSsrReflectionColor = max(0, ssrReflectionColor.xyz);
-	float ssrFraction = saturate(ssrReflectionColor.w * ssrAmount);
+	float ssrFraction = saturate(ssrReflectionColor.w * distanceFactor * ssrAmount);
 	reflectionColor = lerp(reflectionColor, finalSsrReflectionColor, ssrFraction);
 #			endif
 
@@ -1026,10 +1027,6 @@ float3 GetSunColor(float3 normal, float3 viewDirection, float3 worldPosition)
 #			include "LightLimitFix/LightLimitFix.hlsli"
 #		endif
 
-#		if defined(ISL) && defined(LIGHT_LIMIT_FIX)
-#			include "InverseSquareLighting/InverseSquareLighting.hlsli"
-#		endif
-
 #		if defined(IBL)
 #			include "IBL/IBL.hlsli"
 #		endif
@@ -1151,9 +1148,9 @@ PS_OUTPUT main(PS_INPUT input)
 #			else
 
 #				if defined(SKYLIGHTING)
-	float3 specularColor = GetWaterSpecularColor(input, normal, viewDirection, skylightingSpecular);
+	float3 specularColor = GetWaterSpecularColor(input, normal, viewDirection, distanceBlendFactor, skylightingSpecular);
 #				else
-	float3 specularColor = GetWaterSpecularColor(input, normal, viewDirection, 1.0);
+	float3 specularColor = GetWaterSpecularColor(input, normal, viewDirection, distanceBlendFactor, 1.0);
 #				endif
 
 	DiffuseOutput diffuseOutput = GetWaterDiffuseColor(input, normal, viewDirection, distanceMul, depthControl.y, fresnel, viewPosition, depth);
@@ -1177,7 +1174,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 #				if !defined(UNDERWATER)
 	if (SharedData::enbSettings.EnableWater) {
-		float3 dirScatter = saturate(dot(normal.xyz, SharedData::DirLightDirection.xyz) * 0.5 + 0.5) * saturate(dot(viewDirection.xyz, SharedData::DirLightDirection.xyz) * 0.5 + 0.5) * SharedData::DirLightColor.xyz;
+		float3 dirScatter = saturate(dot(normal.xyz, SharedData::DirLightDirection.xyz) * 0.5 + 0.5) * saturate(dot(viewDirection.xyz, SharedData::DirLightDirection.xyz) * 0.5 + 0.5) * ShadowSampling::GetDirectionalLighting();
 		diffuseOutput.refractionDiffuseColor += DeepColor.xyz * dirScatter * surfaceShadow * SharedData::enbSettings.WaterSunLightingMultiplier;
 	}
 #				endif
@@ -1195,13 +1192,12 @@ PS_OUTPUT main(PS_INPUT input)
 	if (LightLimitFix::GetClusterIndex(screenUV, viewPosition.z, clusterIndex)) {
 		lightCount = LightLimitFix::lightGrid[clusterIndex].lightCount;
 		uint lightOffset = LightLimitFix::lightGrid[clusterIndex].offset;
-		const bool localShadows = inWorld && !(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection) && SharedData::lightLimitFixSettings.EnableLocalShadows;
-		const float2x2 localShadowRotation = LightLimitFix::GetShadowRotationMatrix(Random::InterleavedGradientNoise(input.HPosition.xy, SharedData::FrameCount));
 		[loop] for (uint i = 0; i < lightCount; i++)
 		{
 			uint clusteredLightIndex = LightLimitFix::lightList[lightOffset + i];
 			LightLimitFix::Light light = LightLimitFix::lights[clusteredLightIndex];
-			const bool localShadow = localShadows && (light.lightFlags & LightLimitFix::LightFlags::LocalShadow);
+			// Water has no engine shadow mask, so only shadow casters with a cached local shadow can light it.
+			const bool localShadow = light.lightFlags & LightLimitFix::LightFlags::LocalShadow;
 			if (LightLimitFix::IsLightIgnored(light) || ((light.lightFlags & LightLimitFix::LightFlags::ShadowCaster) && !localShadow)) {
 				continue;
 			}
@@ -1209,20 +1205,13 @@ PS_OUTPUT main(PS_INPUT input)
 			float3 lightDirection = light.positionWS.xyz - input.WPosition.xyz;
 			float lightDist = length(lightDirection);
 
-#					if defined(ISL)
-			float intensityMultiplier = InverseSquareLighting::GetAttenuation(lightDist, light);
-#					else
-			float intensityFactor = saturate(lightDist / light.radius);
-			float intensityMultiplier = 1 - intensityFactor * intensityFactor;
-#					endif
+			float intensityMultiplier = LightLimitFix::GetAttenuation(lightDist, light);
 
 			float3 normalizedLightDirection = normalize(lightDirection);
 
 			float lightShadow = 1.0;
 			[branch] if (localShadow)
-			{
-				lightShadow = LightLimitFix::GetLocalShadow(DepthSampler, light.localShadowIndex, input.WPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, normalizedLightDirection, false, localShadowRotation);
-			}
+				lightShadow = LightLimitFix::GetLocalShadow(DepthSampler, light.localShadowIndex, input.WPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, normalizedLightDirection, false, Random::InterleavedGradientNoise(input.HPosition.xy, SharedData::FrameCount));
 
 			float3 H = normalize(normalizedLightDirection - viewDirection);
 			float HdotN = saturate(dot(H, normal));
@@ -1256,8 +1245,8 @@ PS_OUTPUT main(PS_INPUT input)
 
 	if (SharedData::enbSettings.EnableWater) {
 		sunColor *= SharedData::enbSettings.WaterSunSpecularMultiplier;
-#					if defined(DEPTH) && !defined(VERTEX_ALPHA_DEPTH)
-		surfaceMul = saturate(distanceMul.w * FogParam.z / ShoreFadeDepth);
+#					if defined(DEPTH) && !defined(VERTEX_ALPHA_DEPTH) && defined(REFRACTIONS)
+		surfaceMul = saturate(distanceMul.w * FogParam.z / max(min(ShoreFadeDepth, FogParam.z), 1e-4));
 		sunMul = max(sunMul, surfaceMul);
 		shoreFadedSurface = true;
 #					endif
@@ -1317,11 +1306,13 @@ PS_OUTPUT main(PS_INPUT input)
 #					else
 	float specularFraction = lerp(1, fresnel, distanceBlendFactor);
 	float waterOpacity = diffuseOutput.refractionMul;
-	float3 finalColorPreFog = lerp(diffuseOutput.refractionDiffuseColor, specularColor, specularFraction) + sunColor * depthControl.w;
+	float3 finalColorPreFog;
 	if (shoreFadedSurface) {
 		float reflectionWeight = specularFraction * surfaceMul;
-		waterOpacity = lerp(diffuseOutput.refractionMul, 1.0, reflectionWeight);
-		finalColorPreFog = (diffuseOutput.refractionDiffuseColor * (diffuseOutput.refractionMul * (1.0 - reflectionWeight)) + specularColor * reflectionWeight + sunColor * sunMul) / max(waterOpacity, 1e-4);
+		waterOpacity = max(lerp(diffuseOutput.refractionMul, 1.0, reflectionWeight), 1e-3);
+		finalColorPreFog = (diffuseOutput.refractionDiffuseColor * (diffuseOutput.refractionMul * (1.0 - reflectionWeight)) + specularColor * reflectionWeight + sunColor * (sunMul * surfaceMul)) / waterOpacity;
+	} else {
+		finalColorPreFog = lerp(diffuseOutput.refractionDiffuseColor, specularColor, specularFraction) + sunColor * depthControl.w;
 	}
 
 #						if !defined(UNIFIED_WATER)

@@ -5,6 +5,8 @@
 #include <pystring/pystring.h>
 
 #include "Deferred.h"
+#include "EngineFixes/LODBlendRingFix.h"
+#include "EngineFixes/SunShadowMaskFix.h"
 #include "FeatureIssues.h"
 #include "Features/CSEditor.h"
 #include "Features/CloudShadows.h"
@@ -14,14 +16,18 @@
 #include "Features/InteriorSun.h"
 #include "Features/PerformanceOverlay.h"
 #include "Features/PostProcessing.h"
+#include "Features/RainRefraction.h"
+#include "Features/RemoteControl/NvPerf.h"
 #include "Features/Skin.h"
 #include "Features/SkySync.h"
 #include "Features/Skylighting.h"
 #include "Features/SnowCover.h"
+#include "Features/SnowDeformation.h"
 #include "Features/TerrainBlending.h"
 #include "Features/TerrainHelper.h"
 #include "Features/Upscaling.h"
 #include "Features/VolumetricShadows.h"
+#include "Features/WetnessEffects.h"
 #include "Menu.h"
 #include "SceneSettingsManager.h"
 #include "SettingsOverrideManager.h"
@@ -48,6 +54,51 @@ void State::UpdateLightingShaderPermutation(RE::BSRenderPass* a_pass)
 	if (alphaProperty && alphaProperty->GetAlphaBlending() &&
 		alphaProperty->GetDestBlendMode() == RE::NiAlphaProperty::AlphaFunction::kOne) {
 		permutationData.ExtraShaderDescriptor |= additiveLighting;
+	}
+}
+
+void State::BeginLightingVariants(RE::BSShader* a_shader, bool a_skipPixelShader, bool a_shaderFound)
+{
+	lightingVariant = {};
+	auto shaderCache = globals::shaderCache;
+	if (!a_shaderFound || a_skipPixelShader || !a_shader || a_shader->shaderType.get() != RE::BSShader::Type::Lighting ||
+		!shaderCache->IsEnabled() || !shaderCache->IsAsync() || !ShaderEnabled(RE::BSShader::Type::Lighting))
+		return;
+
+	const auto liteDescriptor = SIE::ShaderCache::GetLiteLightingDescriptor(modifiedPixelDescriptor);
+	if (!liteDescriptor)
+		return;
+
+	lightingVariant.shader = a_shader;
+	lightingVariant.descriptor = modifiedPixelDescriptor;
+	lightingVariant.vanillaDescriptor = currentPixelDescriptor;
+	lightingVariant.liteDescriptor = liteDescriptor;
+}
+
+void State::UpdateLightingVariant(RE::BSRenderPass* a_pass)
+{
+	auto& variant = lightingVariant;
+	if (!variant.shader)
+		return;
+
+	constexpr auto noSnowCover = static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::NoSnowCover);
+	constexpr auto noWetness = static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::NoWetness);
+	bool useLite = ((variant.liteDescriptor & noSnowCover) == 0 || globals::features::snowCover.IsSnowFree(a_pass, variant.descriptor, variant.vanillaDescriptor)) &&
+	               ((variant.liteDescriptor & noWetness) == 0 || globals::features::wetnessEffects.IsDry(a_pass, variant.descriptor));
+
+	if (useLite && !variant.resolved) {
+		variant.resolved = true;
+		auto shaderCache = globals::shaderCache;
+		auto* full = shaderCache->FindPixelShader(*variant.shader, variant.descriptor);
+		auto* lite = full ? shaderCache->FindPixelShader(*variant.shader, variant.liteDescriptor) : nullptr;
+		variant.full = full ? reinterpret_cast<ID3D11PixelShader*>(full->shader) : nullptr;
+		variant.lite = lite ? reinterpret_cast<ID3D11PixelShader*>(lite->shader) : nullptr;
+	}
+	useLite = useLite && variant.lite;
+
+	if (useLite != variant.liteBound) {
+		globals::d3d::context->PSSetShader(useLite ? variant.lite : variant.full, nullptr, 0);
+		variant.liteBound = useLite;
 	}
 }
 
@@ -141,14 +192,19 @@ void State::Draw()
 			terrainBlending.TerrainShaderHacks();
 		}
 
+		if (globals::features::snowDeformation.loaded) {
+			ZoneScopedN("SnowDeformation::ApplyDrawState");
+			globals::features::snowDeformation.ApplyDrawState();
+		}
+
 		if (cloudShadows.loaded) {
 			ZoneScopedN("CloudShadows::SkyShaderHacks");
 			cloudShadows.SkyShaderHacks();
 		}
 
-		if (globals::features::effects11.loaded) {
-			ZoneScopedN("Effects11::ParticleShaderHacks");
-			globals::features::effects11.ParticleShaderHacks();
+		if (globals::features::rainRefraction.loaded) {
+			ZoneScopedN("RainRefraction::ParticleShaderHacks");
+			globals::features::rainRefraction.ParticleShaderHacks();
 		}
 
 		if (terrainHelper.loaded) {
@@ -314,6 +370,8 @@ void State::Reset()
 	globals::profiler->EndFrame();
 
 	Feature::ForEachLoadedFeature("Reset", [](Feature* feature) { feature->Reset(); });
+	LODBlendRingFix::GetInstance().Update();
+	SunShadowMaskFix::Update();
 
 	// Cache menu open states once per frame to avoid repeated IsMenuOpen calls
 	// (each call constructs a BSFixedString, which is expensive at scale).
@@ -573,6 +631,8 @@ void State::Load(ConfigMode a_configMode, bool a_allowReload)
 
 		FeatureIssues::ScanForOrphanedFeatureINIs();
 
+		if (a_configMode == ConfigMode::USER)
+			globals::menu->ClearUnsavedChanges();
 		logger::info("Loading Settings Complete");
 	} catch (const json::exception& e) {
 		logger::info("General JSON error accessing settings: {}; recreating config", e.what());
@@ -598,7 +658,7 @@ void State::SaveToJson(nlohmann::json& settings)
 	advanced["Dump Shaders"] = shaderCache->IsDump();
 	advanced["Log Level"] = logLevel;
 	advanced["Developer Mode"] = enableDeveloperMode;
-	advanced["Shader Defines"] = shaderDefinesString;
+	advanced["Shader Defines"] = GetDefinesString();
 	advanced["Compiler Threads"] = shaderCache->compilationThreadCount;
 	advanced["Background Compiler Threads"] = shaderCache->backgroundCompilationThreadCount;
 	advanced["Use FileWatcher"] = shaderCache->UseFileWatcher();
@@ -619,6 +679,7 @@ void State::SaveToJson(nlohmann::json& settings)
 	auto& upscaling = globals::features::upscaling;
 	auto& upscalingJson = settings[upscaling.GetShortName()];
 	upscaling.SaveSettings(upscalingJson);
+	upscaling.WriteGameIniSettings();
 
 	json originalShaders;
 	ForEachShaderTypeWithIndex([&](auto type, int classIndex) {
@@ -761,6 +822,8 @@ void State::Save(ConfigMode a_configMode)
 	try {
 		o << settings.dump(1);
 		logger::info("Saving settings to {}", configPath);
+		if (a_configMode == ConfigMode::USER)
+			globals::menu->ClearUnsavedChanges();
 	} catch (const std::exception& e) {
 		logger::warn("Failed to write settings to file: {}. Error: {}", configPath, e.what());
 	}
@@ -782,7 +845,7 @@ spdlog::level::level_enum State::GetLogLevel()
 void State::SetDefines(std::string a_defines)
 {
 	std::vector<std::pair<std::string, std::string>> parsedDefines;
-	shaderDefinesString = "";
+	std::string definesString;
 	auto defines = pystring::split(a_defines, ";");
 	for (const auto& define : defines) {
 		auto cleanedDefine = pystring::strip(define);
@@ -795,15 +858,22 @@ void State::SetDefines(std::string a_defines)
 		}
 		std::string name = pystring::strip(token[0]);
 		std::string definition = token.size() == 2 ? pystring::strip(token[1]) : std::string{};
-		shaderDefinesString += pystring::strip(define) + ";";
+		definesString += pystring::strip(define) + ";";
 		parsedDefines.emplace_back(std::move(name), std::move(definition));
 	}
-	shaderDefinesString = shaderDefinesString.substr(0, shaderDefinesString.size() - 1);
+	definesString = definesString.substr(0, definesString.size() - 1);
+	logger::debug("Shader Defines set to {}", definesString);
 	{
 		std::scoped_lock lock(shaderDefinesMutex);
+		shaderDefinesString = std::move(definesString);
 		shaderDefines = std::make_shared<const std::vector<std::pair<std::string, std::string>>>(std::move(parsedDefines));
 	}
-	logger::debug("Shader Defines set to {}", shaderDefinesString);
+}
+
+std::string State::GetDefinesString()
+{
+	std::scoped_lock lock(shaderDefinesMutex);
+	return shaderDefinesString;
 }
 
 std::shared_ptr<const std::vector<std::pair<std::string, std::string>>> State::GetDefines()
@@ -908,12 +978,12 @@ void State::SetupResources()
 
 	auto renderer = globals::game::renderer;
 
-	permutationCB = new ConstantBuffer(ConstantBufferDesc<PermutationCB>());
-	sharedDataCB = new ConstantBuffer(ConstantBufferDesc<SharedDataCB>());
+	permutationCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc<PermutationCB>());
+	sharedDataCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc<SharedDataCB>());
 
 	auto [data, size] = GetFeatureBufferData(false);
 	(void)data;
-	featureDataCB = new ConstantBuffer(ConstantBufferDesc((uint32_t)size));
+	featureDataCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc((uint32_t)size));
 
 	// Grab main texture to get resolution
 	D3D11_TEXTURE2D_DESC texDesc{};
@@ -930,13 +1000,17 @@ void State::SetupResources()
 
 	globals::profiler->Initialize(globals::d3d::device, globals::d3d::context);
 
-	if (frameAnnotations) {
-		globals::profiler->SetPerfEventCallbacks(
-			[this](std::string_view name) { BeginPerfEvent(name); },
-			[this](std::string_view) { EndPerfEvent(); });
-	} else {
-		globals::profiler->SetPerfEventCallbacks({}, {});
-	}
+	// Checked per pass rather than bound once, so annotations forced on at runtime (RenderDoc capture, Nsight Perf)
+	// also cover the profiler's passes. Toggles happen between frames, so a pass's begin and end agree.
+	globals::profiler->SetPerfEventCallbacks(
+		[this](std::string_view name) {
+			if (frameAnnotations)
+				BeginPerfEvent(name);
+		},
+		[this](std::string_view) {
+			if (frameAnnotations)
+				EndPerfEvent();
+		});
 }
 
 void State::ModifyShaderLookup(const RE::BSShader& a_shader, uint& a_vertexDescriptor, uint& a_pixelDescriptor, bool a_forceDeferred)
@@ -1054,6 +1128,8 @@ void State::ModifyShaderLookup(const RE::BSShader& a_shader, uint& a_vertexDescr
 			}
 			break;
 		}
+	} else if (a_shader.shaderType.get() == RE::BSShader::Type::Utility) {
+		a_vertexDescriptor &= ~(uint32_t)SIE::ShaderCache::UtilityShaderFlags::TruePbr;
 	}
 }
 
@@ -1072,6 +1148,8 @@ void State::BeginPerfEvent(std::string_view title)
 	s_tracyPerfZones.push_back(ctx);
 #endif
 	pPerf->BeginEvent(std::wstring(title.begin(), title.end()).c_str());
+	if (NvPerf::RangesActive())
+		NvPerf::PushRange(title);
 }
 
 void State::EndPerfEvent()
@@ -1084,6 +1162,8 @@ void State::EndPerfEvent()
 		logger::warn("EndPerfEvent called without a matching BeginPerfEvent");
 	}
 #endif
+	if (NvPerf::RangesActive())
+		NvPerf::PopRange();
 	pPerf->EndEvent();
 }
 
@@ -1137,6 +1217,11 @@ void State::UpdateSharedData([[maybe_unused]] bool a_inWorld, [[maybe_unused]] b
 				}
 			}
 		}
+
+		float waterTop = -FLT_MAX;
+		for (const auto& water : data.WaterData)
+			waterTop = std::max(waterTop, water.w);
+		waterGridTop = Util::GetEyePosition().z + waterTop;
 
 		data.WaterSystemHeight = -RE::NI_INFINITY;
 

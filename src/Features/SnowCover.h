@@ -6,6 +6,7 @@
 #include "TruePBR.h"
 #include "Utils/FormIdParser.h"
 #include "Utils/Game.h"
+#include <DirectXTex.h>
 
 #pragma warning(push)
 #pragma warning(disable: 4324)
@@ -54,6 +55,12 @@ private:
 	static constexpr float FIRE_MELT_FADE_TIME = 1.0f;
 	static constexpr uint32_t FIRE_MELT_FOOTPRINT_SAMPLES = 32;
 	static constexpr float FIRE_MELT_FOOTPRINT_SMOOTHING = 0.5f;
+	static constexpr float SURVIVAL_SNOW_ON = 0.5f;
+	static constexpr float SURVIVAL_SNOW_OFF = 0.4f;
+	static constexpr float DEFAULT_ROOFTOP_SNOW = 3000.0f;
+	static constexpr float DEFAULT_ROOFTOP_HEIGHT = 192.0f;
+	static constexpr float DEFAULT_ROOFTOP_EXPOSURE = 0.7f;
+	static constexpr float MAX_ROOFTOP_SNOW = 20000.0f;
 
 public:
 	virtual inline std::string GetName() { return "Snow Cover"; }
@@ -69,6 +76,11 @@ public:
 		float SnowHeightOffset = 0.0f;
 		uint AffectHavok = 0;
 		uint AffectFloraTint = 0;
+
+		float RooftopSnow = DEFAULT_ROOFTOP_SNOW;
+		float RooftopHeight = DEFAULT_ROOFTOP_HEIGHT;
+		float RooftopExposure = DEFAULT_ROOFTOP_EXPOSURE;
+		uint pad = 0;
 	};
 	static_assert(sizeof(UserSettings) % 16 == 0);
 
@@ -136,7 +148,7 @@ public:
 		FireMeltData fireMelt;
 	};
 	static_assert(sizeof(PerFrame) % 16 == 0);
-	static_assert(sizeof(PerFrame) == 176 + sizeof(FireMeltData));
+	static_assert(sizeof(PerFrame) == 192 + sizeof(FireMeltData));
 
 	struct FireMeltSettings
 	{
@@ -186,6 +198,28 @@ public:
 	static bool IsWorldFireSource(RE::TESBoundObject* a_base);
 	static bool IsFireGeometry(RE::BSGeometry* a_geometry);
 	static void CollectFireGeometry(RE::NiAVObject* a_object, bool a_hidden, bool& a_hasFire, std::vector<RE::NiBound>& a_samples);
+
+	bool survivalEnabled = true;
+	bool survivalSnowy = false;
+	float survivalSnowAmount = 0.0f;
+	RE::TESGlobal* survivalGlobal = nullptr;
+	DirectX::ScratchImage snowMapCpu;
+	std::filesystem::path snowMapCpuPath;
+
+	void UpdateSurvival();
+	void LoadSnowMapCpu();
+
+	struct SnowMapLevel
+	{
+		uint32_t width = 0;
+		uint32_t height = 0;
+		std::vector<uint8_t> texels;
+	};
+	std::vector<SnowMapLevel> snowMapMax;
+
+	void BuildSnowMapMax();
+	bool GetSnowMapMax(float a_u0, float a_v0, float a_u1, float a_v1, float& a_value) const;
+	bool IsSnowFree(RE::BSRenderPass* a_pass, uint32_t a_descriptor, uint32_t a_vanillaDescriptor) const;
 
 	PerFrame GetCommonBufferData();
 
@@ -248,6 +282,7 @@ public:
 
 	virtual void SetupResources();
 	virtual void Prepass() override;
+	virtual void DataLoaded() override;
 
 	virtual void DrawSettings();
 
@@ -258,12 +293,16 @@ public:
 	void Reload();
 	void SaveConfig();
 	void ResetWorldConfig();
+	void ReleaseTextures();
 	void UpdateMapTransform();
 
 	virtual inline void PostPostLoad() override { Hooks::Install(); }
 
 	void BSLightingShader_Setup(RE::BSRenderPass* Pass);
 	static bool IsHarvestableFlora(RE::TESObjectREFR* a_ref);
+	bool IsBuilding(RE::TESObjectREFR* a_ref);
+
+	std::unordered_map<RE::FormID, bool> buildingBaseCache;
 
 	struct Hooks
 	{

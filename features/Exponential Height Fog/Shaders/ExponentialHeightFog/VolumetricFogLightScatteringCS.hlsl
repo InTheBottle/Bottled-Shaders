@@ -18,7 +18,12 @@ RWTexture3D<float4> LightScattering : register(u0);
 #endif
 #if defined(LIGHT_LIMIT_FIX)
 #	include "LightLimitFix/LightLimitFix.hlsli"
-#	include "InverseSquareLighting/InverseSquareLighting.hlsli"
+
+Texture2DArray<float> EngineLocalShadowMaps : register(t5);
+cbuffer EngineLocalShadowCB : register(b1)
+{
+	LightLimitFix::LocalShadowData EngineLocalShadows[4];
+};
 #endif
 #define SKYLIGHTING_PROBE_REGISTER t50
 #include "Skylighting/Skylighting.hlsli"
@@ -203,7 +208,6 @@ float SampleDirectionalWorldShadow(float3 positionWS)
 	float worldShadow = 1.0f;
 #if defined(TERRAIN_SHADOWS)
 	worldShadow *= TerrainShadows::GetTerrainShadow(positionWS + FrameBuffer::CameraPosAdjust.xyz, LinearSampler);
-	worldShadow *= TerrainShadows::GetLODShadow(positionWS + FrameBuffer::CameraPosAdjust.xyz, LinearSampler);
 #endif
 #if defined(CLOUD_SHADOWS)
 	worldShadow *= CloudShadows::GetCloudShadowMult(positionWS, LinearSampler);
@@ -241,6 +245,24 @@ float3 ComputeSkyLightScattering(float3 positionWS, float3 viewDirection, out fl
 }
 
 #if defined(LIGHT_LIMIT_FIX)
+float SampleLocalLightShadow(LightLimitFix::Light light, float3 positionWS, float3 towardLight, float noise)
+{
+	if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow) {
+		if (!VolumetricFogHasLocalShadowCache)
+			return 0.0f;
+		return LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, positionWS, FrameBuffer::CameraPosAdjust.xyz, towardLight, false, noise);
+	}
+	if (light.lightFlags & LightLimitFix::LightFlags::Shadow) {
+		if (!VolumetricFogHasEngineLocalShadows || light.shadowLightIndex >= 4u)
+			return 0.0f;
+		LightLimitFix::LocalShadowData data = EngineLocalShadows[light.shadowLightIndex];
+		if (data.Params.y <= 0.0f)
+			return 0.0f;
+		return LightLimitFix::GetLocalShadow(EngineLocalShadowMaps, LinearSampler, data, (uint)data.Params2.z, positionWS, FrameBuffer::CameraPosAdjust.xyz, towardLight, false, noise, data.Params2.w, 1u, 0.0f);
+	}
+	return (light.lightFlags & LightLimitFix::LightFlags::ShadowCaster) ? 0.0f : 1.0f;
+}
+
 float ComputeLocalLightAttenuation(float distanceSqr, float cellRadius, LightLimitFix::Light light)
 {
 	float distance = sqrt(max(distanceSqr, 1e-6f));
@@ -250,7 +272,7 @@ float ComputeLocalLightAttenuation(float distanceSqr, float cellRadius, LightLim
 		distance = sqrt(max(distanceSqr, cellRadius * cellRadius));
 	}
 
-	return InverseSquareLighting::GetAttenuation(distance, light);
+	return LightLimitFix::GetAttenuation(distance, light);
 }
 
 float3 AccumulateLocalLightScattering(
@@ -279,6 +301,7 @@ float3 AccumulateLocalLightScattering(
 
 	float phaseG = SharedData::exponentialHeightFogSettings.volumetricFogScatteringDistribution;
 	float3 localScattering = 0.0f.xxx;
+	float shadowNoise = float(Rand4DPCG32(int4(coord, VolumetricFogStateFrameIndexMod8)).w) / float(uint(0xffffffff));
 	[loop] for (uint lightIndex = 0; lightIndex < lightCount; lightIndex++)
 	{
 		uint clusteredLightIndex = LightLimitFix::lightList[grid.offset + lightIndex];
@@ -297,6 +320,9 @@ float3 AccumulateLocalLightScattering(
 			continue;
 
 		float3 L = toLight * rsqrt(distanceSqr);
+		attenuation *= SampleLocalLightShadow(light, positionWS, L, shadowNoise);
+		if (attenuation < 1e-5f)
+			continue;
 		float phase = ExponentialHeightFog::HenyeyGreenstein(dot(L, viewDirection), phaseG);
 
 		const bool isPointLightLinear = light.lightFlags & LightLimitFix::LightFlags::Linear;
@@ -328,12 +354,16 @@ float4 ComputeLightScattering(uint3 coord, float3 cellOffset)
 	float extinction = materialScatteringAndExtinction.w;
 
 	float3 viewDirection = normalize(positionWS);
+#if !defined(VOLUMETRIC_FOG_FAR_GRID)
 	float3 localScattering = AccumulateLocalLightScattering(
 		coord,
 		cellOffset,
 		positionWS,
 		viewDepth,
 		viewDirection);
+#else
+	float3 localScattering = 0.0f.xxx;
+#endif
 
 	float phase = ExponentialHeightFog::HenyeyGreenstein(
 		dot(normalize(SharedData::DirLightDirection.xyz), viewDirection),

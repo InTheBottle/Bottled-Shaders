@@ -521,10 +521,16 @@ void Skin::SetupExtraTexture(RE::BSLightingShaderMaterialBase const* material, R
 	workingExtraPtr.extraTexturePath = extraTexturePath;
 	workingExtraPtr.wetnessTexturePath = wetnessTexturePath;
 
-	inTextureSet->SetTexturePath(RE::BSTextureSet::Texture::kEnvironment, workingExtraPtr.extraTexturePath.c_str());
-	inTextureSet->SetTexturePath(RE::BSTextureSet::Texture::kMultilayer, workingExtraPtr.wetnessTexturePath.c_str());
-	inTextureSet->SetTexture(RE::BSTextureSet::Texture::kEnvironment, workingExtraPtr.rfaosTexture);
-	inTextureSet->SetTexture(RE::BSTextureSet::Texture::kMultilayer, workingExtraPtr.wetnessTexture);
+	auto loadExtraTexture = [](const std::string& a_path, RE::NiSourceTexturePtr& a_texture) {
+		if (a_path.empty())
+			return;
+		RE::NiPointer<RE::NiTexture> texture;
+		RE::BSShaderManager::GetTexture(a_path.c_str(), true, texture, false);
+		if (texture && texture->GetRTTI() == globals::rtti::NiSourceTextureRTTI.get())
+			a_texture = RE::NiSourceTexturePtr(static_cast<RE::NiSourceTexture*>(texture.get()));
+	};
+	loadExtraTexture(workingExtraPtr.extraTexturePath, workingExtraPtr.rfaosTexture);
+	loadExtraTexture(workingExtraPtr.wetnessTexturePath, workingExtraPtr.wetnessTexture);
 
 	workingExtraPtr.hasExtraTexture = workingExtraPtr.rfaosTexture != nullptr && !workingExtraPtr.extraTexturePath.empty() && workingExtraPtr.rfaosTexture != stateData.defaultTextureBlack;
 	workingExtraPtr.hasWetnessTexture = workingExtraPtr.wetnessTexture != nullptr && !workingExtraPtr.wetnessTexturePath.empty() && workingExtraPtr.wetnessTexture != stateData.defaultTextureBlack;

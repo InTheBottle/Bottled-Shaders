@@ -15,7 +15,11 @@ RWTexture3D<float4> VBufferA : register(u0);
 		float boundaryDepth;
 		float3 frontPositionWS = ExponentialHeightFog::ComputeCellWorldPosition(dispatchID, float3(0.5f, 0.5f, 0.0f), boundaryDepth);
 		float3 backPositionWS = ExponentialHeightFog::ComputeCellWorldPosition(dispatchID, float3(0.5f, 0.5f, 1.0f), boundaryDepth);
+#if defined(VOLUMETRIC_FOG_FAR_GRID)
+		float nearDistance = length(frontPositionWS);
+#else
 		float nearDistance = dispatchID.z == 0u ? 0.0f : length(frontPositionWS);
+#endif
 		extinction = ExponentialHeightFog::EvaluateFogExtinctionSegment(
 			nearDistance, length(backPositionWS), positionWS, FrameBuffer::CameraPosAdjust.xyz);
 	}

@@ -190,13 +190,6 @@ static void ComputeWavefrontExtents(DispatchParameters inParameters, int3 inGrou
 // Number of bilinear sample reads performed per-thread
 #define READ_COUNT (SAMPLE_COUNT / WAVE_SIZE + 2)
 
-#if SAMPLE_COUNT >= 32
-#	define FADE_OUT_SAMPLES 8
-#else
-#	define FADE_OUT_SAMPLES (SAMPLE_COUNT / 4)
-#endif
-#define MAIN_SAMPLES (SAMPLE_COUNT - FADE_OUT_SAMPLES)
-
 // Common shared data
 groupshared half DepthData[READ_COUNT * WAVE_SIZE];
 
@@ -346,27 +339,28 @@ void WriteScreenSpaceShadow(DispatchParameters inParameters, int3 inGroupID, int
 	half front_start_depth = scaled_start_depth - z_sign;
 	half back_start_depth = scaled_start_depth + z_sign;
 
-	[unroll] for (i = 0; i < MAIN_SAMPLES; i++)
+#if (SAMPLE_COUNT / 4) * 4 != SAMPLE_COUNT
+#	error SAMPLE_COUNT must be a multiple of 4
+#endif
+#if SAMPLE_COUNT > 128
+#	define SSS_MARCH_ATTRIBUTE [loop]
+#else
+#	define SSS_MARCH_ATTRIBUTE [unroll]
+#endif
+	SSS_MARCH_ATTRIBUTE for (i = 0; i < SAMPLE_COUNT; i += 4)
 	{
-		half shadow_depth = DepthData[sample_index + i] * depth_scale;
-		half front_depth_delta = abs(front_start_depth - shadow_depth);
-		half back_depth_delta = abs(back_start_depth - shadow_depth);
+		[unroll] for (int j = 0; j < 4; j++)
+		{
+			half shadow_depth = DepthData[sample_index + i + j] * depth_scale;
+			half front_depth_delta = abs(front_start_depth - shadow_depth);
+			half back_depth_delta = abs(back_start_depth - shadow_depth);
 
-		// By using 4 values, the average shadow can be taken, which can help soften single-pixel shadows.
-		front_shadow_value[i & 3] = min(front_shadow_value[i & 3], front_depth_delta);
-		back_shadow_value[i & 3] = min(back_shadow_value[i & 3], back_depth_delta);
+			// By using 4 values, the average shadow can be taken, which can help soften single-pixel shadows.
+			front_shadow_value[j] = min(front_shadow_value[j], front_depth_delta);
+			back_shadow_value[j] = min(back_shadow_value[j], back_depth_delta);
+		}
 	}
-
-	[unroll] for (i = MAIN_SAMPLES; i < SAMPLE_COUNT; i++)
-	{
-		half shadow_depth = DepthData[sample_index + i] * depth_scale;
-		half fade_out = (half)(i + 1 - MAIN_SAMPLES) / (half)(FADE_OUT_SAMPLES + 1) * 0.75;
-		half front_depth_delta = abs(front_start_depth - shadow_depth) + fade_out;
-		half back_depth_delta = abs(back_start_depth - shadow_depth) + fade_out;
-
-		front_shadow_value[i & 3] = min(front_shadow_value[i & 3], front_depth_delta);
-		back_shadow_value[i & 3] = min(back_shadow_value[i & 3], back_depth_delta);
-	}
+#undef SSS_MARCH_ATTRIBUTE
 
 	// Apply the contrast value.
 	// A value of 0 indicates a sample was exactly matched to the reference depth (and the result is fully shadowed)

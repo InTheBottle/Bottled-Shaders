@@ -55,6 +55,7 @@ public:
 	uint32_t currentPixelDescriptor = 0;
 	spdlog::level::level_enum logLevel = spdlog::level::info;
 	bool enableDeveloperMode = false;  ///< Explicit developer mode toggle; also enabled when log level is debug/trace.
+	// Guarded by shaderDefinesMutex; read it through GetDefinesString().
 	std::string shaderDefinesString = "";
 	std::shared_ptr<const std::vector<std::pair<std::string, std::string>>> shaderDefines = std::make_shared<const std::vector<std::pair<std::string, std::string>>>();  // data structure to parse string into; needed to avoid dangling pointers
 	std::mutex shaderDefinesMutex;
@@ -163,6 +164,8 @@ public:
 	 */
 	void SetDefines(std::string defines);
 	std::shared_ptr<const std::vector<std::pair<std::string, std::string>>> GetDefines();
+	/** @brief Returns a copy of the normalized define string; safe to call from any thread. */
+	std::string GetDefinesString();
 
 	/**
 	 * @brief Checks whether the given shader type is enabled.
@@ -258,6 +261,23 @@ public:
 	 */
 	void UpdateLightingShaderPermutation(RE::BSRenderPass* a_pass);
 
+	struct LightingVariantState
+	{
+		RE::BSShader* shader = nullptr;
+		uint descriptor = 0;
+		uint vanillaDescriptor = 0;
+		uint liteDescriptor = 0;
+		ID3D11PixelShader* full = nullptr;
+		ID3D11PixelShader* lite = nullptr;
+		bool resolved = false;
+		bool liteBound = false;
+	};
+	LightingVariantState lightingVariant;
+	float waterGridTop = 0.0f;
+
+	void BeginLightingVariants(RE::BSShader* a_shader, bool a_skipPixelShader, bool a_shaderFound);
+	void UpdateLightingVariant(RE::BSRenderPass* a_pass);
+
 	/** @brief Bitflags describing extra shader-specific properties. */
 	enum class ExtraShaderDescriptors : uint32_t
 	{
@@ -277,7 +297,9 @@ public:
 		// Humanoid (ActorTypeNPC) geometry, set by NeuralRendering::SetupGeometryCategory.
 		IsHumanoidActor = 1u << 31,
 		// Hair or facial-hair head part, set by NeuralRendering::SetupGeometryCategory.
-		IsHair = 1u << 30
+		IsHair = 1u << 30,
+		SnowRooftop = 1 << 13,
+		SnowLODTree = 1 << 14,
 	};
 
 	/** @brief Bitflags describing extra feature-specific properties related to terrain displacement and material models. */
@@ -344,6 +366,10 @@ public:
 	 * @param a_pass The render pass to inspect.
 	 */
 	void UpdateSkyShaderPermutation(RE::BSRenderPass* a_pass);
+	/**
+	 * @brief Flags effect shader passes that draw the aurora (sky objects under the sky's aurora root).
+	 * @param a_pass The render pass to inspect.
+	 */
 	void UpdateEffectShaderPermutation(RE::BSRenderPass* a_pass);
 	/**
 	 * @brief Checks whether directional shadows are available for the current scene.
@@ -370,7 +396,7 @@ public:
 	};
 	STATIC_ASSERT_ALIGNAS_16(PermutationCB);
 
-	ConstantBuffer* permutationCB = nullptr;
+	std::unique_ptr<ConstantBuffer> permutationCB;
 
 	struct alignas(16) SharedDataCB
 	{
@@ -402,8 +428,8 @@ public:
 	};
 	STATIC_ASSERT_ALIGNAS_16(SharedDataCB);
 
-	ConstantBuffer* sharedDataCB = nullptr;
-	ConstantBuffer* featureDataCB = nullptr;
+	std::unique_ptr<ConstantBuffer> sharedDataCB;
+	std::unique_ptr<ConstantBuffer> featureDataCB;
 
 	PermutationCB permutationData{};
 	PermutationCB permutationDataPrevious{};

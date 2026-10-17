@@ -66,10 +66,10 @@ public:
 	enum class LightFlags : std::uint32_t
 	{
 		PortalStrict = (1 << 0),
-		Shadow = (1 << 1),
+		Shadow = (1 << 1), /**< Has an engine shadow mask channel (shadowMaskIndex). */
 		Simple = (1 << 2),
-		ShadowCaster = (1 << 3),
-		LocalShadow = (1 << 4),
+		ShadowCaster = (1 << 3), /**< Is a BSShadowLight, whether or not it has shadow data this frame. */
+		LocalShadow = (1 << 4),  /**< Has a cached local shadow slice (localShadowIndex). */
 
 		Initialised = (1 << 8),
 		Disabled = (1 << 9),
@@ -101,16 +101,17 @@ public:
 	STATIC_ASSERT_ALIGNAS_16(LightData);
 
 	static constexpr uint32_t SHADOW_MASK_CHANNEL_COUNT = 4;
-	static constexpr uint32_t ENGINE_LOCAL_SHADOW_CASTERS = 3;
+	static constexpr uint32_t NO_SHADOW_MASK_INDEX = 255;
 	static constexpr uint32_t ENGINE_SHADOW_MAP_SLICES = 8;
 	static constexpr uint32_t MIN_LOCAL_SHADOW_SLOTS = 4;
 	static constexpr uint32_t MAX_LOCAL_SHADOW_SLOTS = 64;
-	static constexpr uint64_t LOCAL_SHADOW_MAX_CACHE_BYTES = 2048ull * 1024ull * 1024ull;
+	static constexpr uint64_t LOCAL_SHADOW_MAX_CACHE_BYTES = 512ull * 1024ull * 1024ull;
+	/** @brief Frames to wait before retrying a cache allocation that failed. */
+	static constexpr uint32_t LOCAL_SHADOW_ALLOC_RETRY_FRAMES = 600;
 	static constexpr uint32_t LOCAL_SHADOW_SWEEP_INTERVAL = 30;
 	static constexpr uint32_t LOCAL_SHADOW_EVICT_AGE = 120;
 	static constexpr uint32_t LOCAL_SHADOW_REJECT_MAX_FRAMES = 120;
 	static constexpr uint32_t LOCAL_SHADOW_CAMERA_HOLD_FRAMES = 60;
-	static constexpr uint32_t LOCAL_SHADOW_UNCACHED_GRACE_FRAMES = 8;
 	static constexpr uint32_t LOCAL_SHADOW_STATIC_STARVE_FRAMES = 60;
 	static constexpr float LOCAL_SHADOW_AGE_URGENCY = 64.0f;
 	static constexpr float LOCAL_SHADOW_ACTOR_SCORE = 1000.0f;
@@ -122,6 +123,36 @@ public:
 	static constexpr float LOCAL_SHADOW_MAX_SLACK = 24.0f;
 	static constexpr float LOCAL_SHADOW_DEFAULT_POISSON_RADIUS = 4.0f;
 	static constexpr float LOCAL_SHADOW_TELEPORT_DISTANCE = 128.0f;
+	static constexpr float LOCAL_SHADOW_TELEPORT_RADIUS_FRACTION = 0.25f;
+	static constexpr std::array<uint32_t, 3> LOCAL_SHADOW_RESOLUTION_OPTIONS = { 512, 1024, 2048 };
+	static constexpr std::array<uint32_t, 3> LOCAL_SHADOW_SAMPLE_OPTIONS = { 1, 4, 8 };
+	static constexpr uint32_t LOCAL_SHADOW_MIN_RESOLUTION = 128;
+	static constexpr float LOCAL_SHADOW_FILTER_SCALE_MIN = 0.25f;
+	static constexpr float LOCAL_SHADOW_FILTER_SCALE_MAX = 2.0f;
+	static constexpr float LOCAL_SHADOW_MAX_POISSON_RADIUS = 16.0f;
+	/** @brief Base depth bias per engine texel, scaled by the light's shadowBiasScale to match the engine's own bias. */
+	static constexpr float LOCAL_SHADOW_DEPTH_BIAS = 0.00025f;
+	static constexpr float LOCAL_SHADOW_DEFAULT_SPOT_FALLOFF = 2.0f;
+	/** @brief Score tiers: never-rendered casters outrank moved casters, which outrank actor-lit and static casters. */
+	static constexpr float LOCAL_SHADOW_NEWCOMER_SCORE = 1000000.0f;
+	static constexpr float LOCAL_SHADOW_MOVED_SCORE = 100000.0f;
+	static constexpr float LOCAL_SHADOW_MOVE_THRESHOLD = 12.0f;
+	static constexpr float LOCAL_SHADOW_MOVE_RADIUS_FRACTION = 0.02f;
+	static constexpr float LOCAL_SHADOW_STATIC_IMPORTANCE_BASE = 0.25f;
+	static constexpr float LOCAL_SHADOW_ACTOR_MAX_SPEED = 64.0f;
+	static constexpr float LOCAL_SHADOW_ACTOR_REST_SPEED = 0.5f;
+	static constexpr float LOCAL_SHADOW_ACTOR_PROXIMITY_DISTANCE = 512.0f;
+	static constexpr float LOCAL_SHADOW_ACTOR_EDGE_WEIGHT = 0.25f;
+	static constexpr float LOCAL_SHADOW_ACTOR_STALENESS_WEIGHT = 0.15f;
+	static constexpr float LOCAL_SHADOW_ACTOR_STICKY_BONUS = 0.5f;
+	static constexpr float LOCAL_SHADOW_INTERVAL_EMA_WEIGHT = 0.3f;
+	static constexpr float LOCAL_SHADOW_INTERVAL_EMA_MAX = 60.0f;
+	static constexpr uint32_t LOCAL_SHADOW_REJECT_BASE_FRAMES = 15;
+	static constexpr uint32_t LOCAL_SHADOW_REJECT_MAX_STREAK = 4;
+	static constexpr float LOCAL_SHADOW_MAX_FRAME_TIME = 0.1f;
+	static constexpr uint32_t LOCAL_SHADOW_LOG_INTERVAL_FRAMES = 600;
+	/** @brief Must match numthreads in LocalShadowCopyCS.hlsl. */
+	static constexpr uint32_t LOCAL_SHADOW_COPY_GROUP_SIZE = 8;
 
 	struct alignas(16) LocalShadowData
 	{
@@ -148,7 +179,6 @@ public:
 		RE::NiLight* niLight = nullptr;
 		int32_t slice = -1;
 		uint32_t lastSeenFrame = 0;
-		uint32_t firstSeenFrame = 0;
 		uint32_t lastEvaluatedFrame = 0;
 		uint32_t lastEligibleFrame = 0;
 		uint32_t lastRenderedFrame = 0;
@@ -220,12 +250,15 @@ public:
 		uint LocalShadowSamples;
 		float LocalShadowFilterRadius;
 		float LocalShadowTexelSize;
-		float pad1[2];
+		uint ContactShadowSubSamples;
+		float pad1;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
 
 	/** @brief Populates and returns the per-frame constant buffer data for light visualization settings. */
 	PerFrame GetCommonBufferData();
+
+	bool AreContactShadowsCompiled();
 
 	struct alignas(16) StrictLightDataCB
 	{
@@ -265,6 +298,7 @@ public:
 	bool wasEmpty = false;
 	bool wasWorld = false;
 	bool wasFirstPerson = false;
+	RE::NiPoint3 previousWorldEyePosition{};
 	int previousRoomIndex = -1;
 	uint previousShadowBitMask = 0;
 
@@ -284,7 +318,7 @@ public:
 	/** @brief Returns whether the debug overlay should be displayed. */
 	virtual bool IsOverlayVisible() const override { return settings.EnableLightsVisualisation; }
 
-	/** @brief Installs shader setup geometry hooks for lighting, effect, and water shaders. */
+	/** @brief Installs shader setup geometry hooks and the inverse-square light creation and luminance hooks. */
 	virtual void PostPostLoad() override;
 	/** @brief Unlocks the vanilla magic light limit on data load. */
 	virtual void DataLoaded() override;
@@ -327,16 +361,20 @@ public:
 	eastl::vector<LocalShadowActor> localShadowActors;
 	ankerl::unordered_dense::map<RE::FormID, RE::NiPoint3> localShadowActorHistory;
 	ankerl::unordered_dense::map<RE::FormID, RE::NiPoint3> localShadowActorHistoryNext;
-	eastl::vector<LocalShadowData> localShadowUpload;
 	bool localShadowSelecting = false;
+	bool localShadowHooksInstalled = false;
+	/** @brief True inside the first-person pass, which rebases posAdjust, so shaders take the world eye from WorldEyePosition. */
+	bool localShadowFirstPersonPass = false;
 	bool shadowDistanceRaised = false;
 	uint32_t localShadowFrame = 0;
+	uint32_t localShadowEngineBudget = SHADOW_MASK_CHANNEL_COUNT - 1;
 	RE::NiPoint3 localShadowCameraPosition{};
 
 	eastl::unique_ptr<Texture2D> localShadowCache = nullptr;
 	eastl::unique_ptr<Buffer> localShadowBuffer = nullptr;
 	ConstantBuffer* localShadowCopyCB = nullptr;
 	ID3D11ComputeShader* localShadowCopyCS = nullptr;
+	bool localShadowCopyCSCompiled = false;
 	uint32_t localShadowCacheSlots = 0;
 	uint32_t localShadowRequestedSlots = 0;
 	uint32_t localShadowCacheResolution = 0;
@@ -345,19 +383,35 @@ public:
 	uint32_t localShadowEngineMipLevels = 1;
 	uint32_t localShadowEngineSlices = 0;
 	bool localShadowDirectCopy = false;
+	uint32_t localShadowAllocFailedFrame = 0;
 	RE::Setting* poissonRadiusScaleSetting = nullptr;
 	bool poissonRadiusScaleLookedUp = false;
 
 	uint32_t localShadowStatTracked = 0;
 	uint32_t localShadowStatCached = 0;
 	uint32_t localShadowStatRendered = 0;
-	uint32_t localShadowStatCollisions = 0;
+
+	/** @brief True when local shadows are enabled and their hooks were installed at startup. */
+	bool IsLocalShadowsEnabled() const { return settings.EnableLocalShadows && localShadowHooksInstalled; }
+	/** @brief True when local shadows are enabled and the cache texture exists. */
+	bool IsLocalShadowCacheActive() const { return IsLocalShadowsEnabled() && localShadowCache; }
+	/** @brief Draws the experimental local shadow settings. */
+	void DrawLocalShadowSettings();
+	/** @brief Compiles LocalShadowCopyCS and its constant buffer on first use; false when compilation failed. */
+	bool EnsureLocalShadowCopyShader();
+	/** @brief True when the engine found the caster in range within the camera hold window. */
+	static bool IsLocalShadowCasterInView(const LocalShadowCaster& a_caster, uint32_t a_frame);
+	/** @brief Texel size of the cache format, which is always R16_UNORM or R32_FLOAT. */
+	static uint32_t GetLocalShadowBytesPerTexel(DXGI_FORMAT a_format) { return a_format == DXGI_FORMAT_R16_UNORM ? 2 : 4; }
 
 	/**
 	 * @brief Picks which shadow casters the engine may render this frame so the cache covers every caster over time.
-	 * Runs before the engine selects its (at most four) shadow-casting lights.
+	 * Runs before the engine selects its point/spot shadow-casting lights.
 	 */
 	void ScheduleLocalShadowCasters();
+	/** @brief Point/spot shadow maps the engine can render this frame: every mask channel, minus one when the sun takes a shadow map. */
+	static uint32_t GetEngineLocalShadowBudget();
+	/** @brief Raises the engine's point/spot shadow cull distance to the light fade distance, or restores it when disabled. */
 	void MatchShadowDistanceToLightFade(bool a_enable);
 	/**
 	 * @brief Records the engine's own range test for a caster and hides casters not scheduled this frame.
@@ -382,8 +436,10 @@ public:
 	LocalShadowCaster* FindLocalShadowCaster(RE::BSShadowLight* a_light);
 	/** @brief Flags a light as an engine shadow-mask light only when it owns one of the four mask channels. */
 	static void TryAssignShadowMask(LightData& a_light, RE::BSShadowLight* a_shadowLight);
-	/** @brief Returns the shadow mask channel of a light, or 255 when it has none. */
+	/** @brief Returns the shadow mask channel of a light, or NO_SHADOW_MASK_INDEX when it has none. */
 	static uint32_t GetShadowMaskIndex(RE::BSShadowLight* a_shadowLight);
+	/** @brief True when the engine rendered this light's shadow map this frame; maskIndex alone goes stale once a light is removed. */
+	static bool IsShadowMapRendered(RE::ShadowSceneNode* a_shadowSceneNode, RE::BSShadowLight* a_shadowLight);
 
 	/** @brief Adjusts the saturation of an RGB color value. */
 	static inline float3 Saturation(float3 color, float saturation);
@@ -406,18 +462,18 @@ public:
 		bool EnableParticleLightsCulling = true;
 		bool EnableLightsVisualisation = false;
 		uint LightsVisualisationMode = 0;
-		bool EnableContactShadows = true;
+		bool EnableContactShadows = false;
 		uint ContactShadowMaxSteps = 4;
 		float ContactShadowMaxDistance = 1024.0f;
 		float ContactShadowLength = 8.0f;
 		float ContactShadowDepthThickness = 16.0f;
 		float ContactShadowStrength = 1.0f;
-		bool EnableLocalShadows = true;
+		uint ContactShadowSubSamples = 1;
+		bool EnableLocalShadows = false;
 		uint LocalShadowSlots = 16;
 		uint LocalShadowResolution = 0;
 		uint LocalShadowSamples = 8;
 		float LocalShadowFilterScale = 1.0f;
-		bool LogShadowDiagnostics = false;
 	};
 
 	uint clusterSize[3] = { 16 };
@@ -493,6 +549,12 @@ public:
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		struct Main_RenderFirstPersonView
+		{
+			static void thunk(bool a1, bool a2);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		struct BSShadowParabolicLight_UpdateCamera
 		{
 			static bool thunk(RE::BSShadowLight* This, const RE::NiCamera* a_camera);
@@ -506,11 +568,70 @@ public:
 		};
 
 		static void Install();
+		/** @brief Installs the shadow caster rotation hooks; only called when local shadows are enabled at startup. */
+		static void InstallLocalShadows();
 	};
 
 	virtual bool IsCore() const override { return true; }
 
+	/**
+	 * @brief Calculates the effective radius of an inverse-square light based on its intensity and cutoff.
+	 * @param intensity The light's intensity value.
+	 * @param shadowCaster Whether the light casts shadows (uses a tighter cutoff).
+	 * @param cutoffOverride Per-light cutoff override from the light form data.
+	 * @param size The physical size of the light source.
+	 * @return The computed light radius in game units.
+	 */
+	static float CalculateRadius(float intensity, bool shadowCaster, float cutoffOverride, float size);
+
+	/**
+	 * @brief Builds the LightData for a light from its runtime data, applying inverse-square parameters when flagged.
+	 * @param bsLight The game's BSLight instance.
+	 * @param niLight The underlying NiLight with runtime extension data.
+	 * @return The populated LightData.
+	 */
+	LightData ProcessLight(RE::BSLight* bsLight, RE::NiLight* niLight) const;
+
+	/**
+	 * @brief Computes the inverse-square attenuation at a given distance with smooth fade-out.
+	 * @param distance Distance from the light source.
+	 * @param radius The effective light radius.
+	 * @param size The physical size of the light source.
+	 * @return The attenuation factor in [0, 1].
+	 */
+	static float GetAttenuation(float distance, float radius, float size);
+
+	/** @brief Hook that intercepts point light creation to inject inverse-square light extension data. */
+	struct CreatePointLight
+	{
+		static RE::NiPointLight* thunk(RE::TESObjectLIGH* ligh, RE::TESObjectREFR* refr, RE::NiAVObject* root, bool forceDynamic, bool useLightRadius, bool affectRequesterOnly);
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	/** @brief Hook that overrides BSLight luminance calculation to use inverse-square attenuation. */
+	struct BSLight_GetLuminance
+	{
+		static float thunk(RE::BSLight* bsLight, RE::NiPoint3* targetPosition, RE::NiLight* refLight);
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
 private:
+	bool contactShadowsLatched = false;
+	bool contactShadowsAtBoot = false;
+
+	static constexpr float DefaultCutoff = 0.05f;
+	static constexpr float DefaultShadowCasterCutoff = 0.022f;
+
+	static constexpr float Scale = 0.8f;
+	static constexpr float MetresToUnits = 70.f;
+	static constexpr float MetresToUnitsSq = MetresToUnits * MetresToUnits;
+	static constexpr float ScaledUnitsSq = Scale * MetresToUnitsSq;
+	static constexpr float FadeZoneBase = 4.5f * Scale * MetresToUnits;
+
+	static void SetExtLightData(RE::NiLight* niLight, const RE::TESObjectLIGH* ligh);
+
+	static inline float SmoothStep(float edge0, float edge1, float x);
+
 	VertexColorCacheEntry GetParticleLightConfig(RE::BSRenderPass* a_pass);
 	bool QueueParticleLight(RE::BSRenderPass* a_pass, VertexColorCacheEntry& a_reference);
 };

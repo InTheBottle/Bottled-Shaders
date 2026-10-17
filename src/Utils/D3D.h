@@ -84,6 +84,25 @@ namespace Util
 	void SetResourceName(ID3D11DeviceChild* Resource, const char* Format, ...);
 
 	/**
+	 * @brief Enables D3D11 multithread protection and holds the immediate context's lock for the scope.
+	 * Scopes are reference counted, and the protection state from before the first scope is restored when the last one ends.
+	 */
+	class MultithreadScope
+	{
+	public:
+		explicit MultithreadScope(ID3D11DeviceContext* context);
+		~MultithreadScope();
+		MultithreadScope(const MultithreadScope&) = delete;
+		MultithreadScope& operator=(const MultithreadScope&) = delete;
+
+		/** @brief True when the lock is held; false when ID3D11Multithread is unavailable. */
+		explicit operator bool() const { return multithread != nullptr; }
+
+	private:
+		winrt::com_ptr<REX::W32::ID3D11Multithread> multithread;
+	};
+
+	/**
 	 * @brief Compile an HLSL shader from file and create the appropriate D3D11 shader object.
 	 * @param FilePath Path to the HLSL source file.
 	 * @param Defines Preprocessor macro name/value pairs to pass to the compiler.
@@ -143,11 +162,14 @@ namespace Util
 	 * The caller does NOT own the returned pointer.
 	 *
 	 * Returns prepass depth until Deferred::DeferredPasses copies the finished opaque
-	 * depth, and that final depth (R24_UNORM_X8) for the rest of the frame.
+	 * depth, and that final depth (R24_UNORM_X8, or R32_FLOAT_X8X24 under Reverse Z) for
+	 * the rest of the frame.
 	 *
-	 * @param prefer16bit Before the final depth is available: when false (default) returns
-	 *        R32_FLOAT for compute shaders doing arithmetic on depth; when true returns
-	 *        R16_UNORM for pixel shaders via slot 17 / SharedData::GetDepth. Ignored after.
+	 * @param prefer16bit Before the final depth is available with Terrain Blending active:
+	 *        when false (default) returns R32_FLOAT for compute shaders doing arithmetic on
+	 *        depth; when true returns R16_UNORM for pixel shaders via slot 17 /
+	 *        SharedData::GetDepth. Ignored after, and ignored under Reverse Z, where a
+	 *        UNORM copy would discard the floating-point depth precision for every reader.
 	 * @return The depth SRV, or nullptr if unavailable.
 	 */
 	ID3D11ShaderResourceView* GetCurrentSceneDepthSRV(bool prefer16bit = false);

@@ -6,7 +6,9 @@
 #include "Utils/Game.h"
 #include "Utils/UI.h"
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <shared_mutex>
 #include <unordered_map>
@@ -16,7 +18,9 @@
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	ReverseZ::Settings,
-	EnableReverseZ)
+	EnableReverseZ,
+	NearPlane,
+	ViewportBiasShift)
 
 namespace
 {
@@ -45,11 +49,18 @@ namespace
 		return desc.Format == DXGI_FORMAT_R32G8X24_TYPELESS;
 	}
 
+	template <class T>
+	struct ReversedState
+	{
+		winrt::com_ptr<T> original;
+		winrt::com_ptr<T> reversed;
+	};
+
 	std::mutex g_stateMutex;
-	std::unordered_map<ID3D11DepthStencilState*, winrt::com_ptr<ID3D11DepthStencilState>> g_reversedStates;
+	std::unordered_map<ID3D11DepthStencilState*, ReversedState<ID3D11DepthStencilState>> g_reversedStates;
 
 	std::mutex g_rasterMutex;
-	std::unordered_map<ID3D11RasterizerState*, winrt::com_ptr<ID3D11RasterizerState>> g_reversedRasterStates;
+	std::unordered_map<ID3D11RasterizerState*, ReversedState<ID3D11RasterizerState>> g_reversedRasterStates;
 
 	ID3D11DepthStencilState* g_requestedState = nullptr;
 	ID3D11DepthStencilState* g_boundState = nullptr;
@@ -58,7 +69,6 @@ namespace
 	ID3D11RasterizerState* g_boundRasterState = nullptr;
 	bool g_reverseTargetBound = false;
 	bool g_projectionReversed = false;
-	bool g_hookPassthrough = false;
 
 	D3D11_VIEWPORT g_requestedViewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE]{};
 	D3D11_VIEWPORT g_mappedViewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE]{};
@@ -74,7 +84,7 @@ namespace
 		D3D11_VIEWPORT canonical = a_viewport;
 		if (a_viewport.MinDepth > 0.0f && a_viewport.MinDepth != a_viewport.MaxDepth) {
 			canonical.MinDepth = 0.0f;
-			canonical.MaxDepth = a_viewport.MaxDepth >= 1.0f ? 1.0f - a_viewport.MinDepth : a_viewport.MaxDepth;
+			canonical.MaxDepth = a_viewport.MaxDepth >= 1.0f ? 1.0f - a_viewport.MinDepth / globals::features::reverseZ.GetViewportBiasScale() : a_viewport.MaxDepth;
 		}
 		return canonical;
 	}
@@ -82,7 +92,7 @@ namespace
 	D3D11_VIEWPORT MirrorViewportDepth(const D3D11_VIEWPORT& a_viewport)
 	{
 		D3D11_VIEWPORT mirrored = a_viewport;
-		mirrored.MinDepth = 1.0f - a_viewport.MaxDepth;
+		mirrored.MinDepth = (1.0f - a_viewport.MaxDepth) * globals::features::reverseZ.GetViewportBiasScale();
 		mirrored.MaxDepth = 1.0f - a_viewport.MinDepth;
 		return mirrored;
 	}
@@ -191,6 +201,70 @@ std::pair<std::string, std::vector<std::string>> ReverseZ::GetFeatureSummary()
 void ReverseZ::LoadSettings(json& o_json)
 {
 	settings = o_json;
+	settings.NearPlane = std::isfinite(settings.NearPlane) ? std::clamp(settings.NearPlane, 0.0f, 15.0f) : 0.0f;
+	settings.ViewportBiasShift = std::clamp(settings.ViewportBiasShift, 0, 8);
+}
+
+namespace
+{
+	constexpr float kMinNearPlane = 2.0f;
+}
+
+float ReverseZ::GetViewportBiasScale() const
+{
+	return activeThisBoot && depthTargetsConverted ? std::ldexp(1.0f, -std::clamp(settings.ViewportBiasShift, 0, 8)) : 1.0f;
+}
+
+void ReverseZ::ApplyNearPlane(const RE::NiCamera* a_camera)
+{
+	if (!activeThisBoot || !depthTargetsConverted || !a_camera || a_camera != RE::Main::WorldRootCamera())
+		return;
+	auto* camera = RE::Main::WorldRootCamera();
+	auto* sceneGraph = RE::Main::WorldRootNode();
+	if (!nearPlaneSetting) {
+		auto* collection = globals::game::iniSettingCollection;
+		nearPlaneSetting = collection ? collection->GetSetting("fNearDistance:Display") : nullptr;
+	}
+	if (!camera || !sceneGraph || !nearPlaneSetting)
+		return;
+
+	auto& cameraData = camera->GetRuntimeData2();
+	const bool engineCustomNear = sceneGraph->GetRuntimeData().useCustomNear;
+	if (settings.NearPlane > 0.0f) {
+		if (!nearPlaneOverridden) {
+			engineNearPlane = nearPlaneSetting->GetFloat();
+			nearPlaneOverridden = true;
+		}
+		const float nearPlane = std::max(settings.NearPlane, std::max(cameraData.minNearPlaneDist, kMinNearPlane));
+		if (cameraData.viewFrustum.fFar > 0.0f && cameraData.viewFrustum.fFar / nearPlane > cameraData.maxFarNearRatio)
+			cameraData.maxFarNearRatio = cameraData.viewFrustum.fFar / nearPlane;
+		nearPlaneSetting->data.f = nearPlane;
+		if (!engineCustomNear && cameraData.viewFrustum.fNear != nearPlane)
+			cameraData.viewFrustum.fNear = nearPlane;
+
+		static float loggedNearPlane = 0.0f;
+		static uint32_t mismatchFrames = 0;
+		static bool mismatchLogged = false;
+		if (loggedNearPlane != nearPlane) {
+			loggedNearPlane = nearPlane;
+			mismatchFrames = 0;
+			logger::info("ReverseZ: near plane override {:.2f} (engine default {:.2f})", nearPlane, engineNearPlane);
+		}
+		const float* constantNear = globals::game::cameraNear;
+		if (!engineCustomNear && constantNear && std::abs(*constantNear - nearPlane) > 0.01f) {
+			if (++mismatchFrames > 120 && !mismatchLogged) {
+				mismatchLogged = true;
+				logger::warn("ReverseZ: CameraData near {:.2f} does not follow the near plane override {:.2f}; depth linearisation will be off", *constantNear, nearPlane);
+			}
+		} else {
+			mismatchFrames = 0;
+		}
+	} else if (nearPlaneOverridden) {
+		nearPlaneOverridden = false;
+		nearPlaneSetting->data.f = engineNearPlane;
+		if (!engineCustomNear && engineNearPlane > 0.0f)
+			cameraData.viewFrustum.fNear = engineNearPlane;
+	}
 }
 
 void ReverseZ::SaveSettings(json& o_json)
@@ -385,27 +459,25 @@ ID3D11RasterizerState* ReverseZ::GetReversedRasterizerState(ID3D11RasterizerStat
 
 	std::scoped_lock lock(g_rasterMutex);
 	if (auto it = g_reversedRasterStates.find(a_state); it != g_reversedRasterStates.end())
-		return it->second ? it->second.get() : a_state;
+		return it->second.reversed ? it->second.reversed.get() : a_state;
+
+	auto& entry = g_reversedRasterStates[a_state];
+	entry.original.copy_from(a_state);
 
 	D3D11_RASTERIZER_DESC desc{};
 	a_state->GetDesc(&desc);
-	if (desc.DepthBias == 0 && desc.SlopeScaledDepthBias == 0.0f && desc.DepthBiasClamp == 0.0f) {
-		g_reversedRasterStates.insert_or_assign(a_state, nullptr);
+	if (desc.DepthBias == 0 && desc.SlopeScaledDepthBias == 0.0f && desc.DepthBiasClamp == 0.0f)
 		return a_state;
-	}
 	desc.DepthBias = -desc.DepthBias;
 	desc.SlopeScaledDepthBias = -desc.SlopeScaledDepthBias;
 	desc.DepthBiasClamp = -desc.DepthBiasClamp;
 
-	winrt::com_ptr<ID3D11RasterizerState> reversed;
-	if (FAILED(globals::d3d::device->CreateRasterizerState(&desc, reversed.put()))) {
-		g_reversedRasterStates.insert_or_assign(a_state, nullptr);
+	if (FAILED(globals::d3d::device->CreateRasterizerState(&desc, entry.reversed.put()))) {
+		entry.reversed = nullptr;
 		return a_state;
 	}
-	Util::SetResourceName(reversed.get(), "ReverseZ::RasterizerState");
-	auto* raw = reversed.get();
-	g_reversedRasterStates.insert_or_assign(a_state, std::move(reversed));
-	return raw;
+	Util::SetResourceName(entry.reversed.get(), "ReverseZ::RasterizerState");
+	return entry.reversed.get();
 }
 
 ID3D11DepthStencilState* ReverseZ::GetReversedState(ID3D11DepthStencilState* a_state)
@@ -415,21 +487,21 @@ ID3D11DepthStencilState* ReverseZ::GetReversedState(ID3D11DepthStencilState* a_s
 
 	std::scoped_lock lock(g_stateMutex);
 	if (auto it = g_reversedStates.find(a_state); it != g_reversedStates.end())
-		return it->second ? it->second.get() : a_state;
+		return it->second.reversed ? it->second.reversed.get() : a_state;
+
+	auto& entry = g_reversedStates[a_state];
+	entry.original.copy_from(a_state);
 
 	D3D11_DEPTH_STENCIL_DESC desc{};
 	a_state->GetDesc(&desc);
 	desc.DepthFunc = FlipComparison(desc.DepthFunc);
 
-	winrt::com_ptr<ID3D11DepthStencilState> reversed;
-	if (FAILED(globals::d3d::device->CreateDepthStencilState(&desc, reversed.put()))) {
-		g_reversedStates.insert_or_assign(a_state, nullptr);
+	if (FAILED(globals::d3d::device->CreateDepthStencilState(&desc, entry.reversed.put()))) {
+		entry.reversed = nullptr;
 		return a_state;
 	}
-	Util::SetResourceName(reversed.get(), "ReverseZ::DepthStencilState");
-	auto* raw = reversed.get();
-	g_reversedStates.insert_or_assign(a_state, std::move(reversed));
-	return raw;
+	Util::SetResourceName(entry.reversed.get(), "ReverseZ::DepthStencilState");
+	return entry.reversed.get();
 }
 
 void ReverseZ::ApplyReverseProjection(void* a_cameraStateEntry, const RE::NiCamera* a_camera)
@@ -620,7 +692,7 @@ namespace
 	{
 		static void thunk(ID3D11DeviceContext* This, ID3D11DepthStencilState* pDepthStencilState, UINT StencilRef)
 		{
-			if (This == globals::d3d::context && !g_hookPassthrough) {
+			if (This == globals::d3d::context) {
 				g_requestedState = pDepthStencilState;
 				g_requestedStencilRef = StencilRef;
 				g_boundState = ShouldFlip() ? globals::features::reverseZ.GetReversedState(pDepthStencilState) : pDepthStencilState;
@@ -636,7 +708,7 @@ namespace
 	{
 		static void thunk(ID3D11DeviceContext* This, ID3D11RasterizerState* pRasterizerState)
 		{
-			if (This == globals::d3d::context && !g_hookPassthrough) {
+			if (This == globals::d3d::context) {
 				g_requestedRasterState = pRasterizerState;
 				g_boundRasterState = ShouldFlip() ? globals::features::reverseZ.GetReversedRasterizerState(pRasterizerState) : pRasterizerState;
 				func(This, g_boundRasterState);
@@ -651,7 +723,7 @@ namespace
 	{
 		static void thunk(ID3D11DeviceContext* This, UINT NumViewports, const D3D11_VIEWPORT* pViewports)
 		{
-			if (This != globals::d3d::context || g_hookPassthrough || !pViewports || NumViewports == 0 || NumViewports > D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE) {
+			if (This != globals::d3d::context || !pViewports || NumViewports == 0 || NumViewports > D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE) {
 				func(This, NumViewports, pViewports);
 				return;
 			}
@@ -723,6 +795,8 @@ namespace
 		static void thunk(RE::BSGraphics::State* a_state, const RE::NiCamera* a_camera, std::uint32_t a_flags)
 		{
 			const bool renderingCubemap = globals::state && (globals::state->permutationData.ExtraShaderDescriptor & static_cast<uint32_t>(State::ExtraShaderDescriptors::IsReflections)) != 0;
+			if (!renderingCubemap)
+				globals::features::reverseZ.ApplyNearPlane(a_camera);
 			SetProjectionReversed(globals::features::reverseZ.ExpectPublishedReversal(a_camera, renderingCubemap));
 			func(a_state, a_camera, a_flags);
 			if (!renderingCubemap)
@@ -737,7 +811,7 @@ namespace
 	{
 		static void thunk(ID3D11DeviceContext* This, ID3D11DepthStencilView* pDepthStencilView, UINT ClearFlags, FLOAT Depth, UINT8 Stencil)
 		{
-			if (This == globals::d3d::context && !g_hookPassthrough && g_projectionReversed && globals::features::reverseZ.IsReverseDepthView(pDepthStencilView))
+			if (This == globals::d3d::context && g_projectionReversed && globals::features::reverseZ.IsReverseDepthView(pDepthStencilView))
 				Depth = 1.0f - Depth;
 			func(This, pDepthStencilView, ClearFlags, Depth, Stencil);
 		}
@@ -765,10 +839,6 @@ namespace
 	{
 		static void thunk(ID3D11DeviceContext* This, UINT NumViews, ID3D11RenderTargetView* const* ppRenderTargetViews, ID3D11DepthStencilView* pDepthStencilView)
 		{
-			if (g_hookPassthrough) {
-				func(This, NumViews, ppRenderTargetViews, pDepthStencilView);
-				return;
-			}
 			if (This == globals::d3d::context && NumViews > 0 && ppRenderTargetViews)
 				pDepthStencilView = ResolveFaceDepth(This, ppRenderTargetViews[0], pDepthStencilView);
 			func(This, NumViews, ppRenderTargetViews, pDepthStencilView);
@@ -781,10 +851,6 @@ namespace
 	{
 		static void thunk(ID3D11DeviceContext* This, UINT NumRTVs, ID3D11RenderTargetView* const* ppRenderTargetViews, ID3D11DepthStencilView* pDepthStencilView, UINT UAVStartSlot, UINT NumUAVs, ID3D11UnorderedAccessView* const* ppUnorderedAccessViews, const UINT* pUAVInitialCounts)
 		{
-			if (g_hookPassthrough) {
-				func(This, NumRTVs, ppRenderTargetViews, pDepthStencilView, UAVStartSlot, NumUAVs, ppUnorderedAccessViews, pUAVInitialCounts);
-				return;
-			}
 			if (This == globals::d3d::context && NumRTVs != D3D11_KEEP_RENDER_TARGETS_AND_DEPTH_STENCIL && NumRTVs > 0 && ppRenderTargetViews)
 				pDepthStencilView = ResolveFaceDepth(This, ppRenderTargetViews[0], pDepthStencilView);
 			func(This, NumRTVs, ppRenderTargetViews, pDepthStencilView, UAVStartSlot, NumUAVs, ppUnorderedAccessViews, pUAVInitialCounts);
@@ -799,7 +865,7 @@ namespace
 		static void thunk(ID3D11DeviceContext* This, ID3D11DepthStencilState** ppDepthStencilState, UINT* pStencilRef)
 		{
 			func(This, ppDepthStencilState, pStencilRef);
-			if (This != globals::d3d::context || g_hookPassthrough || !ppDepthStencilState || !*ppDepthStencilState)
+			if (This != globals::d3d::context || !ppDepthStencilState || !*ppDepthStencilState)
 				return;
 			if (*ppDepthStencilState != g_boundState || !g_requestedState || g_requestedState == g_boundState)
 				return;
@@ -815,7 +881,7 @@ namespace
 		static void thunk(ID3D11DeviceContext* This, ID3D11RasterizerState** ppRasterizerState)
 		{
 			func(This, ppRasterizerState);
-			if (This != globals::d3d::context || g_hookPassthrough || !ppRasterizerState || !*ppRasterizerState)
+			if (This != globals::d3d::context || !ppRasterizerState || !*ppRasterizerState)
 				return;
 			if (*ppRasterizerState != g_boundRasterState || !g_requestedRasterState || g_requestedRasterState == g_boundRasterState)
 				return;
@@ -831,7 +897,7 @@ namespace
 		static void thunk(ID3D11DeviceContext* This, UINT* pNumViewports, D3D11_VIEWPORT* pViewports)
 		{
 			func(This, pNumViewports, pViewports);
-			if (This != globals::d3d::context || g_hookPassthrough || !pNumViewports || !pViewports)
+			if (This != globals::d3d::context || !pNumViewports || !pViewports)
 				return;
 			const UINT count = std::min<UINT>(*pNumViewports, D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE);
 			for (UINT i = 0; i < count; ++i)
@@ -864,11 +930,6 @@ void ReverseZ::InstallRuntimeHooks()
 	logger::info("ReverseZ: installed depth-state, depth-clear and state read-back hooks");
 }
 
-void ReverseZ::SetHookPassthrough(bool a_passthrough)
-{
-	g_hookPassthrough = a_passthrough;
-}
-
 void ReverseZ::PostPostLoad()
 {
 	LatchBootState();
@@ -891,6 +952,25 @@ void ReverseZ::DrawSettings()
 
 	if (activeThisBoot && !depthTargetsConverted)
 		ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", T(TKEY("status_failed"), "The depth buffer could not be reallocated; see the log."));
+
+	{
+		Util::DisableGuard disable(!activeThisBoot);
+
+		if (ImGui::SliderFloat(T(TKEY("near_plane"), "Near Plane Override"), &settings.NearPlane, 0.0f, 15.0f, settings.NearPlane > 0.0f ? "%.1f" : T(TKEY("near_plane_off"), "Game default"), ImGuiSliderFlags_AlwaysClamp) && settings.NearPlane > 0.0f && settings.NearPlane < kMinNearPlane)
+			settings.NearPlane = kMinNearPlane;
+		Util::HelpMarker(T(TKEY("near_plane_tooltip"),
+			"Distance of the camera near plane in game units. The game default is 15.\n"
+			"A floating-point reverse depth buffer keeps full precision at any distance, so the near plane "
+			"can be moved closer to reduce the camera and first-person arms clipping through nearby geometry.\n"
+			"0 keeps the game's value, the minimum is 2. Applied to the world camera only."));
+
+		ImGui::SliderInt(T(TKEY("viewport_bias_shift"), "Depth Bias Reduction"), &settings.ViewportBiasShift, 0, 8, "%d", ImGuiSliderFlags_AlwaysClamp);
+		Util::HelpMarker(T(TKEY("viewport_bias_shift_tooltip"),
+			"Halves the game's fixed depth offsets for decals, water and similar overlays this many times.\n"
+			"Those offsets were sized for a 24-bit depth buffer and are far larger than the floating-point "
+			"buffer needs, which lets decals and water show through thin geometry at a distance.\n"
+			"Raise it until overlays start to flicker, then step back one. 0 keeps the game's offsets."));
+	}
 }
 
 #undef I18N_KEY_PREFIX

@@ -12,6 +12,7 @@
 #include "Globals.h"
 #include "I18n/I18n.h"
 #include "Menu.h"
+#include "Utils/D3D.h"
 #include "Utils/FileSystem.h"
 
 #define I18N_KEY_PREFIX "feature.screenshot."
@@ -210,8 +211,8 @@ namespace
 				sourceImage.GetImages(),
 				sourceImage.GetImageCount(),
 				sourceImage.GetMetadata(),
-				DXGI_FORMAT_B8G8R8X8_UNORM,
-				DirectX::TEX_FILTER_DEFAULT,
+				DXGI_FORMAT_B8G8R8X8_UNORM_SRGB,
+				DirectX::TEX_FILTER_SRGB,
 				0.0f,
 				convertedImage))) {
 			return convertedImage.GetImage(0, 0, 0);
@@ -802,15 +803,22 @@ void ScreenshotFeature::EnsurePreviewCache(ID3D11Texture2D* sourceTexture)
 		previewCacheTexture = nullptr;
 		return;
 	}
+	Util::SetResourceName(previewCacheTexture.get(), "Screenshot::PreviewCache");
 	if (FAILED(globals::d3d::device->CreateShaderResourceView(
 			previewCacheTexture.get(), nullptr, previewCacheSRV.put()))) {
 		previewCacheSRV = nullptr;
 		previewCacheTexture = nullptr;
+		return;
 	}
+	Util::SetResourceName(previewCacheSRV.get(), "Screenshot::PreviewCache SRV");
 }
 
 void ScreenshotFeature::Reset()
 {
+	if (previewCacheTexture && !Menu::GetSingleton()->IsEnabled) {
+		previewCacheSRV = nullptr;
+		previewCacheTexture = nullptr;
+	}
 }
 
 void ScreenshotFeature::RaiseMultithreadProtection()

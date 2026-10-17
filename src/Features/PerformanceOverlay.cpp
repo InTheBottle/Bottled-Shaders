@@ -168,7 +168,7 @@ void PerformanceOverlay::DrawSettings()
 			ImGui::Checkbox(T(TKEY("show_post_fg_graph"), "Show Post-FG Frametime Graph"), &this->settings.ShowPostFGFrameTimeGraph);
 			if (ImGui::IsItemHovered()) {
 				if (auto _tt = Util::HoverTooltipWrapper()) {
-					ImGui::Text("%s", T(TKEY("post_fg_graph_tooltip"), "FSR Frame Generation uses calculated timing data (2x Pre-FG).\nDLSS Frame Generation provides measured timing data."));
+					ImGui::Text("%s", T(TKEY("post_fg_graph_tooltip"), "FSR Frame Generation uses calculated timing data (2x Pre-FG)."));
 				}
 			}
 		} else if (this->settings.ShowFPS) {
@@ -475,16 +475,11 @@ void PerformanceOverlay::DrawFPS()
 
 	// Show Post-FG frametime graph if enabled
 	if (this->settings.ShowPostFGFrameTimeGraph && this->state.isFrameGenerationActive) {
-		if (globals::features::upscaling.UsesDLSSGFrameGen()) {
-			Util::Text::Info("%s", T(TKEY("post_fg_derived"), "Post-FG: Derived from reported flip count"));
-		} else {
-			Util::Text::Warning("%s", T(TKEY("post_fg_calculated"), "Post-FG: Calculated timing (2x Pre-FG)"));
-		}
+		Util::Text::Warning("%s", T(TKEY("post_fg_calculated"), "Post-FG: Calculated timing (2x Pre-FG)"));
 		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("fsr_dlss_timing_tooltip"), "AMD FSR Frame Generation timing is calculated assuming 2x Pre-FG.\nNVIDIA DLSS Frame Generation timing is derived from the driver's reported flip count per real frame."));
+			ImGui::Text("%s", T(TKEY("fsr_timing_tooltip"), "AMD FSR Frame Generation timing is calculated assuming 2x Pre-FG."));
 		}
 
-		// Show post-FG graph for both DLSS and FSR (FSR uses calculated data)
 		this->DrawPostFGFrameTimeGraph();
 	}
 }
@@ -648,22 +643,27 @@ void PerformanceOverlay::DrawABTestStatisticalValidity(const Menu::ThemeSettings
 	float totalDuration = aggregator.GetTotalTestDuration();
 	int totalFrames = aggregator.GetTotalFrameCount();
 	int excludedFrames = 0;
+	bool hasSamplesA = false;
+	bool hasSamplesB = false;
 	for (const auto& interval : aggregator.GetIntervals()) {
 		excludedFrames += interval.excludedFrames;
+		hasSamplesA = hasSamplesA || (interval.variant == ABVariant::A && !interval.frameRows.empty());
+		hasSamplesB = hasSamplesB || (interval.variant == ABVariant::B && !interval.frameRows.empty());
 	}
 	int validFrames = totalFrames;
 	int totalWithExcluded = totalFrames + excludedFrames;
 	float validPercent = (totalWithExcluded > 0) ? (100.0f * validFrames / totalWithExcluded) : 100.0f;
 
+	bool hasBothVariants = hasSamplesA && hasSamplesB;
 	bool hasEnoughSamples = validFrames >= kMinimumSamplesForValidity;
 	bool hasGoodDuration = totalDuration >= kMinimumTestDuration;
 	bool hasLowExclusionRate = validPercent >= kMinimumValidFramesPercent;
-	bool isStatisticallyValid = hasEnoughSamples && hasGoodDuration && hasLowExclusionRate;
+	bool isStatisticallyValid = hasBothVariants && hasEnoughSamples && hasGoodDuration && hasLowExclusionRate;
 
 	ImVec4 validityColor = theme.Palette.Text;
 	if (isStatisticallyValid) {
 		validityColor = theme.StatusPalette.SuccessColor;
-	} else if (validFrames >= kMinimumSamplesForMarginal && totalDuration >= kMinimumDurationForMarginal) {
+	} else if (hasBothVariants && validFrames >= kMinimumSamplesForMarginal && totalDuration >= kMinimumDurationForMarginal) {
 		validityColor = theme.StatusPalette.Warning;
 	} else {
 		validityColor = theme.StatusPalette.Error;
@@ -1938,6 +1938,9 @@ void PerformanceOverlay::UpdateGraphValues()
 	                  static_cast<float>(state.overlayTimingFrequency.QuadPart);
 	state.lastUpdateTime = now;
 
+	if (!state.graphSampleGate.ShouldSample())
+		return;
+
 	// Insert latest frame time into circular buffer
 	float oldFrameTime = state.frameTimeHistory.GetData()[state.frameTimeHistory.GetHeadIdx()];  // what is the point of oldFrameTime?
 	state.frameTimeHistory.Push(state.frameTimeMs);
@@ -1982,16 +1985,8 @@ void PerformanceOverlay::UpdateGraphValues()
 	state.smoothedMaxFrameTime = state.smoothedMaxFrameTime + Settings::kSmoothingFactor * (graphMax - state.smoothedMaxFrameTime);
 
 	if (state.isFrameGenerationActive) {
-		auto& upscaling = globals::features::upscaling;
-		if (upscaling.UsesDLSSGFrameGen()) {
-			const float framesPresented = static_cast<float>(std::max(1u, upscaling.streamlineDX12.lastDLSSGFramesPresented));
-			state.postFGFrameTimeMs = state.frameTimeMs / framesPresented;
-			state.postFGFps = state.fps * framesPresented;
-		} else {
-			const float multiplier = static_cast<float>(upscaling.GetFrameGenerationMultiplier());
-			state.postFGFrameTimeMs = state.frameTimeMs / multiplier;
-			state.postFGFps = state.fps * multiplier;
-		}
+		state.postFGFrameTimeMs = state.frameTimeMs / Settings::kFrameGenerationMultiplier;
+		state.postFGFps = state.fps * Settings::kFrameGenerationMultiplier;
 
 		// Update post-FG smooth values when timer elapses
 		if (state.updateTimer <= 0.0f) {

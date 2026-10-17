@@ -165,6 +165,7 @@ void PostProcessing::DrawSettings()
 				ImGui::Spacing();
 				ImGui::Checkbox(T("feature.post_processing.enabled", "Enabled"), &feat->enabled);
 				if (feat->enabled) {
+					feat->EnsureResources();
 					ImGui::Indent();
 					feat->DrawSettings();
 					ImGui::Unindent();
@@ -272,8 +273,7 @@ void PostProcessing::ProcessSettings(json& o_json)
 				logger::warn("Failed to load Post Processing settings for {}: {}", feat->GetType(), e.what());
 				feat->RestoreDefaultSettings();
 			}
-			if (loaded)
-				feat->SetupResources();
+			feat->resourcesReady = false;
 		}
 	}
 
@@ -435,7 +435,7 @@ void PostProcessing::RestoreDefaultSettings()
 void PostProcessing::ClearShaderCache()
 {
 	for (auto& pipe : pipeline) {
-		if (pipe)
+		if (pipe && pipe->resourcesReady)
 			pipe->ClearShaderCache();
 	}
 }
@@ -515,16 +515,24 @@ void PostProcessing::SetupResources()
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::Border)].get()->enabled = false;
 
 	for (auto& pipe : pipeline) {
-		if (pipe) {
+		if (pipe)
 			pipe->owner = this;
-			pipe->SetupResources();
-		}
 	}
 
 	bokehResources.Setup();
 
 	ProcessSettings(pendingSettings);
 	pendingSettings = {};
+
+	EnsureEnabledResources();
+}
+
+void PostProcessing::EnsureEnabledResources()
+{
+	for (auto& pipe : pipeline) {
+		if (pipe && pipe->enabled)
+			pipe->EnsureResources();
+	}
 }
 
 void PostProcessing::Reset()
@@ -617,6 +625,8 @@ void PostProcessing::DrawBeforeUpscaling()
 			pipe->UpdateAutoEnabled();
 	}
 
+	EnsureEnabledResources();
+
 	// go through each fx
 	for (auto& pipe : pipeline) {
 		if (pipe && pipe->enabled && !pipe->DrawAfterColorGrading() && !(inMainLoadingMenu && pipe->DisableInMainLoadingMenu()) && pipe->DrawBeforeUpscaling()) {
@@ -663,6 +673,8 @@ void PostProcessing::PreProcess(RE::RENDER_TARGET a_input)
 			pipe->UpdateAutoEnabled();
 	}
 
+	EnsureEnabledResources();
+
 	// go through each fx
 	for (auto& pipe : pipeline) {
 		if (pipe && pipe->enabled && !pipe->DrawAfterColorGrading() && !(inMainLoadingMenu && pipe->DisableInMainLoadingMenu()) && (!pipe->DrawBeforeUpscaling() || !upscaling.loaded)) {
@@ -695,6 +707,7 @@ void PostProcessing::ClearBorderMotionVectorsForFrameGen()
 	auto borderIdx = static_cast<size_t>(FeaturePipelineIndex::Border);
 	auto& pipe = pipeline[borderIdx];
 	if (pipe && pipe->enabled) {
+		pipe->EnsureResources();
 		auto* border = static_cast<Border*>(pipe.get());
 		border->ClearMotionVectorsForFrameGen();
 	}

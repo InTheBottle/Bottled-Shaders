@@ -358,10 +358,6 @@ cbuffer AlphaTestRefCB : register(b11)
 #		include "LightLimitFix/LightLimitFix.hlsli"
 #	endif
 
-#	if defined(ISL) && defined(LIGHT_LIMIT_FIX)
-#		include "InverseSquareLighting/InverseSquareLighting.hlsli"
-#	endif
-
 #	define SampColorSampler SampBaseSampler
 
 #	if defined(SKYLIGHTING)
@@ -545,25 +541,17 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		lightCount = LightLimitFix::lightGrid[clusterIndex].lightCount;
 		if (lightCount) {
 			uint lightOffset = LightLimitFix::lightGrid[clusterIndex].offset;
-			const float2x2 grassShadowRotation = LightLimitFix::GetShadowRotationMatrix(screenNoise);
 			[loop] for (uint i = 0; i < lightCount; ++i) {
 				LightLimitFix::Light light = LightLimitFix::lights[LightLimitFix::lightList[lightOffset + i]];
 				float3 lightVector = light.positionWS.xyz - input.WorldPosition.xyz;
 				float lightDist = length(lightVector);
-#					if defined(ISL)
-				float attenuation = InverseSquareLighting::GetAttenuation(lightDist, light);
+				float attenuation = LightLimitFix::GetAttenuation(lightDist, light);
 				if (attenuation < 1e-5)
 					continue;
-#					else
-				float distanceFactor = saturate(lightDist / light.radius);
-				if (distanceFactor == 1)
-					continue;
-				float attenuation = 1 - distanceFactor * distanceFactor;
-#					endif
 				float3 lightColor = Color::PointLight(light.color.xyz, (light.lightFlags & LightLimitFix::LightFlags::Linear) != 0) * attenuation * light.fade;
 				float lightShadow = 1.0;
 				[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow)
-					lightShadow = LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, float3(0.0, 0.0, 0.0), false, grassShadowRotation);
+					lightShadow = LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, float3(0.0, 0.0, 0.0), false, screenNoise);
 				else if (light.lightFlags & LightLimitFix::LightFlags::Shadow)
 					lightShadow = shadowColor[light.shadowLightIndex];
 				float3 lightDirection = lightVector / max(lightDist, EPSILON_DIVISION);
@@ -596,6 +584,11 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float skylightingDiffuse = Skylighting::GetSkylightingDiffuse(skylightingSH, input.WorldPosition.xyz, normal, vertexAO);
 	Skylighting::ApplySkylighting(directColor, directionalAmbientColor, outputAlbedo, skylightingDiffuse);
 #				endif
+
+	directColor *= Color::PBRLightingScale;
+	directionalAmbientColor *= Color::PBRLightingScale;
+	outputAlbedo *= Color::PBRLightingScale;
+	totalLighting.specular *= Color::PBRLightingScale;
 
 	float3 outputColor = FogNearColor.w * directColor;
 #				if defined(LIGHT_LIMIT_FIX) && defined(LLFDEBUG)
@@ -880,7 +873,6 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		lightCount = LightLimitFix::lightGrid[clusterIndex].lightCount;
 		if (lightCount) {
 			uint lightOffset = LightLimitFix::lightGrid[clusterIndex].offset;
-			const float2x2 grassShadowRotation = LightLimitFix::GetShadowRotationMatrix(screenNoise);
 
 			[loop] for (uint i = 0; i < lightCount; i++)
 			{
@@ -890,26 +882,21 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 				float3 lightDirection = light.positionWS.xyz - input.WorldPosition.xyz;
 				float lightDist = length(lightDirection);
 
-#				if defined(ISL)
-				float intensityMultiplier = InverseSquareLighting::GetAttenuation(lightDist, light);
+				float intensityMultiplier = LightLimitFix::GetAttenuation(lightDist, light);
 				if (intensityMultiplier < 1e-5)
 					continue;
-#				else
-				float intensityFactor = saturate(lightDist / light.radius);
-				if (intensityFactor == 1)
-					continue;
-
-				float intensityMultiplier = 1 - intensityFactor * intensityFactor;
-#				endif
 
 				float3 lightColor = Color::PointLight(light.color.xyz, (light.lightFlags & LightLimitFix::LightFlags::Linear) != 0) * intensityMultiplier * light.fade;
 				float lightShadow = 1.0;
 
 				float shadowComponent = 1.0;
-				[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow) {
-					shadowComponent = LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, float3(0.0, 0.0, 0.0), false, grassShadowRotation);
+				[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow)
+				{
+					shadowComponent = LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, float3(0.0, 0.0, 0.0), false, screenNoise);
 					lightShadow *= shadowComponent;
-				} else if (light.lightFlags & LightLimitFix::LightFlags::Shadow) {
+				}
+				else if (light.lightFlags & LightLimitFix::LightFlags::Shadow)
+				{
 					shadowComponent = shadowColor[light.shadowLightIndex];
 					lightShadow *= shadowComponent;
 				}
@@ -1088,7 +1075,6 @@ PS_OUTPUT main(PS_INPUT input)
 		lightCount = LightLimitFix::lightGrid[clusterIndex].lightCount;
 		if (lightCount) {
 			uint lightOffset = LightLimitFix::lightGrid[clusterIndex].offset;
-			const float2x2 grassShadowRotation = LightLimitFix::GetShadowRotationMatrix(screenNoise);
 
 			[loop] for (uint i = 0; i < lightCount; i++)
 			{
@@ -1098,17 +1084,9 @@ PS_OUTPUT main(PS_INPUT input)
 				float3 lightDirection = light.positionWS.xyz - input.WorldPosition.xyz;
 				float lightDist = length(lightDirection);
 
-#				if defined(ISL)
-				float intensityMultiplier = InverseSquareLighting::GetAttenuation(lightDist, light);
+				float intensityMultiplier = LightLimitFix::GetAttenuation(lightDist, light);
 				if (intensityMultiplier < 1e-5)
 					continue;
-#				else
-				float intensityFactor = saturate(lightDist / light.radius);
-				if (intensityFactor == 1)
-					continue;
-
-				float intensityMultiplier = 1 - intensityFactor * intensityFactor;
-#				endif
 
 				const bool isPointLightLinear = light.lightFlags & LightLimitFix::LightFlags::Linear;
 				float3 lightColor = Color::PointLight(light.color.xyz, isPointLightLinear) * intensityMultiplier * light.fade;
@@ -1116,10 +1094,13 @@ PS_OUTPUT main(PS_INPUT input)
 				float lightShadow = 1.0;
 
 				float shadowComponent = 1.0;
-				[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow) {
-					shadowComponent = LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, float3(0.0, 0.0, 0.0), false, grassShadowRotation);
+				[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow)
+				{
+					shadowComponent = LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, float3(0.0, 0.0, 0.0), false, screenNoise);
 					lightShadow *= shadowComponent;
-				} else if (light.lightFlags & LightLimitFix::LightFlags::Shadow) {
+				}
+				else if (light.lightFlags & LightLimitFix::LightFlags::Shadow)
+				{
 					shadowComponent = shadowColor[light.shadowLightIndex];
 					lightShadow *= shadowComponent;
 				}

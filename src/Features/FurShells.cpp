@@ -57,7 +57,14 @@ namespace
 	constexpr size_t MaxMissingShells = 65536;
 	constexpr uint32_t MaxOverrideSize = 65536;
 	constexpr float PixelsPerShell = 1.0f;
+	constexpr uint32_t FirstPersonRenderMode = 0x16;
 	constexpr std::string_view EmptyOverlayPath = "textures\\actors\\character\\overlays\\default.dds";
+
+	bool IsFirstPersonPass()
+	{
+		auto* accumulator = *globals::game::currentAccumulator.get();
+		return accumulator && accumulator->GetRuntimeData().renderMode == FirstPersonRenderMode;
+	}
 
 	bool CanDrawShells(RE::BSGeometry* a_geometry)
 	{
@@ -429,6 +436,8 @@ void FurShells::Reset()
 	passCount = 0;
 	lastDiffuse = nullptr;
 	lastLookup = {};
+	if (!entries.empty() && globals::state->IsMainOrLoadingMenuOpen())
+		entries.clear();
 	deferredPasses.clear();
 	deferredOverlayPasses.clear();
 	frameBodies.clear();
@@ -590,7 +599,7 @@ void FurShells::BeginPass(RE::BSShader* a_shader, RE::BSRenderPass* a_pass)
 	if (depthMode != kTestEqual && depthMode != kTestWrite)
 		return;
 
-	const float distance = std::max(0.0f, geometry->worldBound.center.GetDistance(Util::GetEyePosition()) - geometry->worldBound.radius);
+	const float distance = IsFirstPersonPass() ? 0.0f : std::max(0.0f, geometry->worldBound.center.GetDistance(Util::GetEyePosition()) - geometry->worldBound.radius);
 	if (distance >= std::max(settings.FadeEnd, overrideFadeEnd) || !CanDrawShells(geometry))
 		return;
 

@@ -88,6 +88,8 @@ namespace Permutation
 		static const uint IsHumanoidActor = (1u << 31);
 		// Hair or facial-hair head part, whatever its shader type; see NeuralRenderingCategories::Hair.
 		static const uint IsHair = (1u << 30);
+		static const uint SnowRooftop = (1 << 13);
+		static const uint SnowLODTree = (1 << 14);
 	}
 
 	namespace ExtraFeatureFlags

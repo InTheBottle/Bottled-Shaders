@@ -13,12 +13,9 @@ upstreams:
     repository: InTheBottle/Bottled-Shaders
     remote: bottle
     branch: Bottle-Compendium
-    # Last Bottle commit Personal is synchronized to (2026-09-26 simplification: Personal reset
-    # to Bottle-Compendium's tip plus Neural Rendering, the Screenshot SDR fix and the
-    # background compile overlay toggle; later synced forward to a6c04a8ff7, ed4152e525, then 978eb4d9f2, which carries Hair Backlighting and
-    # the background compile overlay toggle, both handed over to Bottle).
-    # Newer Bottle commits are reported as upstream drift by bottle_sync.py until deliberately synced.
-    sha: 978eb4d9f2
+    # Last Bottle commit Personal is synchronized to. Sync deliberately with `git merge` and update
+    # this pin in the same change; newer Bottle commits are reported as upstream drift.
+    sha: 77b19a8a9f
     role: primary-maintenance-baseline
   mainline:
     repository: community-shaders/skyrim-community-shaders

@@ -43,7 +43,7 @@ features:
     seam:
       - path: src/Features/Upscaling.cpp
         anchor: "#include block"
-        match: ['#include "NeuralRendering.h"']
+        match: ['#include "NeuralRendering.h"', '#include "Menu.h"']
       - path: src/Features/Upscaling.cpp
         anchor: "S1 - Upscale(), DLSS branch, the streamline.Upscale() input"
         match: ["Neural Rendering seam S1", "globals::features::neuralRendering.PrepareUpscaleInput("]
@@ -52,13 +52,16 @@ features:
         anchor: "S2+S3 - PerformUpscaling(), between Upscale() and UpscaleDepth()"
         match: ["Neural Rendering seams S2+S3", "globals::features::neuralRendering.ResolveUpscaledFrame("]
       - path: src/Features/Upscaling/Streamline.cpp
-        anchor: "S5 - Streamline constants: slConstants.reset takes Upscaling::pendingDLSSReset (Bottle declares it, nothing reads it)"
-        match: ["Neural Rendering seam", "pendingDLSSReset"]
-        replaces: ["slConstants.reset = sl::Boolean::eFalse;"]
+        anchor: "S5 - Streamline constants: reset DLSS SR history with Neural Rendering"
+        match: ["Reset DLSS SR history on the same frame", "resetForNeuralRendering", "pendingDLSSReset"]
+        replaces: ["slConstants.reset = (sceneCut || constantsResetPending || constantsGap)"]
       - path: src/Features/Upscaling/Streamline.cpp
-        anchor: "F1 - Streamline constants: motionVectorsDilated = eTrue (Personal fix, not an NR hook)"
-        match: ["Personal fix F1", "motionVectorsDilated = sl::Boolean::eTrue;"]
+        anchor: "F1 - Streamline constants: tell DLSS that the motion vectors are already dilated"
+        match: ["EncodeTexturesCS already dilates these", "motionVectorsDilated = sl::Boolean::eTrue;"]
         replaces: ["motionVectorsDilated = sl::Boolean::eFalse;"]
+      - path: src/Features/Upscaling.h
+        anchor: "DLSS reset request consumed by Streamline frame constants"
+        match: ["Requests a DLSS history reset alongside Neural Rendering", "pendingDLSSReset"]
     note: >-
       S4 (ApplySharpening) eliminated: ResolveUpscaledFrame() copies NR's result back into
       sharpenerTexture. S5 keeps DLSS SR on NR's history boundary (NR toggle, loading screens).
@@ -129,6 +132,8 @@ features:
       - features/Neural Rendering/
       - package/Shaders/Common/NeuralRenderingCategories.hlsli
       - docs/development/neural-rendering.md
+      - docs/development/neural-rendering-alternate-frames.md
+      - tools/test-neural-temporal.cpp
 
   Screenshot:
     policy: bottle-plus-components
@@ -169,11 +174,6 @@ shared_integrations:
       source: personal
       anchor: "ExtraShaderDescriptors: IsHumanoidActor, IsHair (Neural Rendering), allocated downward from bit 31"
       match: ["IsHumanoidActor = 1u << 31", "IsHair = 1u << 30"]
-  src/State.cpp:
-    nr_settings_migration:
-      source: personal
-      anchor: "State::LoadFromJson, before any feature loads"
-      match: ['#include "Features/NeuralRendering.h"', "NeuralRendering::MigrateLegacyUpscalingSettings(settings)"]
   src/Hooks.cpp:
     nr_finished_image:
       source: personal

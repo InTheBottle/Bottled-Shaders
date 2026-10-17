@@ -19,7 +19,7 @@ struct LightLimitFix;
 struct LinearLighting;
 struct LODBlending;
 struct InteriorSun;
-struct InverseSquareLighting;
+struct RainRefraction;
 struct ScreenSpaceGI;
 struct ScreenSpaceShadows;
 struct Skylighting;
@@ -52,6 +52,7 @@ struct NeuralRendering;
 struct HairBacklighting;
 struct FurShells;
 struct LandscapeSeams;
+struct SnowDeformation;
 
 class State;
 class Deferred;
@@ -121,7 +122,7 @@ namespace globals
 		extern LinearLighting linearLighting;
 		extern LODBlending lodBlending;
 		extern InteriorSun interiorSun;
-		extern InverseSquareLighting inverseSquareLighting;
+		extern RainRefraction rainRefraction;
 		extern ScreenSpaceGI screenSpaceGI;
 		extern ScreenSpaceShadows screenSpaceShadows;
 		extern Skylighting skylighting;
@@ -156,6 +157,7 @@ namespace globals
 		extern HairBacklighting hairBacklighting;
 		extern FurShells furShells;
 		extern LandscapeSeams landscapeSeams;
+		extern SnowDeformation snowDeformation;
 
 	}
 

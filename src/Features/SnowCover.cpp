@@ -1,6 +1,7 @@
 #include "SnowCover.h"
 
 #include "ShaderCache.h"
+#include "TruePBR/BSLightingShaderMaterialPBR.h"
 #include "Util.h"
 #include "Utils/FileSystem.h"
 #include <DDSTextureLoader.h>
@@ -15,7 +16,10 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	EnableExpensiveFoliage,
 	AffectHavok,
 	AffectFloraTint,
-	SnowHeightOffset)
+	SnowHeightOffset,
+	RooftopSnow,
+	RooftopHeight,
+	RooftopExposure)
 
 void copyString(const std::string& input, char* dst, size_t dst_size)
 {
@@ -47,6 +51,21 @@ void SnowCover::DrawSettings()
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("Moves the altitude that snow appears at. For testing purposes.");
 	}
+	ImGui::SliderFloat(T("feature.snow_cover.rooftop_snow", "Rooftop Snow"), &settings.RooftopSnow, 0.0f, MAX_ROOFTOP_SNOW, "%.0f", ImGuiSliderFlags_AlwaysClamp);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::TextWrapped("%s", T("feature.snow_cover.rooftop_snow_tooltip", "High, sky-exposed parts of buildings collect snow as if they were this many units higher (uses Skylighting). 0 disables it."));
+	}
+	{
+		Util::DisableGuard disable(settings.RooftopSnow <= 0.0f);
+		ImGui::SliderFloat(T("feature.snow_cover.rooftop_height", "Rooftop Height"), &settings.RooftopHeight, 32.0f, 1024.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::TextWrapped("%s", T("feature.snow_cover.rooftop_height_tooltip", "Height above the base of a building where the extra snow is fully applied. Keeps it off streets, steps and porches."));
+		}
+		ImGui::SliderFloat(T("feature.snow_cover.rooftop_exposure", "Rooftop Sky Exposure"), &settings.RooftopExposure, 0.0f, 0.95f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::TextWrapped("%s", T("feature.snow_cover.rooftop_exposure_tooltip", "How open to the sky a surface must be before it gets extra snow. Higher keeps it off eaves, balconies and covered walkways."));
+		}
+	}
 	ImGui::Checkbox("Melt Snow Near Fire", &fireMeltSettings.Enabled);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text(
@@ -65,6 +84,14 @@ void SnowCover::DrawSettings()
 		}
 		ImGui::Text("Tracked fires: %u", static_cast<uint32_t>(trackedFires.size()));
 	}
+	ImGui::Checkbox("Survival Mode Cold", &survivalEnabled);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text(
+			"Snow-covered ground under the player counts as a Freezing area for Survival Mode\n"
+			"(Creation Club and Survival Mode Improved), so seasonal snow in mild regions makes you cold.");
+	}
+	if (survivalEnabled)
+		ImGui::Text("Snow at player: %.2f (%s)", survivalSnowAmount, survivalGlobal ? (survivalSnowy ? "freezing" : "clear") : "Survival Mode not found");
 	ImGui::Separator();
 	ImGui::Text("Each config applies to one worldspace or interior cell.");
 	ImGui::Text("Saved config will be applied when you enter the worldspace.");
@@ -272,6 +299,11 @@ SnowCover::PerFrame SnowCover::GetCommonBufferData()
 {
 	Reload();
 
+	if (wsettings.EnableSnowCover && !snowMapCpuPath.empty()) {
+		LoadSnowMapCpu();
+		BuildSnowMapMax();
+	}
+
 	bool snowing = false;
 	bool raining = false;
 	if (wsettings.EnableSnowCover) {
@@ -320,8 +352,10 @@ SnowCover::PerFrame SnowCover::GetCommonBufferData()
 	perFrame.settings = settings;
 	perFrame.wsettings = wsettings;
 
-	if (fireMeltFrame.IsNewFrame())
+	if (fireMeltFrame.IsNewFrame()) {
 		UpdateFireMelt();
+		UpdateSurvival();
+	}
 
 	return perFrame;
 }
@@ -366,6 +400,9 @@ void SnowCover::ResetWorldConfig()
 	mapbuf[0] = '\0';
 	tbuf[0] = '\0';
 	altbuf[0] = '\0';
+	snowMapCpu.Release();
+	snowMapCpuPath.clear();
+	snowMapMax.clear();
 }
 
 void SnowCover::UpdateMapTransform()
@@ -449,6 +486,14 @@ void SnowCover::SaveConfig()
 	status = std::format("Saved {}", path.generic_string());
 }
 
+void SnowCover::ReleaseTextures()
+{
+	for (auto& view : views)
+		view = nullptr;
+	ID3D11ShaderResourceView* srvs[std::tuple_size_v<decltype(views)>]{};
+	globals::d3d::context->PSSetShaderResources(FIRST_SRV_SLOT, (uint)views.size(), srvs);
+}
+
 void SnowCover::Reload()
 {
 	std::ifstream fileStream;
@@ -459,6 +504,7 @@ void SnowCover::Reload()
 			return;
 		last_worldspace = curr_worldspace;
 		ResetWorldConfig();
+		ReleaseTextures();
 		path = (Util::PathHelpers::GetShadersPath() / "SnowCover" / curr_worldspace).replace_extension(std::filesystem::path(".json"));
 		if (!std::filesystem::exists(path)) {
 			status = std::format("Config doesn't exist {}", path.generic_string());
@@ -527,6 +573,14 @@ void SnowCover::Reload()
 		auto data_path = Util::PathHelpers::GetDataPath();
 		auto loadDDS = [&](const std::filesystem::path& file) -> winrt::com_ptr<ID3D11ShaderResourceView> {
 			winrt::com_ptr<ID3D11ShaderResourceView> view;
+			RE::BSResourceNiBinaryStream stream(file.lexically_relative(data_path).make_preferred().string());
+			if (stream.good() && stream.stream->totalSize > 0) {
+				std::vector<uint8_t> buffer(stream.stream->totalSize);
+				if (stream.read(buffer.data(), stream.stream->totalSize) &&
+					SUCCEEDED(DirectX::CreateDDSTextureFromMemory(device, context, buffer.data(), buffer.size(), nullptr, view.put())))
+					return view;
+				view = nullptr;
+			}
 			if (FAILED(DirectX::CreateDDSTextureFromFile(device, context, file.native().c_str(), nullptr, view.put())))
 				return nullptr;
 			return view;
@@ -574,7 +628,8 @@ void SnowCover::Reload()
 
 		map_tex = std::filesystem::path(config["MapTexture"].get<std::string>());
 		copyString(map_tex.generic_string().c_str(), mapbuf, 256);
-		views[6] = loadDDS(std::filesystem::path(data_path / map_tex).concat(".dds"));
+		snowMapCpuPath = std::filesystem::path(data_path / map_tex).concat(".dds");
+		views[6] = loadDDS(snowMapCpuPath);
 		if (!views[6]) {
 			logger::warn("Snow Cover: Error loading {}.dds texture", map_tex.generic_string());
 			views[6] = loadDDS(data_path / "textures" / "gray.dds");
@@ -611,10 +666,17 @@ void SnowCover::Prepass()
 void SnowCover::LoadSettings(json& o_json)
 {
 	settings = o_json;
+	auto sanitize = [](float& a_value, float a_default, float a_min, float a_max) {
+		a_value = std::clamp(std::isfinite(a_value) ? a_value : a_default, a_min, a_max);
+	};
+	sanitize(settings.RooftopSnow, DEFAULT_ROOFTOP_SNOW, 0.0f, MAX_ROOFTOP_SNOW);
+	sanitize(settings.RooftopHeight, DEFAULT_ROOFTOP_HEIGHT, 32.0f, 1024.0f);
+	sanitize(settings.RooftopExposure, DEFAULT_ROOFTOP_EXPOSURE, 0.0f, 0.95f);
 	const FireMeltSettings defaults{};
 	fireMeltSettings.Enabled = o_json.value("FireMeltEnabled", defaults.Enabled);
 	fireMeltSettings.RadiusScale = std::clamp(o_json.value("FireMeltRadiusScale", defaults.RadiusScale), 1.0f, 16.0f);
 	fireMeltSettings.Strength = std::clamp(o_json.value("FireMeltStrength", defaults.Strength), 0.0f, 1.0f);
+	survivalEnabled = o_json.value("SurvivalEnabled", true);
 }
 
 void SnowCover::SaveSettings(json& o_json)
@@ -623,12 +685,14 @@ void SnowCover::SaveSettings(json& o_json)
 	o_json["FireMeltEnabled"] = fireMeltSettings.Enabled;
 	o_json["FireMeltRadiusScale"] = fireMeltSettings.RadiusScale;
 	o_json["FireMeltStrength"] = fireMeltSettings.Strength;
+	o_json["SurvivalEnabled"] = survivalEnabled;
 }
 
 void SnowCover::RestoreDefaultSettings()
 {
 	settings = {};
 	fireMeltSettings = {};
+	survivalEnabled = true;
 }
 
 bool SnowCover::IsWorldFireSource(RE::TESBoundObject* a_base)
@@ -851,6 +915,139 @@ void SnowCover::Hooks::BSLightingShader_SetupGeometry::thunk(RE::BSShader* This,
 	func(This, Pass, RenderFlags);
 }
 
+void SnowCover::BuildSnowMapMax()
+{
+	snowMapMax.clear();
+	const auto* image = snowMapCpu.GetImage(0, 0, 0);
+	if (!image || image->format != DXGI_FORMAT_R8_UNORM || image->width == 0 || image->height == 0)
+		return;
+
+	SnowMapLevel base;
+	base.width = static_cast<uint32_t>(image->width);
+	base.height = static_cast<uint32_t>(image->height);
+	base.texels.resize(static_cast<size_t>(base.width) * base.height);
+	for (uint32_t y = 0; y < base.height; ++y)
+		std::memcpy(base.texels.data() + static_cast<size_t>(y) * base.width, image->pixels + y * image->rowPitch, base.width);
+	snowMapMax.push_back(std::move(base));
+
+	while (snowMapMax.back().width > 1 || snowMapMax.back().height > 1) {
+		const auto& src = snowMapMax.back();
+		SnowMapLevel next;
+		next.width = std::max(1u, (src.width + 1) / 2);
+		next.height = std::max(1u, (src.height + 1) / 2);
+		next.texels.resize(static_cast<size_t>(next.width) * next.height);
+		for (uint32_t y = 0; y < next.height; ++y) {
+			const uint32_t y0 = std::min(src.height - 1, y * 2);
+			const uint32_t y1 = std::min(src.height - 1, y * 2 + 1);
+			for (uint32_t x = 0; x < next.width; ++x) {
+				const uint32_t x0 = std::min(src.width - 1, x * 2);
+				const uint32_t x1 = std::min(src.width - 1, x * 2 + 1);
+				next.texels[static_cast<size_t>(y) * next.width + x] = std::max(
+					std::max(src.texels[static_cast<size_t>(y0) * src.width + x0], src.texels[static_cast<size_t>(y0) * src.width + x1]),
+					std::max(src.texels[static_cast<size_t>(y1) * src.width + x0], src.texels[static_cast<size_t>(y1) * src.width + x1]));
+			}
+		}
+		snowMapMax.push_back(std::move(next));
+	}
+}
+
+bool SnowCover::GetSnowMapMax(float a_u0, float a_v0, float a_u1, float a_v1, float& a_value) const
+{
+	if (snowMapMax.empty())
+		return false;
+	const auto& base = snowMapMax.front();
+	const float uMin = std::min(a_u0, a_u1);
+	const float uMax = std::max(a_u0, a_u1);
+	const float vMin = std::min(a_v0, a_v1);
+	const float vMax = std::max(a_v0, a_v1);
+	const float x0f = std::floor(uMin * base.width - 0.5f);
+	const float x1f = std::floor(uMax * base.width - 0.5f) + 1.0f;
+	const float y0f = std::floor(vMin * base.height - 0.5f);
+	const float y1f = std::floor(vMax * base.height - 0.5f) + 1.0f;
+	if (!(x0f >= 0.0f && y0f >= 0.0f && x1f < static_cast<float>(base.width) && y1f < static_cast<float>(base.height)))
+		return false;
+
+	const auto x0 = static_cast<uint32_t>(x0f);
+	const auto x1 = static_cast<uint32_t>(x1f);
+	const auto y0 = static_cast<uint32_t>(y0f);
+	const auto y1 = static_cast<uint32_t>(y1f);
+	size_t level = 0;
+	while (level + 1 < snowMapMax.size() && ((x1 >> level) - (x0 >> level) > 1 || (y1 >> level) - (y0 >> level) > 1))
+		++level;
+
+	const auto& map = snowMapMax[level];
+	const uint32_t lx0 = std::min(map.width - 1, x0 >> level);
+	const uint32_t lx1 = std::min(map.width - 1, x1 >> level);
+	const uint32_t ly0 = std::min(map.height - 1, y0 >> level);
+	const uint32_t ly1 = std::min(map.height - 1, y1 >> level);
+	uint8_t result = 0;
+	for (uint32_t y = ly0; y <= ly1; ++y)
+		for (uint32_t x = lx0; x <= lx1; ++x)
+			result = std::max(result, map.texels[static_cast<size_t>(y) * map.width + x]);
+	a_value = result / 255.0f;
+	return true;
+}
+
+bool SnowCover::IsSnowFree(RE::BSRenderPass* a_pass, uint32_t a_descriptor, uint32_t a_vanillaDescriptor) const
+{
+	using Flags = SIE::ShaderCache::LightingShaderFlags;
+	using Techniques = SIE::ShaderCache::LightingShaderTechniques;
+
+	const auto technique = static_cast<Techniques>(0x3F & (a_descriptor >> 24));
+	if ((a_descriptor & static_cast<uint32_t>(Flags::Skinned)) != 0 || technique == Techniques::Eye || technique == Techniques::Hair)
+		return false;
+
+	const bool truePbr = (a_descriptor & static_cast<uint32_t>(Flags::TruePbr)) != 0;
+	if (truePbr && (a_vanillaDescriptor & static_cast<uint32_t>(Flags::AnisoLighting)) != 0)
+		return false;
+
+	if (!wsettings.EnableSnowCover)
+		return true;
+
+	if (technique == Techniques::MTLand || technique == Techniques::MTLandLODBlend || technique == Techniques::LODLand || technique == Techniques::LODLandNoise)
+		return false;
+
+	const auto extra = globals::state->permutationData.ExtraShaderDescriptor;
+	if (technique != Techniques::TreeAnim && (extra & static_cast<uint32_t>(State::ExtraShaderDescriptors::NoSnow)) != 0)
+		return true;
+
+	if (perFrame.TimeSnowing > 0.0f || !(wsettings.BlendSmoothness > 0.0f) || wsettings.mapZscale < 0.0f)
+		return false;
+
+	if (!a_pass || !a_pass->geometry)
+		return false;
+
+	float displacement = 0.0f;
+	if (truePbr) {
+		if (technique != Techniques::TreeAnim) {
+			auto* material = a_pass->shaderProperty ? static_cast<BSLightingShaderMaterialPBR*>(a_pass->shaderProperty->material) : nullptr;
+			displacement = 0.5f * std::max(0.0f, material ? material->GetDisplacementScale() : 1.0f);
+		}
+	} else if (technique == Techniques::Parallax || technique == Techniques::ParallaxOcc || technique == Techniques::Envmap || technique == Techniques::MultilayerParallax) {
+		displacement = 0.5f;
+	}
+
+	const auto& bound = a_pass->geometry->worldBound;
+	const float radius = std::max(0.0f, bound.radius);
+	float mapValue = 0.0f;
+	if (!GetSnowMapMax((bound.center.x - radius) * wsettings.mapScale.x + wsettings.mapOffset.x, (bound.center.y - radius) * wsettings.mapScale.y + wsettings.mapOffset.y,
+			(bound.center.x + radius) * wsettings.mapScale.x + wsettings.mapOffset.x, (bound.center.y + radius) * wsettings.mapScale.y + wsettings.mapOffset.y, mapValue))
+		return false;
+
+	const bool rooftop = (extra & static_cast<uint32_t>(State::ExtraShaderDescriptors::SnowRooftop)) != 0;
+	const float top = bound.center.z + radius + 512.0f + (rooftop ? settings.RooftopSnow : 0.0f);
+	const float env = (top - settings.SnowHeightOffset + (mapValue + 2.0f / 255.0f - 0.5f) * wsettings.mapZscale + perFrame.SeasonalAltitude) / wsettings.BlendSmoothness;
+	if (env + 5.0f * displacement >= -0.01f)
+		return false;
+
+	const bool tintedTree = technique == Techniques::TreeAnim ? (extra & static_cast<uint32_t>(State::ExtraShaderDescriptors::NoFoliageTint)) == 0 :
+	                                                            (extra & static_cast<uint32_t>(State::ExtraShaderDescriptors::SnowLODTree)) != 0;
+	if (tintedTree && wsettings.AffectTreeTint && env >= wsettings.FoliageHeightOffset / 5000.0f - 0.01f)
+		return false;
+
+	return true;
+}
+
 void SnowCover::BSLightingShader_Setup(RE::BSRenderPass* a_pass)
 {
 	auto state = globals::state;
@@ -873,6 +1070,41 @@ void SnowCover::BSLightingShader_Setup(RE::BSRenderPass* a_pass)
 		state->permutationData.ExtraShaderDescriptor |= (uint)State::ExtraShaderDescriptors::NoFoliageTint;
 	else
 		state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::NoFoliageTint;
+
+	if (settings.RooftopSnow > 0.0f && IsBuilding(userData))
+		state->permutationData.ExtraShaderDescriptor |= (uint)State::ExtraShaderDescriptors::SnowRooftop;
+	else
+		state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::SnowRooftop;
+
+	if (name && _strnicmp(name, "treepassthru", 12) == 0)
+		state->permutationData.ExtraShaderDescriptor |= (uint)State::ExtraShaderDescriptors::SnowLODTree;
+	else
+		state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::SnowLODTree;
+}
+
+bool SnowCover::IsBuilding(RE::TESObjectREFR* a_ref)
+{
+	if (!a_ref)
+		return false;
+	auto base = a_ref->GetObjectReference();
+	if (!base)
+		return false;
+	const auto id = base->GetFormID();
+	if (const auto cached = buildingBaseCache.find(id); cached != buildingBaseCache.end())
+		return cached->second;
+
+	bool building = false;
+	if (base->GetFormType() == RE::FormType::Static || base->GetFormType() == RE::FormType::MovableStatic) {
+		if (auto model = base->As<RE::TESModel>(); model && model->GetModel()) {
+			std::string path = model->GetModel();
+			std::transform(path.begin(), path.end(), path.begin(), [](unsigned char c) { return static_cast<char>(c == '/' ? '\\' : std::tolower(c)); });
+			building = path.find("architecture\\") != std::string::npos || path.find("dungeons\\") != std::string::npos;
+		}
+	}
+	if (buildingBaseCache.size() > 16384)
+		buildingBaseCache.clear();
+	buildingBaseCache.emplace(id, building);
+	return building;
 }
 
 bool SnowCover::IsHarvestableFlora(RE::TESObjectREFR* a_ref)
@@ -890,4 +1122,82 @@ bool SnowCover::IsHarvestableFlora(RE::TESObjectREFR* a_ref)
 	default:
 		return false;
 	}
+}
+
+void SnowCover::DataLoaded()
+{
+	auto* dataHandler = RE::TESDataHandler::GetSingleton();
+	auto* spell = dataHandler ? dataHandler->LookupForm<RE::SpellItem>(0x87F, "ccqdrsse001-survivalmode.esl") : nullptr;
+	if (!spell || spell->effects.size() < 3) {
+		logger::info("[Snow Cover] Survival Mode region spell not found, cold integration inactive");
+		return;
+	}
+	survivalGlobal = RE::IFormFactory::Create<RE::TESGlobal>();
+	if (!survivalGlobal)
+		return;
+	survivalGlobal->type = RE::TESGlobal::Type::kFloat;
+
+	const auto prepend = [this](RE::Effect* effect, RE::CONDITION_ITEM_DATA::OpCode op, bool isOR) {
+		auto* item = new RE::TESConditionItem();
+		item->data.comparisonValue.f = 1.0f;
+		item->data.functionData.function = RE::FUNCTION_DATA::FunctionID::kGetGlobalValue;
+		item->data.functionData.params[0] = survivalGlobal;
+		item->data.flags.isOR = isOR;
+		item->data.flags.opCode = op;
+		item->next = effect->conditions.head;
+		effect->conditions.head = item;
+	};
+	prepend(spell->effects[0], RE::CONDITION_ITEM_DATA::OpCode::kLessThan, false);
+	prepend(spell->effects[1], RE::CONDITION_ITEM_DATA::OpCode::kLessThan, false);
+	prepend(spell->effects[2], RE::CONDITION_ITEM_DATA::OpCode::kGreaterThanOrEqualTo, true);
+	logger::info("[Snow Cover] Survival Mode region conditions now read ground snow");
+}
+
+void SnowCover::UpdateSurvival()
+{
+	float amount = 0.0f;
+	if (survivalEnabled && survivalGlobal && wsettings.EnableSnowCover) {
+		if (!snowMapCpuPath.empty())
+			LoadSnowMapCpu();
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		auto* tes = RE::TES::GetSingleton();
+		if (player && tes && !tes->interiorCell && !globals::state->isLoadingMenuOpen) {
+			const auto p = player->GetPosition();
+			float map = 0.5f;
+			if (const auto* image = snowMapCpu.GetImage(0, 0, 0)) {
+				const float2 uv = float2(p.x, p.y) * wsettings.mapScale + wsettings.mapOffset;
+				const auto x = static_cast<size_t>(std::clamp(uv.x, 0.0f, 1.0f) * (image->width - 1) + 0.5f);
+				const auto y = static_cast<size_t>(std::clamp(uv.y, 0.0f, 1.0f) * (image->height - 1) + 0.5f);
+				map = image->pixels[y * image->rowPitch + x] / 255.0f;
+			}
+			const float env = (p.z - settings.SnowHeightOffset + (map - 0.5f) * wsettings.mapZscale + perFrame.SeasonalAltitude) / std::max(wsettings.BlendSmoothness, 1.0f);
+			const float snowTime = perFrame.TimeSnowing;
+			const float weather = snowTime * snowTime * snowTime * std::max(500.0f, perFrame.SnowingDensity) / 500.0f;
+			amount = std::clamp(std::max(env, weather), 0.0f, 1.0f);
+		}
+	}
+	survivalSnowAmount = amount;
+	if (amount <= SURVIVAL_SNOW_OFF)
+		survivalSnowy = false;
+	else if (amount >= SURVIVAL_SNOW_ON)
+		survivalSnowy = true;
+	if (survivalGlobal)
+		survivalGlobal->value = survivalSnowy ? 1.0f : 0.0f;
+}
+
+void SnowCover::LoadSnowMapCpu()
+{
+	DirectX::ScratchImage source;
+	if (SUCCEEDED(DirectX::LoadFromDDSFile(snowMapCpuPath.c_str(), DirectX::DDS_FLAGS_NONE, nullptr, source))) {
+		const auto& image = *source.GetImage(0, 0, 0);
+		if (image.format == DXGI_FORMAT_R8_UNORM)
+			snowMapCpu = std::move(source);
+		else if (DirectX::IsCompressed(image.format))
+			DirectX::Decompress(image, DXGI_FORMAT_R8_UNORM, snowMapCpu);
+		else
+			DirectX::Convert(image, DXGI_FORMAT_R8_UNORM, DirectX::TEX_FILTER_DEFAULT, DirectX::TEX_THRESHOLD_DEFAULT, snowMapCpu);
+	}
+	if (!snowMapCpu.GetImageCount())
+		logger::warn("[Snow Cover] Could not read {} on the CPU, Survival Mode ground snow ignores the altitude map here", snowMapCpuPath.generic_string());
+	snowMapCpuPath.clear();
 }

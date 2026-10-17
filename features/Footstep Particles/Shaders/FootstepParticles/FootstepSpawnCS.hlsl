@@ -20,6 +20,8 @@ Texture2D<unorm float3> AlbedoTexture : register(t1);
 Texture2D<unorm float3> NormalRoughnessTexture : register(t2);
 Texture2D<float> SnowMapTexture : register(t3);
 StructuredBuffer<FootstepParticles::FootstepEvent> Events : register(t4);
+Texture2D<float> BlanketRaise : register(t6);
+Texture2D<float> DeformationField : register(t7);
 
 RWStructuredBuffer<FootstepParticles::Particle> Particles : register(u0);
 
@@ -31,6 +33,7 @@ groupshared float3 gsSnowColor;
 groupshared float3 gsWaterColor;
 groupshared float gsSnowWeight;
 groupshared float gsWetness;
+groupshared float gsSurfaceZ;
 
 static const uint kGroundSamples = 12;
 
@@ -283,6 +286,83 @@ void PlanFootstep(FootstepParticles::FootstepEvent footstep)
 	gsWetness = wetness;
 }
 
+float BlanketRaiseAt(float2 positionXY)
+{
+	if (!(FootstepParticles::FrameFlags & FootstepParticles::FrameFlagBlanket))
+		return 0.0;
+	int mask = (int)FootstepParticles::SurfaceMasks.x;
+	float2 cell = positionXY / FootstepParticles::SurfaceParams.x;
+	int2 base = (int2)floor(cell);
+	int2 inside = base - FootstepParticles::BlanketCell;
+	if (any(inside < 0) || any(inside >= mask))
+		return 0.0;
+	float2 t = cell - base;
+	float r00 = BlanketRaise.Load(int3(base & mask, 0));
+	float r10 = BlanketRaise.Load(int3((base + int2(1, 0)) & mask, 0));
+	float r01 = BlanketRaise.Load(int3((base + int2(0, 1)) & mask, 0));
+	float r11 = BlanketRaise.Load(int3((base + int2(1, 1)) & mask, 0));
+	return lerp(lerp(r00, r10, t.x), lerp(r01, r11, t.x), t.y);
+}
+
+float FieldAt(float2 positionXY)
+{
+	if (!(FootstepParticles::FrameFlags & FootstepParticles::FrameFlagField))
+		return 0.0;
+	int2 cell = (int2)round(positionXY / FootstepParticles::SurfaceParams.y);
+	int2 tile = (int2)floor(float2(cell) / FootstepParticles::SurfaceParams.z);
+	if (any(abs(tile - FootstepParticles::FieldTile) > (int)FootstepParticles::SurfaceParams.w))
+		return 0.0;
+	return DeformationField.Load(int3(cell & (int)FootstepParticles::SurfaceMasks.y, 0));
+}
+
+void PlanWade(FootstepParticles::FootstepEvent footstep)
+{
+	float snow = max(BlanketRaiseAt(footstep.Position.xy) + FieldAt(footstep.Position.xy), 0.0);
+	float surfaceZ = footstep.Position.z + snow;
+	float3 surfaceWS = float3(footstep.Position.xy, surfaceZ) - FrameBuffer::CameraPosAdjust.xyz;
+	float scale = max(footstep.Scale, 0.25);
+
+	float3 sampledColor;
+	float3 normal;
+	float coverage = SampleGround(surfaceWS, scale, footstep.Seed, sampledColor, normal);
+	float skyOcclusion = GetSkyOcclusion(surfaceWS + float3(0.0, 0.0, 8.0), normal);
+
+	float wetness;
+	float puddle;
+	EvaluateWetness(float3(footstep.Position.xy, surfaceZ), normal, skyOcclusion, wetness, puddle);
+
+	float amount = smoothstep(1.0, 8.0, snow - footstep.Clearance) * footstep.Strength * FootstepParticles::WadeIntensity * FootstepParticles::SnowIntensity;
+	float counts[FootstepParticles::TypeCount];
+	[unroll] for (uint i = 0; i < FootstepParticles::TypeCount; i++)
+		counts[i] = 0.0;
+	counts[FootstepParticles::TypeSnow] = FootstepParticles::WadeCounts.x * amount * (1.0 - 0.5 * smoothstep(0.3, 0.9, wetness));
+	counts[FootstepParticles::TypeClod] = FootstepParticles::WadeCounts.y * amount;
+
+	uint remaining = min(footstep.SlotCount, FootstepParticles::SlotsPerEvent);
+	float capacity = (float)remaining;
+	float total = counts[FootstepParticles::TypeSnow] + counts[FootstepParticles::TypeClod];
+	if (total > capacity) {
+		counts[FootstepParticles::TypeSnow] *= capacity / total;
+		counts[FootstepParticles::TypeClod] *= capacity / total;
+	}
+	[unroll] for (uint type = 0; type < FootstepParticles::TypeCount; type++)
+	{
+		uint count = min((uint)round(max(counts[type], 0.0)), remaining);
+		gsCounts[type] = count;
+		remaining -= count;
+	}
+
+	float3 snowColor = Color::Diffuse(GetSurfaceColor(FootstepParticles::SurfaceSnow));
+	snowColor = lerp(snowColor, max(sampledColor, snowColor * 0.8), saturate(coverage * 3.0) * 0.35);
+
+	gsGroundColor = snowColor;
+	gsSnowColor = snowColor;
+	gsWaterColor = snowColor;
+	gsSnowWeight = 1.0;
+	gsWetness = wetness;
+	gsSurfaceZ = surfaceZ;
+}
+
 uint ResolveType(uint localIndex, out bool alive)
 {
 	uint start = 0;
@@ -306,11 +386,19 @@ uint ResolveType(uint localIndex, out bool alive)
 		return;
 
 	FootstepParticles::FootstepEvent footstep = Events[eventIndex];
+	bool wade = (footstep.Flags & FootstepParticles::EventFlagWade) != 0;
 
-	if (localIndex == 0)
-		PlanFootstep(footstep);
+	if (localIndex == 0) {
+		if (wade)
+			PlanWade(footstep);
+		else
+			PlanFootstep(footstep);
+	}
 
 	GroupMemoryBarrierWithGroupSync();
+
+	if (localIndex >= footstep.SlotCount)
+		return;
 
 	uint slot = (footstep.FirstSlot + localIndex) % FootstepParticles::MaxParticles;
 	FootstepParticles::Particle particle = (FootstepParticles::Particle)0;
@@ -318,7 +406,8 @@ uint ResolveType(uint localIndex, out bool alive)
 	bool alive;
 	uint type = ResolveType(localIndex, alive);
 	if (!alive) {
-		Particles[slot] = particle;
+		if (!wade)
+			Particles[slot] = particle;
 		return;
 	}
 
@@ -330,6 +419,7 @@ uint ResolveType(uint localIndex, out bool alive)
 	float r4 = FootstepParticles::Hash(seed, 4);
 	float r5 = FootstepParticles::Hash(seed, 5);
 	float r6 = FootstepParticles::Hash(seed, 6);
+	float r7 = FootstepParticles::Hash(seed, 7);
 
 	float scale = clamp(footstep.Scale, 0.25, 4.0);
 	float strength = clamp(footstep.Strength, 0.2, 3.0);
@@ -347,9 +437,28 @@ uint ResolveType(uint localIndex, out bool alive)
 	float growth = 1.0;
 	float lifetime = 1.0;
 	float opacity = 1.0;
+	float groundZ = footstep.Position.z;
 	uint flags = 0;
 
-	if (type == FootstepParticles::TypeDust) {
+	if (wade) {
+		position = float3(footstep.Position.xy + radial * r1 * 4.0 * scale, gsSurfaceZ + lerp(0.0, 3.0, r7) * scale);
+		velocity = float3(footstep.Velocity.xy * 0.12, 0.0);
+		color = gsSnowColor;
+		flags = 0x100u;
+		groundZ = gsSurfaceZ;
+		if (type == FootstepParticles::TypeSnow) {
+			velocity += float3(radial * lerp(15.0, 45.0, r2) * strength + moveDirection * lerp(15.0, 50.0, r3) * strength, lerp(25.0, 70.0, r4) * strength);
+			size = lerp(4.5, 8.0, r5) * scale;
+			growth = lerp(2.0, 3.0, r6);
+			lifetime = lerp(1.0, 1.8, r1);
+			opacity = lerp(0.35, 0.55, r3);
+		} else {
+			velocity += float3(radial * lerp(10.0, 40.0, r2) + moveDirection * lerp(25.0, 80.0, r3), lerp(60.0, 150.0, r4) * strength);
+			size = lerp(0.7, 1.8, r6) * scale;
+			lifetime = lerp(0.8, 1.4, r1);
+			color = gsSnowColor * lerp(0.9, 1.0, r2);
+		}
+	} else if (type == FootstepParticles::TypeDust) {
 		velocity += float3(radial * lerp(15.0, 45.0, r2) * strength + kick * 25.0, lerp(8.0, 30.0, r3) * strength);
 		size = lerp(4.0, 7.0, r4) * scale;
 		growth = lerp(2.2, 3.4, r5);
@@ -398,7 +507,7 @@ uint ResolveType(uint localIndex, out bool alive)
 	particle.Color = max(color, 0.0);
 	particle.Size = size * FootstepParticles::SizeScale;
 	particle.Type = type | flags;
-	particle.GroundZ = footstep.Position.z;
+	particle.GroundZ = groundZ;
 	particle.Growth = growth;
 	particle.Opacity = saturate(opacity * FootstepParticles::Opacity);
 

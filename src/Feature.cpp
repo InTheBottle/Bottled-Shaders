@@ -23,7 +23,6 @@
 #include "Features/HorizonFix.h"
 #include "Features/IBL.h"
 #include "Features/InteriorSun.h"
-#include "Features/InverseSquareLighting.h"
 #include "Features/LODBlending.h"
 #include "Features/LandscapeSeams.h"
 #include "Features/LightLimitFix.h"
@@ -31,6 +30,7 @@
 #include "Features/PerformanceOverlay.h"
 #include "Features/NeuralRendering.h"
 #include "Features/PostProcessing.h"
+#include "Features/RainRefraction.h"
 #include "Features/RemoteControl.h"
 #include "Features/RenderDoc.h"
 #include "Features/ScreenSpaceGI.h"
@@ -38,6 +38,7 @@
 #include "Features/ScreenshotFeature.h"
 #include "Features/Skin.h"
 #include "Features/SnowCover.h"
+#include "Features/SnowDeformation.h"
 #include "Features/SkySync.h"
 #include "Features/Skylighting.h"
 #include "Features/SubsurfaceScattering.h"
@@ -219,7 +220,6 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::vanillaFresnel,
 		&globals::features::volumetricLighting,
 		&globals::features::lodBlending,
-		&globals::features::inverseSquareLighting,
 		&globals::features::hairSpecular,
 		&globals::features::interiorSun,
 		&globals::features::terrainVariation,
@@ -234,6 +234,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::screenshotFeature,
 		&globals::features::linearLighting,
 		&globals::features::effects11,
+		&globals::features::rainRefraction,
 		&globals::features::unifiedWater,
 		&globals::features::horizonFix,
 		&globals::features::exponentialHeightFog,
@@ -245,7 +246,8 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::neuralRendering,
 		&globals::features::hairBacklighting,
 		&globals::features::furShells,
-		&globals::features::landscapeSeams
+		&globals::features::landscapeSeams,
+		&globals::features::snowDeformation
 	};
 
 	return features;

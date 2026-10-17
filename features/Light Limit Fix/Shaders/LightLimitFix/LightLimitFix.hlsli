@@ -3,6 +3,9 @@
 #include "Common/Random.hlsli"
 #include "Common/SharedData.hlsli"
 
+#include "Common/Game.hlsli"
+#include "LightLimitFix/Attenuation.hlsli"
+
 namespace LightLimitFix
 {
 
@@ -89,32 +92,31 @@ namespace LightLimitFix
 		return float2x2(cosAngle, sinAngle, -sinAngle, cosAngle);
 	}
 
-	float SampleLocalShadowTap(SamplerState samp, uint slice, float2 uv, float receiverDepth)
+	/** @brief Bilinear PCF tap equivalent to SampleCmpLevelZero; the host shaders have no comparison sampler bound, so this uses Gather. */
+	float SampleLocalShadowTap(Texture2DArray<float> shadowMaps, SamplerState samp, uint slice, float2 uv, float receiverDepth, float texel)
 	{
-		const float texel = SharedData::lightLimitFixSettings.LocalShadowTexelSize;
 		float2 texelPosition = uv / texel - 0.5;
 		float2 weight = frac(texelPosition);
-		float4 lit = float4(LocalShadowMaps.GatherRed(samp, float3((floor(texelPosition) + 1.0) * texel, slice)) >= receiverDepth);
+		float4 lit = float4(shadowMaps.GatherRed(samp, float3((floor(texelPosition) + 1.0) * texel, slice)) >= receiverDepth);
 		return lerp(lerp(lit.w, lit.z, weight.x), lerp(lit.x, lit.y, weight.x), weight.y);
 	}
 
-	float SampleLocalShadowPCF(SamplerState samp, uint slice, float2 uv, float receiverDepth, float2x2 rotationMatrix, float2 clampMin, float2 clampMax)
+	float SampleLocalShadowPCF(Texture2DArray<float> shadowMaps, SamplerState samp, uint slice, float2 uv, float receiverDepth, float noise, float2 clampMin, float2 clampMax, float texel, uint sampleCount, float radiusUV)
 	{
-		const uint sampleCount = SharedData::lightLimitFixSettings.LocalShadowSamples;
 		float shadow = 0.0;
 		[branch] if (sampleCount <= 1)
 		{
-			shadow = SampleLocalShadowTap(samp, slice, clamp(uv, clampMin, clampMax), receiverDepth);
+			shadow = SampleLocalShadowTap(shadowMaps, samp, slice, clamp(uv, clampMin, clampMax), receiverDepth, texel);
 		}
 		else
 		{
-			const float radiusUV = SharedData::lightLimitFixSettings.LocalShadowFilterRadius;
+			const float2x2 rotationMatrix = GetShadowRotationMatrix(noise);
 			const uint stride = sampleCount >= 8 ? 1 : 2;
 			float sum = 0.0;
 			[loop] for (uint i = 0; i < 8; i += stride)
 			{
 				float2 offset = mul(Random::SpiralSampleOffsets8[i], rotationMatrix) * radiusUV;
-				sum += SampleLocalShadowTap(samp, slice, clamp(uv + offset, clampMin, clampMax), receiverDepth);
+				sum += SampleLocalShadowTap(shadowMaps, samp, slice, clamp(uv + offset, clampMin, clampMax), receiverDepth, texel);
 			}
 			shadow = sum * (stride == 1 ? 0.125 : 0.25);
 		}
@@ -122,16 +124,14 @@ namespace LightLimitFix
 	}
 
 	// position is relative to eyePosition; each cached projection is relative to its own Origin.
-	float GetLocalShadow(SamplerState samp, uint slice, float3 position, float3 eyePosition, float3 towardLight, bool skinnedReceiver, float2x2 rotationMatrix)
+	float GetLocalShadow(Texture2DArray<float> shadowMaps, SamplerState samp, LocalShadowData data, uint slice, float3 position, float3 eyePosition, float3 towardLight, bool skinnedReceiver, float noise, float texel, uint sampleCount, float radiusUV)
 	{
-		LocalShadowData data = LocalShadows[slice];
 		float rawShadow = 1.0;
 		float fade = 0.0;
 
 		[branch] if (data.Params.y > 0.0)
 		{
 			fade = data.Params.w;
-			const float texel = SharedData::lightLimitFixSettings.LocalShadowTexelSize;
 			const uint shadowType = (uint)data.Params.x;
 			float3 shadowPosition = position + (eyePosition - data.Origin.xyz) + towardLight * (skinnedReceiver ? data.Params2.y : 0.0);
 			float4 positionLS = mul(data.ShadowProj, float4(shadowPosition, 1.0));
@@ -148,7 +148,7 @@ namespace LightLimitFix
 						float2 uv = positionLS.xy * 0.5 + 0.5;
 						float receiverDepth = positionLS.z - data.Params.z;
 						float spotFalloff = saturate(1.0 - pow(length(positionLS.xy), data.Params2.x));
-						rawShadow = SampleLocalShadowPCF(samp, slice, uv, receiverDepth, rotationMatrix, texel, 1.0 - texel) * spotFalloff;
+						rawShadow = SampleLocalShadowPCF(shadowMaps, samp, slice, uv, receiverDepth, noise, texel, 1.0 - texel, texel, sampleCount, radiusUV) * spotFalloff;
 					}
 				}
 			}
@@ -174,12 +174,18 @@ namespace LightLimitFix
 					}
 
 					float receiverDepth = saturate(length(positionLS.xyz) / data.Params.y) - data.Params.z;
-					rawShadow = SampleLocalShadowPCF(samp, slice, uv, receiverDepth, rotationMatrix, clampMin, clampMax);
+					rawShadow = SampleLocalShadowPCF(shadowMaps, samp, slice, uv, receiverDepth, noise, clampMin, clampMax, texel, sampleCount, radiusUV);
 				}
 			}
 		}
 
 		return lerp(1.0, rawShadow, fade);
+	}
+
+	float GetLocalShadow(SamplerState samp, uint slice, float3 position, float3 eyePosition, float3 towardLight, bool skinnedReceiver, float noise)
+	{
+		return GetLocalShadow(LocalShadowMaps, samp, LocalShadows[slice], slice, position, eyePosition, towardLight, skinnedReceiver, noise,
+			SharedData::lightLimitFixSettings.LocalShadowTexelSize, SharedData::lightLimitFixSettings.LocalShadowSamples, SharedData::lightLimitFixSettings.LocalShadowFilterRadius);
 	}
 
 	// The first-person viewmodel renders in a compressed depth range below this linearized
@@ -201,6 +207,14 @@ namespace LightLimitFix
 	static const float CONTACT_SHADOW_RAY_END_FADE = 4.0;
 
 	static const float CONTACT_SHADOW_DEPTH_BIAS = 2.0 / 65536.0;
+
+	// Rotated-grid sub-pixel offsets in pixels; 2x uses entries 0 and 2.
+	static const float2 CONTACT_SHADOW_SUBSAMPLE_OFFSETS[4] = {
+		float2(-0.375, -0.125),
+		float2(0.125, -0.375),
+		float2(0.375, 0.125),
+		float2(-0.125, 0.375)
+	};
 
 	struct ContactShadowRay
 	{
@@ -312,28 +326,41 @@ namespace LightLimitFix
 
 			const ContactShadowRay ray = GetContactShadowRay(viewPosition, viewPosition + lightDirectionVS * max(rayLength, 0.0));
 			const uint marchSteps = GetPixelLimitedSteps(ray, contactShadowSteps);
+			const uint subSamples = clamp(SharedData::lightLimitFixSettings.ContactShadowSubSamples, 1u, 4u);
 
+			// The coarse test is skipped at the default step count so that path stays unchanged; with extra
+			// sub-pixel rays it is cheaper than the march it can reject.
 			bool march = true;
-			[branch] if (marchSteps > CONTACT_SHADOW_COARSE_STEPS)
+			[branch] if (marchSteps > CONTACT_SHADOW_COARSE_STEPS || subSamples > 1)
 				march = MayBeOccluded(ray, thickness);
 
 			[branch] if (march)
 			{
-				const float jitter = 1.0 - noise;
+				const float2 pixelUV = rcp(FrameBuffer::DynamicResolutionParams1.xy * SharedData::BufferDim.xy);
+				const float2x2 subSampleRotation = GetShadowRotationMatrix(noise);
 				const float stepScale = rcp(float(marchSteps));
-				[loop] for (uint i = 0; i < marchSteps; i++)
+				float occlusionSum = 0.0;
+				[loop] for (uint s = 0; s < subSamples; s++)
 				{
-					const float t = GetContactShadowRayT(ray, (float(i) + jitter) * stepScale);
-					const float rayDepth = GetContactShadowRayDepth(ray, t);
-					const float2 sceneDepths = GetContactShadowSceneDepths(samp, ray.uvOrigin + ray.uvDelta * t);
+					float2 uvOrigin = ray.uvOrigin;
+					[branch] if (subSamples > 1)
+						uvOrigin += mul(CONTACT_SHADOW_SUBSAMPLE_OFFSETS[(subSamples == 2 ? s * 2 : s) & 3], subSampleRotation) * pixelUV;
+					const float jitter = 1.0 - frac(noise + float(s) * 0.3819660113);
+					[loop] for (uint i = 0; i < marchSteps; i++)
+					{
+						const float t = GetContactShadowRayT(ray, (float(i) + jitter) * stepScale);
+						const float rayDepth = GetContactShadowRayDepth(ray, t);
+						const float2 sceneDepths = GetContactShadowSceneDepths(samp, uvOrigin + ray.uvDelta * t);
 
-					const bool behindSurface = rayDepth > sceneDepths.x * (1.0 + sceneDepths.x * depthBias);
-					const bool withinThickness = rayDepth - sceneDepths.y < thickness;
-					if (sceneDepths.y > CONTACT_SHADOW_FIRST_PERSON_MAX_DEPTH && behindSurface && withinThickness) {
-						occlusion = saturate((1.0 - t) * CONTACT_SHADOW_RAY_END_FADE);
-						break;
+						const bool behindSurface = rayDepth > sceneDepths.x * (1.0 + sceneDepths.x * depthBias);
+						const bool withinThickness = rayDepth - sceneDepths.y < thickness;
+						if (sceneDepths.y > CONTACT_SHADOW_FIRST_PERSON_MAX_DEPTH && behindSurface && withinThickness) {
+							occlusionSum += saturate((1.0 - t) * CONTACT_SHADOW_RAY_END_FADE);
+							break;
+						}
 					}
 				}
+				occlusion = occlusionSum / float(subSamples);
 			}
 		}
 

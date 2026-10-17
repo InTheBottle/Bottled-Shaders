@@ -68,14 +68,17 @@ void ExtendedMaterials::DrawSettings()
 		}
 		ImGui::Checkbox(T(TKEY("enable_parallax_warping_fix"), "Enable Parallax Warping Fix"), (bool*)&settings.EnableParallaxWarpingFix);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("enable_parallax_warping_fix_tooltip"), "Enables a fix reducing parallax scale on curved and smooth normal triangles."));
+			ImGui::Text("%s", T(TKEY("enable_parallax_warping_fix_tooltip"),
+								  "Reduces parallax depth on curved and smooth normal triangles and softens the view ray at grazing angles. "
+								  "Disable for the full-depth view ray, at the cost of warping on curved meshes."));
 		}
 		ImGui::SliderFloat(T(TKEY("parallax_quality"), "Parallax Quality"), &settings.ParallaxQuality, MinParallaxQuality, MaxParallaxQuality, "%.2fx", ImGuiSliderFlags_AlwaysClamp);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T(TKEY("parallax_quality_tooltip"),
 								  "Scales how many height samples parallax takes per pixel, on meshes and terrain. "
-								  "1.00x is the default. Higher values reduce stepping and slicing at grazing angles at extra GPU cost; "
-								  "lower values are faster but show more stepping."));
+								  "1.00x is the default. Above 1.00x the sample count grows with the square of the value, "
+								  "Complex Material and legacy terrain heightmaps are read at full resolution, and parallax self-shadows take more taps; "
+								  "2.00x costs roughly four times as much. Lower values are faster but show more stepping."));
 		}
 
 		ImGui::Spacing();

@@ -14,7 +14,11 @@
 #include "Utils/D3D.h"
 
 #include "Features/DynamicCubemaps.h"
+#include "Features/LandscapeSeams.h"
+#include "Features/LightLimitFix.h"
 #include "Features/ReverseZ.h"
+#include "Features/SnowCover.h"
+#include "Features/WetnessEffects.h"
 
 #include "ShaderDDC.h"
 
@@ -138,7 +142,7 @@ namespace SIE
 		static void GetLightingShaderDefines(uint32_t descriptor, std::span<D3D_SHADER_MACRO> defines)
 		{
 			static REL::Relocation<void(uint32_t, D3D_SHADER_MACRO*)> VanillaGetLightingShaderDefines(RELOCATION_ID(101631, 108698));
-			VanillaGetLightingShaderDefines(descriptor & ~static_cast<uint32_t>(ShaderCache::LightingShaderFlags::Reflections), defines.data());
+			VanillaGetLightingShaderDefines(descriptor & ~(static_cast<uint32_t>(ShaderCache::LightingShaderFlags::Reflections) | static_cast<uint32_t>(ShaderCache::LightingShaderFlags::NoSnowCover) | static_cast<uint32_t>(ShaderCache::LightingShaderFlags::NoWetness)), defines.data());
 
 			size_t lastIndex = std::ranges::find_if(defines, [](const D3D_SHADER_MACRO& macro) { return macro.Name == nullptr; }) - defines.begin();
 
@@ -164,11 +168,17 @@ namespace SIE
 				}
 			}
 
+			const bool noSnowCover = (descriptor & static_cast<uint32_t>(ShaderCache::LightingShaderFlags::NoSnowCover)) != 0;
+			const bool noWetness = (descriptor & static_cast<uint32_t>(ShaderCache::LightingShaderFlags::NoWetness)) != 0;
 			for (auto* feature : Feature::GetFeatureList()) {
 				if (feature->loaded && feature->HasShaderDefine(RE::BSShader::Type::Lighting)) {
+					if ((noSnowCover && feature == &globals::features::snowCover) || (noWetness && feature == &globals::features::wetnessEffects))
+						continue;
 					defines[lastIndex++] = { feature->GetShaderDefineName().data(), nullptr };
 				}
 			}
+			if (globals::features::lightLimitFix.loaded && globals::features::lightLimitFix.AreContactShadowsCompiled())
+				defines[lastIndex++] = { "LLF_CONTACT_SHADOWS", nullptr };
 
 			defines[lastIndex] = { nullptr, nullptr };
 		}
@@ -634,6 +644,9 @@ namespace SIE
 			}
 			if (descriptor & static_cast<uint32_t>(LocalMapFogOfWar)) {
 				defines[lastIndex++] = { "LOCALMAP_FOGOFWAR", nullptr };
+			}
+			if (descriptor & static_cast<uint32_t>(TruePbr)) {
+				defines[lastIndex++] = { "TRUE_PBR", nullptr };
 			}
 
 			if (hasShadowMask) {
@@ -1926,6 +1939,9 @@ namespace SIE
 			}
 		}
 
+		if (precompiling && shader.shaderType.get() == RE::BSShader::Type::Lighting)
+			QueueLightingDerivatives(shader, descriptor);
+
 		if (IsAsync()) {
 			compilationSet.Add({ ShaderClass::Pixel, shader, descriptor });
 		} else {
@@ -1933,6 +1949,14 @@ namespace SIE
 		}
 
 		return nullptr;
+	}
+
+	RE::BSGraphics::PixelShader* ShaderCache::FindPixelShader(const RE::BSShader& shader, uint32_t descriptor)
+	{
+		std::lock_guard lockGuard(pixelShadersMutex);
+		auto& typeCache = pixelShaders[static_cast<size_t>(shader.shaderType.underlying())];
+		auto it = typeCache.find(descriptor);
+		return it != typeCache.end() ? it->second.get() : nullptr;
 	}
 
 	RE::BSGraphics::ComputeShader* ShaderCache::GetComputeShader(const RE::BSShader& shader,
@@ -2613,6 +2637,95 @@ namespace SIE
 		compilationSet.EnqueueAux([] { ShaderDDC::Trim(); });
 	}
 
+	void ShaderCache::SetPrecompiling(bool value)
+	{
+		precompiling = value;
+	}
+
+	uint32_t ShaderCache::GetLiteLightingDescriptor(uint32_t descriptor)
+	{
+		using Flags = LightingShaderFlags;
+		using Techniques = LightingShaderTechniques;
+		constexpr uint32_t excluded = static_cast<uint32_t>(Flags::Skinned) | static_cast<uint32_t>(Flags::Reflections) | static_cast<uint32_t>(Flags::WorldMap) |
+		                              static_cast<uint32_t>(Flags::FurShells) | static_cast<uint32_t>(Flags::FurShellsDepth) |
+		                              static_cast<uint32_t>(Flags::NoSnowCover) | static_cast<uint32_t>(Flags::NoWetness);
+		if ((descriptor & static_cast<uint32_t>(Flags::Deferred)) == 0 || (descriptor & excluded) != 0)
+			return 0;
+
+		bool snow = globals::features::snowCover.loaded;
+		bool wetness = globals::features::wetnessEffects.loaded;
+		switch (static_cast<Techniques>(0x3F & (descriptor >> 24))) {
+		case Techniques::Facegen:
+		case Techniques::FacegenRGBTint:
+		case Techniques::Hair:
+		case Techniques::Eye:
+		case Techniques::LODLand:
+		case Techniques::LODLandNoise:
+			return 0;
+		case Techniques::MTLand:
+		case Techniques::MTLandLODBlend:
+			snow = false;
+			break;
+		case Techniques::TreeAnim:
+		case Techniques::LODObjects:
+		case Techniques::LODObjectHD:
+			wetness = false;
+			break;
+		default:
+			break;
+		}
+
+		uint32_t lite = 0;
+		if (snow)
+			lite |= static_cast<uint32_t>(Flags::NoSnowCover);
+		if (wetness)
+			lite |= static_cast<uint32_t>(Flags::NoWetness);
+		return lite ? descriptor | lite : 0;
+	}
+
+	bool ShaderCache::IsReflectionsCandidate(uint32_t descriptor)
+	{
+		using Flags = LightingShaderFlags;
+		using Techniques = LightingShaderTechniques;
+		constexpr uint32_t excluded = static_cast<uint32_t>(Flags::Deferred) | static_cast<uint32_t>(Flags::Skinned) | static_cast<uint32_t>(Flags::Reflections) |
+		                              static_cast<uint32_t>(Flags::WorldMap) | static_cast<uint32_t>(Flags::FurShells) | static_cast<uint32_t>(Flags::FurShellsDepth) |
+		                              static_cast<uint32_t>(Flags::LandscapeSeams) | static_cast<uint32_t>(Flags::NoSnowCover) | static_cast<uint32_t>(Flags::NoWetness);
+		if ((descriptor & excluded) != 0)
+			return false;
+
+		switch (static_cast<Techniques>(0x3F & (descriptor >> 24))) {
+		case Techniques::Facegen:
+		case Techniques::FacegenRGBTint:
+		case Techniques::Hair:
+		case Techniques::Eye:
+		case Techniques::MTLand:
+		case Techniques::MTLandLODBlend:
+			return false;
+		default:
+			return true;
+		}
+	}
+
+	void ShaderCache::QueueLightingDerivatives(const RE::BSShader& shader, uint32_t descriptor)
+	{
+		using Flags = LightingShaderFlags;
+		using Techniques = LightingShaderTechniques;
+		constexpr uint32_t derived = static_cast<uint32_t>(Flags::Reflections) | static_cast<uint32_t>(Flags::NoSnowCover) | static_cast<uint32_t>(Flags::NoWetness);
+		if ((descriptor & derived) != 0)
+			return;
+
+		if (const auto lite = GetLiteLightingDescriptor(descriptor))
+			std::ignore = GetPixelShader(shader, lite);
+		if (IsReflectionsCandidate(descriptor))
+			std::ignore = GetPixelShader(shader, descriptor | static_cast<uint32_t>(Flags::Reflections));
+
+		constexpr uint32_t seams = static_cast<uint32_t>(Flags::LandscapeSeams);
+		const auto technique = static_cast<Techniques>(0x3F & (descriptor >> 24));
+		if ((descriptor & seams) == 0 && (descriptor & static_cast<uint32_t>(Flags::Deferred)) != 0 && globals::features::landscapeSeams.IsRenderable() &&
+			(technique == Techniques::MTLand || technique == Techniques::MTLandLODBlend))
+			std::ignore = GetPixelShader(shader, descriptor | seams);
+	}
+
 	ShaderCache::ShaderCache()
 	{
 		dependencyTracker = std::make_unique<ShaderFileDependencyTracker>();
@@ -2753,9 +2866,11 @@ namespace SIE
 					newShader->shader->Release();
 				}
 			} else {
-				return vertexShaders[static_cast<size_t>(shader.shaderType.get())]
-				    .insert_or_assign(descriptor, std::move(newShader))
-				    .first->second.get();
+				auto& entry = vertexShaders[static_cast<size_t>(shader.shaderType.get())][descriptor];
+				if (entry && entry->shader)
+					entry->shader->Release();
+				entry = std::move(newShader);
+				return entry.get();
 			}
 		}
 		return nullptr;
@@ -2782,9 +2897,11 @@ namespace SIE
 					newShader->shader->Release();
 				}
 			} else {
-				return pixelShaders[static_cast<size_t>(shader.shaderType.get())]
-				    .insert_or_assign(descriptor, std::move(newShader))
-				    .first->second.get();
+				auto& entry = pixelShaders[static_cast<size_t>(shader.shaderType.get())][descriptor];
+				if (entry && entry->shader)
+					entry->shader->Release();
+				entry = std::move(newShader);
+				return entry.get();
 			}
 		}
 		return nullptr;
@@ -2811,9 +2928,11 @@ namespace SIE
 					newShader->shader->Release();
 				}
 			} else {
-				return computeShaders[static_cast<size_t>(shader.shaderType.get())]
-				    .insert_or_assign(descriptor, std::move(newShader))
-				    .first->second.get();
+				auto& entry = computeShaders[static_cast<size_t>(shader.shaderType.get())][descriptor];
+				if (entry && entry->shader)
+					entry->shader->Release();
+				entry = std::move(newShader);
+				return entry.get();
 			}
 		}
 		return nullptr;

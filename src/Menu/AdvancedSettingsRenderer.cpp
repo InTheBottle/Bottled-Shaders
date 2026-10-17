@@ -77,6 +77,7 @@ void AdvancedSettingsRenderer::RenderAdvancedSettings(
 
 		// Profiling Tab
 		if (MenuFonts::BeginTabItemWithFont(T("menu.advanced.tab_profiling", "Profiling"), Menu::FontRole::Subheading)) {
+			globals::menu->IgnoreSettingEditsThisFrame();
 			if (ImGui::BeginChild("##ProfilingContent", ImVec2(0, 0), false)) {
 				ProfilingRenderer::RenderStatistics();
 			}
@@ -86,6 +87,7 @@ void AdvancedSettingsRenderer::RenderAdvancedSettings(
 
 		// Testing Tab (for A/B Testing and related settings)
 		if (MenuFonts::BeginTabItemWithFont(T("menu.advanced.tab_testing", "Testing"), Menu::FontRole::Subheading)) {
+			globals::menu->IgnoreSettingEditsThisFrame();
 			if (ImGui::BeginChild("##Testing", ImVec2(0, 0), false)) {
 				RenderTestingSection();
 			}
@@ -146,13 +148,14 @@ void AdvancedSettingsRenderer::RenderLoggingSection()
 	}
 
 	// Shader Defines input
-	auto& shaderDefines = globals::state->shaderDefinesString;
-	if (ImGui::InputText(T("menu.advanced.shader_defines", "Shader Defines"), &shaderDefines)) {
-		globals::state->SetDefines(shaderDefines);
-	}
-	if (ImGui::IsItemDeactivatedAfterEdit() || (ImGui::IsItemActive() &&
-												   (ImGui::IsKeyPressed(ImGuiKey_Enter) ||
-													   ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)))) {
+	// SetDefines normalizes the string, so the buffer is only reloaded while the input is idle.
+	static std::string shaderDefines;
+	static bool editingDefines = false;
+	if (!editingDefines)
+		shaderDefines = globals::state->GetDefinesString();
+	ImGui::InputText(T("menu.advanced.shader_defines", "Shader Defines"), &shaderDefines);
+	editingDefines = ImGui::IsItemActive();
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
 		globals::state->SetDefines(shaderDefines);
 		shaderCache->Clear();
 	}

@@ -194,6 +194,7 @@ void VolumetricLighting::LoadSettings(json& o_json)
 	settings.ExteriorShaftDefinition = std::clamp(settings.ExteriorShaftDefinition, -1.0f, 1.0f);
 	settings.InteriorShaftDefinition = std::clamp(settings.InteriorShaftDefinition, -1.0f, 1.0f);
 	settings.Effects11Priority = std::clamp(settings.Effects11Priority, 0, static_cast<int32_t>(GodRayPriority::Count) - 1);
+	// Custom sizes are stored in texels; the sliders only offer whole 32/32/10 texel steps
 	for (auto* size : { &settings.ExteriorCustomSize, &settings.InteriorCustomSize }) {
 		size->Width = std::clamp(size->Width, 32, 640);
 		size->Height = std::clamp(size->Height, 32, 640);
@@ -239,11 +240,6 @@ void VolumetricLighting::EarlyPrepass()
 {
 	int32_t width = static_cast<int32_t>(globals::game::graphicsState->screenWidth);
 	int32_t height = static_cast<int32_t>(globals::game::graphicsState->screenHeight);
-
-	if (width != fullScreenX || height != fullScreenY) {
-		blurHCS = nullptr;
-		blurVCS = nullptr;
-	}
 
 	fullScreenX = width;
 	fullScreenY = height;

@@ -58,8 +58,12 @@ PS_OUTPUT main(PS_INPUT input)
 	// Clamp within dynamic-resolution bounds.
 	uv = FrameBuffer::ClampDynamicResolutionAdjustedScreenPosition(uv, input.TexCoord);
 
+	float4 refractionNormals = RefractionNormals.Load(int3(uv * SharedData::BufferDim.xy, 0));
+	if (refractionNormals.w > 0)
+		refractionNormals.xyz = RefractionNormals.SampleLevel(LinearSampler, uv, 0).xyz;
+	psout.RefractionNormals = refractionNormals;
+
 	// Upscale using linear sampling
-	psout.RefractionNormals = RefractionNormals.SampleLevel(LinearSampler, uv, 0);
 	psout.Depth = DepthTex.SampleLevel(LinearSampler, uv, 0);
 
 	psout.SAOCameraZ = psout.Depth;

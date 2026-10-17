@@ -330,6 +330,9 @@ namespace Util
 	/** @brief Starts (or restarts) the post-click flash window for the named button. */
 	void NotifyButtonFlash(const char* label);
 
+	void NotifyEscapeHandledByPopup();
+	bool ConsumeEscapeHandledByPopup();
+
 	/**
 	 * @brief RAII guard that applies the post-click flash chrome for the named button.
 	 *
@@ -978,8 +981,10 @@ namespace Util
 	 * @brief Draws the feature search bar with magnifying glass icon.
 	 * @param searchString Reference to the search string to modify
 	 * @param availableWidth The available width for the search bar
+	 * @param focus Moves keyboard focus into the search bar this frame
+	 * @return True on the frame Enter is pressed in the search bar
 	 */
-	void DrawFeatureSearchBar(std::string& searchString, float availableWidth = 0.0f);
+	bool DrawFeatureSearchBar(std::string& searchString, float availableWidth = 0.0f, bool focus = false);
 
 	/**
 	 * Provides access to theme-aware UI colors for consistent styling.

@@ -74,6 +74,8 @@ namespace Util::Subrect
 		if (a_json.contains("CropPresets") && a_json["CropPresets"].is_array()) {
 			presets.clear();
 			for (auto& entry : a_json["CropPresets"]) {
+				if (!entry.is_object())
+					continue;
 				Preset preset;
 				preset.name = entry.value("name", "Unknown");
 				if (entry.contains("uv")) {

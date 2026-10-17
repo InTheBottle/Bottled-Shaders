@@ -506,13 +506,8 @@ void ScreenSpaceGI::SetupResources()
 			texIlY[1]->CreateSRV(srvDesc);
 			texIlY[1]->CreateUAV(uavDesc);
 
-			texGiSpecular[0] = eastl::make_unique<Texture2D>(texDesc, "SSGI::GiSpecular[0]");
-			texGiSpecular[0]->CreateSRV(srvDesc);
-			texGiSpecular[0]->CreateUAV(uavDesc);
-
-			texGiSpecular[1] = eastl::make_unique<Texture2D>(texDesc, "SSGI::GiSpecular[1]");
-			texGiSpecular[1]->CreateSRV(srvDesc);
-			texGiSpecular[1]->CreateUAV(uavDesc);
+			if (settings.EnableExperimentalSpecularGI)
+				EnsureGiSpecularTextures();
 		}
 		srvDesc.Format = uavDesc.Format = texDesc.Format = DXGI_FORMAT_R16G16_FLOAT;
 		{
@@ -721,6 +716,36 @@ void ScreenSpaceGI::UpdateSB()
 	ssgiCB->Update(data);
 }
 
+void ScreenSpaceGI::EnsureGiSpecularTextures()
+{
+	if (texGiSpecular[0] || !texIlY[0])
+		return;
+
+	D3D11_TEXTURE2D_DESC texDesc = texIlY[0]->desc;
+	D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
+		.Format = texDesc.Format,
+		.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+		.Texture2D = { .MostDetailedMip = 0, .MipLevels = 1 }
+	};
+	D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {
+		.Format = texDesc.Format,
+		.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D,
+		.Texture2D = { .MipSlice = 0 }
+	};
+
+	texGiSpecular[0] = eastl::make_unique<Texture2D>(texDesc, "SSGI::GiSpecular[0]");
+	texGiSpecular[0]->CreateSRV(srvDesc);
+	texGiSpecular[0]->CreateUAV(uavDesc);
+
+	texGiSpecular[1] = eastl::make_unique<Texture2D>(texDesc, "SSGI::GiSpecular[1]");
+	texGiSpecular[1]->CreateSRV(srvDesc);
+	texGiSpecular[1]->CreateUAV(uavDesc);
+
+	const FLOAT clr[4] = { 0.f, 0.f, 0.f, 0.f };
+	globals::d3d::context->ClearUnorderedAccessViewFloat(texGiSpecular[0]->uav.get(), clr);
+	globals::d3d::context->ClearUnorderedAccessViewFloat(texGiSpecular[1]->uav.get(), clr);
+}
+
 void ScreenSpaceGI::DrawSSGI()
 {
 	auto context = globals::d3d::context;
@@ -731,6 +756,9 @@ void ScreenSpaceGI::DrawSSGI()
 	// Toggle vanilla SSAO
 	if (BSImagespaceShaderISSAOBlurH)
 		BSImagespaceShaderISSAOBlurH->enableSAO = settings.EnableVanillaSSAO;
+
+	if (settings.Enabled && settings.EnableExperimentalSpecularGI)
+		EnsureGiSpecularTextures();
 
 	if (!(settings.Enabled && ShadersOK())) {
 		FLOAT clr[4] = { 0.f, 0.f, 0.f, 0.f };
@@ -836,7 +864,7 @@ void ScreenSpaceGI::DrawSSGI()
 		srvs.at(6) = texAo[inputAoTexIdx]->srv.get();
 		srvs.at(7) = texIlY[inputGITexIdx]->srv.get();
 		srvs.at(8) = texIlCoCg[inputGITexIdx]->srv.get();
-		srvs.at(9) = texGiSpecular[inputAoTexIdx]->srv.get();
+		srvs.at(9) = GiSpecularSRV(inputAoTexIdx);
 		srvs.at(10) = nullptr;
 
 		uavs.at(0) = texRadianceTemp->uav.get();
@@ -844,7 +872,7 @@ void ScreenSpaceGI::DrawSSGI()
 		uavs.at(2) = texAo[!inputAoTexIdx]->uav.get();
 		uavs.at(3) = texIlY[!inputGITexIdx]->uav.get();
 		uavs.at(4) = texIlCoCg[!inputGITexIdx]->uav.get();
-		uavs.at(5) = texGiSpecular[!inputAoTexIdx]->uav.get();
+		uavs.at(5) = GiSpecularUAV(!inputAoTexIdx);
 
 		context->CSSetShaderResources(0, (uint)srvs.size(), srvs.data());
 		context->CSSetUnorderedAccessViews(0, (uint)uavs.size(), uavs.data(), nullptr);
@@ -912,13 +940,13 @@ void ScreenSpaceGI::DrawSSGI()
 		srvs.at(4) = texAccumFrames[lastFrameAccumTexIdx]->srv.get();
 		srvs.at(5) = texIlY[inputGITexIdx]->srv.get();
 		srvs.at(6) = texIlCoCg[inputGITexIdx]->srv.get();
-		srvs.at(7) = texGiSpecular[inputAoTexIdx]->srv.get();
+		srvs.at(7) = GiSpecularSRV(inputAoTexIdx);
 		srvs.at(8) = texNormal->srv.get();
 
 		uavs.at(0) = texAo[!inputAoTexIdx]->uav.get();
 		uavs.at(1) = texIlY[!inputGITexIdx]->uav.get();
 		uavs.at(2) = texIlCoCg[!inputGITexIdx]->uav.get();
-		uavs.at(3) = texGiSpecular[!inputAoTexIdx]->uav.get();
+		uavs.at(3) = GiSpecularUAV(!inputAoTexIdx);
 		uavs.at(4) = texPrevGeo->uav.get();
 
 		context->CSSetShaderResources(0, (uint)srvs.size(), srvs.data());
@@ -968,12 +996,12 @@ void ScreenSpaceGI::DrawSSGI()
 		srvs.at(1) = texAo[inputAoTexIdx]->srv.get();
 		srvs.at(2) = texIlY[inputGITexIdx]->srv.get();
 		srvs.at(3) = texIlCoCg[inputGITexIdx]->srv.get();
-		srvs.at(4) = texGiSpecular[inputAoTexIdx]->srv.get();
+		srvs.at(4) = GiSpecularSRV(inputAoTexIdx);
 
 		uavs.at(0) = texAo[!inputAoTexIdx]->uav.get();
 		uavs.at(1) = texIlY[!inputGITexIdx]->uav.get();
 		uavs.at(2) = texIlCoCg[!inputGITexIdx]->uav.get();
-		uavs.at(3) = texGiSpecular[!inputAoTexIdx]->uav.get();
+		uavs.at(3) = GiSpecularUAV(!inputAoTexIdx);
 
 		context->CSSetShaderResources(0, (uint)srvs.size(), srvs.data());
 		context->CSSetUnorderedAccessViews(0, (uint)uavs.size(), uavs.data(), nullptr);

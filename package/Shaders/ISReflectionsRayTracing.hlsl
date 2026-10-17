@@ -31,6 +31,9 @@ static const int iterations = 64.0;
 static const int binaryIterations = ceil(log2(iterations));
 
 static const float rayLength = 1.0;
+#	ifndef UNIFIED_WATER
+static const float maxValidDepth = 0.9999;
+#	endif
 
 float2 ConvertRaySample(float2 raySample)
 {
@@ -59,6 +62,10 @@ float4 GetReflectionColor(
 			return 0.0;
 
 		float iterationDepth = FrameBuffer::ToStandardDepth(DepthTex.SampleLevel(DepthSampler, ConvertRaySample(sampleUV), 0).x);
+#	ifndef UNIFIED_WATER
+		if (iterationDepth > maxValidDepth)
+			continue;
+#	endif
 
 		if (saturate((raySample.z - iterationDepth) / SSRParams.y) > 0.0) {
 			float3 binaryMinRaySample = prevRaySample;
@@ -71,6 +78,16 @@ float4 GetReflectionColor(
 
 				sampleUV = binaryRaySample.xy;
 				iterationDepth = FrameBuffer::ToStandardDepth(DepthTex.SampleLevel(DepthSampler, ConvertRaySample(sampleUV), 0).x);
+#	ifndef UNIFIED_WATER
+				if (iterationDepth > maxValidDepth) {
+					if (iterationDepth < binaryRaySample.z)
+						binaryMaxRaySample = binaryRaySample;
+					else
+						binaryMinRaySample = binaryRaySample;
+					depthThicknessFactor = 0.0;
+					continue;
+				}
+#	endif
 
 				// Compute expected depth vs actual depth
 				depthThicknessFactor = 1.0 - saturate(abs(binaryRaySample.z - iterationDepth) / SSRParams.y);
@@ -149,6 +166,12 @@ PS_OUTPUT main(PS_INPUT input)
 
 	float nativeDepth = DepthTex.SampleLevel(DepthSampler, screenPosition, 0).x;
 	float depth = FrameBuffer::ToStandardDepth(nativeDepth);
+#	ifndef UNIFIED_WATER
+	[branch] if (depth > maxValidDepth)
+	{
+		return psout;
+	}
+#	endif
 
 	float4 positionVS = float4(float2(uv.x, 1.0 - uv.y) * 2.0 - 1.0, nativeDepth, 1.0);
 	positionVS = mul(FrameBuffer::CameraProjInverse, positionVS);

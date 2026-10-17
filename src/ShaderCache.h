@@ -412,6 +412,9 @@ namespace SIE
 		void RemoveLegacyDiskCache();
 		void TrimDiskCache();
 		void InvalidateShaderSources();
+		void SetPrecompiling(bool value);
+		static uint32_t GetLiteLightingDescriptor(uint32_t descriptor);
+		static bool IsReflectionsCandidate(uint32_t descriptor);
 		/** Gets whether the filesystem watcher for hot-reload is active. */
 		bool UseFileWatcher() const;
 		/** Sets whether the filesystem watcher for hot-reload is active. */
@@ -492,6 +495,7 @@ namespace SIE
 		RE::BSGraphics::VertexShader* GetVertexShader(const RE::BSShader& shader, uint32_t descriptor);
 		RE::BSGraphics::PixelShader* GetPixelShader(const RE::BSShader& shader,
 			uint32_t descriptor);
+		RE::BSGraphics::PixelShader* FindPixelShader(const RE::BSShader& shader, uint32_t descriptor);
 		RE::BSGraphics::ComputeShader* GetComputeShader(const RE::BSShader& shader,
 			uint32_t descriptor);
 
@@ -643,7 +647,7 @@ namespace SIE
 			MTLandLODBlend = 19,
 		};
 
-		enum class LightingShaderFlags
+		enum class LightingShaderFlags : uint32_t
 		{
 			VC = 1 << 0,
 			Skinned = 1 << 1,
@@ -671,7 +675,9 @@ namespace SIE
 			DoAlphaTest = 1 << 20,
 			Snow = 1 << 21,
 			CharacterLight = 1 << 22,
-			AdditionalAlphaMask = 1 << 23
+			AdditionalAlphaMask = 1 << 23,
+			NoWetness = 1u << 29,
+			NoSnowCover = 1u << 30
 		};
 
 		enum class BloodSplatterShaderTechniques
@@ -813,6 +819,7 @@ namespace SIE
 			LodObject = 1 << 27,
 			LocalMapFogOfWar = 1 << 28,
 			OpaqueEffect = 1 << 29,
+			TruePbr = 1 << 30,
 		};
 
 		// Shader blocking data for developer mode
@@ -863,6 +870,7 @@ namespace SIE
 		ShaderCache();
 		void ManageCompilationSet(std::stop_token stoken);
 		void ProcessCompilationSet(std::stop_token stoken, SIE::ShaderCompilationTask task);
+		void QueueLightingDerivatives(const RE::BSShader& shader, uint32_t descriptor);
 
 		~ShaderCache();
 
@@ -902,6 +910,8 @@ namespace SIE
 		UpdateListener* listener = nullptr;
 
 		std::unique_ptr<ShaderFileDependencyTracker> dependencyTracker;
+
+		std::atomic_bool precompiling = false;
 	};
 
 	// Inherits from the abstract listener class, and implements the the file action handler

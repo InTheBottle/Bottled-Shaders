@@ -103,11 +103,8 @@ ID3D11ShaderResourceView* ENBAdaptation::MaskProceduralSun(ID3D11ShaderResourceV
 	const auto& proceduralSun = globals::features::proceduralSun;
 	if (!proceduralSun.loaded || !proceduralSun.settings.enabled || !proceduralSun.settings.excludeFromAdaptation)
 		return a_source;
-	if (!globals::state || !globals::state->inWorld)
-		return a_source;
-
 	auto sky = globals::game::sky;
-	if (!sky || !sky->sun || !sky->sun->root || !sky->root)
+	if (!sky || sky->mode.get() != RE::Sky::Mode::kFull || !sky->sun || !sky->sun->root || !sky->root)
 		return a_source;
 	if (ProceduralSun::GetSunVisibility() <= 0.0f)
 		return a_source;
