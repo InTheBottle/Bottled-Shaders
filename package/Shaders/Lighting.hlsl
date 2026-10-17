@@ -1479,8 +1479,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		weights[6] = weights[7] = weights[8] = weights[9] = 0.0;
 #			endif
 
-		const bool doTerrainPom = viewPosition.z < 2048.0 && ExtendedMaterials::TerrainHasAnyDisplacement() &&
-		                          ExtendedMaterials::TerrainMaxWeightedHeightScale(input, displacementParams) > 0.01;
+		const bool terrainHasDisplacement = ExtendedMaterials::TerrainHasAnyDisplacement() &&
+		                                    ExtendedMaterials::TerrainMaxWeightedHeightScale(input, displacementParams) > 0.01;
+		const bool doTerrainPom = viewPosition.z < 2048.0 && terrainHasDisplacement;
 		[branch] if (doTerrainPom)
 		{
 			uv = ExtendedMaterials::GetParallaxCoords(input, viewPosition.z, uv, terrainMipLevel, terrainMaxTexDim, viewDirection, tbnTr, screenNoise, displacementParams, sharedOffset, weights);
@@ -1507,9 +1508,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 			ExtendedMaterials::TerrainHasAnyDisplacement() &&
 			ExtendedMaterials::TerrainMaxWeightedHeightScale(input, displacementParams) > 0.01;
 		// sh0 feeds point-light terrain shadows (hasTerrainParallaxShadow), not only POM.
-		if ((doTerrainPom || hasTerrainParallaxShadow) && parallaxShadowsEnabled && terrainDirectionalShadowQuality > 0.0) {
+		if ((terrainHasDisplacement || hasTerrainParallaxShadow) && parallaxShadowsEnabled && terrainDirectionalShadowQuality > 0.0) {
 			hasCachedTerrainShadowBaseHeight = COMPUTE_TERRAIN_SHADOW_BASE(sh0);
-			if (doTerrainPom && hasCachedTerrainShadowBaseHeight) {
+			if (terrainHasDisplacement && hasCachedTerrainShadowBaseHeight) {
 				float3 dirLightDirectionTS = mul(DirLightDirection, tbn).xyz;
 				cachedDirectionalTerrainParallaxShadow = EVAL_TERRAIN_DIR_SHADOW(sh0, dirLightDirectionTS);
 				hasCachedDirectionalTerrainParallaxShadow = true;
@@ -2396,6 +2397,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		snowNormal = normalize(snowNormal + float3(0, 0, 0.5));
 		float3 treeSnowNormal = snowNormal;
 		if (SharedData::snowCoverSettings.AffectTreeTint && !(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::NoFoliageTint))
+			SnowCover::ApplyFoliageColor(material.BaseColor, SnowCover::GetEnvironmentalMultiplier(adjustedWorldPos));
+#		elif defined(DO_ALPHA_TEST)
+		if (SharedData::snowCoverSettings.AffectTreeTint && (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::SnowLODTree))
 			SnowCover::ApplyFoliageColor(material.BaseColor, SnowCover::GetEnvironmentalMultiplier(adjustedWorldPos));
 #		endif
 #		if defined(DO_ALPHA_TEST) && defined(LOD_BLENDING) && !defined(TREE_ANIM)

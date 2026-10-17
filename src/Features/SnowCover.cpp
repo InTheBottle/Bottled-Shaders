@@ -1040,8 +1040,9 @@ bool SnowCover::IsSnowFree(RE::BSRenderPass* a_pass, uint32_t a_descriptor, uint
 	if (env + 5.0f * displacement >= -0.01f)
 		return false;
 
-	if (technique == Techniques::TreeAnim && wsettings.AffectTreeTint && (extra & static_cast<uint32_t>(State::ExtraShaderDescriptors::NoFoliageTint)) == 0 &&
-		env >= wsettings.FoliageHeightOffset / 5000.0f - 0.01f)
+	const bool tintedTree = technique == Techniques::TreeAnim ? (extra & static_cast<uint32_t>(State::ExtraShaderDescriptors::NoFoliageTint)) == 0 :
+	                                                            (extra & static_cast<uint32_t>(State::ExtraShaderDescriptors::SnowLODTree)) != 0;
+	if (tintedTree && wsettings.AffectTreeTint && env >= wsettings.FoliageHeightOffset / 5000.0f - 0.01f)
 		return false;
 
 	return true;
@@ -1074,6 +1075,11 @@ void SnowCover::BSLightingShader_Setup(RE::BSRenderPass* a_pass)
 		state->permutationData.ExtraShaderDescriptor |= (uint)State::ExtraShaderDescriptors::SnowRooftop;
 	else
 		state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::SnowRooftop;
+
+	if (name && _strnicmp(name, "treepassthru", 12) == 0)
+		state->permutationData.ExtraShaderDescriptor |= (uint)State::ExtraShaderDescriptors::SnowLODTree;
+	else
+		state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::SnowLODTree;
 }
 
 bool SnowCover::IsBuilding(RE::TESObjectREFR* a_ref)

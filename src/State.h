@@ -294,7 +294,8 @@ public:
 		IsAurora = 1 << 10,
 		IsMoon = 1 << 11,
 		NoSkyScattering = 1 << 12,
-		SnowRooftop = 1 << 13
+		SnowRooftop = 1 << 13,
+		SnowLODTree = 1 << 14
 	};
 
 	/** @brief Bitflags describing extra feature-specific properties related to terrain displacement and material models. */

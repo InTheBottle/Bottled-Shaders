@@ -256,6 +256,7 @@
 			float offset = (1.0 - parallaxAmount) * -maxHeight + minHeight;
 			float2 finalCoords = parallaxDir * offset + coords.xy;
 #if defined(LANDSCAPE)
+			finalCoords = lerp(finalCoords, coords.xy, nearBlendToFar * nearBlendToFar);
 			if (SharedData::extendedMaterialSettings.EnableHeightBlending) {
 				float unusedHeight = GetTerrainHeight(finalCoords, mipLevel, params, 1.0, w1, w2, sharedOffset, weights);
 			}
