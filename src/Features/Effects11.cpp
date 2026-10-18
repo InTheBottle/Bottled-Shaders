@@ -763,7 +763,7 @@ void Effects11::OverrideAmbientLighting(DirectionalAmbientColors& DirectionalAmb
 
 	for (auto& axis : DirectionalAmbientColors.directionalAmbientColors) {
 		for (auto& ambientLightingColor : axis)
-			ambientLightingColor = F3ToNi(Intensity(NiToF3(ambientLightingColor) + constantShift, intensity));
+			ambientLightingColor = F3ToNi(Intensity(float3::Max(NiToF3(ambientLightingColor) + constantShift, float3::Zero), intensity));
 	}
 }
 

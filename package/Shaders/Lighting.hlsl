@@ -2558,6 +2558,12 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	// sharply without this floor.
 	static const float wetnessMinPuddleRoughness = 0.05;
 	waterRoughnessSpecular = max(saturate(1.0 - wetnessGlossinessSpecular), wetnessMinPuddleRoughness);
+
+	float3 wetnessNormalDdx = ddx_coarse(wetnessNormal);
+	float3 wetnessNormalDdy = ddy_coarse(wetnessNormal);
+	float wetnessKernelRoughness2 = min(0.5 * (dot(wetnessNormalDdx, wetnessNormalDdx) + dot(wetnessNormalDdy, wetnessNormalDdy)), 0.18);
+	float wetnessAlpha = waterRoughnessSpecular * waterRoughnessSpecular;
+	waterRoughnessSpecular = min(sqrt(sqrt(saturate(wetnessAlpha * wetnessAlpha + wetnessKernelRoughness2))), max(waterRoughnessSpecular, 0.99));
 #	endif
 
 	float llDirLightMult = SharedData::linearLightingSettings.enableLinearLighting && !SharedData::linearLightingSettings.isDirLightLinear && (inWorld || inReflection) && !SharedData::InInterior ? SharedData::linearLightingSettings.dirLightMult : 1.0f;
