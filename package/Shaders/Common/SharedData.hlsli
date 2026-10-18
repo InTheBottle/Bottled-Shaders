@@ -431,7 +431,7 @@ namespace SharedData
 		uint GameVolumetricRaysDisableDithering;
 		float2 GameVolumetricRaysPad0;
 
-		float3 GameVolumetricRaysLightScale;
+		float3 GameVolumetricRaysSunColor;
 		float GameVolumetricRaysCustomContribution;
 
 		float3 GameVolumetricRaysCustomColor;

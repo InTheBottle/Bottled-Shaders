@@ -2528,6 +2528,7 @@
     "feature.sky_sync.dim_sunlight_under_horizon_tooltip": "Fade directional light to zero as the sun or moon approaches the horizon.",
     "feature.sky_sync.disabled_worldspaces": "Disabled Worldspaces",
     "feature.sky_sync.disabled_worldspaces_hint": "Sky Sync leaves lighting to vanilla in these worldspaces.",
+    "feature.sky_sync.effects11_owns_colors": "Effects 11 is active, so Sky Sync only moves the light with the sun and moons. The light colour, the horizon dim and volumetric lighting follow the preset.",
     "feature.sky_sync.enabled": "Enabled",
     "feature.sky_sync.enabled_tooltip": "Enable or disable Sky Sync features.",
     "feature.sky_sync.fade_volumetric_lighting": "Fade Volumetric Lighting",

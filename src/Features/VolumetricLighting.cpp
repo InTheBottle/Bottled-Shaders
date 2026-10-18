@@ -4,6 +4,7 @@
 #include "I18n/I18n.h"
 #include "InteriorSun.h"
 #include "ShaderCache.h"
+#include "SkySync.h"
 #include "State.h"
 #include "Utils/Game.h"
 #include "Utils/UI.h"
@@ -326,6 +327,141 @@ void VolumetricLighting::ApplyGodRaySettings()
 		const float biased = std::lerp(renderData.phaseFunction.scattering, target, std::abs(shaftDefinition));
 		renderData.phaseFunction.scattering = std::clamp(biased, -ScatteringLimit, ScatteringLimit);
 	}
+}
+
+namespace
+{
+	constexpr size_t RenderDataFloatCount = sizeof(RE::BSVolumetricLightingRenderData) / sizeof(float);
+	static_assert(RenderDataFloatCount * sizeof(float) == sizeof(RE::BSVolumetricLightingRenderData));
+
+	constexpr float MeanDensityFactor = 0.5f;
+	constexpr float MaxTransitionCorrection = 8.0f;
+
+	void AccumulateRenderData(RE::BSVolumetricLightingRenderData& a_target, const RE::BSVolumetricLightingRenderData& a_source, float a_weight)
+	{
+		const auto source = reinterpret_cast<const float*>(&a_source);
+		const auto target = reinterpret_cast<float*>(&a_target);
+		for (size_t i = 0; i < RenderDataFloatCount; ++i)
+			target[i] += source[i] * a_weight;
+	}
+
+	struct WeatherTimeBlend
+	{
+		RE::TESWeather::ColorTime first = RE::TESWeather::ColorTime::kDay;
+		RE::TESWeather::ColorTime second = RE::TESWeather::ColorTime::kDay;
+		float firstWeight = 1.0f;
+	};
+
+	WeatherTimeBlend GetWeatherTimeBlend(RE::Sky* a_sky)
+	{
+		WeatherTimeBlend result;
+		RE::Sky::COLOR_BLEND blend{};
+		a_sky->FillColorBlend(blend, a_sky->currentWeather, a_sky->currentWeatherPct, result.first, result.second);
+		result.firstWeight = std::clamp(blend.blend[0] + blend.blend[2], 0.0f, 1.0f);
+		return result;
+	}
+
+	RE::BSVolumetricLightingRenderData GetWeatherVolumetricLighting(const RE::Sky* a_sky, const RE::TESWeather* a_weather, const WeatherTimeBlend& a_time, bool a_night, bool a_current)
+	{
+		if (a_night)
+			return SkySync::BlendNightVolumetricLighting(a_sky, a_current ? 1.0f : 0.0f, a_current ? 0.0f : 1.0f);
+
+		auto record = [a_weather](RE::TESWeather::ColorTime a_colorTime) {
+			const auto form = a_weather ? a_weather->volumetricLighting[a_colorTime] : nullptr;
+			return form ? static_cast<const RE::BSVolumetricLightingRenderData&>(*form) : SkySync::GetDefaultVolumetricLighting();
+		};
+
+		RE::BSVolumetricLightingRenderData result{};
+		AccumulateRenderData(result, record(a_time.first), a_time.firstWeight);
+		if (a_time.firstWeight < 1.0f)
+			AccumulateRenderData(result, record(a_time.second), 1.0f - a_time.firstWeight);
+		return result;
+	}
+
+	RE::NiColor GetWeatherSunlight(RE::Sky* a_sky, const RE::TESWeather* a_weather, const WeatherTimeBlend& a_time, bool a_night)
+	{
+		RE::NiColor result{};
+		if (!a_weather)
+			return result;
+
+		constexpr auto sunlight = RE::TESWeather::ColorTypes::kSunlight;
+		RE::Sky::COLOR_BLEND blend{};
+		if (a_night) {
+			blend.RGBVal[0] = a_weather->colorData[sunlight][RE::TESWeather::ColorTime::kNight];
+			blend.blend[0] = 1.0f;
+		} else {
+			blend.RGBVal[0] = a_weather->colorData[sunlight][a_time.first];
+			blend.RGBVal[1] = a_weather->colorData[sunlight][a_time.second];
+			blend.blend[0] = a_time.firstWeight;
+			blend.blend[1] = 1.0f - a_time.firstWeight;
+		}
+		a_sky->SetColor(result, &blend, 0.0f);
+		return result;
+	}
+
+	float GetVolumetricBrightness(const RE::BSVolumetricLightingRenderData& a_data, const RE::NiColor& a_sunlight, float a_intensityScale)
+	{
+		const float customContribution = std::clamp(a_data.customColor.contribution, 0.0f, 1.0f);
+		const RE::NiColor color = a_sunlight + (a_data.color - a_sunlight) * customContribution;
+		const float colorMean = std::max((color.red + color.green + color.blue) / 3.0f, 0.0f);
+
+		const float scattering = std::clamp(a_data.phaseFunction.scattering, -0.999f, 0.999f);
+		const float meanPhase = std::abs(scattering) > 1e-3f ?
+		                            (1.0f - scattering * scattering) / (8.0f * RE::NI_PI * scattering) * std::log((1.0f + scattering) / (1.0f - scattering)) :
+		                            1.0f / (4.0f * RE::NI_PI);
+		const float phase = std::max(std::lerp(1.0f, meanPhase, a_data.phaseFunction.contribution), 0.0f);
+		const float density = std::max(std::lerp(1.0f, MeanDensityFactor, a_data.density.contribution), 0.0f);
+
+		return std::max(a_data.intensity * a_intensityScale, 0.0f) * phase * density * colorMean;
+	}
+}
+
+void VolumetricLighting::BeginSkyUpdate()
+{
+	auto& renderData = GetRenderData();
+	if (hasWrittenRenderData && std::memcmp(&renderData, &writtenRenderData, sizeof(renderData)) == 0)
+		renderData = engineRenderData;
+	else
+		engineRenderData = renderData;
+}
+
+void VolumetricLighting::FinishSkyUpdate(RE::Sky* a_sky)
+{
+	auto& renderData = GetRenderData();
+
+	const float weatherPct = a_sky ? a_sky->currentWeatherPct : 1.0f;
+	if (a_sky && a_sky->mode.get() == RE::Sky::Mode::kFull && a_sky->currentClimate && a_sky->currentWeather && a_sky->lastWeather &&
+		weatherPct > 0.0f && weatherPct < 1.0f) {
+		const auto& skySync = globals::features::skySync;
+		const bool nightVolumetricLighting = skySync.IsNightVolumetricLightingApplied();
+		const bool nightSunlight = skySync.GetLightNightWeight() >= 1.0f;
+		const auto time = GetWeatherTimeBlend(a_sky);
+
+		float intensityLast = 1.0f;
+		float intensityCurrent = 1.0f;
+		if (globals::features::effects11.loaded)
+			globals::features::effects11.GetGameVolumetricRaysIntensityEndpoints(intensityLast, intensityCurrent);
+
+		const auto lastData = GetWeatherVolumetricLighting(a_sky, a_sky->lastWeather, time, nightVolumetricLighting, false);
+		const auto currentData = GetWeatherVolumetricLighting(a_sky, a_sky->currentWeather, time, nightVolumetricLighting, true);
+		const auto lastSunlight = GetWeatherSunlight(a_sky, a_sky->lastWeather, time, nightSunlight);
+		const auto currentSunlight = GetWeatherSunlight(a_sky, a_sky->currentWeather, time, nightSunlight);
+
+		RE::BSVolumetricLightingRenderData blendedData{};
+		AccumulateRenderData(blendedData, lastData, 1.0f - weatherPct);
+		AccumulateRenderData(blendedData, currentData, weatherPct);
+		const RE::NiColor blendedSunlight = lastSunlight * (1.0f - weatherPct) + currentSunlight * weatherPct;
+
+		const float blendedBrightness = GetVolumetricBrightness(blendedData, blendedSunlight, std::lerp(intensityLast, intensityCurrent, weatherPct));
+		if (blendedBrightness > 1e-6f) {
+			const float targetBrightness = std::lerp(GetVolumetricBrightness(lastData, lastSunlight, intensityLast),
+				GetVolumetricBrightness(currentData, currentSunlight, intensityCurrent), weatherPct);
+			renderData.intensity *= std::clamp(targetBrightness / blendedBrightness, 0.0f, MaxTransitionCorrection);
+		}
+	}
+
+	writtenRenderData = renderData;
+	hasWrittenRenderData = true;
 }
 
 VolumetricLighting::VolumetricLightingDescriptor& VolumetricLighting::GetVLDescriptor()

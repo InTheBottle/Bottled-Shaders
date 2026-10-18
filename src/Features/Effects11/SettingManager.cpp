@@ -300,7 +300,7 @@ T SettingManager::GetValue(uint32_t id, bool rawValue)
 }
 
 template <typename T>
-T SettingManager::GetValueInternal(uint32_t id, bool rawValue) const
+T SettingManager::GetValueInternal(uint32_t id, bool rawValue, float weatherBlendOverride) const
 {
 	if (id >= allSettings.size()) {
 		return T{};
@@ -332,11 +332,12 @@ T SettingManager::GetValueInternal(uint32_t id, bool rawValue) const
 			SettingValue currentValue = ResolveWeatherValue(currentWeatherID, id);
 			SettingValue lastValue = ResolveWeatherValue(lastWeatherID, id);
 
+			const float blend = weatherBlendOverride >= 0.0f ? weatherBlendOverride : weatherBlendFactor;
 			if (rawValue) {
-				return safeGet(weatherBlendFactor > 0.5f ? currentValue : lastValue);
+				return safeGet(blend > 0.5f ? currentValue : lastValue);
 			}
 
-			SettingValue blendedValue = InterpolateValues(lastValue, currentValue, weatherBlendFactor);
+			SettingValue blendedValue = InterpolateValues(lastValue, currentValue, blend);
 			return safeGet(blendedValue);
 		}
 	}
@@ -432,6 +433,15 @@ float SettingManager::GetInterpolatedTimeOfDayValue(std::string_view key, std::s
 		return 0.0f;
 	TimeOfDayValue timeOfDayValue = GetValueInternal<TimeOfDayValue>(id);
 	return ComputeTimeOfDayInterpolation(timeOfDayValue);
+}
+
+float SettingManager::GetInterpolatedTimeOfDayValueAtWeatherBlend(std::string_view key, std::string_view category, float weatherBlend)
+{
+	std::shared_lock lock(mutex);
+	uint32_t id = GetSettingIDInternal(key, category);
+	if (id == 0xFFFFFFFF)
+		return 0.0f;
+	return ComputeTimeOfDayInterpolation(GetValueInternal<TimeOfDayValue>(id, false, std::clamp(weatherBlend, 0.0f, 1.0f)));
 }
 
 float3 SettingManager::GetInterpolatedColorTimeOfDayValue(std::string_view key, std::string_view category)
@@ -1211,10 +1221,10 @@ template void SettingManager::SetValue<float>(uint32_t id, const float& value);
 template void SettingManager::SetValue<TimeOfDayValue>(uint32_t id, const TimeOfDayValue& value);
 template void SettingManager::SetValue<ColorTimeOfDayValue>(uint32_t id, const ColorTimeOfDayValue& value);
 
-template bool SettingManager::GetValueInternal<bool>(uint32_t id, bool rawValue) const;
-template float SettingManager::GetValueInternal<float>(uint32_t id, bool rawValue) const;
-template TimeOfDayValue SettingManager::GetValueInternal<TimeOfDayValue>(uint32_t id, bool rawValue) const;
-template ColorTimeOfDayValue SettingManager::GetValueInternal<ColorTimeOfDayValue>(uint32_t id, bool rawValue) const;
+template bool SettingManager::GetValueInternal<bool>(uint32_t id, bool rawValue, float weatherBlendOverride) const;
+template float SettingManager::GetValueInternal<float>(uint32_t id, bool rawValue, float weatherBlendOverride) const;
+template TimeOfDayValue SettingManager::GetValueInternal<TimeOfDayValue>(uint32_t id, bool rawValue, float weatherBlendOverride) const;
+template ColorTimeOfDayValue SettingManager::GetValueInternal<ColorTimeOfDayValue>(uint32_t id, bool rawValue, float weatherBlendOverride) const;
 
 template void SettingManager::SetValueInternal<bool>(uint32_t id, const bool& value);
 template void SettingManager::SetValueInternal<float>(uint32_t id, const float& value);

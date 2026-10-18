@@ -157,7 +157,7 @@ public:
 		uint GameVolumetricRaysDisableDithering;
 		float2 GameVolumetricRaysPad0;
 
-		float3 GameVolumetricRaysLightScale;
+		float3 GameVolumetricRaysSunColor;
 		float GameVolumetricRaysCustomContribution;
 
 		float3 GameVolumetricRaysCustomColor;
@@ -168,7 +168,7 @@ public:
 	static_assert(offsetof(PerFrame, VolumetricFogColorFilter) % 16 == 0);
 	static_assert(offsetof(PerFrame, VolumetricRaysSkyColor) % 16 == 0);
 	static_assert(offsetof(PerFrame, VolumetricRaysSampleCount) % 16 == 0);
-	static_assert(offsetof(PerFrame, GameVolumetricRaysLightScale) % 16 == 0);
+	static_assert(offsetof(PerFrame, GameVolumetricRaysSunColor) % 16 == 0);
 	static_assert(offsetof(PerFrame, GameVolumetricRaysCustomColor) % 16 == 0);
 	static_assert(offsetof(PerFrame, EnableCloudsScattering) % 16 == 0);
 	static_assert(offsetof(PerFrame, SkyScatteringColor) % 16 == 0);
@@ -206,7 +206,14 @@ public:
 
 	float3 scatteringSunColor = { 1.0f, 1.0f, 1.0f };
 	float3 scatteringSunDirection = { 0.0f, 0.0f, 1.0f };
-	float3 directLightingUngradeScale = { 1.0f, 1.0f, 1.0f };
+	float3 ungradedSunlight = { 0.0f, 0.0f, 0.0f };
+	float3 gradedSunlight = { 0.0f, 0.0f, 0.0f };
+	bool sunlightGraded = false;
+	float3 volumetricSunColor = { 0.0f, 0.0f, 0.0f };
+
+	bool gameVolumetricRaysIntensityApplied = false;
+	float gameVolumetricRaysIntensityLast = 1.0f;
+	float gameVolumetricRaysIntensityCurrent = 1.0f;
 
 	PerFrame GetCommonBufferData();
 	void UpdateSkyScattering(PerFrame& a_data);
@@ -228,6 +235,13 @@ public:
 	void DrawSunRays();
 
 	void OnSkyUpdateColors(RE::Sky* a_sky);
+	/** @brief Records the sunlight the game volumetric lighting should use: ungraded, but with the dims applied after grading. Runs after Sky Sync's dim. */
+	void FinishSkyUpdateColors(RE::Sky* a_sky);
+	/**
+	 * @brief The [GAMEVOLUMETRICRAYS] Intensity of the last and current weather, if this tick multiplied it into the game volumetric lighting.
+	 * @return False when Effects 11 left the intensity alone this tick.
+	 */
+	bool GetGameVolumetricRaysIntensityEndpoints(float& a_last, float& a_current) const;
 	virtual void DataLoaded() override;
 	void UpdateNightEye();
 	bool IsNightEyeActive() const { return nightEye.active; }

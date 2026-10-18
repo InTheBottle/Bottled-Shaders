@@ -75,6 +75,24 @@ public:
 	/** @brief 1 when this frame's sunlight was rebuilt from night colours, else 0, so light grading can follow it. */
 	float GetLightNightWeight() const { return lightNightWeight; }
 
+	/** @brief True when this frame's VL was rebuilt from the weathers' night VL. */
+	bool IsNightVolumetricLightingApplied() const { return nightVolumetricLightingApplied; }
+
+	/** @brief The factor this frame's sunlight was dimmed by, lightning excluded; 1 when nothing was dimmed. */
+	float GetAppliedSunlightFactor() const { return appliedSunlightFactor; }
+
+	/**
+	 * @brief True while an Effects 11 preset is active. Sky Sync then only moves the light with the sun and moons and
+	 *        leaves the light colour, the horizon dim and volumetric lighting to the preset.
+	 */
+	bool IsEffects11Active() const;
+
+	/** @brief The engine's VL fallback for weathers without a VL form, read from the fVolumetricLighting*:Display INI settings. */
+	static RE::BSVolumetricLightingRenderData GetDefaultVolumetricLighting();
+
+	/** @brief Blends the current and last weathers' night VL with the given weights, as vanilla's time-of-day VL blend does. */
+	static RE::BSVolumetricLightingRenderData BlendNightVolumetricLighting(const RE::Sky* sky, float currentWeight, float lastWeight);
+
 	/** @brief Installs rendering hooks and detects conflicting mods after plugin load. */
 	virtual void PostPostLoad() override;
 	/** @brief Checks for conflicting ESP files after game data is loaded. */
@@ -211,6 +229,8 @@ private:
 	float moonNightWeight = 0.0f;
 	float lightNightWeight = 0.0f;
 	float flashWeight = 0.0f;  // lightning's share of this frame's directional light
+	float appliedSunlightFactor = 1.0f;
+	bool nightVolumetricLightingApplied = false;
 	bool sunBelowHorizon = false;
 	ShadowFader shadowFader;
 
@@ -262,12 +282,6 @@ private:
 
 	/** @brief The lightning flash Sky::UpdateColors adds to the directional light, 0 during weather transitions as in vanilla. */
 	static float GetDirectionalFlash(const RE::Sky* sky);
-
-	/** @brief The engine's VL fallback for weathers without a VL form, read from the fVolumetricLighting*:Display INI settings. */
-	static RE::BSVolumetricLightingRenderData GetDefaultVolumetricLighting();
-
-	/** @brief Blends the current and last weathers' night VL with the given weights, as vanilla's time-of-day VL blend does. */
-	static RE::BSVolumetricLightingRenderData BlendNightVolumetricLighting(const RE::Sky* sky, float currentWeight, float lastWeight);
 
 	void ProcessSun(const RE::Sky* sky, const RE::NiPoint3& sunDir, float sunHeight, RE::NiPoint3 dirs[], float intensities[]);
 

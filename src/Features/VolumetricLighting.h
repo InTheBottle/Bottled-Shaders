@@ -79,8 +79,9 @@ public:
 	/**
 	 * @brief Returns the engine's volumetric lighting render data for the current weather and time of day.
 	 *
-	 * The engine rewrites this from the active weather's BGSVolumetricLighting records on every
-	 * Sky::UpdateColors, so writes to it are frame-local and never mutate form data.
+	 * The engine rewrites this from the weathers' BGSVolumetricLighting records in Sky::UpdateWeather, but only
+	 * under a full sky with a climate. BeginSkyUpdate restores it elsewhere, so per-tick writes never stack and
+	 * never mutate form data.
 	 */
 	static RE::BSVolumetricLightingRenderData& GetRenderData();
 	/** @brief Splits the god ray strength between the interpolated render data and the sun-focused shader lobe. */
@@ -91,6 +92,16 @@ public:
 	 *       under GodRayPriority::Effects11. Always true while this feature is unloaded.
 	 */
 	bool ClaimEffects11Intensity();
+
+	/** @brief Restores the engine's render data when the engine skipped this tick's rewrite, so the per-tick multipliers never stack. Call before any of them. */
+	void BeginSkyUpdate();
+
+	/**
+	 * @brief Rescales a weather transition's intensity so the brightness blends between the two weathers instead of overshooting both.
+	 * @param a_sky The sky whose weather transition is corrected.
+	 * @note Call after every per-tick multiplier. Also records the result, which BeginSkyUpdate compares against.
+	 */
+	void FinishSkyUpdate(RE::Sky* a_sky);
 
 	/**
 	 * @brief Creates a BSImagespaceShader wrapping a compute shader for volumetric lighting passes.
@@ -189,6 +200,9 @@ private:
 	static constexpr float MaxGodRayLobeExponentLog2 = 7.0f;
 
 	bool effects11DroveIntensity = false;
+	RE::BSVolumetricLightingRenderData engineRenderData{};
+	RE::BSVolumetricLightingRenderData writtenRenderData{};
+	bool hasWrittenRenderData = false;
 	GodRayBufferData godRayBufferData{ 0.0f, 1.0f, { 0.0f, 0.0f } };
 
 	TextureSize exteriorSizeInUnits;

@@ -27,6 +27,26 @@ void copyString(const std::string& input, char* dst, size_t dst_size)
 	dst[dst_size - 1] = '\0';
 }
 
+static bool IsObjectLODTree(const char* a_name, const RE::BSShaderProperty* a_property)
+{
+	if (!a_name)
+		return false;
+	if (_strnicmp(a_name, "treepassthru", 12) == 0)
+		return true;
+	if (!a_property || !a_property->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kTwoSided))
+		return false;
+
+	std::string_view name(a_name);
+	constexpr std::string_view largeRef = "-LargeRef";
+	if (name.size() > largeRef.size() && _strnicmp(name.data() + name.size() - largeRef.size(), largeRef.data(), largeRef.size()) == 0)
+		name.remove_suffix(largeRef.size());
+	for (const std::string_view category : { "obj"sv, "objHD"sv, "objpassthru"sv }) {
+		if (name.size() == category.size() && _strnicmp(name.data(), category.data(), name.size()) == 0)
+			return true;
+	}
+	return false;
+}
+
 void SnowCover::DrawSettings()
 {
 	ImGui::Checkbox("Enable Nicer Foliage", (bool*)&settings.EnableExpensiveFoliage);
@@ -1076,7 +1096,7 @@ void SnowCover::BSLightingShader_Setup(RE::BSRenderPass* a_pass)
 	else
 		state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::SnowRooftop;
 
-	if (name && _strnicmp(name, "treepassthru", 12) == 0)
+	if (!userData && IsObjectLODTree(name, a_pass->shaderProperty))
 		state->permutationData.ExtraShaderDescriptor |= (uint)State::ExtraShaderDescriptors::SnowLODTree;
 	else
 		state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::SnowLODTree;

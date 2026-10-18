@@ -149,6 +149,8 @@ public:
 	uint32_t GetSettingID(std::string_view key, std::string_view category) const;
 
 	float GetInterpolatedTimeOfDayValue(std::string_view key, std::string_view category);
+	/** @brief Like GetInterpolatedTimeOfDayValue, but at the given weather blend: 0 is the last weather, 1 the current one. */
+	float GetInterpolatedTimeOfDayValueAtWeatherBlend(std::string_view key, std::string_view category, float weatherBlend);
 	float3 GetInterpolatedColorTimeOfDayValue(std::string_view key, std::string_view category);
 
 	const Setting* GetSettingInfo(std::string_view key, std::string_view category) const;
@@ -237,7 +239,7 @@ private:
 	SettingValue ResolveWeatherValue(uint32_t weatherID, uint32_t settingID) const;
 
 	template <typename T>
-	T GetValueInternal(uint32_t id, bool rawValue = false) const;
+	T GetValueInternal(uint32_t id, bool rawValue = false, float weatherBlendOverride = -1.0f) const;
 	template <typename T>
 	void SetValueInternal(uint32_t id, const T& value);
 	uint32_t GetSettingIDInternal(std::string_view key, std::string_view category) const;

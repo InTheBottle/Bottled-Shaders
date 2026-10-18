@@ -36,9 +36,10 @@ PS_OUTPUT main(PS_INPUT input)
 	if (SharedData::enbSettings.Enable) {
 		// Preset intensities are far above vanilla, so the accumulated power must be capped or the rays become a flat veil
 		volumetricLightingPower = saturate(volumetricLightingPower);
-		// The game blends the custom colour with the sunlight, which Effects 11 has graded as direct lighting; undo that grade on the sunlight share
-		float3 customColorShare = SharedData::enbSettings.GameVolumetricRaysCustomColor * SharedData::enbSettings.GameVolumetricRaysCustomContribution;
-		volumetricLightingColor = (volumetricLightingColor - customColorShare) * SharedData::enbSettings.GameVolumetricRaysLightScale + customColorShare;
+		// The game blends the custom colour with the sunlight, which Effects 11 has graded as direct lighting; rebuild the sunlight share from the ungraded sunlight
+		float customContribution = SharedData::enbSettings.GameVolumetricRaysCustomContribution;
+		float3 customColorShare = SharedData::enbSettings.GameVolumetricRaysCustomColor * customContribution;
+		volumetricLightingColor = SharedData::enbSettings.GameVolumetricRaysSunColor * (1.0 - customContribution) + customColorShare;
 		volumetricLightingColor = lerp(volumetricLightingColor, dot(volumetricLightingColor, 1.0 / 3.0), SharedData::enbSettings.VolumetricRaysDesaturation);
 		volumetricLightingColor *= SharedData::enbSettings.VolumetricRaysColorFilter;
 	}

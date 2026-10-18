@@ -295,7 +295,7 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 
 	data.GameVolumetricRaysDisableDithering = settingManager.GetValue<bool>("DisableGameDithering", "GAMEVOLUMETRICRAYS");
 	const auto& gameVolumetricLighting = VolumetricLighting::GetRenderData();
-	data.GameVolumetricRaysLightScale = Util::IsInterior() ? float3{ 1.0f, 1.0f, 1.0f } : directLightingUngradeScale;
+	data.GameVolumetricRaysSunColor = volumetricSunColor;
 	data.GameVolumetricRaysCustomContribution = gameVolumetricLighting.customColor.contribution;
 	data.GameVolumetricRaysCustomColor = { gameVolumetricLighting.color.red, gameVolumetricLighting.color.green, gameVolumetricLighting.color.blue };
 
@@ -545,10 +545,9 @@ void Effects11::OverrideWeather(RE::Sky* a_sky)
 
 		sunGradingRatio = rawSunMean > minColorMean ? ColorMean(dirLightColorF3) / rawSunMean : 1.0f;
 
-		static constexpr float minGradedChannel = 1e-6f;
-		auto ungradeScale = [](float a_ungraded, float a_graded) { return a_graded > minGradedChannel ? a_ungraded / a_graded : 1.0f; };
-		directLightingUngradeScale = { ungradeScale(ungradedDirLightColor.x, dirLightColorF3.x), ungradeScale(ungradedDirLightColor.y, dirLightColorF3.y),
-			ungradeScale(ungradedDirLightColor.z, dirLightColorF3.z) };
+		ungradedSunlight = ungradedDirLightColor;
+		gradedSunlight = dirLightColorF3;
+		sunlightGraded = true;
 
 		dirLightColor = F3ToNi(dirLightColorF3);
 	}
@@ -708,8 +707,12 @@ void Effects11::OverrideWeather(RE::Sky* a_sky)
 		auto& volumetricLighting = VolumetricLighting::GetRenderData();
 		// Volumetric Lighting arbitrates the intensity when its own god ray strength slider is set
 		// to win; the sampling range is not contested and always follows the preset.
-		if (globals::features::volumetricLighting.ClaimEffects11Intensity())
+		if (globals::features::volumetricLighting.ClaimEffects11Intensity()) {
 			volumetricLighting.intensity *= settingManager.GetInterpolatedTimeOfDayValue("Intensity", "GAMEVOLUMETRICRAYS");
+			gameVolumetricRaysIntensityLast = settingManager.GetInterpolatedTimeOfDayValueAtWeatherBlend("Intensity", "GAMEVOLUMETRICRAYS", 0.0f);
+			gameVolumetricRaysIntensityCurrent = settingManager.GetInterpolatedTimeOfDayValueAtWeatherBlend("Intensity", "GAMEVOLUMETRICRAYS", 1.0f);
+			gameVolumetricRaysIntensityApplied = true;
+		}
 		volumetricLighting.samplingRepartition.rangeFactor *= settingManager.GetInterpolatedTimeOfDayValue("RangeFactor", "GAMEVOLUMETRICRAYS");
 	}
 }
@@ -866,10 +869,33 @@ void Effects11::UpdateNightEye()
 
 void Effects11::OnSkyUpdateColors(RE::Sky* a_sky)
 {
+	sunlightGraded = false;
+	gameVolumetricRaysIntensityApplied = false;
 	CheckCommonData();
 	UpdateNightEye();
 	if (enableEffect)
 		OverrideWeather(a_sky);
+}
+
+void Effects11::FinishSkyUpdateColors(RE::Sky* a_sky)
+{
+	if (!a_sky)
+		return;
+
+	const auto& sunlight = a_sky->skyColor[static_cast<uint>(RE::TESWeather::ColorTypes::kSunlight)];
+	volumetricSunColor = NiToF3(sunlight);
+	if (sunlightGraded && !Util::IsInterior())
+		volumetricSunColor += (ungradedSunlight - gradedSunlight) * globals::features::skySync.GetAppliedSunlightFactor();
+	volumetricSunColor = float3::Max(volumetricSunColor, float3::Zero);
+}
+
+bool Effects11::GetGameVolumetricRaysIntensityEndpoints(float& a_last, float& a_current) const
+{
+	if (!gameVolumetricRaysIntensityApplied)
+		return false;
+	a_last = gameVolumetricRaysIntensityLast;
+	a_current = gameVolumetricRaysIntensityCurrent;
+	return true;
 }
 
 bool Effects11::WantsTonemapOwnership()
