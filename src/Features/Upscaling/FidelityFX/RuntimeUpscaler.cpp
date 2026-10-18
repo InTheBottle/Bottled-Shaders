@@ -1554,6 +1554,7 @@ bool FidelityFX::DispatchRuntimeUpscalerSingle(uint32_t a_contextIndex, ID3D11Re
 		} else {
 			const uint64_t d3d11SubmitFence = runtimeFenceValue++;
 			DX::ThrowIfFailed(swapChain.d3d11Context->Signal(runtimeD3D11Fence.get(), d3d11SubmitFence));
+			swapChain.d3d11Context->Flush();
 			DX::ThrowIfFailed(swapChain.commandQueue->Wait(runtimeD3D12Fence.get(), d3d11SubmitFence));
 
 			DX::ThrowIfFailed(commandAllocator->Reset());
