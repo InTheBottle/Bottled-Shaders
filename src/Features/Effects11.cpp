@@ -751,9 +751,19 @@ void Effects11::OverrideAmbientLighting(DirectionalAmbientColors& DirectionalAmb
 	const float desaturation = settingManager.GetInterpolatedTimeOfDayValue("AmbientLightingDesaturation", "ENVIRONMENT");
 	const float intensity = settingManager.GetInterpolatedTimeOfDayValue("AmbientLightingIntensity", "ENVIRONMENT");
 
+	float3 constantTerm = {};
+	for (const auto& axis : DirectionalAmbientColors.directionalAmbientColors) {
+		for (const auto& ambientLightingColor : axis)
+			constantTerm += NiToF3(ambientLightingColor);
+	}
+	constantTerm /= 6.0f;
+
+	const float constantMean = ColorMean(constantTerm);
+	const float3 constantShift = float3::Lerp(constantTerm, { constantMean, constantMean, constantMean }, desaturation) - constantTerm;
+
 	for (auto& axis : DirectionalAmbientColors.directionalAmbientColors) {
 		for (auto& ambientLightingColor : axis)
-			ambientLightingColor = F3ToNi(Intensity(Desaturation(NiToF3(ambientLightingColor), desaturation), intensity));
+			ambientLightingColor = F3ToNi(Intensity(NiToF3(ambientLightingColor) + constantShift, intensity));
 	}
 }
 

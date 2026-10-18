@@ -76,7 +76,8 @@ public:
 		float SkyIBLSaturation;
 		float FogAmount;
 		uint DALCMode;
-		float pad0[2];
+		float AdditiveAmount;
+		float ReflectiveAmount;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
 
