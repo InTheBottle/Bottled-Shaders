@@ -11,7 +11,7 @@ If you would like to contribute to Bottled Shaders, you can do so by raising a p
 
 New features should offer functionality to end-users. Backend systems for other features are not considered features.
 
-All contributions fall under this project's license, GPL-3.0 or later.
+All contributions fall under this project's license, GPL-3.0 with the exceptions in EXCEPTIONS.md.
 
 ## AI Usage
 
