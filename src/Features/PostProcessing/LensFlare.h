@@ -36,15 +36,15 @@ struct LensFlare : public PostProcessFeature
 
 	struct Settings
 	{
-		float Intensity = 0.1f;
+		float Intensity = 0.25f;
 		float ThresholdEV = 3.0f;  // EV100-based threshold (converted to linear luminance for shader)
 		float ThresholdRange = 1.0f;
 		float GhostStrength = 0.3f;
 		float GhostChromaShift = 0.015f;
-		int GhostModeInt = 0;  // 0 = Fast, 1 = Quality, 2 = Ultra
-		int FFTResolution = 256;
+		int GhostModeInt = 1;  // 0 = Fast, 1 = Quality, 2 = Ultra
+		int FFTResolution = 512;
 		float KernelScale = 0.1f;      // Fraction of FFT resolution for bokeh kernel size
-		float FStop = 2.8f;            // F-number for procedural aperture (e.g. F2.8)
+		float FStop = 14.3f;           // F-number for procedural aperture (e.g. F2.8)
 		int ApertureBlades = 6;        // Number of aperture blades (3-10)
 		float ApertureRotation = 0.f;  // Aperture rotation in degrees
 		float HaloStrength = 0.2f;
@@ -130,7 +130,6 @@ struct LensFlare : public PostProcessFeature
 
 	// FFT ghost pipeline textures
 	eastl::unique_ptr<Texture2D> texFFT[2] = {};          // RG32F ping-pong (N×N)
-	eastl::unique_ptr<Texture2D> texBokehFFT = nullptr;   // RG32F cached bokeh kernel FFT (N×N)
 	eastl::unique_ptr<Texture2D> texSceneFFT = nullptr;   // RG32F cached scene FFT (N×N)
 	eastl::unique_ptr<Texture2D> texFFTResult = nullptr;  // RGBA16F FFT convolution result (N×N)
 
@@ -145,10 +144,11 @@ struct LensFlare : public PostProcessFeature
 	winrt::com_ptr<ID3D11ComputeShader> mixCS = nullptr;
 
 	// FFT ghost pipeline shaders (self-contained in lensflare_fft.cs.hlsl)
-	winrt::com_ptr<ID3D11ComputeShader> fftRowCS = nullptr;
-	winrt::com_ptr<ID3D11ComputeShader> fftColCS = nullptr;
-	winrt::com_ptr<ID3D11ComputeShader> fftRowInvCS = nullptr;
-	winrt::com_ptr<ID3D11ComputeShader> fftColInvCS = nullptr;
+	static constexpr uint FFT_VARIANT_COUNT = 4;
+	std::array<winrt::com_ptr<ID3D11ComputeShader>, FFT_VARIANT_COUNT> fftRowCS = {};
+	std::array<winrt::com_ptr<ID3D11ComputeShader>, FFT_VARIANT_COUNT> fftColCS = {};
+	std::array<winrt::com_ptr<ID3D11ComputeShader>, FFT_VARIANT_COUNT> fftRowInvCS = {};
+	std::array<winrt::com_ptr<ID3D11ComputeShader>, FFT_VARIANT_COUNT> fftColInvCS = {};
 	winrt::com_ptr<ID3D11ComputeShader> fftMultiplyCS = nullptr;
 	winrt::com_ptr<ID3D11ComputeShader> bokehPrepareCS = nullptr;
 	winrt::com_ptr<ID3D11ComputeShader> fftThresholdCS = nullptr;
@@ -173,10 +173,22 @@ struct LensFlare : public PostProcessFeature
 	virtual inline void Reset() override { bokehFFTDirty = true; }
 
 private:
+	struct BokehFFTCache
+	{
+		eastl::unique_ptr<Texture2D> texture = nullptr;
+		float kernelScale = 0.f;
+		float apertureSize = 0.f;
+		float apertureRotation = 0.f;
+		int apertureBlades = 0;
+		bool valid = false;
+	};
+	std::array<BokehFFTCache, MAX_KERNEL_GROUPS> bokehFFTCache = {};
+
+	bool FFTShadersReady(uint resolution) const;
 	void DispatchFFT(ID3D11ComputeShader* shader, Texture2D* input, Texture2D* output, uint resolution);
 	void DrawFast(TextureInfo& inout_tex, LensFlareCB& data);
 	void DrawQuality(TextureInfo& inout_tex, LensFlareCB& data);
-	void PrepareBokehFFT();
+	void PrepareBokehFFT(BokehFFTCache& cache, const LensFlareCB& data);
 };
 
 inline PostProcessFeature::TextureInfo LensFlare::GetFlareOutput() const { return outputReady ? TextureInfo{ texFlare->resource.get(), texFlare->srv.get() } : TextureInfo{}; }

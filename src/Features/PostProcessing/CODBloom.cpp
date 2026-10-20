@@ -35,7 +35,7 @@ void CODBloom::DrawSettings()
 	}
 	ImGui::Unindent();
 
-	if (ImGui::CollapsingHeader(T("feature.post_processing.codbloom.debug", "Debug"))) {
+	if (Util::ShowDebugSections() && ImGui::CollapsingHeader(T("feature.post_processing.codbloom.debug", "Debug"))) {
 		static int mip = 0;
 		ImGui::SliderInt(T("feature.post_processing.codbloom.debug_mip_level", "Debug Mip Level"), &mip, 0, (int)s_BloomMips - 1, "%d", ImGuiSliderFlags_NoInput | ImGuiSliderFlags_AlwaysClamp);
 
@@ -99,7 +99,7 @@ void CODBloom::SetupResources()
 			};
 			texBloomMipSRVs[i] = nullptr;
 			DX::ThrowIfFailed(device->CreateShaderResourceView(texBloom->resource.get(), &mipSrvDesc, texBloomMipSRVs[i].put()));
-			Util::SetResourceName(texBloomMipSRVs[i].get(), "CODBloom::Bloom SRV mip%d", i);
+			Util::SetResourceName(texBloomMipSRVs[i].get(), "CODBloom::Bloom SRV mip%u", i);
 		}
 
 		// RTV for each mip
@@ -111,15 +111,8 @@ void CODBloom::SetupResources()
 			};
 			texBloomMipRTVs[i] = nullptr;
 			DX::ThrowIfFailed(device->CreateRenderTargetView(texBloom->resource.get(), &mipRtvDesc, texBloomMipRTVs[i].put()));
-			Util::SetResourceName(texBloomMipRTVs[i].get(), "CODBloom::Bloom RTV mip%d", i);
+			Util::SetResourceName(texBloomMipRTVs[i].get(), "CODBloom::Bloom RTV mip%u", i);
 		}
-
-		// Composite samples mip 0 as soon as this pass is enabled, which can be before the
-		// bloom shaders finish compiling and produce anything.
-		auto context = globals::d3d::context;
-		const FLOAT clearColor[4] = { 0.f, 0.f, 0.f, 0.f };
-		for (uint i = 0; i < s_BloomMips; i++)
-			context->ClearRenderTargetView(texBloomMipRTVs[i].get(), clearColor);
 	}
 
 	logger::debug("Creating samplers...");

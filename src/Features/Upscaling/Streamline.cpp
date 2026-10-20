@@ -373,7 +373,7 @@ bool Streamline::CheckFrameConstants(sl::ViewportHandle p_viewport)
 	const uint32_t constantsFrame = globals::state->frameCount;
 	const bool constantsGap = lastConstantsFrame == UINT32_MAX || constantsFrame - lastConstantsFrame > 1;
 	const bool sceneCut = globals::state->IsMainOrLoadingMenuOpen();
-	slConstants.reset = (sceneCut || constantsResetPending || constantsGap) ? sl::Boolean::eTrue : sl::Boolean::eFalse;
+	slConstants.reset = (sceneCut || constantsResetPending || constantsGap || globals::state->ShouldResetHistory()) ? sl::Boolean::eTrue : sl::Boolean::eFalse;
 	constantsResetPending = sceneCut;
 	lastConstantsFrame = constantsFrame;
 

@@ -1,7 +1,7 @@
 #ifndef __EXPONENTIAL_HEIGHT_FOG_HLSLI__
 #define __EXPONENTIAL_HEIGHT_FOG_HLSLI__
 
-#include "Common/Color.hlsli"
+#include "Common/ColorManagement.hlsli"
 #include "Common/Math.hlsli"
 #include "Common/Random.hlsli"
 #include "Common/SharedData.hlsli"
@@ -210,7 +210,7 @@ namespace ExponentialHeightFog
 			fogInscatteringColor = GetFogAmbientColor(viewToPosLength);
 		} else if (SharedData::exponentialHeightFogSettings.originalFogColorAmount > 0.0f) {
 			if (!SharedData::InInterior) {
-				fogColor = Color::Fog(SharedData::exponentialHeightFogSettings.vanillaFogNearColor.rgb);
+				fogColor = ColorManagement::SRGBToWorking(SharedData::exponentialHeightFogSettings.vanillaFogNearColor.rgb);
 #if defined(IBL)
 				if (SharedData::iblSettings.EnableIBL) {
 					const float4 iblFogColor = ExponentialHeightFogIBLFogColor.Load(int3(0, 0, 0));

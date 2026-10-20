@@ -2,6 +2,7 @@
 
 #include "Features/ReverseZ.h"
 #include "Deferred.h"
+#include "Feature.h"
 #include "Features/TerrainBlending.h"
 #include "ShaderCache.h"
 #include "ShaderDDC.h"
@@ -254,6 +255,15 @@ namespace Util
 		if (!shaderDefines->empty()) {
 			for (unsigned int i = 0; i < shaderDefines->size(); i++)
 				macros.push_back({ shaderDefines->at(i).first.c_str(), shaderDefines->at(i).second.c_str() });
+		}
+
+		for (auto* feature : Feature::GetFeatureList()) {
+			if (!feature->loaded)
+				continue;
+			for (const auto& [name, value] : feature->GetCommonShaderDefines()) {
+				if (std::ranges::none_of(macros, [&](const auto& macro) { return name == macro.Name; }))
+					macros.push_back({ name.data(), value.empty() ? nullptr : value.data() });
+			}
 		}
 		if (!_stricmp(ProgramType, "ps_5_0"))
 			macros.push_back({ "PSHADER", "" });

@@ -32,9 +32,9 @@ public:
 	static constexpr float kMinMotionStretch = 0.01f;
 	static constexpr float kMaxMotionStretch = 3.0f;
 	static constexpr float kMaxRefractionFactor = 2.0f;
-	static constexpr float kMaxMotionBluriness = 6.0f;
+	static constexpr float kMaxRefractionBlur = 1.0f;
 
-	/** @brief User settings, used while Effects 11 is not active; mirrors the preset's [RAIN] Enable, MotionStretch, MotionTransparency, RefractionFactor, MotionBluriness and EnableSupersampling. */
+	/** @brief User settings, used while Effects 11 is not active; mirrors the preset's [RAIN] Enable, MotionStretch, MotionTransparency, RefractionFactor and MotionBluriness. */
 	struct Settings
 	{
 		bool Enable = true;
@@ -42,8 +42,7 @@ public:
 		float MotionTransparency = 0.91f;
 		bool ScreenRefraction = true;
 		float RefractionFactor = 1.0f;
-		float MotionBluriness = 1.0f;
-		bool Supersampling = false;
+		float RefractionBlur = 0.0f;
 	} settings;
 
 	/** @brief Feature buffer data, matching RainRefractionSettings in SharedData.hlsli; Enable is cleared when the raindrop texture or blend state is missing. */
@@ -56,7 +55,7 @@ public:
 		float RefractionFactor;
 		float MotionBluriness;
 		float Brightness;
-		uint Supersampling;
+		float pad0;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
 
@@ -96,11 +95,12 @@ public:
 private:
 	/** @brief Returns true when the current particle pass is rain and refractive rain is active this frame. */
 	bool IsRefractiveRainPass();
+	bool IsMainTargetBound() const;
 
-	/** @brief Copies the bound main render target into the mipmapped half resolution background, once per frame. */
+	/** @brief Copies the main render target into the mipmapped half resolution background, once per frame. */
 	void CaptureBackground();
-	/** @brief Creates the background texture and its downsample shader on first use; false if unsupported. */
-	bool EnsureBackgroundResources();
+	/** @brief Creates or resizes the background texture and creates its downsample shader on first use; false if unsupported. */
+	bool EnsureBackgroundResources(uint32_t a_width, uint32_t a_height);
 
 	winrt::com_ptr<ID3D11BlendState> alphaBlendState;
 

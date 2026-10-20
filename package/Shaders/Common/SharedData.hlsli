@@ -12,6 +12,10 @@
 
 namespace SharedData
 {
+	static const uint TonemapOwnerVanilla = 0;
+	static const uint TonemapOwnerPostProcessing = 1;
+	static const uint TonemapOwnerEffects11 = 2;
+
 	cbuffer SharedData : register(b5)
 	{
 		float4 WaterData[25];
@@ -34,7 +38,9 @@ namespace SharedData
 		bool HideSky;             // HideSky flag in WorldSpace, e.g. Blackreach
 		float MipBias;            // Offset to mip level for TAA sharpness
 		float WaterSystemHeight;  // TES::GetWaterHeight in camera-relative Z; -FLT_MAX when no water body found
-		float3 pad0;
+		uint PostWaterComposite;
+		uint ResetHistory;
+		uint TonemapOwner;
 		float4 AmbientSHR;
 		float4 AmbientSHG;
 		float4 AmbientSHB;
@@ -261,9 +267,9 @@ namespace SharedData
 		float EnvIBLSaturation;
 		float SkyIBLSaturation;
 		float FogAmount;
-		uint DALCMode;  // 0: Luminance Ratio, 1: Color Ratio, 2: DALC + Sky, 3: DALC + Sky (Directional)
+		uint DALCMode;       // 0: Luminance Ratio, 1: Color Ratio, 2: DALC + Sky, 3: DALC + Sky (Directional)
+		uint ENBSkyFalloff;  // Effects 11 owns IBL: darken sky irradiance from below
 		float pad0;
-		float pad1;
 	};
 
 	struct ExtendedTranslucencySettings
@@ -276,26 +282,11 @@ namespace SharedData
 
 	struct LinearLightingSettings
 	{
-		uint enableLinearLighting;
-		uint isDirLightLinear;
-		float dirLightMult;
-		float lightGamma;
-		float colorGamma;
-		float emitColorGamma;
-		float glowmapGamma;
-		float ambientGamma;
-		float fogGamma;
-		float fogAlphaGamma;
-		float effectGamma;
-		float effectAlphaGamma;
-		float skyGamma;
-		float waterGamma;
-		float vlGamma;
-		float vanillaDiffuseColorMult;
+		uint isMainOrLoadingMenu;
+		float diffuseGamma;
 		float directionalLightMult;
 		float pointLightMult;
 		float ambientMult;
-		float emitColorMult;
 		float glowmapMult;
 		float effectLightingMult;
 		float membraneEffectMult;
@@ -303,7 +294,14 @@ namespace SharedData
 		float projectedEffectMult;
 		float deferredEffectMult;
 		float otherEffectMult;
-		uint pad0;
+		float particleEffectMult;
+		float lightSpriteEffectMult;
+		float fireEffectMult;
+		float fireEffectCurve;
+		float diffuseCurve;
+		float diffuseWhiteReflectance;
+		float waterGamma;
+		float pad;
 	};
 
 	struct ENBSettings
@@ -606,12 +604,6 @@ namespace SharedData
 		float4 FireMeltSpheres[8];
 	};
 
-	struct PostProcessingSettings
-	{
-		uint DisableVanillaTonemapping;
-		uint3 pad0;
-	};
-
 	struct VolumetricLightingSettings
 	{
 		float GodRayGain;
@@ -648,7 +640,7 @@ namespace SharedData
 		float RefractionFactor;
 		float MotionBluriness;
 		float Brightness;
-		uint Supersampling;
+		float pad0;
 	};
 
 	cbuffer FeatureData : register(b6)
@@ -676,7 +668,6 @@ namespace SharedData
 		SkinData skinData;
 		VanillaFresnelSettings vanillaFresnelSettings;
 		SnowCoverSettings snowCoverSettings;
-		PostProcessingSettings postProcessingSettings;
 		VolumetricLightingSettings volumetricLightingSettings;
 		HorizonFixSettings horizonFixSettings;
 		HairBacklightingSettings hairBacklightingSettings;

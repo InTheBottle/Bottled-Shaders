@@ -327,7 +327,11 @@ void CalculateGI(
 	o_currGIAOSpecular = float4(radianceSpecular, visibilitySpecular);
 }
 
-[numthreads(8, 8, 1)] void main(const uint2 dtid : SV_DispatchThreadID) {
+#ifdef TEMPORAL_DENOISER
+groupshared float gsCurrAo[8][8];
+#endif
+
+[numthreads(8, 8, 1)] void main(const uint2 dtid : SV_DispatchThreadID, const uint2 gtid : SV_GroupThreadID) {
 	const float2 frameScale = FrameDim * RcpTexDim;
 
 	uint2 pxCoord = dtid;
@@ -359,13 +363,33 @@ void CalculateGI(
 		CalculateGI(
 			pxCoord, uv, viewspaceZ, viewspaceNormal,
 			currAo, currY, currCoCg, currGIAOSpecular);
+	}
 
 #ifdef TEMPORAL_DENOISER
+	gsCurrAo[gtid.y][gtid.x] = needGI ? currAo : -1.0;
+	GroupMemoryBarrierWithGroupSync();
+
+	if (needGI) {
 		float lerpFactor = rcp(srcAccumFrames[pxCoord] * 255);
 
 		float4 prevY = srcPrevY[pxCoord];
 		float2 prevCoCg = srcPrevCoCg[pxCoord];
-		float prevAo = srcPrevAo[pxCoord];
+
+		float aoMin = currAo;
+		float aoMax = currAo;
+		[unroll] for (int y = -1; y <= 1; y++)
+		{
+			[unroll] for (int x = -1; x <= 1; x++)
+			{
+				int2 neighbour = clamp(int2(gtid) + int2(x, y), 0, 7);
+				float neighbourAo = gsCurrAo[neighbour.y][neighbour.x];
+				if (neighbourAo >= 0.0) {
+					aoMin = min(aoMin, neighbourAo);
+					aoMax = max(aoMax, neighbourAo);
+				}
+			}
+		}
+		float prevAo = clamp(srcPrevAo[pxCoord], aoMin, aoMax);
 
 		// Clamp history to the local color neighbourhood to prevent ghosting
 		// and reduce pops when disocclusion fires (SVGF, Schied 2017).
@@ -390,12 +414,6 @@ void CalculateGI(
 
 			prevY = clamp(prevY, nMinY, nMaxY);
 			prevCoCg = clamp(prevCoCg, nMinCoCg, nMaxCoCg);
-
-			float aoL = srcPrevAo[pxCoord + int2(-1, 0)];
-			float aoR = srcPrevAo[pxCoord + int2(1, 0)];
-			float aoU = srcPrevAo[pxCoord + int2(0, -1)];
-			float aoD = srcPrevAo[pxCoord + int2(0, 1)];
-			prevAo = clamp(prevAo, min(min(min(aoL, aoR), min(aoU, aoD)), currAo), max(max(max(aoL, aoR), max(aoU, aoD)), currAo));
 		}
 
 		currAo = lerp(prevAo, currAo, lerpFactor);
@@ -404,8 +422,8 @@ void CalculateGI(
 #	ifdef GI_SPECULAR
 		currGIAOSpecular = lerp(srcPrevGISpecular[pxCoord], currGIAOSpecular, lerpFactor);
 #	endif
-#endif
 	}
+#endif
 	currY = filterNaN(currY);
 	currCoCg = filterNaN(currCoCg);
 	currGIAOSpecular = filterNaN(currGIAOSpecular);

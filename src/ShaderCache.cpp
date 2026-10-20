@@ -175,6 +175,13 @@ namespace SIE
 					if ((noSnowCover && feature == &globals::features::snowCover) || (noWetness && feature == &globals::features::wetnessEffects))
 						continue;
 					defines[lastIndex++] = { feature->GetShaderDefineName().data(), nullptr };
+					auto options = feature->GetShaderDefineOptions();
+					if (!options.empty()) {
+						for (auto& option : options) {
+							const char* definition = option.second.empty() ? nullptr : option.second.data();
+							defines[lastIndex++] = { option.first.data(), definition };
+						}
+					}
 				}
 			}
 			if (globals::features::lightLimitFix.loaded && globals::features::lightLimitFix.AreContactShadowsCompiled())
@@ -195,6 +202,13 @@ namespace SIE
 			for (auto* feature : Feature::GetFeatureList()) {
 				if (feature->loaded && feature->HasShaderDefine(RE::BSShader::Type::BloodSplatter)) {
 					defines[lastIndex++] = { feature->GetShaderDefineName().data(), nullptr };
+					auto options = feature->GetShaderDefineOptions();
+					if (!options.empty()) {
+						for (auto& option : options) {
+							const char* definition = option.second.empty() ? nullptr : option.second.data();
+							defines[lastIndex++] = { option.first.data(), definition };
+						}
+					}
 				}
 			}
 
@@ -219,6 +233,13 @@ namespace SIE
 			for (auto* feature : Feature::GetFeatureList()) {
 				if (feature->loaded && feature->HasShaderDefine(RE::BSShader::Type::DistantTree)) {
 					defines[lastIndex++] = { feature->GetShaderDefineName().data(), nullptr };
+					auto options = feature->GetShaderDefineOptions();
+					if (!options.empty()) {
+						for (auto& option : options) {
+							const char* definition = option.second.empty() ? nullptr : option.second.data();
+							defines[lastIndex++] = { option.first.data(), definition };
+						}
+					}
 				}
 			}
 
@@ -295,6 +316,13 @@ namespace SIE
 			for (auto* feature : Feature::GetFeatureList()) {
 				if (feature->loaded && feature->HasShaderDefine(RE::BSShader::Type::Sky)) {
 					defines[lastIndex++] = { feature->GetShaderDefineName().data(), nullptr };
+					auto options = feature->GetShaderDefineOptions();
+					if (!options.empty()) {
+						for (auto& option : options) {
+							const char* definition = option.second.empty() ? nullptr : option.second.data();
+							defines[lastIndex++] = { option.first.data(), definition };
+						}
+					}
 				}
 			}
 
@@ -318,6 +346,13 @@ namespace SIE
 			for (auto* feature : Feature::GetFeatureList()) {
 				if (feature->loaded && feature->HasShaderDefine(RE::BSShader::Type::Grass)) {
 					defines[lastIndex++] = { feature->GetShaderDefineName().data(), nullptr };
+					auto options = feature->GetShaderDefineOptions();
+					if (!options.empty()) {
+						for (auto& option : options) {
+							const char* definition = option.second.empty() ? nullptr : option.second.data();
+							defines[lastIndex++] = { option.first.data(), definition };
+						}
+					}
 				}
 			}
 
@@ -364,6 +399,13 @@ namespace SIE
 			for (auto* feature : Feature::GetFeatureList()) {
 				if (feature->loaded && feature->HasShaderDefine(RE::BSShader::Type::Particle)) {
 					defines[lastIndex++] = { feature->GetShaderDefineName().data(), nullptr };
+					auto options = feature->GetShaderDefineOptions();
+					if (!options.empty()) {
+						for (auto& option : options) {
+							const char* definition = option.second.empty() ? nullptr : option.second.data();
+							defines[lastIndex++] = { option.first.data(), definition };
+						}
+					}
 				}
 			}
 
@@ -460,6 +502,13 @@ namespace SIE
 			for (auto* feature : Feature::GetFeatureList()) {
 				if (feature->loaded && feature->HasShaderDefine(RE::BSShader::Type::Effect)) {
 					defines[lastIndex++] = { feature->GetShaderDefineName().data(), nullptr };
+					auto options = feature->GetShaderDefineOptions();
+					if (!options.empty()) {
+						for (auto& option : options) {
+							const char* definition = option.second.empty() ? nullptr : option.second.data();
+							defines[lastIndex++] = { option.first.data(), definition };
+						}
+					}
 				}
 			}
 
@@ -525,6 +574,13 @@ namespace SIE
 			for (auto* feature : Feature::GetFeatureList()) {
 				if (feature->loaded && feature->HasShaderDefine(RE::BSShader::Type::Water)) {
 					defines[lastIndex++] = { feature->GetShaderDefineName().data(), nullptr };
+					auto options = feature->GetShaderDefineOptions();
+					if (!options.empty()) {
+						for (auto& option : options) {
+							const char* definition = option.second.empty() ? nullptr : option.second.data();
+							defines[lastIndex++] = { option.first.data(), definition };
+						}
+					}
 				}
 			}
 
@@ -1161,7 +1217,8 @@ namespace SIE
 			std::string result;
 			if (a_sort)
 				std::sort(std::begin(defines), std::end(defines), [](const D3D_SHADER_MACRO& a, const D3D_SHADER_MACRO& b) {
-					return a.Name > b.Name;
+					return std::pair{ std::string_view(a.Name ? a.Name : ""), std::string_view(a.Definition ? a.Definition : "") } <
+					       std::pair{ std::string_view(b.Name ? b.Name : ""), std::string_view(b.Definition ? b.Definition : "") };
 				});
 			for (const auto& def : defines) {
 				if (def.Name != nullptr) {
@@ -1172,7 +1229,7 @@ namespace SIE
 					}
 					result += ' ';
 				} else {
-					if (a_sort)  // sometimes the sort messes up so null entries get interspersed
+					if (a_sort)
 						continue;
 					break;
 				}
@@ -1959,6 +2016,18 @@ namespace SIE
 		return it != typeCache.end() ? it->second.get() : nullptr;
 	}
 
+	bool ShaderCache::HasPixelShaders(RE::BSShader::Type type, std::span<const uint32_t> descriptors)
+	{
+		if (type <= RE::BSShader::Type::None || type >= RE::BSShader::Type::Total)
+			return false;
+		std::lock_guard lockGuard(pixelShadersMutex);
+		const auto& typeCache = pixelShaders[static_cast<size_t>(type)];
+		return std::ranges::all_of(descriptors, [&](uint32_t descriptor) {
+			const auto it = typeCache.find(descriptor);
+			return it != typeCache.end() && it->second && it->second->shader;
+		});
+	}
+
 	RE::BSGraphics::ComputeShader* ShaderCache::GetComputeShader(const RE::BSShader& shader,
 		uint32_t descriptor)
 	{
@@ -2020,8 +2089,33 @@ namespace SIE
 		}
 	}
 
+	void ShaderCache::Reload(const std::function<void()>& activate)
+	{
+		const bool watch = UseFileWatcher();
+		if (watch)
+			StopFileWatcher();
+		managementJthread.request_stop();
+		if (managementJthread.joinable())
+			managementJthread.join();
+		compilationPool.wait();
+		activate();
+		Clear();
+		managementJthread = std::jthread([this](std::stop_token token) { ManageCompilationSet(token); });
+		if (watch) {
+			useFileWatcher = true;
+			StartFileWatcher();
+		}
+	}
+
 	void ShaderCache::Clear()
 	{
+		auto* state = globals::state;
+		if (globals::game::currentVertexShader && *globals::game::currentVertexShader == state->customVertexShader)
+			*globals::game::currentVertexShader = nullptr;
+		if (globals::game::currentPixelShader && *globals::game::currentPixelShader == state->customPixelShader)
+			*globals::game::currentPixelShader = nullptr;
+		state->customVertexShader = nullptr;
+		state->customPixelShader = nullptr;
 		ShaderDDC::InvalidateSources();
 		{
 			std::lock_guard lockGuardV(vertexShadersMutex);
@@ -2423,6 +2517,14 @@ namespace SIE
 		StandaloneShaderClass shaderClass,
 		StandaloneShaderReadyCallback onReady)
 	{
+		for (auto* feature : Feature::GetFeatureList()) {
+			if (!feature->loaded)
+				continue;
+			for (const auto& [name, value] : feature->GetCommonShaderDefines()) {
+				if (std::ranges::none_of(defines, [&](const auto& macro) { return macro.first && name == macro.first; }))
+					defines.emplace_back(name.data(), value.empty() ? nullptr : value.data());
+			}
+		}
 		compilationSet.EnqueueAux(
 			[this, sourcePath = std::move(sourcePath), entryPoint = std::move(entryPoint),
 				defines = std::move(defines), shaderClass, onReady = std::move(onReady)]() mutable {
@@ -3686,6 +3788,7 @@ namespace SIE
 	{
 		std::scoped_lock lock(compilationMutex);
 		availableTasks.clear();
+		pendingAuxTasks.clear();
 		tasksInProgress.clear();
 		processedTasks.clear();
 		totalTasks = 0;

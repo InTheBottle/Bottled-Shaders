@@ -6,6 +6,7 @@
 #include "PostProcessing/Border.h"
 #include "PostProcessing/CODBloom.h"
 #include "PostProcessing/Camera.h"
+#include "PostProcessing/CinematicCamera.h"
 #include "PostProcessing/ColorGrading.h"
 #include "PostProcessing/Composite.h"
 #include "PostProcessing/DoF.h"
@@ -25,14 +26,6 @@ struct PostProcessing : Feature
 		return &singleton;
 	}
 
-	struct alignas(16) Settings
-	{
-		uint DisableVanillaTonemapping = 1;
-		uint pad[3];
-	} settings;
-
-	const std::string ppPresetPath = "Data\\SKSE\\Plugins\\CommunityShaders\\PostProcessing";
-
 	virtual inline std::string GetName() override { return "Post Processing"; }
 	virtual inline std::string GetDisplayName() override { return T("feature.post_processing.name", "Post Processing"); }
 	virtual inline std::string GetShortName() override { return "PostProcessing"; }
@@ -42,7 +35,6 @@ struct PostProcessing : Feature
 		return t == RE::BSShader::Type::ImageSpace;
 	};
 	virtual std::string_view GetCategory() const override { return FeatureCategories::kPostProcessing; }
-	virtual bool IsDisabledByDefault() const override { return true; }
 	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
 	{
 		return {
@@ -61,10 +53,6 @@ struct PostProcessing : Feature
 
 	/**
 	 * @brief Whether Post Processing wants to replace the vanilla tonemap this frame.
-	 *
-	 * Queried by State::GetTonemapOwner() to arbitrate against Effects11. Note this is
-	 * narrower than "is the pipeline active": with DisableVanillaTonemapping off the
-	 * pipeline still runs its effects and then hands off to the vanilla tonemap.
 	 */
 	bool WantsTonemapOwnership() const;
 
@@ -77,23 +65,21 @@ struct PostProcessing : Feature
 	bool IsTonemapOwnedByEffects11() const;
 
 	/**
-	 * @brief Builds the shared-buffer payload, masking flags the arbiter has revoked.
-	 *
-	 * DisableVanillaTonemapping is forced to 0 unless Post Processing actually owns the
-	 * tonemap, so ISHDR and HDROutputCS do not assume a linear, already-tonemapped scene
-	 * when another feature produced the image.
+	 * @brief Whether Color Grading wants Pumbo AutoHDR this frame (SDR tonemapper + HDR Display).
 	 */
-	Settings GetCommonBufferData();
+	bool WantsAutoHDR() const;
 
+	/// Settings loaded before the pipeline exists.
 	json pendingSettings = {};
 
 	void ProcessSettings(json& o_json);
 
-	std::vector<std::string> presets = {};
-	std::vector<std::string> LoadPresets();
-	void SavePresetTo(std::string a_name);
-	/** Loads a named preset. @return true when reading and applying both succeed. */
-	bool LoadPresetFrom(std::string a_name);
+	/// Sets each sub-feature's on/off state to the shipped default. Their values default to their
+	/// Settings initializers, so this and RestoreDefaultSettings need no defaults file.
+	void ApplyDefaultEnabledStates();
+
+	/** @brief Creates every sub-feature at its shipped defaults, without GPU resources. */
+	void BuildPipeline();
 
 	enum class FeaturePipelineIndex : size_t
 	{
@@ -113,10 +99,21 @@ struct PostProcessing : Feature
 		COUNT
 	};
 
+	void UpdateVanillaEffects(bool active);
+
 	/// shared_ptr, not unique_ptr: see PostProcessFeature's weak_ptr callback contract.
 	std::array<std::shared_ptr<PostProcessFeature>, static_cast<size_t>(FeaturePipelineIndex::COUNT)> pipeline;
 
 	BokehResources bokehResources;
+
+	CinematicCamera::Controller cinematicCamera;
+
+	[[nodiscard]] const CinematicCamera::PhysicalCameraState* GetActivePhysicalCameraState() const
+	{
+		return cinematicCamera.GetState();
+	}
+
+	[[nodiscard]] CinematicCamera::Controller& GetCinematicCamera() { return cinematicCamera; }
 
 	template <typename T>
 	T* GetPipelineFeature(FeaturePipelineIndex idx)
@@ -127,7 +124,6 @@ struct PostProcessing : Feature
 	virtual void ClearShaderCache() override;
 
 	virtual void SetupResources() override;
-	void EnsureEnabledResources();
 	virtual void Reset() override;
 
 	virtual void PostPostLoad() override;
@@ -138,11 +134,25 @@ struct PostProcessing : Feature
 	void ClearBorderMotionVectorsForFrameGen();
 	void DrawFeature(PostProcessFeature& feature, PostProcessFeature::TextureInfo& lastTexColor);
 
+	enum class Gamut : uint
+	{
+		Rec709,
+		ACEScg,
+		Rec2020
+	};
+	struct alignas(16) CopyCB
+	{
+		Gamut inputGamut = Gamut::Rec709;
+		Gamut outputGamut = Gamut::Rec709;
+		float gamma = 1.f;
+		float pad = 0.f;
+	};
+
 	/**
 	 * @brief Copies the pipeline output into a game render target, converting the
 	 *        format via the copyPS fullscreen pass when the formats differ.
 	 *
-	 * Same-format copies go through CopySubresourceRegion directly; otherwise the
+	 * Same-format, same-space copies use CopySubresourceRegion; otherwise the
 	 * source is rendered into convertTex first and then copied.
 	 *
 	 * @param targetRT  Game render target receiving the image.
@@ -154,7 +164,8 @@ struct PostProcessing : Feature
 		RE::BSGraphics::RenderTargetData& targetRT,
 		Texture2D* convertTex,
 		ID3D11Texture2D* srcTex,
-		ID3D11ShaderResourceView* srcSRV);
+		ID3D11ShaderResourceView* srcSRV, const CopyCB& conversion);
+	void BeginLinearProcessing(PostProcessFeature::TextureInfo& texture);
 
 	/////////////////////////////////////////////////////////////////////////////////
 
@@ -173,6 +184,8 @@ struct PostProcessing : Feature
 
 	/// Format-conversion copy pass (fullscreen triangle PS draw).
 	winrt::com_ptr<ID3D11PixelShader> copyPS = nullptr;
+	std::unique_ptr<ConstantBuffer> copyCB;
+	std::unique_ptr<Texture2D> texInput;
 
 	/// Shared fullscreen-triangle vertex shader for every raster pass in the
 	/// pipeline (compiled from PostProcessing/fullscreen.hlsli).

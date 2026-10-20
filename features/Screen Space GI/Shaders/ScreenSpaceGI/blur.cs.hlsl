@@ -108,6 +108,8 @@ float2x2 getRotationMatrix(float noise)
 	float2x3 TvBv = getKernelBasis(normal, normal);  // D = N
 	float halfAngle = Math::HALF_PI;
 
+	const float geometryScale = DistanceNormalisation * 0.5 / max(worldRadius, 1e-3);
+
 	TvBv[0] *= worldRadius;
 	TvBv[1] *= worldRadius;
 #ifdef TEMPORAL_DENOISER
@@ -145,7 +147,7 @@ float2x2 getRotationMatrix(float noise)
 		float3 normalSample = GBuffer::DecodeNormal(normalRoughnessSample.xy);
 
 		// geometry weight
-		w *= saturate(1 - abs(dot(normal, posSample - pos)) * DistanceNormalisation * 100.0 / max(pos.z, 1.0));
+		w *= saturate(1 - abs(dot(normal, posSample - pos)) * geometryScale);
 		// normal weight
 		w *= 1 - saturate(FastMath::acosFast4(saturate(dot(normalSample, normal))) / halfAngle);
 

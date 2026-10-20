@@ -148,7 +148,6 @@ public:
 
 		uint32_t enableRain = 0xFFFFFFFF;
 		uint32_t rainRefractionFactor = 0xFFFFFFFF;
-		uint32_t rainSupersampling = 0xFFFFFFFF;
 
 		uint32_t nightEyeEnable = 0xFFFFFFFF;
 		uint32_t nightEyeFadeTime = 0xFFFFFFFF;

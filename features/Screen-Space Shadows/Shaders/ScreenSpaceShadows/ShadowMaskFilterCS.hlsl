@@ -21,19 +21,14 @@ cbuffer ShadowMaskFilterCB : register(b0)
 	float2 pad0;
 };
 
-static const int2 PinwheelCorners[4] = {
-	int2(1, 2),
-	int2(-1, 1),
-	int2(0, -1),
-	int2(2, 0)
-};
+static const int GroupSize = 8;
+static const int FilterRadius = 2;
+static const int TileSize = GroupSize + 2 * FilterRadius;
+static const float SpatialSigma = 1.5;
+static const float RelativeDepthTolerance = 0.015;
 
-static const int2 CornerTexels[4] = {
-	int2(-1, -1),
-	int2(0, -1),
-	int2(-1, 0),
-	int2(0, 0)
-};
+groupshared float TileDepth[TileSize * TileSize];
+groupshared float4 TileMask[TileSize * TileSize];
 
 int2 ClampToRender(int2 texel)
 {
@@ -47,47 +42,64 @@ float LoadLinearDepth(int2 texel, out bool isSky)
 	return ReverseZ ? CameraData.w / (depth * CameraData.z + CameraData.y) : CameraData.w / (-depth * CameraData.z + CameraData.x);
 }
 
-float GetDepthGradient(float centerDepth, int2 texel, int2 axis)
+uint GetTileIndex(int2 tileTexel)
 {
-	bool unusedSky;
-	float backward = centerDepth - LoadLinearDepth(ClampToRender(texel - axis), unusedSky);
-	float forward = LoadLinearDepth(ClampToRender(texel + axis), unusedSky) - centerDepth;
+	return tileTexel.y * TileSize + tileTexel.x;
+}
+
+float GetDepthGradient(float centerDepth, int2 tileTexel, int2 axis)
+{
+	float backward = centerDepth - abs(TileDepth[GetTileIndex(tileTexel - axis)]);
+	float forward = abs(TileDepth[GetTileIndex(tileTexel + axis)]) - centerDepth;
 	return abs(backward) < abs(forward) ? backward : forward;
 }
 
-[numthreads(8, 8, 1)] void main(uint3 dispatchID : SV_DispatchThreadID) {
+[numthreads(GroupSize, GroupSize, 1)] void main(uint3 dispatchID : SV_DispatchThreadID, uint3 groupID : SV_GroupID, uint3 groupThreadID : SV_GroupThreadID, uint groupIndex : SV_GroupIndex) {
+	int2 tileOrigin = int2(groupID.xy) * GroupSize - FilterRadius;
+	for (uint i = groupIndex; i < uint(TileSize * TileSize); i += uint(GroupSize * GroupSize)) {
+		int2 tileTexel = ClampToRender(tileOrigin + int2(i % uint(TileSize), i / uint(TileSize)));
+		bool isSky;
+		float depth = LoadLinearDepth(tileTexel, isSky);
+		TileDepth[i] = isSky ? -depth : depth;
+		TileMask[i] = ShadowMask[tileTexel];
+	}
+	GroupMemoryBarrierWithGroupSync();
+
 	if (any(dispatchID.xy >= (uint2)RenderSize))
 		return;
 
 	int2 texel = int2(dispatchID.xy);
-	float4 center = ShadowMask[texel];
+	int2 tileCenter = int2(groupThreadID.xy) + FilterRadius;
+	uint centerIndex = GetTileIndex(tileCenter);
+	float4 center = TileMask[centerIndex];
+	float centerDepth = TileDepth[centerIndex];
 
-	bool centerIsSky;
-	float centerDepth = LoadLinearDepth(texel, centerIsSky);
-	if (centerIsSky) {
+	if (centerDepth < 0.0) {
 		FilteredShadowMask[texel] = center;
 		return;
 	}
 
-	float2 depthGradient = float2(GetDepthGradient(centerDepth, texel, int2(1, 0)), GetDepthGradient(centerDepth, texel, int2(0, 1)));
+	float2 depthGradient = float2(GetDepthGradient(centerDepth, tileCenter, int2(1, 0)), GetDepthGradient(centerDepth, tileCenter, int2(0, 1)));
+	float rangeFalloff = rcp(max(RelativeDepthTolerance * RelativeDepthTolerance * centerDepth * centerDepth, 1e-8));
+	float spatialFalloff = rcp(2.0 * SpatialSigma * SpatialSigma);
 
 	float4 filtered = center;
 	float weightSum = 1.0;
 
-	[unroll] for (uint i = 0; i < 4; i++)
+	[unroll] for (int y = -FilterRadius; y <= FilterRadius; y++)
 	{
-		[unroll] for (uint j = 0; j < 4; j++)
+		[unroll] for (int x = -FilterRadius; x <= FilterRadius; x++)
 		{
-			int2 sampleTexel = ClampToRender(texel + PinwheelCorners[i] + CornerTexels[j]);
+			if (x == 0 && y == 0)
+				continue;
 
-			bool sampleIsSky;
-			float sampleDepth = LoadLinearDepth(sampleTexel, sampleIsSky);
-			float predictedDepth = centerDepth + dot(float2(sampleTexel - texel), depthGradient);
-			float residual = sampleDepth - predictedDepth;
-			float tolerance = (residual < 0.0 ? 0.02 : 0.01) * centerDepth;
-			float weight = sampleIsSky ? 0.0 : 0.4375 * saturate(1.0 - abs(residual) / max(tolerance, 1e-4));
+			uint sampleIndex = GetTileIndex(tileCenter + int2(x, y));
+			float sampleDepth = TileDepth[sampleIndex];
+			float2 sampleOffset = float2(ClampToRender(texel + int2(x, y)) - texel);
+			float residual = sampleDepth - (centerDepth + dot(sampleOffset, depthGradient));
+			float weight = sampleDepth < 0.0 ? 0.0 : exp(-float(x * x + y * y) * spatialFalloff - residual * residual * rangeFalloff);
 
-			filtered += ShadowMask[sampleTexel] * weight;
+			filtered += TileMask[sampleIndex] * weight;
 			weightSum += weight;
 		}
 	}

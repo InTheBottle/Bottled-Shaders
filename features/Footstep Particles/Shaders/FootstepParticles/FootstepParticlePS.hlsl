@@ -1,4 +1,4 @@
-#include "Common/Color.hlsli"
+#include "Common/ColorManagement.hlsli"
 #include "Common/FrameBuffer.hlsli"
 #include "Common/Math.hlsli"
 #include "Common/Random.hlsli"
@@ -65,8 +65,7 @@ float3 GetPointLighting(float3 positionWS)
 				continue;
 			float lightDistance = length(light.positionWS.xyz - positionWS);
 			float attenuation = LightLimitFix::GetAttenuation(lightDistance, light);
-			const bool isLinear = light.lightFlags & LightLimitFix::LightFlags::Linear;
-			lighting += Color::PointLight(light.color.xyz, isLinear) * attenuation * 0.5 * light.fade * Color::EffectLightingMult();
+			lighting += Color::PointLight(light.color.xyz) * attenuation * 0.5 * light.fade * Color::EffectLightingScale;
 		}
 	}
 #endif
@@ -126,7 +125,7 @@ float4 main(PS_INPUT input) : SV_Target
 		if (!SharedData::iblSettings.EnableIBL)
 #	endif
 		{
-			ambient = Color::IrradianceToGamma(Color::IrradianceToLinear(ambient) * skylightingDiffuse);
+			ambient = ColorManagement::SceneColor::ScaleByLinear(ambient, skylightingDiffuse);
 		}
 	}
 #endif
@@ -176,8 +175,8 @@ float4 main(PS_INPUT input) : SV_Target
 	float fogFactor = 0.0;
 	float3 fogColor = 0.0;
 	if (FootstepParticles::FrameFlags & FootstepParticles::FrameFlagFog) {
-		fogFactor = Color::FogAlpha(input.FogParam.w);
-		fogColor = Color::Fog(input.FogParam.xyz);
+		fogFactor = input.FogParam.w;
+		fogColor = input.FogParam.xyz;
 #if defined(IBL)
 		if (SharedData::iblSettings.EnableIBL)
 			fogColor = ImageBasedLighting::GetFogIBLColor(fogColor);

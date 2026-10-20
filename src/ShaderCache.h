@@ -5,6 +5,7 @@
 #include <deque>
 #include <efsw/efsw.hpp>
 #include <functional>
+#include <span>
 #include <string_view>
 #include <unordered_set>
 #include <variant>
@@ -450,6 +451,7 @@ namespace SIE
 		bool ShaderModifiedSince(const std::string& a_type, system_clock::time_point a_current);
 
 		void Clear();
+		void Reload(const std::function<void()>& activate);
 		void Clear(RE::BSShader::Type a_type);
 		/**
    		* @brief Clears and marks shaders for recompilation based on the given path.
@@ -496,6 +498,7 @@ namespace SIE
 		RE::BSGraphics::PixelShader* GetPixelShader(const RE::BSShader& shader,
 			uint32_t descriptor);
 		RE::BSGraphics::PixelShader* FindPixelShader(const RE::BSShader& shader, uint32_t descriptor);
+		bool HasPixelShaders(RE::BSShader::Type type, std::span<const uint32_t> descriptors);
 		RE::BSGraphics::ComputeShader* GetComputeShader(const RE::BSShader& shader,
 			uint32_t descriptor);
 

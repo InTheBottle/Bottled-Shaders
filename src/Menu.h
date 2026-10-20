@@ -1,6 +1,7 @@
 
 #pragma once
 #include "Feature.h"
+#include "Menu/FontAtlasState.h"
 #include "Menu/ThemeManager.h"
 #include "Utils/Input.h"
 #include "Utils/Serialize.h"
@@ -158,6 +159,8 @@ public:
 	void RecordDirectInputWheelDelta(std::int32_t delta);
 	/** @brief Returns true if the menu should consume all input (menu open or capturing hotkey) */
 	bool ShouldSwallowInput();
+	/** @brief Keeps Skyrim's AFK vanity camera off while any CS UI is open (settings, editor, first-time setup). */
+	void SyncVanityCamera();
 	/** @brief Returns true if the free camera preview is in flying mode */
 	bool IsPreviewFlying();
 	/**
@@ -173,36 +176,14 @@ public:
 	bool settingSkipCompilationKey = false;
 	bool settingsEffectsToggle = false;
 	bool settingOverlayToggleKey = false;
-	bool settingShaderBlockPrevKey = false;      // Debug: capture shader block prev key
-	bool settingShaderBlockNextKey = false;      // Debug: capture shader block next key
-	bool settingCSEditorToggleKey = false;  // CS Editor toggle key
-	bool settingScreenshotKey = false;           // Screenshot capture key
-	bool settingEffects11ToggleKey = false;      // Effects 11 toggle key
-	bool settingEffects11EditorKey = false;      // Effects 11 editor key
-
-	// Font caching (made public for ThemeManager and OverlayRenderer access)
-	// Marked mutable because they're cache fields that may be updated from const methods
-	float cachedFontSize = ThemeManager::Constants::DEFAULT_FONT_SIZE;  // Tracks whether font has been modified and may require reloading
-	mutable std::string cachedFontName = "Jost/Jost-Regular.ttf";       // Tracks whether font file has changed and may require reloading
-	std::array<std::string, static_cast<size_t>(FontRole::Count)> cachedFontFilesByRole = []() {
-		std::array<std::string, static_cast<size_t>(FontRole::Count)> files{};
-		auto setFile = [&files](FontRole role, std::string value) {
-			files[static_cast<size_t>(role)] = std::move(value);
-		};
-		setFile(FontRole::Body, "Jost/Jost-Regular.ttf");
-		setFile(FontRole::Title, "Jost/Jost-Regular.ttf");
-		setFile(FontRole::Heading, "Jost/Jost-Regular.ttf");
-		setFile(FontRole::Subheading, "Jost/Jost-Regular.ttf");
-		setFile(FontRole::Subtext, "Jost/Jost-Regular.ttf");
-		return files;
-	}();
-	mutable std::array<float, static_cast<size_t>(FontRole::Count)> cachedFontPixelSizesByRole = {};
-	std::string cachedFontSignature;
-	mutable std::array<ImFont*, static_cast<size_t>(FontRole::Count)> loadedFontRoles = {};
+	bool settingShaderBlockPrevKey = false;  // Debug: capture shader block prev key
+	bool settingShaderBlockNextKey = false;  // Debug: capture shader block next key
+	bool settingCSEditorToggleKey = false;   // CS Editor toggle key
+	bool settingScreenshotKey = false;       // Screenshot capture key
+	bool settingEffects11ToggleKey = false;  // Effects 11 toggle key
+	bool settingEffects11EditorKey = false;  // Effects 11 editor key
 
 	// Deferred reload systems (public for SettingsTabRenderer access)
-	bool pendingFontReload = false;
-	bool wantsFontPreviewAtlas = false;  // Set when Fonts tab is opened; gates catalog preview font loading
 	bool pendingCursorReload = false;
 
 	// Display size tracking for cross-session resolution change detection
@@ -230,8 +211,8 @@ public:
 		};
 
 		float FontSize = ThemeManager::Constants::DEFAULT_FONT_SIZE;
-		std::string FontName = "Jost/Jost-Regular.ttf";         // Default font file name (legacy)
-		float GlobalScale = 0.f;  // exponential
+		std::string FontName = "Jost/Jost-Regular.ttf";  // Default font file name (legacy)
+		float GlobalScale = 0.f;                         // exponential
 		std::array<FontRoleSettings, static_cast<size_t>(FontRole::Count)> FontRoles = []() {
 			std::array<FontRoleSettings, static_cast<size_t>(FontRole::Count)> roles{};
 			auto setRole = [&roles](FontRole role, std::string family, std::string style, std::string file, float sizeScale) {
@@ -254,7 +235,7 @@ public:
 		bool UseSimplePalette = false;      // DEPRECATED: No longer affects behavior. UI now shows both Simple and Advanced controls.
 		float TooltipHoverDelay = 0.5f;     // tooltip hover delay in seconds
 		bool BackgroundBlurEnabled = true;  // enable background blur effect
-		bool UseCustomCursor = false;     // use theme cursor images instead of default ImGui cursors
+		bool UseCustomCursor = false;       // use theme cursor images instead of default ImGui cursors
 		struct CursorImageSettings
 		{
 			std::string File;
@@ -292,9 +273,9 @@ public:
 			ImVec4 Disable{ 0.5f, 0.5f, 0.5f, 1.0f };
 			ImVec4 Error{ 1.0f, 0.4f, 0.4f, 1.0f };
 			ImVec4 Warning{ 1.0f, 0.6f, 0.2f, 1.0f };
-			ImVec4 RestartNeeded{ 0.4f, 1.0f, 0.4f, 1.0f };
+			ImVec4 RestartNeeded{ 0.45f, 0.78f, 0.48f, 1.0f };
 			ImVec4 CurrentHotkey{ 1.0f, 1.0f, 0.0f, 1.0f };
-			ImVec4 SuccessColor{ 0.0f, 1.0f, 0.0f, 1.0f };
+			ImVec4 SuccessColor{ 0.32f, 0.68f, 0.42f, 1.0f };
 			ImVec4 InfoColor{ 0.2f, 0.6f, 1.0f, 1.0f };
 		} StatusPalette;
 		struct FeatureHeadingColors
@@ -408,25 +389,33 @@ public:
 	/** @brief Deserializes cursor settings from named-key or legacy sparse-array format */
 	static void CursorFromJson(const json& cursorJson, ThemeSettings::CursorSettings& cursor);
 
+	/** @brief Order of the feature list in the left menu column. */
+	enum class FeatureSortMode : std::uint8_t
+	{
+		Category = 0,  // Grouped under collapsible category headers
+		Alphabetical   // Flat A-Z list
+	};
+
 	struct Settings
 	{
 		std::vector<InputCombo> ToggleKey = { InputCombo::Keyboard(VK_END) };
 		std::vector<InputCombo> SkipCompilationKey = { InputCombo::Keyboard(VK_ESCAPE) };
-		std::vector<InputCombo> EffectToggleKey = { InputCombo::Keyboard(VK_MULTIPLY) };    // toggle all effects
-		std::vector<InputCombo> OverlayToggleKey = { InputCombo::Keyboard(VK_F10) };        // Global overlay toggle key for all overlays
-		std::vector<InputCombo> ShaderBlockPrevKey = { InputCombo::Keyboard(VK_PRIOR) };    // Debug: cycle backward through shaders (PageUp)
-		std::vector<InputCombo> ShaderBlockNextKey = { InputCombo::Keyboard(VK_NEXT) };     // Debug: cycle forward through shaders (PageDown)
-		std::vector<InputCombo> CSEditorToggleKey = { InputCombo::Keyboard(VK_SHIFT), InputCombo::Keyboard(VK_END) };  // CS Editor toggle key
-		std::vector<InputCombo> ScreenshotKey = { InputCombo::Keyboard(VK_SNAPSHOT) };                                    // Screenshot capture key
+		std::vector<InputCombo> EffectToggleKey = { InputCombo::Keyboard(VK_MULTIPLY) };                                     // toggle all effects
+		std::vector<InputCombo> OverlayToggleKey = { InputCombo::Keyboard(VK_F10) };                                         // Global overlay toggle key for all overlays
+		std::vector<InputCombo> ShaderBlockPrevKey = { InputCombo::Keyboard(VK_PRIOR) };                                     // Debug: cycle backward through shaders (PageUp)
+		std::vector<InputCombo> ShaderBlockNextKey = { InputCombo::Keyboard(VK_NEXT) };                                      // Debug: cycle forward through shaders (PageDown)
+		std::vector<InputCombo> CSEditorToggleKey = { InputCombo::Keyboard(VK_SHIFT), InputCombo::Keyboard(VK_END) };        // CS Editor toggle key
+		std::vector<InputCombo> ScreenshotKey = { InputCombo::Keyboard(VK_SNAPSHOT) };                                       // Screenshot capture key
 		std::vector<InputCombo> Effects11ToggleKey = { InputCombo::Keyboard(VK_SHIFT), InputCombo::Keyboard(VK_MULTIPLY) };  // Effects 11 toggle key
 		std::vector<InputCombo> Effects11EditorKey = { InputCombo::Keyboard(VK_SHIFT), InputCombo::Keyboard(VK_RETURN) };    // Effects 11 editor key
-		bool EnableShaderBlocking = false;                                                  // Enable shader blocking hotkeys for debugging
-		bool FirstTimeSetupCompleted = false;                                               // Track if first-time setup has been completed
-		bool SkipClearCacheConfirmation = false;                                            // Skip confirmation dialog when clearing shader cache
-		bool AutoHideFeatureList = false;                                                   // Auto-hide left feature list panel, show on hover
-		bool SkipConstraintWarning = false;                                                 // Skip popup when a setting change creates new constraints
-		bool RequireShiftToDock = true;                                                     // Require holding Shift to dock windows
-		bool UseResolutionFont = true;                                                      // When true, runtime font size scales with screen resolution; when persisted to theme files, FontSize is zeroed for backward compatibility
+		bool EnableShaderBlocking = false;                                                                                   // Enable shader blocking hotkeys for debugging
+		bool FirstTimeSetupCompleted = false;                                                                                // Track if first-time setup has been completed
+		bool SkipClearCacheConfirmation = false;                                                                             // Skip confirmation dialog when clearing shader cache
+		bool AutoHideFeatureList = false;                                                                                    // Auto-hide left feature list panel, show on hover
+		FeatureSortMode FeatureListSort = FeatureSortMode::Category;                                                         // Feature list order in the left menu column
+		bool SkipConstraintWarning = false;                                                                                  // Skip popup when a setting change creates new constraints
+		bool RequireShiftToDock = true;                                                                                      // Require holding Shift to dock windows
+		bool UseResolutionFont = true;                                                                                       // When true, runtime font size scales with screen resolution; when persisted to theme files, FontSize is zeroed for backward compatibility
 		ThemeSettings Theme;
 		std::string SelectedThemePreset = "";  // Currently selected theme preset (empty = custom/user theme)
 	};
@@ -443,12 +432,13 @@ public:
 	/** @brief Gets the font role settings for the given role */
 	const ThemeSettings::FontRoleSettings& GetFontRoleSettings(FontRole role) const { return settings.Theme.FontRoles[static_cast<size_t>(role)]; }
 	/** @brief Gets the loaded ImFont pointer for the given role */
-	ImFont* GetFont(FontRole role) const { return loadedFontRoles[static_cast<size_t>(role)]; }
+	ImFont* GetFont(FontRole role) const { return MenuFonts::GetAtlasState().GetFont(static_cast<size_t>(role)); }
 
-	/** @brief Queues a feature to be selected in the left panel on the next frame */
+	/** @brief Queues a feature to be selected in the left panel on the next frame.
+	 *  @param featureName Feature short name, or a built-in page's display name such as Presets. */
 	void SelectFeatureMenu(const std::string& featureName);
 
-	bool HasUnsavedChanges() const { return unsavedChanges || !unsavedFeatures.empty(); }
+	bool HasUnsavedChanges() const;
 	void MarkUnsavedChanges() { unsavedChanges = true; }
 	void ClearUnsavedChanges() { unsavedResetPending.store(true, std::memory_order_relaxed); }
 	void IgnoreSettingEditsThisFrame() { ignoreEditsThisFrame = true; }
@@ -551,6 +541,10 @@ private:
 	// suppressed so a shared single-key binding (e.g. End) doesn't also fire once
 	// the modifier is released first.
 	std::unordered_set<uint32_t> _comboFiredKeys;
+
+	// Skyrim AFK vanity camera: delayed spin while idle. Held off while any CS UI is open.
+	bool vanityCameraDisabled = false;
+	float savedVanityCameraDelay = 180.0f;
 
 	Menu() = default;
 

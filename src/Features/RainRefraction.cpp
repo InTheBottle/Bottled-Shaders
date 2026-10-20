@@ -20,8 +20,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	MotionTransparency,
 	ScreenRefraction,
 	RefractionFactor,
-	MotionBluriness,
-	Supersampling)
+	RefractionBlur)
 
 namespace
 {
@@ -89,10 +88,8 @@ namespace
 
 void RainRefraction::DrawSettings()
 {
-	if (IsManagedByENB()) {
-		ImGui::TextColored(globals::menu->GetSettings().Theme.StatusPalette.Warning, "%s", T("common.settings_managed_by_enb", "Settings are currently managed by ENB."));
-		return;
-	}
+	const Util::LockedSection enbLock(IsManagedByENB(),
+		T("common.settings_managed_by_enb", "This setting is managed by Effects 11."));
 
 	if (!defaultRaindrops.status.empty())
 		Util::Text::WrappedWarning("%s", defaultRaindrops.status.c_str());
@@ -119,14 +116,10 @@ void RainRefraction::DrawSettings()
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T(TKEY("refraction_factor_tooltip"), "How strongly drops bend the view behind them. 1 = water, 0 = no bending."));
 		}
-		ImGui::SliderFloat(T(TKEY("motion_bluriness"), "Refraction Blur"), &settings.MotionBluriness, 0.0f, kMaxMotionBluriness, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		ImGui::SliderFloat(T(TKEY("motion_bluriness"), "Refraction Blur"), &settings.RefractionBlur, 0.0f, kMaxRefractionBlur, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("motion_bluriness_tooltip"), "Blurs the refracted scene to suggest motion. Values up to 1 keep it sharp."));
+			ImGui::Text("%s", T(TKEY("motion_bluriness_tooltip"), "Smears the refracted scene along the direction the drops fall, as a fraction of the streak length."));
 		}
-	}
-	ImGui::Checkbox(T(TKEY("supersampling"), "Supersampling"), &settings.Supersampling);
-	if (auto _tt = Util::HoverTooltipWrapper()) {
-		ImGui::Text("%s", T(TKEY("supersampling_tooltip"), "Samples each drop four times per pixel to reduce shimmering on thin streaks, at a small cost."));
 	}
 }
 
@@ -138,7 +131,7 @@ void RainRefraction::LoadSettings(json& o_json)
 	settings.MotionStretch = std::clamp(settings.MotionStretch, kMinMotionStretch, kMaxMotionStretch);
 	settings.MotionTransparency = std::clamp(settings.MotionTransparency, 0.0f, 1.0f);
 	settings.RefractionFactor = std::clamp(settings.RefractionFactor, 0.0f, kMaxRefractionFactor);
-	settings.MotionBluriness = std::clamp(settings.MotionBluriness, 0.0f, kMaxMotionBluriness);
+	settings.RefractionBlur = std::clamp(settings.RefractionBlur, 0.0f, kMaxRefractionBlur);
 }
 
 void RainRefraction::SaveSettings(json& o_json)
@@ -211,9 +204,8 @@ RainRefraction::PerFrame RainRefraction::GetCommonBufferData()
 		.MotionTransparency = settings.MotionTransparency,
 		.ScreenRefraction = settings.ScreenRefraction,
 		.RefractionFactor = settings.RefractionFactor,
-		.MotionBluriness = settings.MotionBluriness,
-		.Brightness = 1.0f,
-		.Supersampling = settings.Supersampling
+		.MotionBluriness = settings.RefractionBlur,
+		.Brightness = 1.0f
 	};
 
 	if (IsManagedByENB()) {
@@ -222,10 +214,9 @@ RainRefraction::PerFrame RainRefraction::GetCommonBufferData()
 		data.MotionStretch = settingManager.GetInterpolatedTimeOfDayValue("MotionStretch", "RAIN");
 		data.MotionTransparency = settingManager.GetInterpolatedTimeOfDayValue("MotionTransparency", "RAIN");
 		data.ScreenRefraction = true;
-		data.RefractionFactor = settingManager.GetValue<float>(EffectManager::GetSingleton().ids.rainRefractionFactor);
-		data.MotionBluriness = settingManager.GetInterpolatedTimeOfDayValue("MotionBluriness", "RAIN");
-		data.Brightness = settingManager.GetInterpolatedTimeOfDayValue("Brightness", "RAIN");
-		data.Supersampling = settingManager.GetValue<bool>(EffectManager::GetSingleton().ids.rainSupersampling);
+		data.RefractionFactor = std::clamp(settingManager.GetValue<float>(EffectManager::GetSingleton().ids.rainRefractionFactor), 0.0f, kMaxRefractionFactor);
+		data.MotionBluriness = std::clamp(settingManager.GetInterpolatedTimeOfDayValue("MotionBluriness", "RAIN"), 0.0f, kMaxRefractionBlur);
+		data.Brightness = std::max(settingManager.GetInterpolatedTimeOfDayValue("Brightness", "RAIN"), 0.0f);
 	}
 	data.Enable = data.Enable && GetRaindropSRV() && alphaBlendState;
 
@@ -262,23 +253,40 @@ void RainRefraction::ParticleShaderHacks()
 	if (!IsRefractiveRainPass())
 		return;
 
-	auto context = globals::d3d::context;
-
-	if (perFrameCache.ScreenRefraction && backgroundFrame != globals::state->frameCount)
-		CaptureBackground();
-
-	ID3D11ShaderResourceView* background = backgroundFrame == globals::state->frameCount && backgroundTexture ? backgroundTexture->srv.get() : nullptr;
-	context->PSSetShaderResources(kBackgroundSlot, 1, &background);
+	ID3D11ShaderResourceView* background = nullptr;
+	if (perFrameCache.ScreenRefraction && IsMainTargetBound()) {
+		if (backgroundFrame != globals::state->frameCount)
+			CaptureBackground();
+		if (backgroundFrame == globals::state->frameCount && backgroundTexture)
+			background = backgroundTexture->srv.get();
+	}
+	globals::d3d::context->PSSetShaderResources(kBackgroundSlot, 1, &background);
 
 	float blendFactor[4] = { 0, 0, 0, 0 };
-	context->OMSetBlendState(alphaBlendState.get(), blendFactor, 0xFFFFFFFF);
+	globals::d3d::context->OMSetBlendState(alphaBlendState.get(), blendFactor, 0xFFFFFFFF);
 	globals::game::stateUpdateFlags->set(RE::BSGraphics::ShaderFlags::DIRTY_ALPHA_BLEND);
 }
 
-bool RainRefraction::EnsureBackgroundResources()
+bool RainRefraction::IsMainTargetBound() const
+{
+	auto renderer = globals::game::renderer;
+	if (!renderer)
+		return false;
+
+	winrt::com_ptr<ID3D11RenderTargetView> boundTarget;
+	globals::d3d::context->OMGetRenderTargets(1, boundTarget.put(), nullptr);
+	return boundTarget && boundTarget.get() == renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGET::kMAIN].RTV;
+}
+
+bool RainRefraction::EnsureBackgroundResources(uint32_t a_width, uint32_t a_height)
 {
 	if (backgroundUnsupported)
 		return false;
+
+	if (backgroundTexture && (backgroundTexture->desc.Width != a_width || backgroundTexture->desc.Height != a_height)) {
+		backgroundTexture.reset();
+		backgroundFrame = UINT32_MAX;
+	}
 
 	if (!backgroundTexture) {
 		auto device = globals::d3d::device;
@@ -298,13 +306,11 @@ bool RainRefraction::EnsureBackgroundResources()
 			return false;
 		}
 
-		const UINT width = std::max((globals::game::graphicsState->screenWidth + 1) / 2, 1u);
-		const UINT height = std::max((globals::game::graphicsState->screenHeight + 1) / 2, 1u);
-		const UINT mipLevels = std::min(static_cast<UINT>(std::floor(std::log2(static_cast<float>(std::max(width, height))))) + 1, 7u);
+		const UINT mipLevels = static_cast<UINT>(std::bit_width(std::max(a_width, a_height)));
 
 		D3D11_TEXTURE2D_DESC texDesc{
-			.Width = width,
-			.Height = height,
+			.Width = a_width,
+			.Height = a_height,
 			.MipLevels = mipLevels,
 			.ArraySize = 1,
 			.Format = format,
@@ -328,7 +334,8 @@ bool RainRefraction::EnsureBackgroundResources()
 			backgroundTexture = std::make_unique<Texture2D>(texDesc, "RainRefraction::Background");
 			backgroundTexture->CreateSRV(srvDesc);
 			backgroundTexture->CreateUAV(uavDesc);
-			downsampleCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc<DownsampleCB>(), "RainRefraction::DownsampleCB");
+			if (!downsampleCB)
+				downsampleCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc<DownsampleCB>(), "RainRefraction::DownsampleCB");
 		} catch (const std::exception& e) {
 			logger::error("[Rain Refraction] Failed to create the background texture ({}), screen refraction disabled", e.what());
 			backgroundTexture.reset();
@@ -355,7 +362,13 @@ void RainRefraction::CaptureBackground()
 	if (!renderer)
 		return;
 
-	if (!EnsureBackgroundResources())
+	const auto& main = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGET::kMAIN];
+	if (!main.SRV || !main.texture)
+		return;
+
+	D3D11_TEXTURE2D_DESC mainDesc{};
+	main.texture->GetDesc(&mainDesc);
+	if (!EnsureBackgroundResources(std::max((mainDesc.Width + 1) / 2, 1u), std::max((mainDesc.Height + 1) / 2, 1u)))
 		return;
 
 	auto context = globals::d3d::context;
@@ -375,17 +388,8 @@ void RainRefraction::CaptureBackground()
 		depthStencil = nullptr;
 	};
 
-	const auto& main = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGET::kMAIN];
-	if (!renderTargets[0] || renderTargets[0] != main.RTV || !main.SRV || !main.texture) {
-		releaseTargets();
-		return;
-	}
-
 	ZoneScopedN("RainRefraction::CaptureBackground");
 	TracyD3D11Zone(globals::state->tracyCtx, "Rain Refraction - Capture Background");
-
-	D3D11_TEXTURE2D_DESC mainDesc{};
-	main.texture->GetDesc(&mainDesc);
 
 	const float2 renderSize = Util::ConvertToDynamic(float2{ static_cast<float>(mainDesc.Width), static_cast<float>(mainDesc.Height) }, true);
 	const uint outputWidth = backgroundTexture->desc.Width;
