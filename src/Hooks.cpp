@@ -1013,7 +1013,8 @@ namespace Hooks
 				                          (pass != HiZOcclusion::kCameraPass || HiZOcclusion::IsMainViewRegistration(renderMode, accum)) &&
 				                          !globals::features::skylighting.inOcclusion &&
 				                          !(globals::state->permutationData.ExtraShaderDescriptor & static_cast<uint32_t>(State::ExtraShaderDescriptors::IsReflections)) &&
-				                          !hiz.IsPlayerAttachedGeometry(geo, refr);
+				                          !hiz.IsPlayerAttachedGeometry(geo, refr) &&
+				                          !globals::features::lightLimitFix.IsParticleLightEmitter(geo);
 
 				if (allowCulling) {
 					// Initialize the thread-local registration if this thread is calling the hook for the first time

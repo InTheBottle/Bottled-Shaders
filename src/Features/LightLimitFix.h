@@ -42,6 +42,7 @@ struct LightLimitFix : OverlayFeature
 	std::shared_mutex particleLightsMutex;
 
 	bool CheckParticleLights(RE::BSRenderPass* a_pass, uint32_t a_technique);
+	bool IsParticleLightEmitter(RE::BSGeometry* a_geometry);
 
 public:
 	virtual inline std::string GetName() override { return "Light Limit Fix"; }
@@ -291,6 +292,7 @@ public:
 	eastl::unique_ptr<Buffer> lightGrid = nullptr;
 
 	std::uint32_t lightCount = 0;
+	std::uint32_t particleLightCount = 0;
 	float lightsNear = 1;
 	float lightsFar = 16384;
 
@@ -536,6 +538,7 @@ public:
 		using RenderPass1 = BSBatchRenderer_RenderPassImmediately<1>;
 		using RenderPass2 = BSBatchRenderer_RenderPassImmediately<2>;
 		using RenderPass3 = BSBatchRenderer_RenderPassImmediately<3>;
+		using RenderPass4 = BSBatchRenderer_RenderPassImmediately<4>;
 
 		struct BSGeometry_Destroy
 		{
@@ -632,7 +635,7 @@ private:
 
 	static inline float SmoothStep(float edge0, float edge1, float x);
 
-	VertexColorCacheEntry GetParticleLightConfig(RE::BSRenderPass* a_pass);
+	VertexColorCacheEntry GetParticleLightConfig(RE::BSGeometry* a_geometry, RE::BSShaderProperty* a_shaderProperty);
 	bool QueueParticleLight(RE::BSRenderPass* a_pass, VertexColorCacheEntry& a_reference);
 };
 
