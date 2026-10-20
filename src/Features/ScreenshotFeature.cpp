@@ -198,6 +198,15 @@ namespace
 			TonemapHdrToSrgb(sourceImage);
 		}
 
+		// Plain UNORM (not _SRGB): DirectXTex's ConvertScanline() derives its
+		// TEX_FILTER_SRGB_IN/OUT flags purely from the DXGI format, not from
+		// whether the data is actually linear. Converting into a _SRGB target
+		// therefore re-encodes these already gamma-encoded pixels through the
+		// sRGB curve a second time - a real value change (not just metadata)
+		// that washed out both PNG and BMP output alike. The correct sRGB tag
+		// for PNG is applied separately via WIC_FLAGS_FORCE_SRGB below, which
+		// only touches the written metadata. X8 (not A8) still discards alpha
+		// on write.
 		if (SUCCEEDED(DirectX::Convert(
 				sourceImage.GetImages(),
 				sourceImage.GetImageCount(),
@@ -376,11 +385,13 @@ namespace
 	}
 
 	// Picks the capture source:
-	//   HDR + CS menu open -> clean HDR composite (no UI, no menu blur).
+	//   HDR + (CS menu open or forceCleanNoUI) -> clean HDR composite (no UI, no menu blur).
 	//   HDR enabled        -> swap-chain back buffer after ApplyHDR (PQ HDR10 / PQ float).
 	//   otherwise          -> kFRAMEBUFFER (tonemapped UNORM).
 	// forCapture: post-blur screenshot uses the snapshot; pre-blur preview uses hdrTexture.
-	CaptureSource SelectCaptureSource(winrt::com_ptr<ID3D11Texture2D>& holder, bool forCapture)
+	// forceCleanNoUI: caller guarantees this runs before the game UI is drawn (e.g. the Neural
+	//   Rendering comparison capture from Main_PostProcessing) and wants a frame with no HUD.
+	CaptureSource SelectCaptureSource(winrt::com_ptr<ID3D11Texture2D>& holder, bool forCapture, bool forceCleanNoUI = false)
 	{
 		CaptureSource src;
 		auto* renderer = globals::game::renderer;
@@ -392,7 +403,7 @@ namespace
 		if (IsFlatHdrScreenshotCapture()) {
 			// Recompose from the clean scene with no UI buffer.
 			auto& hdr = globals::features::hdrDisplay;
-			if (Menu::GetSingleton()->IsEnabled && hdr.outputTexture && hdr.outputTexture->srv) {
+			if ((forceCleanNoUI || Menu::GetSingleton()->IsEnabled) && hdr.outputTexture && hdr.outputTexture->srv) {
 				ID3D11ShaderResourceView* sceneSRV =
 					(forCapture && hdr.IsCleanSceneCaptureFresh()) ? hdr.cleanSceneCapture->srv.get() :
 																	 (hdr.hdrTexture ? hdr.hdrTexture->srv.get() : nullptr);
@@ -578,6 +589,11 @@ namespace
 		const GUID& codec = saveAsPng ?
 		                        DirectX::GetWICCodec(DirectX::WIC_CODEC_PNG) :
 		                        DirectX::GetWICCodec(DirectX::WIC_CODEC_BMP);
+		// FORCE_SRGB writes the PNG sRGB chunk (correct, since saveImage's pixels
+		// are already gamma-encoded) without touching pixel values - unlike
+		// tagging the source DXGI format as _SRGB, which would make DirectXTex's
+		// Convert() actually re-encode the data (see PrepareBmpImage). BMP has no
+		// such metadata, so the flag is a no-op for that codec.
 		return SUCCEEDED(DirectX::SaveToWICFile(
 			*saveImage,
 			DirectX::WIC_FLAGS_FORCE_SRGB,
@@ -846,6 +862,12 @@ void ScreenshotFeature::ProcessCaptureRequest(bool presented)
 	}
 }
 
+std::filesystem::path ScreenshotFeature::NeuralRenderingComparisonPath(const std::string& timestamp, const char* suffix)
+{
+	// Extension is appended in Capture() once the capture format is known.
+	return std::filesystem::path("Data/DLSS 5 Screenshots") / ("CS_" + timestamp + suffix);
+}
+
 void ScreenshotFeature::EnsureWorkerThread()
 {
 	if (screenshotWorker.joinable()) {
@@ -966,7 +988,7 @@ void ScreenshotFeature::ShowInGameNotification(std::string message)
 	});
 }
 
-void ScreenshotFeature::Capture()
+void ScreenshotFeature::Capture(std::filesystem::path overridePath, bool forceCleanNoUI)
 {
 	auto device = globals::d3d::device;
 	auto context = globals::d3d::context;
@@ -975,7 +997,7 @@ void ScreenshotFeature::Capture()
 		return;
 
 	winrt::com_ptr<ID3D11Texture2D> sourceTextureKeepAlive;
-	const auto src = SelectCaptureSource(sourceTextureKeepAlive, /*forCapture=*/true);
+	const auto src = SelectCaptureSource(sourceTextureKeepAlive, /*forCapture=*/true, forceCleanNoUI);
 	logger::debug("Capturing from {}", src.description);
 
 	if (!src.texture) {
@@ -992,7 +1014,8 @@ void ScreenshotFeature::Capture()
 	uint32_t copyW = srcDesc.Width;
 	uint32_t copyH = srcDesc.Height;
 
-	if (applyCropToScreenshot) {
+	// Clean no-UI captures (Neural Rendering comparison) are always full-frame.
+	if (applyCropToScreenshot && !forceCleanNoUI) {
 		auto region = subrect.GetPixelRegion(srcDesc.Width, srcDesc.Height);
 		copyX = region.x;
 		copyY = region.y;
@@ -1047,8 +1070,14 @@ void ScreenshotFeature::Capture()
 	screenshot.saveAsHdrPng = saveAsHdrPng;
 	screenshot.saveAsSdrPng = saveAsSdrPng;
 	screenshot.hdrPngBitDepth = static_cast<int>(hdrPngBitDepth);
-	screenshot.outputPath = BuildScreenshotPath(screenshotPath, saveAsHdrPng || saveAsSdrPng);
-	screenshot.copyToClipboard = copyToClipboard;
+	if (overridePath.empty()) {
+		screenshot.outputPath = BuildScreenshotPath(screenshotPath, saveAsHdrPng || saveAsSdrPng);
+		screenshot.copyToClipboard = copyToClipboard;
+	} else {
+		overridePath.replace_extension(saveAsHdrPng || saveAsSdrPng ? ".png" : ".bmp");
+		screenshot.outputPath = ResolveToAbsoluteGamePath(overridePath);
+		screenshot.copyToClipboard = false;
+	}
 	RaiseMultithreadProtection();
 	screenshotsInFlight.fetch_add(1, std::memory_order_acq_rel);
 	EnqueueScreenshot(std::move(screenshot));

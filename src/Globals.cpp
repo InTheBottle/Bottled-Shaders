@@ -26,6 +26,7 @@
 #include "Features/LightLimitFix.h"
 #include "Features/LinearLighting.h"
 #include "Features/PerformanceOverlay.h"
+#include "Features/NeuralRendering.h"
 #include "Features/PostProcessing.h"
 #include "Features/ProceduralSun.h"
 #include "Features/RainRefraction.h"
@@ -119,6 +120,7 @@ namespace globals
 		Skin skin{};
 		SnowCover snowCover{};
 		FootstepParticles footstepParticles{};
+		NeuralRendering neuralRendering{};
 		HairBacklighting hairBacklighting{};
 		FurShells furShells{};
 		LandscapeSeams landscapeSeams{};

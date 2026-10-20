@@ -207,6 +207,9 @@ public:
 	bool previousUpscalingWasActive = false;
 	bool depthUpscaleUseWideKernel = false;
 
+	/** @brief Requests a DLSS history reset alongside Neural Rendering; consumed by Streamline frame constants. */
+	std::atomic<bool> pendingDLSSReset{ false };
+
 	/** @brief Copies depth and motion vectors for frame generation; returns false if its shaders or shared buffers are unavailable. */
 	bool CopySharedD3D12Resources();
 	void PostDisplay();

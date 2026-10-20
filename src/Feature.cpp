@@ -28,6 +28,7 @@
 #include "Features/LightLimitFix.h"
 #include "Features/LinearLighting.h"
 #include "Features/PerformanceOverlay.h"
+#include "Features/NeuralRendering.h"
 #include "Features/PostProcessing.h"
 #include "Features/RainRefraction.h"
 #include "Features/RemoteControl.h"
@@ -242,6 +243,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::skin,
 		&globals::features::snowCover,
 		&globals::features::footstepParticles,
+		&globals::features::neuralRendering,
 		&globals::features::hairBacklighting,
 		&globals::features::furShells,
 		&globals::features::landscapeSeams,

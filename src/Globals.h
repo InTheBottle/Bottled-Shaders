@@ -48,6 +48,7 @@ struct ScreenshotFeature;
 struct Skin;
 struct SnowCover;
 struct FootstepParticles;
+struct NeuralRendering;
 struct HairBacklighting;
 struct FurShells;
 struct LandscapeSeams;
@@ -152,6 +153,7 @@ namespace globals
 		extern Skin skin;
 		extern SnowCover snowCover;
 		extern FootstepParticles footstepParticles;
+		extern NeuralRendering neuralRendering;
 		extern HairBacklighting hairBacklighting;
 		extern FurShells furShells;
 		extern LandscapeSeams landscapeSeams;

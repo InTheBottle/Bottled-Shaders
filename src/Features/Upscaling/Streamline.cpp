@@ -370,10 +370,12 @@ bool Streamline::CheckFrameConstants(sl::ViewportHandle p_viewport)
 
 	auto jitter = upscaling.jitter;
 	slConstants.jitterOffset = { -jitter.x, -jitter.y };
+	// Reset DLSS SR history on the same frame as the Neural Rendering model.
+	const bool resetForNeuralRendering = upscaling.pendingDLSSReset.exchange(false, std::memory_order_acq_rel);
 	const uint32_t constantsFrame = globals::state->frameCount;
 	const bool constantsGap = lastConstantsFrame == UINT32_MAX || constantsFrame - lastConstantsFrame > 1;
 	const bool sceneCut = globals::state->IsMainOrLoadingMenuOpen();
-	slConstants.reset = (sceneCut || constantsResetPending || constantsGap) ? sl::Boolean::eTrue : sl::Boolean::eFalse;
+	slConstants.reset = (resetForNeuralRendering || sceneCut || constantsResetPending || constantsGap) ? sl::Boolean::eTrue : sl::Boolean::eFalse;
 	constantsResetPending = sceneCut;
 	lastConstantsFrame = constantsFrame;
 
@@ -381,7 +383,8 @@ bool Streamline::CheckFrameConstants(sl::ViewportHandle p_viewport)
 	slConstants.motionVectors3D = sl::Boolean::eFalse;
 	slConstants.motionVectorsInvalidValue = FLT_MIN;
 	slConstants.orthographicProjection = sl::Boolean::eFalse;
-	slConstants.motionVectorsDilated = sl::Boolean::eFalse;
+	// EncodeTexturesCS already dilates these; eFalse makes DLSS dilate twice (edge shimmer).
+	slConstants.motionVectorsDilated = sl::Boolean::eTrue;
 	slConstants.motionVectorsJittered = sl::Boolean::eFalse;
 
 	if (SL_FAILED(res, slSetConstants(slConstants, *frameToken, p_viewport))) {
