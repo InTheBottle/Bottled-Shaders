@@ -3,6 +3,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -82,6 +83,21 @@ public:
 	 */
 	static std::vector<Feature*> GetUtilityFeatures();
 
+	/**
+	 * @brief Draws a loaded feature's settings under the baseline interceptor scope and queues new constraint warnings.
+	 * @param feat A loaded feature.
+	 */
+	static void DrawFeatureBody(Feature* feat);
+
+	/**
+	 * @brief Draws the reactive constraint warning modal while one is pending; call once per frame, outside child windows.
+	 * @param pendingFeatureSelection Receives the short name of a feature the user navigates to from the dialog.
+	 */
+	static void DrawConstraintWarningDialog(std::string& pendingFeatureSelection);
+
+	/** @brief Translated display label for a FeatureCategories value. */
+	static std::string TranslateCategory(std::string_view category);
+
 private:
 	struct ListMenuVisitor
 	{
@@ -120,9 +136,8 @@ private:
 		bool featureChanged = false;
 
 		// Helper methods for Feature rendering
-		void RenderFeatureHeader(Feature* feat, bool isDisabled, bool isLoaded, bool sceneControlled);
-		void RenderFeatureSettings(Feature* feat, bool isDisabled, bool isLoaded, bool hasFailedMessage, bool sceneControlled);
-		void RenderReactiveConstraintWarningDialog();
+		void RenderFeatureHeader(Feature* feat, bool isDisabled, bool isLoaded);
+		void RenderFeatureSettings(Feature* feat, bool isDisabled, bool isLoaded, bool hasFailedMessage);
 	};
 
 	static std::vector<MenuFuncInfo> BuildMenuList(

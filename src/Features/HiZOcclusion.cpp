@@ -42,6 +42,15 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 
 namespace
 {
+	bool BeginSubheadingTab(const char* label)
+	{
+		MenuFonts::FontRoleGuard tabFont(Menu::FontRole::Subheading);
+		return ImGui::BeginTabItem(label);
+	}
+}
+
+namespace
+{
 	float Angle(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b)
 	{
 		const float d = std::clamp(a.x * b.x + a.y * b.y + a.z * b.z, -1.0f, 1.0f);
@@ -282,7 +291,7 @@ void HiZOcclusion::DrawSettings()
 
 	if (ImGui::BeginTabBar("##HiZTabs", ImGuiTabBarFlags_None)) {
 		// General Settings Tab
-		if (MenuFonts::BeginTabItemWithFont(T(TKEY("tab_settings"), "Settings"), Menu::FontRole::Subheading)) {
+		if (BeginSubheadingTab(T(TKEY("tab_settings"), "Settings"))) {
 			if (ImGui::BeginChild("##HiZSettingsFrame", { 0, 0 }, ImGuiChildFlags_Borders)) {
 				// Culling Options
 				ImGui::SeparatorText(T(TKEY("culling_options"), "Culling Options"));
@@ -343,7 +352,7 @@ void HiZOcclusion::DrawSettings()
 			ImGui::EndTabItem();
 		}
 
-		if (MenuFonts::BeginTabItemWithFont(T(TKEY("tab_advanced"), "Advanced"), Menu::FontRole::Subheading)) {
+		if (BeginSubheadingTab(T(TKEY("tab_advanced"), "Advanced"))) {
 			if (ImGui::BeginChild("##HiZAdvancedFrame", { 0, 0 }, ImGuiChildFlags_Borders)) {
 				ImGui::SeparatorText(T(TKEY("sun_shadow_culling"), "Sun Shadow Culling"));
 				ImGui::TextDisabled("%s", T(TKEY("sun_shadow_culling_hint"), "Off by default. May cause missing or popping shadows."));
@@ -370,7 +379,7 @@ void HiZOcclusion::DrawSettings()
 		}
 
 		// Developer/Debug Tab
-		if (MenuFonts::BeginTabItemWithFont(T(TKEY("tab_developer"), "Developer"), Menu::FontRole::Subheading)) {
+		if (BeginSubheadingTab(T(TKEY("tab_developer"), "Developer"))) {
 			if (ImGui::BeginChild("##HiZDevFrame", { 0, 0 }, ImGuiChildFlags_Borders)) {
 				// Debug Visualization
 				ImGui::SeparatorText(T(TKEY("visualization"), "Visualization"));

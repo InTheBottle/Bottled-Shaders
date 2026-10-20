@@ -52,6 +52,7 @@ struct HairBacklighting;
 struct FurShells;
 struct LandscapeSeams;
 struct SnowDeformation;
+struct SceneManager;
 
 class State;
 class Deferred;
@@ -59,7 +60,6 @@ struct TruePBR;
 class RenderDoc;
 class RemoteControl;
 class Menu;
-class WeatherManager;
 class SceneSettingsManager;
 
 namespace SIE
@@ -156,6 +156,7 @@ namespace globals
 		extern FurShells furShells;
 		extern LandscapeSeams landscapeSeams;
 		extern SnowDeformation snowDeformation;
+		extern SceneManager sceneManager;
 
 	}
 
@@ -272,7 +273,6 @@ namespace globals
 	extern Menu* menu;
 	extern SIE::ShaderCache* shaderCache;
 	extern Profiler* profiler;
-	extern WeatherManager* weatherManager;
 	extern SceneSettingsManager* sceneSettingsManager;
 
 	/** @brief Initializes core singletons (ShaderCache, State, Menu, Deferred). Called once at plugin load. */

@@ -85,6 +85,7 @@ namespace Permutation
 		static const uint NoSkyScattering = (1 << 12);
 		static const uint SnowRooftop = (1 << 13);
 		static const uint SnowLODTree = (1 << 14);
+		static const uint SourceAlphaBlend = (1 << 15);
 	}
 
 	namespace ExtraFeatureFlags
@@ -107,6 +108,9 @@ namespace Permutation
 		uint ExtraFeatureDescriptor;
 
 		float EffectRadius;
+		uint BaseTextureIsWorking;
+		uint RenderToUI;
+		uint pad;
 	};
 
 }

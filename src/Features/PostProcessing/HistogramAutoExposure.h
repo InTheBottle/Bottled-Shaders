@@ -14,6 +14,7 @@ struct HistogramAutoExposure : public PostProcessFeature
 			"Auto exposure and eye adaptation method that uses a histogram to calculate average screen brightness. Expects HDR linear RGB inputs.");
 	}
 	virtual inline bool DisableInMainLoadingMenu() const override { return true; }
+	virtual bool IsActive() const override;
 
 	/// This feature no longer writes to the main texture.
 	/// It only computes the adaptation value which is consumed by the Composite pass.
@@ -24,14 +25,14 @@ struct HistogramAutoExposure : public PostProcessFeature
 		float ExposureCompensation = 0.f;
 
 		// auto exposure
-		float2 AdaptationRange = { -3.f, 5.f };  // EV100 (0 EV100 = 0.125 linear luminance)
+		float2 AdaptationRange = { -2.f, 6.f };  // EV100 (0 EV100 = 0.125 linear luminance)
 		float2 AdaptArea = { .6f, .6f };
 
 		float AdaptSpeed = 1.5f;
 
 		// purkinje
-		float PurkinjeStartEV = -1.5f;  // EV100 (0 EV100 = 0.125 linear luminance)
-		float PurkinjeMaxEV = -4.f;     // EV100 (0 EV100 = 0.125 linear luminance)
+		float PurkinjeStartEV = 1.5f;  // EV100 (0 EV100 = 0.125 linear luminance)
+		float PurkinjeMaxEV = -1.f;    // EV100 (0 EV100 = 0.125 linear luminance)
 		float PurkinjeStrength = 0.f;
 	} settings;
 
@@ -64,6 +65,7 @@ struct HistogramAutoExposure : public PostProcessFeature
 	virtual void SaveSettings(json&) override;
 
 	virtual void DrawSettings() override;
+	void DrawCameraExposureReadout();
 
 	virtual void Draw(TextureInfo&) override;
 
@@ -79,9 +81,18 @@ struct HistogramAutoExposure : public PostProcessFeature
 	winrt::com_ptr<ID3D11Buffer> adaptationStagingBuffer = nullptr;
 	std::array<uint32_t, 256> histogramData = {};
 	float adaptationValue = 0.f;
+	bool resetAdaptation = true;
+	bool hasMeasuredAdaptation = false;
 	bool histogramReadbackRequested = false;
 	int histogramReadbackRequestFrame = -1;
+	int exposureReadbackRequestFrame = -1;
+	int adaptationReadbackFrame = -1;
 
-	bool hasMeasuredAdaptation = false;
-	bool resetAdaptation = true;
+	struct ExposureParameters
+	{
+		float2 LuminanceRange;
+		float CompensationEV = 0.0f;
+		float ExposureAtISO100 = 1.0f;
+	};
+	ExposureParameters GetExposureParameters() const;
 };

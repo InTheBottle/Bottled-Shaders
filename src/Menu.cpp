@@ -1,4 +1,5 @@
 #include "Menu.h"
+#include "Menu/FontAtlasState.h"
 
 #ifndef DIRECTINPUT_VERSION
 #	define DIRECTINPUT_VERSION 0x0800
@@ -29,21 +30,24 @@
 #include "I18n/I18n.h"
 #include "Menu/AdvancedSettingsRenderer.h"
 #include "Menu/BackgroundBlur.h"
+#include "Menu/CursorLoader.h"
 #include "Menu/FeatureListRenderer.h"
 #include "Menu/Fonts.h"
 #include "Menu/SetupRenderer.h"
-#include "Menu/CursorLoader.h"
 #include "Menu/MenuHeaderRenderer.h"
 #include "Menu/OverlayRenderer.h"
+#include "Menu/PresetsPageRenderer.h"
 #include "Menu/SettingsTabRenderer.h"
 #include "Menu/ThemeManager.h"
+#include "SaveManager.h"
 #include "ShaderCache.h"
 #include "State.h"
 #include "Util.h"
 #include "Utils/UI.h"
-#include "WeatherVariableRegistry.h"
 
 #include "CSEditor/EditorWindow.h"
+#include "CSEditor/SceneManager/SceneSettingsManager.h"
+#include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
 #include "Features/CSEditor.h"
 #include "Features/Effects11.h"
 #include "Features/Effects11/Editor/Effects11Editor.h"
@@ -183,6 +187,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	FirstTimeSetupCompleted,
 	SkipClearCacheConfirmation,
 	AutoHideFeatureList,
+	FeatureListSort,
 	SkipConstraintWarning,
 	RequireShiftToDock,
 	UseResolutionFont,
@@ -597,8 +602,8 @@ bool Menu::LoadThemePreset(const std::string& themeName)
 			settings.SelectedThemePreset = themeName;
 
 			// Schedule deferred font reload if font has changed
-			if (settings.Theme.FontName != cachedFontName) {
-				pendingFontReload = true;
+			if (settings.Theme.FontName != MenuFonts::GetAtlasState().cachedFontName) {
+				MenuFonts::GetAtlasState().pendingFontReload = true;
 			}
 
 			pendingCursorReload = true;
@@ -723,7 +728,7 @@ void Menu::Init()
 	ImGui_ImplWin32_Init(desc.OutputWindow);
 	ImGui_ImplDX11_Init(globals::d3d::device, globals::d3d::context);
 
-	ThemeManager::ReloadFont(*this, cachedFontSize);
+	ThemeManager::ReloadFont(*this, MenuFonts::GetAtlasState().cachedFontSize);
 
 	{
 		winrt::com_ptr<IDXGIDevice> dxgiDevice;
@@ -740,6 +745,10 @@ void Menu::Init()
 	if (!BackgroundBlur::Initialize()) {
 		logger::warn("Menu::Init() - Failed to initialize background blur system");
 	}
+
+	// Detours must land before any feature draws, and this is the first guaranteed render-thread
+	// point; Install logs its own failure and leaves the interceptor inert.
+	SceneWidgetInterceptor::Install();
 
 	initialized = true;
 }
@@ -865,13 +874,14 @@ void Menu::HandleMenuShortcuts()
 
 void Menu::SaveSettings()
 {
-	globals::state->Save();
+	SaveManager::SaveAll();
 }
 
 namespace
 {
 	json CaptureFeatureState(Feature* feature)
 	{
+		SceneSettingsManager::SceneLayerGuard sceneLayerGuard;
 		json state;
 		if (feature->loaded)
 			feature->SaveSettings(state["Settings"]);
@@ -900,11 +910,14 @@ void Menu::EndFeatureEditTracking(Feature* feature, bool edited)
 		return;
 	pendingDiffFeature.clear();
 
-	auto* weatherRegistry = WeatherVariables::GlobalWeatherRegistry::GetSingleton();
-	const bool weatherDriven = weatherRegistry->HasWeatherSupport(shortName) && !weatherRegistry->IsFeaturePaused(shortName);
 	const auto baseline = featureBaselines.find(shortName);
-	if (!weatherDriven && baseline != featureBaselines.end() && CaptureFeatureState(feature) == baseline->second.state)
+	if (baseline != featureBaselines.end() && CaptureFeatureState(feature) == baseline->second.state)
 		unsavedFeatures.erase(shortName);
+}
+
+bool Menu::HasUnsavedChanges() const
+{
+	return unsavedChanges || !unsavedFeatures.empty() || globals::state->HasUnsavedChanges();
 }
 
 bool Menu::IsFeaturePinned(const std::string& shortName) const
@@ -1025,18 +1038,18 @@ void Menu::DrawOverlay()
 	ImGuiContext* ctx = ImGui::GetCurrentContext();
 	bool canReload = ctx && !ctx->WithinFrameScope && ctx->WithinEndChildID == 0;
 
-	if (!IsEnabled && wantsFontPreviewAtlas) {
-		wantsFontPreviewAtlas = false;
-		pendingFontReload = true;
+	if (auto& atlas = MenuFonts::GetAtlasState(); !IsEnabled && atlas.wantsFontPreviewAtlas) {
+		atlas.wantsFontPreviewAtlas = false;
+		atlas.pendingFontReload = true;
 	}
 
 	// Process deferred font reload BEFORE any ImGui operations
 	// This is the safest place to do font atlas modifications
-	if (pendingFontReload && canReload) {
+	if (MenuFonts::GetAtlasState().pendingFontReload && canReload) {
 		// Call ReloadFont first - only clear flag if it succeeds
-		if (ThemeManager::ReloadFont(*this, cachedFontSize)) {
+		if (ThemeManager::ReloadFont(*this, MenuFonts::GetAtlasState().cachedFontSize)) {
 			// Reload completed successfully
-			pendingFontReload = false;
+			MenuFonts::GetAtlasState().pendingFontReload = false;
 		} else {
 			// Reload failed - keep flag true to retry next frame
 			logger::warn("Menu::DrawOverlay() - Font reload failed, will retry next frame");
@@ -1063,7 +1076,7 @@ void Menu::DrawOverlay()
 			result_cache = Util::Input::KeyIdToString(keys);
 			return result_cache.c_str();
 		},
-		cachedFontSize,
+		MenuFonts::GetAtlasState().cachedFontSize,
 		ThemeManager::ResolveFontSize(*this));
 }
 
@@ -1106,7 +1119,8 @@ void Menu::ProcessInputEventQueue()
 	ImGuiIO& io = ImGui::GetIO();
 	for (auto& event : _keyEventQueue) {
 		if (event.eventType == RE::INPUT_EVENT_TYPE::kChar) {
-			io.AddInputCharacter(event.keyCode);
+			if (!Util::Input::IsRejectedByNumericTextEntry(event.keyCode))
+				io.AddInputCharacter(event.keyCode);
 			continue;
 		}
 		if (event.device == RE::INPUT_DEVICE::kMouse) {
@@ -1117,9 +1131,12 @@ void Menu::ProcessInputEventQueue()
 				if (ew && ew->previewMode == EditorWindow::PreviewMode::FreeCamera) {
 					ew->AdjustFlySpeed(event.keyCode == 8 ? 1.0f : -1.0f);
 				}
-			} else if (!flying) {
-				if (static_cast<int>(event.keyCode) < ImGuiMouseButton_COUNT)
-					io.AddMouseButtonEvent(event.keyCode, event.IsPressed());
+			} else if (flying) {
+				// Right-click exits free-cam / play mode (alongside the CSEditorToggleKey combo).
+				if (event.keyCode == ImGuiMouseButton_Right && event.IsPressed())
+					ew->ExitPreviewMode();
+			} else if (static_cast<int>(event.keyCode) < ImGuiMouseButton_COUNT) {
+				io.AddMouseButtonEvent(event.keyCode, event.IsPressed());
 			}
 		}
 
@@ -1145,7 +1162,7 @@ void Menu::ProcessInputEventQueue()
 				auto shaderCache = globals::shaderCache;
 				KeyAction keyActions[] = {
 					{ settings.ToggleKey, [this]() {
-						 if (!SetupRenderer::ShouldShowFirstTimeSetup()) {
+						 if (!SetupRenderer::ShouldShowFirstTimeSetup() && !EditorWindow::GetSingleton()->open) {
 							 IsEnabled = !IsEnabled;
 							 suppressNextEscape = false;
 							 if (IsEnabled)
@@ -1289,16 +1306,25 @@ void Menu::ProcessInputEventQueue()
 					suppressNextEscape = false;
 				// An Escape-bound Effects11 editor hotkey already toggled the editor this release
 				if (key == VK_ESCAPE && !escapeHandledByPopup && !effects11EditorToggled) {
-					if (editorWindow && editorWindow->IsInPreviewMode()) {
+					if (PresetsPageRenderer::CloseLightboxIfOpen()) {
+						// Screenshot lightbox takes priority over closing the menu.
+					} else if (editorWindow && editorWindow->IsInPreviewMode()) {
 						editorWindow->ExitPreviewMode();
-					} else if (editorWindow && editorWindow->open && editorWindow->ShouldHandleEscapeKey()) {
-						editorWindow->open = false;
+					} else if (editorWindow && editorWindow->open) {
+						// Both guards consume one-shot flags, so evaluate each unconditionally.
+						auto& hostedEffects11Editor = Effects11Editor::GetSingleton();
+						const bool editorHandlesEscape = editorWindow->ShouldHandleEscapeKey();
+						const bool effects11Allows = !hostedEffects11Editor.IsOpen() || hostedEffects11Editor.ShouldHandleEscapeKey();
+						if (editorHandlesEscape && effects11Allows)
+							editorWindow->open = false;
 					} else if (auto& effects11Editor = Effects11Editor::GetSingleton(); effects11Editor.IsOpen()) {
 						if (effects11Editor.ShouldHandleEscapeKey())
 							effects11Editor.Close();
 					} else if (IsEnabled && (!editorWindow || !editorWindow->open)) {
 						if (suppressNextEscape)
 							suppressNextEscape = false;
+						else if (editorWindow && editorWindow->suppressNextEditorEscape)
+							editorWindow->suppressNextEditorEscape = false;
 						else
 							IsEnabled = false;
 					}
@@ -1412,6 +1438,25 @@ bool Menu::ShouldSwallowInput()
 	       Effects11Editor::GetSingleton().IsOpen();
 }
 
+void Menu::SyncVanityCamera()
+{
+	const bool wantDisabled = ShouldSwallowInput();
+	auto setting = RE::GetINISetting("fAutoVanityModeDelay:Camera");
+	if (!setting)
+		return;
+
+	if (wantDisabled && !vanityCameraDisabled) {
+		savedVanityCameraDelay = setting->GetFloat();
+		setting->data.f = 10000.0f;
+		vanityCameraDisabled = true;
+		logger::info("Vanity camera disabled while CS UI is open (saved delay: {})", savedVanityCameraDelay);
+	} else if (!wantDisabled && vanityCameraDisabled) {
+		setting->data.f = savedVanityCameraDelay;
+		vanityCameraDisabled = false;
+		logger::info("Vanity camera restored (delay: {})", savedVanityCameraDelay);
+	}
+}
+
 bool Menu::IsPreviewFlying()
 {
 	auto editorWindow = EditorWindow::GetSingleton();
@@ -1443,5 +1488,5 @@ void Menu::DrawWeatherDetailsWindow()
 	// Use Weather core feature for all window management and rendering
 	auto& weather = globals::features::csEditor;
 	bool* p_open = &globals::features::csEditor.WeatherDetailsWindow.Enabled;
-	weather.RenderWeatherDetailsWindow(p_open, !weather.WeatherDetailsWindow.ShowInOverlay);
+	weather.RenderWeatherDetailsWindow(p_open, !globals::features::performanceOverlay.settings.ShowWeatherPicker);
 }

@@ -2,15 +2,6 @@
 
 // via https://www.colour-science.org/
 
-// Whether the scene is rendered in a wide-gamut (ACEScg) working space.
-// Upstream Linear Lighting exposes an `enableACEScg` mode that this branch does not carry,
-// so the scene is always delivered to Post Processing in sRGB/BT.709 primaries.
-// Flip this to the real query if an ACEScg working space is ever ported.
-inline bool SceneUsesWideGamutWorkingSpace()
-{
-	return false;
-}
-
 inline const auto& getAvailableColorSpaces()
 {
 	static auto spaces = std::array{

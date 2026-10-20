@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT AND (LicenseRef-GPL-3.0-with-Modding-Exception WITH GPL-3.0-linking-source-exception)
 // Original code Copyright (c) 2022 Ilya Perapechka (MIT), modifications GPL-3.0 with Modding Exception (see EXCEPTIONS.md)
 
-#include "Common/Color.hlsli"
+#include "Common/ColorManagement.hlsli"
 #include "Common/FrameBuffer.hlsli"
 #include "Common/SharedData.hlsli"
 
@@ -9,20 +9,22 @@
 #	undef IBL
 #endif
 
+#if defined(VSHADER)
 struct VS_INPUT
 {
 	float4 Position: POSITION0;
-#if !defined(ENVCUBE)
+#	if !defined(ENVCUBE)
 	float4 Normal: NORMAL0;
-#endif
+#	endif
 	float4 TexCoord0: TEXCOORD0;
-#if defined(ENVCUBE)
+#	if defined(ENVCUBE)
 	float4
-#else
+#	else
 	int4
-#endif
+#	endif
 		TexCoord1: TEXCOORD1;
 };
+#endif
 
 struct VS_OUTPUT
 {
@@ -187,6 +189,10 @@ VS_OUTPUT main(VS_INPUT input)
 		colorTmp1 = 0;
 		colorTmp2 = fVars1.x;
 	}
+#		if !defined(GRAYSCALE_TO_COLOR)
+	color1.rgb = ColorManagement::SRGBToWorking(color1.rgb);
+	color2.rgb = ColorManagement::SRGBToWorking(color2.rgb);
+#		endif
 	float colorParam = (tmp1 - colorTmp1) / (colorTmp2 - colorTmp1);
 	float4 color = lerp(color1, color2, colorParam);
 
@@ -320,6 +326,20 @@ float GetPointLightIntensity(LightLimitFix::Light light, float3 positionWS, out 
 }
 #	endif
 
+void ApplyLinearLightingOutput(inout PS_OUTPUT psout)
+{
+#	if defined(ENABLE_LL)
+	if (!Permutation::RenderToUI || (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection)) {
+#		if !defined(ENVCUBE)
+		if (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::SourceAlphaBlend)
+#		endif
+			psout.Color.w = pow(saturate(psout.Color.w), TransferFunctions::GAME_GAMMA);
+	}
+	if (Permutation::RenderToUI && !(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection))
+		psout.Color.rgb = ColorManagement::WorkingToUI(psout.Color.rgb);
+#	endif
+}
+
 PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 {
 	PS_OUTPUT psout;
@@ -386,7 +406,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		if (dot(refractDir, refractDir) < 1e-4)
 			refractDir = -V;
 
-		float3 reflectColor = Color::IrradianceToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(SampSourceTexture, reflectDir, 0).xyz);
+		float3 reflectColor = ColorManagement::SceneToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(SampSourceTexture, reflectDir, 0).xyz);
 		float3 exitDir = GetRaindropExitDirection(V, normalWS, SharedData::rainRefractionSettings.RefractionFactor);
 		float4 exitCS = mul(FrameBuffer::CameraViewProj, float4(exitDir, 0.0));
 		float2 backgroundUV = exitCS.xy / max(exitCS.w, 1e-4) * float2(0.5, -0.5) + 0.5;
@@ -403,13 +423,13 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 			float2 edgeDistance = min(backgroundUV, 1.0 - backgroundUV);
 			float screenWeight = exitCS.w > 1e-4 ? saturate(min(edgeDistance.x, edgeDistance.y) * 20.0) : 0.0;
 			float2 backgroundSampleUV = FrameBuffer::GetDynamicResolutionAdjustedScreenPosition(saturate(backgroundUV));
-			float3 screenColor = Color::IrradianceToLinear(TexRainBackground.SampleGrad(SampSourceTexture, backgroundSampleUV, backgroundDx, backgroundDy).xyz);
-			float3 cubemapColor = Color::IrradianceToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(SampSourceTexture, exitDir, 0).xyz);
+			float3 screenColor = ColorManagement::SceneToLinear(TexRainBackground.SampleGrad(SampSourceTexture, backgroundSampleUV, backgroundDx, backgroundDy).xyz);
+			float3 cubemapColor = ColorManagement::SceneToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(SampSourceTexture, exitDir, 0).xyz);
 			refractColor = lerp(cubemapColor, screenColor, screenWeight);
 		}
 		else
 		{
-			refractColor = Color::IrradianceToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(SampSourceTexture, refractDir, 0).xyz);
+			refractColor = ColorManagement::SceneToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(SampSourceTexture, refractDir, 0).xyz);
 		}
 
 	float3 raindropColor = lerp(refractColor, reflectColor, fresnel);
@@ -433,15 +453,14 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 				float forwardScatter = lerp(0.3, 1.0, pow(saturate(dot(-lightDirection, V) * 0.5 + 0.5), 4.0));
 				float3 halfVector = lightDirection + V;
 				float glint = pow(saturate(dot(normalWS, halfVector) * rsqrt(max(dot(halfVector, halfVector), 1e-8))), 48.0);
-				const bool isPointLightLinear = light.lightFlags & LightLimitFix::LightFlags::Linear;
-				pointLighting += Color::IrradianceToLinear(Color::Light(light.color.xyz, isPointLightLinear)) * intensity * ((1.0 - fresnel) * forwardScatter + glint);
+				pointLighting += ColorManagement::SceneToLinear(Color::Light(light.color.xyz)) * intensity * ((1.0 - fresnel) * forwardScatter + glint);
 			}
 		}
 		raindropColor += pointLighting * pointLightingScale;
 	}
 #		endif
 
-	psout.Color.xyz = Color::IrradianceToGamma(raindropColor * SharedData::rainRefractionSettings.Brightness);
+	psout.Color.xyz = ColorManagement::LinearToScene(raindropColor * SharedData::rainRefractionSettings.Brightness);
     psout.Color.w = alpha;
     psout.Normal = float4(0, 1, 0, alpha);
     return psout;
@@ -449,12 +468,17 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	endif
 
 	float4 sourceColor = TexSourceTexture.Sample(SampSourceTexture, input.TexCoord0);
-	float4 baseColor = input.Color * sourceColor;
-	baseColor.xyz = Color::Diffuse(baseColor.xyz);
+	float4 baseColor;
+#	if defined(GRAYSCALE_TO_COLOR)
+	baseColor = input.Color * sourceColor;
+#	else
+	baseColor.xyz = input.Color.xyz * Color::Albedo(ColorManagement::TextureToWorking(sourceColor.xyz));
+	baseColor.w = input.Color.w * sourceColor.w;
+#	endif
 #	if defined(GRAYSCALE_TO_COLOR)
 	float3 grayScaleColor =
 		TexGrayscaleTexture.Sample(SampGrayscaleTexture, float2(sourceColor.y, input.Color.x)).xyz;
-	baseColor.xyz = grayScaleColor;
+	baseColor.xyz = ColorManagement::TextureToWorking(grayScaleColor);
 #	endif
 #	if defined(GRAYSCALE_TO_ALPHA)
 	float grayScaleAlpha =
@@ -465,9 +489,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	if defined(EFFECTS11) && !defined(ENVCUBE) && !defined(GRAYSCALE_TO_COLOR) && !defined(GRAYSCALE_TO_ALPHA)
 	[branch] if (SharedData::enbSettings.EnableParticle)
 	{
-		psout.Color.xyz = Color::EffectMult(Color::Effect(input.Color.xyz) * Color::Effect(sourceColor.xyz) * ColorScale * SharedData::enbSettings.ParticleIntensity);
-		psout.Color.w = Color::EffectAlpha(baseColor.w);
+		psout.Color.xyz = Color::EffectMult(input.Color.xyz * ColorManagement::TextureToWorking(sourceColor.xyz) * ColorScale * SharedData::enbSettings.ParticleIntensity);
+		psout.Color.w = baseColor.w;
 		psout.Normal = float4(0, 1, 0, psout.Color.w);
+		ApplyLinearLightingOutput(psout);
 		return psout;
 	}
 #	endif
@@ -511,6 +536,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	psout.Normal.w = baseColor.w;
 	psout.Normal.xyz = float3(0, 1, 0);
 
+	ApplyLinearLightingOutput(psout);
 	return psout;
 }
 #endif

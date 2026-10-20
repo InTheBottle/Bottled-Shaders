@@ -1,5 +1,7 @@
 #include "DoF.h"
 
+#include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
+
 #include "Features/PostProcessing.h"
 #include "Menu.h"
 #include "ShaderCache.h"
@@ -7,6 +9,11 @@
 #include "Util.h"
 
 #include "I18n/I18n.h"
+
+namespace
+{
+	constexpr float RaceMenuFocalLengthMM = 18.0f;
+}
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	DoF::Settings,
@@ -16,6 +23,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	ManualFocusPlane,
 	FocalLength,
 	FNumber,
+	SensorWidthMM,
 	FarPlaneMaxBlur,
 	NearPlaneMaxBlur,
 	UseAdaptiveGather,
@@ -39,15 +47,71 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 
 void DoF::DrawSettings()
 {
+	const auto* cam = owner ? owner->GetActivePhysicalCameraState() : nullptr;
+	const bool camActive = cam != nullptr;
+
+	float autoFocusCoord[2] = { settings.FocusCoord.x, settings.FocusCoord.y };
+	float manualFocus = settings.ManualFocusPlane;
+	float focalLength = settings.FocalLength;
+	float fNumber = settings.FNumber;
+	float sensorWidth = settings.SensorWidthMM;
+	float transitionSpeed = settings.TransitionSpeed;
+	int bladeCount = settings.BokehBladeCount;
+	float bladeRoundness = settings.BokehBladeRoundness;
+	float shapeRotation = settings.HighlightShapeRotationAngle;
+	if (camActive) {
+		autoFocusCoord[0] = cam->ScreenPointUV.x;
+		autoFocusCoord[1] = cam->ScreenPointUV.y;
+		manualFocus = cam->ManualDistanceM;
+		focalLength = cam->FocalLengthMM;
+		fNumber = cam->FNumber;
+		sensorWidth = cam->EffectiveSensorWidthMM;
+		transitionSpeed = cam->TransitionSpeed;
+		bladeCount = cam->ApertureBladeCount;
+		bladeRoundness = cam->ApertureRoundness;
+		shapeRotation = std::fmod(cam->ApertureBladeRotationDeg, 360.0f) / 360.0f;
+		ImGui::TextDisabled("%s", T("feature.post_processing.controlled_by_cinematic_camera", "Lens and focus are currently controlled by Cinematic Camera."));
+	}
+
+	ImGui::BeginDisabled(camActive);
 	ImGui::Checkbox(T("feature.post_processing.do_f.auto_focus", "Auto Focus"), &settings.AutoFocus);
 
 	if (settings.AutoFocus) {
-		ImGui::SliderFloat2(T("feature.post_processing.do_f.focus_point", "Focus Point"), &settings.FocusCoord.x, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		const SceneWidgetInterceptor::ProxyScope proxy(&settings.FocusCoord, 1.0f);
+		ImGui::SliderFloat2(T("feature.post_processing.do_f.focus_point", "Focus Point"), autoFocusCoord, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 	}
-	ImGui::SliderFloat(T("feature.post_processing.do_f.transition_speed", "Transition Speed"), &settings.TransitionSpeed, 0.1f, 1.0f, "%.2f");
-	ImGui::SliderFloat(T("feature.post_processing.do_f.manual_focus", "Manual Focus"), &settings.ManualFocusPlane, 0.1f, 150.0f, "%.2f m");
-	ImGui::SliderFloat(T("feature.post_processing.do_f.focal_length", "Focal Length"), &settings.FocalLength, 1.0f, 300.0f, "%.1f mm");
-	ImGui::SliderFloat(T("feature.post_processing.do_f.f_number", "F-Number"), &settings.FNumber, 1.0f, 22.0f, "f/%.1f");
+	{
+		const SceneWidgetInterceptor::ProxyScope proxy(&settings.TransitionSpeed, 1.0f);
+		ImGui::SliderFloat(T("feature.post_processing.do_f.transition_speed", "Transition Speed"), &transitionSpeed, 0.1f, 1.0f, "%.2f");
+	}
+	{
+		const SceneWidgetInterceptor::ProxyScope proxy(&settings.ManualFocusPlane, 1.0f);
+		ImGui::SliderFloat(T("feature.post_processing.do_f.manual_focus", "Manual Focus"), &manualFocus, 0.1f, 150.0f, "%.2f m");
+	}
+	{
+		const SceneWidgetInterceptor::ProxyScope proxy(&settings.FocalLength, 1.0f);
+		ImGui::SliderFloat(T("feature.post_processing.do_f.focal_length", "Focal Length"), &focalLength, 1.0f, 300.0f, "%.1f mm");
+	}
+	{
+		const SceneWidgetInterceptor::ProxyScope proxy(&settings.FNumber, 1.0f);
+		ImGui::SliderFloat(T("feature.post_processing.do_f.f_number", "F-Number"), &fNumber, 1.0f, 22.0f, "f/%.1f");
+	}
+	{
+		const SceneWidgetInterceptor::ProxyScope proxy(&settings.SensorWidthMM, 1.0f);
+		ImGui::SliderFloat(T("feature.post_processing.do_f.sensor_width", "Sensor Width"), &sensorWidth, 1.0f, 100.0f, "%.1f mm", ImGuiSliderFlags_AlwaysClamp);
+	}
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::Text(T("feature.post_processing.do_f.sensor_width_desc", "Horizontal sensor extent the focal length and F-number are expressed for. 36 mm matches a full frame camera."));
+	ImGui::EndDisabled();
+	if (!camActive && !SceneWidgetInterceptor::IsArmed()) {
+		settings.FocusCoord.x = autoFocusCoord[0];
+		settings.FocusCoord.y = autoFocusCoord[1];
+		settings.ManualFocusPlane = manualFocus;
+		settings.TransitionSpeed = transitionSpeed;
+		settings.FocalLength = focalLength;
+		settings.FNumber = fNumber;
+		settings.SensorWidthMM = sensorWidth;
+	}
 	ImGui::SliderFloat(T("feature.post_processing.do_f.far_plane_max_blur", "Far Plane Max Blur"), &settings.FarPlaneMaxBlur, 0.0f, 8.0f, "%.2f");
 	ImGui::SliderFloat(T("feature.post_processing.do_f.near_plane_max_blur", "Near Plane Max Blur"), &settings.NearPlaneMaxBlur, 0.0f, 4.0f, "%.2f");
 	ImGui::SliderFloat(T("feature.post_processing.do_f.max_far_coc_radius", "Max Far Blur Radius"), &settings.MaxFarCoCRadius, 0.001f, 0.1f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
@@ -70,14 +134,29 @@ void DoF::DrawSettings()
 	ImGui::SliderFloat(T("feature.post_processing.do_f.post_blur_smoothing", "Post Blur Smoothing"), &settings.PostBlurSmoothing, 0.0f, 2.0f, "%.2f");
 	ImGui::Combo(T("feature.post_processing.do_f.bokeh_mode", "Bokeh Mode"), &settings.BokehMode, "Procedural\0Custom Texture (Higher Cost)\0");
 	if (settings.BokehMode == 0) {
-		ImGui::SliderInt(T("feature.post_processing.do_f.bokeh_blade_count", "Aperture Blades"), &settings.BokehBladeCount, 4, 16, "%d", ImGuiSliderFlags_AlwaysClamp);
-		ImGui::SliderFloat(T("feature.post_processing.do_f.bokeh_blade_roundness", "Blade Roundness"), &settings.BokehBladeRoundness, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		ImGui::BeginDisabled(camActive);
+		{
+			const SceneWidgetInterceptor::ProxyScope proxy(&settings.BokehBladeCount, 1.0f);
+			ImGui::SliderInt(T("feature.post_processing.do_f.bokeh_blade_count", "Aperture Blades"), &bladeCount, 4, 16, "%d", ImGuiSliderFlags_AlwaysClamp);
+		}
+		{
+			const SceneWidgetInterceptor::ProxyScope proxy(&settings.BokehBladeRoundness, 1.0f);
+			ImGui::SliderFloat(T("feature.post_processing.do_f.bokeh_blade_roundness", "Blade Roundness"), &bladeRoundness, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		}
+		ImGui::EndDisabled();
+		if (!camActive && !SceneWidgetInterceptor::IsArmed()) {
+			settings.BokehBladeCount = bladeCount;
+			settings.BokehBladeRoundness = bladeRoundness;
+		}
 		if (!settings.UseAdaptiveGather)
 			ImGui::TextDisabled(T("feature.post_processing.do_f.procedural_requires_adaptive", "Procedural blades require Adaptive Gather; the compatibility path uses a circle."));
 	} else if (owner) {
 		const int shapeCount = owner->bokehResources.GetTotalShapeCount();
-		settings.HighlightShape = std::clamp(settings.HighlightShape, 1, std::max(shapeCount, 1));
-		const int selectedShape = settings.HighlightShape - 1;
+		const int shape = std::clamp(settings.HighlightShape, 1, std::max(shapeCount, 1));
+		if (!SceneWidgetInterceptor::IsArmed())
+			settings.HighlightShape = shape;
+		const int selectedShape = shape - 1;
+		ImGui::BeginDisabled(SceneWidgetInterceptor::IsArmed());
 		if (ImGui::BeginCombo(T("feature.post_processing.do_f.highlight_custom_shape", "Custom Aperture Texture"), owner->bokehResources.GetShapeName(selectedShape))) {
 			for (int i = 0; i < shapeCount; ++i) {
 				const bool selected = i == selectedShape;
@@ -88,17 +167,29 @@ void DoF::DrawSettings()
 			}
 			ImGui::EndCombo();
 		}
+		ImGui::EndDisabled();
 		ImGui::TextDisabled(T("feature.post_processing.do_f.custom_shape_cost", "Custom textures preserve arbitrary silhouettes but add a texture lookup per gather tap."));
 	}
-	ImGui::SliderFloat(T("feature.post_processing.do_f.highlight_shape_rotation", "Highlight Shape Rotation"), &settings.HighlightShapeRotationAngle, 0.0f, 1.0f, "%.2f");
+	ImGui::BeginDisabled(camActive);
+	{
+		const SceneWidgetInterceptor::ProxyScope proxy(&settings.HighlightShapeRotationAngle, 1.0f);
+		ImGui::SliderFloat(T("feature.post_processing.do_f.highlight_shape_rotation", "Highlight Shape Rotation"), &shapeRotation, 0.0f, 1.0f, "%.2f");
+	}
+	ImGui::EndDisabled();
+	if (!camActive && !SceneWidgetInterceptor::IsArmed())
+		settings.HighlightShapeRotationAngle = shapeRotation;
+	ImGui::BeginDisabled(camActive);
 	ImGui::Checkbox(T("feature.post_processing.do_f.target_focus", "Target Focus"), &settings.targetFocus);
-	ImGui::SliderFloat(T("feature.post_processing.do_f.target_focus_focal_length", "Target Focus Focal Length"), &settings.targetFocusFocalLength, 1.0f, 300.0f, "%.1f mm");
+	if (settings.targetFocus) {
+		ImGui::SliderFloat(T("feature.post_processing.do_f.target_focus_focal_length", "Target Focus Focal Length"), &settings.targetFocusFocalLength, 1.0f, 300.0f, "%.1f mm");
+	}
+	ImGui::EndDisabled();
 	ImGui::Checkbox(T("feature.post_processing.do_f.console_selection", "Console Selection"), &settings.consoleSelection);
 	if (settings.consoleSelection && currentRef != 0) {
 		ImGui::Text(T("feature.post_processing.do_f.selected_reference", "Selected Reference: %08X"), currentRef);
 	}
 
-	if (ImGui::CollapsingHeader(T("feature.post_processing.do_f.debug", "Debug"))) {
+	if (Util::ShowDebugSections() && ImGui::CollapsingHeader(T("feature.post_processing.do_f.debug", "Debug"))) {
 		static float debugRescale = .3f;
 		ImGui::Text(T("feature.post_processing.do_f.debug_distance", "Debug Distance: %f"), debugDistance);
 		ImGui::Text(T("feature.post_processing.do_f.debug_focus_plane", "Debug Focus Plane: %f"), debugFocusPlane);
@@ -143,13 +234,13 @@ void DoF::SaveSettings(json& o_json)
 	o_json = settings;
 }
 
-void DoF::UpdateProceduralBokehSamples(bool force)
+void DoF::UpdateProceduralBokehSamples(int bladeCount, float bladeRoundness, bool force)
 {
 	if (!proceduralBokehSamples)
 		return;
 
-	const int bladeCount = std::clamp(settings.BokehBladeCount, 4, 16);
-	const float roundness = std::clamp(settings.BokehBladeRoundness, 0.0f, 1.0f);
+	bladeCount = std::clamp(bladeCount, 4, 16);
+	const float roundness = std::clamp(bladeRoundness, 0.0f, 1.0f);
 	if (!force && bladeCount == cachedBokehBladeCount && roundness == cachedBokehBladeRoundness)
 		return;
 
@@ -222,7 +313,7 @@ void DoF::SetupResources()
 			BokehResources::GATHER_SAMPLE_COUNT,
 			"DoF::ProceduralBokehSamples");
 		proceduralBokehSamples->CreateSRV();
-		UpdateProceduralBokehSamples(true);
+		UpdateProceduralBokehSamples(settings.BokehBladeCount, settings.BokehBladeRoundness, true);
 	}
 
 	logger::debug("Creating 2D textures...");
@@ -349,8 +440,6 @@ void DoF::SetupResources()
 		texPreFocus = eastl::make_unique<Texture2D>(texDesc, "DoF::PreviousFocus");
 		texPreFocus->CreateSRV(srvDesc);
 		texPreFocus->CreateUAV(uavDesc);
-
-		g_TDM = reinterpret_cast<TDM_API::IVTDM2*>(TDM_API::RequestPluginAPI(TDM_API::InterfaceVersion::V2));
 	}
 
 	// Bokeh shapes are loaded by PostProcessing::bokehResources (shared with LensFlare)
@@ -368,7 +457,6 @@ void DoF::SetupResources()
 		};
 		linearSampler = nullptr;
 		DX::ThrowIfFailed(device->CreateSamplerState(&samplerDesc, linearSampler.put()));
-		Util::SetResourceName(linearSampler.get(), "DoF::LinearSampler");
 		Util::SetResourceName(linearSampler.get(), "DoF::LinearSampler");
 	}
 
@@ -441,86 +529,13 @@ void DoF::CompileComputeShaders()
 	CompileComputeShadersAsync(L"Data\\Shaders\\PostProcessing\\DoF", shaderInfos);
 }
 
-// Thanks Ershin!
-RE::NiPoint3 DoF::GetCameraPos()
-{
-	auto player = RE::PlayerCharacter::GetSingleton();
-	auto playerCamera = RE::PlayerCamera::GetSingleton();
-	RE::NiPoint3 ret;
-
-	if (playerCamera->currentState == playerCamera->GetRuntimeData().cameraStates[RE::CameraStates::kFirstPerson] ||
-		playerCamera->currentState == playerCamera->GetRuntimeData().cameraStates[RE::CameraStates::kThirdPerson] ||
-		playerCamera->currentState == playerCamera->GetRuntimeData().cameraStates[RE::CameraStates::kMount]) {
-		RE::NiNode* root = playerCamera->cameraRoot.get();
-		if (root) {
-			ret.x = root->world.translate.x;
-			ret.y = root->world.translate.y;
-			ret.z = root->world.translate.z;
-		}
-	} else if (playerCamera->IsInFreeCameraMode()) {
-		auto freeCameraState = static_cast<RE::FreeCameraState*>(playerCamera->currentState.get());
-		ret = freeCameraState->translation;
-	} else {
-		RE::NiPoint3 playerPos = player->GetLookingAtLocation();
-
-		ret.z = playerPos.z;
-		ret.x = player->GetPositionX();
-		ret.y = player->GetPositionY();
-	}
-
-	return ret;
-}
-
-bool DoF::GetTargetLockEnabled()
-{
-	return g_TDM && g_TDM->GetCurrentTarget();
-}
-
-bool DoF::GetInDialogue()
-{
-	return RE::MenuTopicManager::GetSingleton()->speaker || RE::MenuTopicManager::GetSingleton()->lastSpeaker;
-}
-
-float DoF::GetDistanceToReference(RE::TESObjectREFR* a_ref)
-{
-	auto* camera = RE::Main::WorldRootCamera();
-	RE::NiPoint3 cameraPosition = camera ? camera->world.translate : GetCameraPos();
-	return cameraPosition.GetDistance(GetReferenceFocusPosition(a_ref));
-}
-
-RE::NiPoint3 DoF::GetReferenceFocusPosition(RE::TESObjectREFR* a_ref)
-{
-	RE::NiPoint3 targetPosition = a_ref->GetPosition();
-	if (a_ref->GetFormType() == RE::FormType::ActorCharacter) {
-		auto head = a_ref->GetNodeByName("NPC Head [Head]");
-		if (head)
-			targetPosition = head->world.translate;
-	}
-	return targetPosition;
-}
-
-bool DoF::GetReferenceFocusCoord(RE::TESObjectREFR* a_ref, float2& a_focusCoord)
-{
-	auto* camera = RE::Main::WorldRootCamera();
-	if (!camera)
-		return false;
-
-	float screenX = 0.0f;
-	float screenY = 0.0f;
-	float screenZ = 0.0f;
-	if (!camera->WorldPtToScreenPt3(GetReferenceFocusPosition(a_ref), screenX, screenY, screenZ, 1e-5f) ||
-		!std::isfinite(screenX) || !std::isfinite(screenY) || screenZ <= 0.0f ||
-		screenX < 0.0f || screenX > 1.0f || screenY < 0.0f || screenY > 1.0f) {
-		return false;
-	}
-
-	// WorldPtToScreenPt3 uses a bottom-left origin; texture UVs use a top-left origin.
-	a_focusCoord = float2(screenX, 1.0f - screenY);
-	return true;
-}
+// Focus target resolution (camera position, reference projection, dialogue and
+// TDM lookup) lives in CinematicCamera::FocusResolver, shared with the
+// Cinematic Camera focus modes. See CinematicCamera.cpp.
 
 void DoF::Draw(TextureInfo& inout_tex)
 {
+	Settings renderSettings = settings;
 	auto state = globals::state;
 	auto context = globals::d3d::context;
 	auto renderer = globals::game::renderer;
@@ -530,60 +545,93 @@ void DoF::Draw(TextureInfo& inout_tex)
 	}
 
 	float2 res = { (float)texOutput->desc.Width, (float)texOutput->desc.Height };
-
-	float focusLen = settings.FocalLength;
-	float nearBlur = settings.NearPlaneMaxBlur;
-	float manualFocus = settings.ManualFocusPlane / 1000.0f;
-	float2 focusCoord = settings.FocusCoord;
+	float focusLen = renderSettings.FocalLength;
+	float fNumber = renderSettings.FNumber;
+	float sensorWidthMM = renderSettings.SensorWidthMM;
+	float transitionSpeed = renderSettings.TransitionSpeed;
+	float nearBlur = renderSettings.NearPlaneMaxBlur;
+	float manualFocus = renderSettings.ManualFocusPlane / 1000.0f;
+	float2 focusCoord = renderSettings.FocusCoord;
 	debugFocusPlane = manualFocus;
-	bool autoFocus = settings.AutoFocus;
+	bool autoFocus = renderSettings.AutoFocus;
+	int bladeCount = renderSettings.BokehBladeCount;
+	float bladeRoundness = renderSettings.BokehBladeRoundness;
 
-	if (settings.targetFocus) {
+	const auto* cam = owner ? owner->GetActivePhysicalCameraState() : nullptr;
+	CinematicCamera::FocusResolver* resolver = owner ? &owner->GetCinematicCamera().focusResolver : nullptr;
+	if (cam && resolver) {
+		focusLen = cam->FocalLengthMM;
+		fNumber = cam->FNumber;
+		sensorWidthMM = cam->EffectiveSensorWidthMM;
+		transitionSpeed = cam->TransitionSpeed;
+		manualFocus = cam->ManualDistanceM / 1000.0f;
+		focusCoord = cam->ScreenPointUV;
+		bladeCount = cam->ApertureBladeCount;
+		bladeRoundness = cam->ApertureRoundness;
+		autoFocus = false;
+
+		switch (cam->Mode) {
+		case CinematicCamera::FocusMode::Manual:
+			break;
+		case CinematicCamera::FocusMode::ScreenPoint:
+			autoFocus = true;
+			break;
+		case CinematicCamera::FocusMode::Target:
+			{
+				// Target focus keeps the DoF console-selection preference. Target mode
+				// never swaps the focal length; the unified lens always wins.
+				auto result = resolver->ResolveTarget(renderSettings.consoleSelection, currentRef);
+				if (result.hasTarget) {
+					if (result.projected) {
+						autoFocus = true;
+						focusCoord = result.focusCoord;
+					} else {
+						manualFocus = result.distanceM / 1000.0f;
+					}
+				}
+				break;
+			}
+		default:
+			break;
+		}
+		debugFocusPlane = manualFocus;
+	} else if (renderSettings.targetFocus && resolver) {
 		focusLen = 1.0f;
 		nearBlur = 0.0f;
 		float targetFocusDistanceGame = 0;
 		autoFocus = false;
 
-		RE::TESObjectREFR* target = nullptr;
-		const auto consoleRef = RE::Console::GetSelectedRef();
-		if (settings.consoleSelection)
-			if (consoleRef && !consoleRef->IsDisabled() && !consoleRef->IsDeleted() && consoleRef->Is3DLoaded()) {
-				currentRef = consoleRef->formID;
-				target = consoleRef.get();
-			} else {
-				currentRef = 0;
-			}
-
-		if (GetTargetLockEnabled()) {
-			target = g_TDM->GetCurrentTarget().get().get();
-		}
-
-		if (GetInDialogue()) {
-			if (RE::MenuTopicManager::GetSingleton()->speaker) {
-				target = RE::MenuTopicManager::GetSingleton()->speaker.get().get();
-			} else {
-				target = RE::MenuTopicManager::GetSingleton()->lastSpeaker.get().get();
-			}
-		}
+		RE::TESObjectREFR* target = resolver->FindTarget(renderSettings.consoleSelection, currentRef);
 		if (!target)
 			return;
 
-		targetFocusDistanceGame = GetDistanceToReference(target);
+		targetFocusDistanceGame = resolver->GetDistanceToReference(target);
 		debugDistance = targetFocusDistanceGame;
-		nearBlur = settings.NearPlaneMaxBlur;
-		focusLen = settings.targetFocusFocalLength;
-		if (GetReferenceFocusCoord(target, focusCoord)) {
+		nearBlur = renderSettings.NearPlaneMaxBlur;
+		focusLen = renderSettings.targetFocusFocalLength;
+		if (resolver->GetReferenceFocusCoord(target, focusCoord)) {
 			// Sample the visible surface at the projected head/object position. This matches the
 			// view-space depth convention used by the CoC pass and avoids focusing behind a face.
 			autoFocus = true;
 		} else {
 			manualFocus = Util::Units::GameUnitsToMeters(targetFocusDistanceGame) * 0.001f;  // in KM
 		}
+		debugFocusPlane = manualFocus;
 	}
-	debugFocusPlane = manualFocus;
+	// RaceMenu always autofocuses the player, regardless of the configured mode.
+	auto* player = globals::game::player;
+	if (resolver && player && globals::game::ui->IsMenuOpen(RE::RaceSexMenu::MENU_NAME)) {
+		focusLen = RaceMenuFocalLengthMM;
+		autoFocus = resolver->GetReferenceFocusCoord(player, focusCoord);
+		if (!autoFocus) {
+			manualFocus = Util::Units::GameUnitsToMeters(resolver->GetDistanceToReference(player)) * 0.001f;
+		}
+		debugFocusPlane = manualFocus;
+	}
+
 	// No-op the whole frame until the core kernels are ready -- a partial
 	// sequential pipeline would write garbage into the scene target.
-	const bool needPostSmoothing = settings.PostBlurSmoothing >= 0.01f;
+	const bool needPostSmoothing = renderSettings.PostBlurSmoothing >= 0.01f;
 	const bool coreReady = AllShadersReady({ &UpdateFocusCS, &CalculateCoCCS, &CoCTileFlattenCS,
 		&CoCTileDilateHCS, &CoCTileDilateVCS, &DownsampleLegacyCS, &FarBlurCS, &NearBlurCS,
 		&GatherPostfilterCS, &CombinerCS });
@@ -595,15 +643,15 @@ void DoF::Draw(TextureInfo& inout_tex)
 	const uint halfResY = std::max(1u, (uint)res.y / 2);
 	const uint tileDimX = std::max(1u, (halfResX + 7) / 8);
 	const uint tileDimY = std::max(1u, (halfResY + 7) / 8);
-	const size_t gatherQuality = (size_t)std::clamp(settings.GatherQuality, 0, 1);
-	UpdateProceduralBokehSamples();
+	const size_t gatherQuality = (size_t)std::clamp(renderSettings.GatherQuality, 0, 1);
+	UpdateProceduralBokehSamples(bladeCount, bladeRoundness);
 
-	const int requestedBokehMode = std::clamp(settings.BokehMode, 0, 1);
+	const int requestedBokehMode = std::clamp(renderSettings.BokehMode, 0, 1);
 	int customShapeIndex = 0;
 	ID3D11ShaderResourceView* customShapeSRV = nullptr;
 	ID3D11ShaderResourceView* customShapeSampleSRV = nullptr;
 	if (owner && requestedBokehMode == 1) {
-		customShapeIndex = std::clamp(settings.HighlightShape - 1, 0, std::max(owner->bokehResources.GetTotalShapeCount() - 1, 0));
+		customShapeIndex = std::clamp(renderSettings.HighlightShape - 1, 0, std::max(owner->bokehResources.GetTotalShapeCount() - 1, 0));
 		customShapeSRV = owner->bokehResources.GetShapeSRV(customShapeIndex);
 		customShapeSampleSRV = owner->bokehResources.GetShapeSampleSRV(customShapeIndex);
 	}
@@ -614,34 +662,34 @@ void DoF::Draw(TextureInfo& inout_tex)
 	const bool adaptiveGatherReady = bokehSampleSRV &&
 	                                 AllShadersReady({ &DownsampleCS, &ReduceColorCoCCS, &ReduceColorCS,
 										 &FarGatherCS[gatherQuality], &NearGatherCS[gatherQuality] });
-	const bool useAdaptiveGather = settings.UseAdaptiveGather && adaptiveGatherReady;
+	const bool useAdaptiveGather = renderSettings.UseAdaptiveGather && adaptiveGatherReady;
 
 	// Tile propagation carries the near disc reach itself, so the same low-resolution dilation used
 	// for group culling now replaces the two old half-resolution Gaussian passes.
-	const float wantNearRadiusPx = std::max(settings.MaxNearCoCRadius, 1e-4f) * res.x * std::max(nearBlur, 0.0f) * bokehMaxRadius;
+	const float wantNearRadiusPx = std::max(renderSettings.MaxNearCoCRadius, 1e-4f) * res.x * std::max(nearBlur, 0.0f) * bokehMaxRadius;
 	constexpr float conservativeTileStepPx = 16.0f * 0.70710678f;
 	const uint tileDilateRadius = wantNearRadiusPx > 0.0f ? std::min(48u, (uint)std::ceil(wantNearRadiusPx / conservativeTileStepPx) + 1u) : 0u;
 	const float nearMaxReachPx = tileDilateRadius > 0u ? std::min(wantNearRadiusPx, (float)(tileDilateRadius - 1u) * conservativeTileStepPx) : 0.0f;
 
 	DoFCB dofData = {
-		.TransitionSpeed = focusPrimed ? settings.TransitionSpeed : 1.0f,
+		.TransitionSpeed = focusPrimed ? transitionSpeed : 1.0f,
 		.FocusCoord = focusCoord,
 		.ManualFocusPlane = manualFocus,
 		.FocalLength = focusLen,
-		.FNumber = settings.FNumber,
-		.FarPlaneMaxBlur = settings.FarPlaneMaxBlur,
+		.FNumber = fNumber,
+		.FarPlaneMaxBlur = renderSettings.FarPlaneMaxBlur,
 		.NearPlaneMaxBlur = nearBlur,
-		.BlurQuality = settings.BlurQuality,
-		.NearFarDistanceCompensation = settings.NearFarDistanceCompensation,
-		.BokehBusyFactor = settings.BokehBusyFactor,
-		.HighlightBoost = settings.HighlightBoost,
-		.PostBlurSmoothing = settings.PostBlurSmoothing,
-		.HighlightShape = bokehMode == 1 ? (uint)settings.HighlightShape : 0u,
-		.HighlightShapeRotationAngle = settings.HighlightShapeRotationAngle,
-		.PetzvalStrength = settings.PetzvalStrength,
+		.BlurQuality = renderSettings.BlurQuality,
+		.NearFarDistanceCompensation = renderSettings.NearFarDistanceCompensation,
+		.BokehBusyFactor = renderSettings.BokehBusyFactor,
+		.HighlightBoost = renderSettings.HighlightBoost,
+		.PostBlurSmoothing = renderSettings.PostBlurSmoothing,
+		.HighlightShape = bokehMode == 1 ? (uint)renderSettings.HighlightShape : 0u,
+		.HighlightShapeRotationAngle = cam ? std::fmod(cam->ApertureBladeRotationDeg, 360.0f) / 360.0f : renderSettings.HighlightShapeRotationAngle,
+		.PetzvalStrength = renderSettings.PetzvalStrength,
 		.AutoFocus = autoFocus,
-		.MaxNearCoCRadius = std::max(settings.MaxNearCoCRadius, 1e-4f),
-		.MaxFarCoCRadius = std::max(settings.MaxFarCoCRadius, 1e-4f),
+		.MaxNearCoCRadius = std::max(renderSettings.MaxNearCoCRadius, 1e-4f),
+		.MaxFarCoCRadius = std::max(renderSettings.MaxFarCoCRadius, 1e-4f),
 		.TileDilateRadius = tileDilateRadius,
 		.CoCTileDimX = tileDimX,
 		.CoCTileDimY = tileDimY,
@@ -651,10 +699,10 @@ void DoF::Draw(TextureInfo& inout_tex)
 		.CustomShapeRadiusScale = customShapeRadiusScale,
 		.BokehMaxRadius = bokehMaxRadius,
 		.NearMaxReachPx = nearMaxReachPx,
-		.BokehBladeCount = (uint)std::clamp(settings.BokehBladeCount, 4, 16),
-		.BokehBladeRoundness = std::clamp(settings.BokehBladeRoundness, 0.0f, 1.0f),
+		.BokehBladeCount = (uint)std::clamp(bladeCount, 4, 16),
+		.BokehBladeRoundness = std::clamp(bladeRoundness, 0.0f, 1.0f),
 		.ProceduralBokehAreaScale = proceduralBokehAreaScale,
-		.pad = 0
+		.SensorWidthMM = std::max(sensorWidthMM, 1.0f)
 	};
 	dofCB->Update(dofData);
 

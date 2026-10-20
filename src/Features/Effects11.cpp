@@ -4,11 +4,16 @@
 #include "Effects11/ENBHelper.h"
 #include "Effects11/Editor/Effects11Editor.h"
 #include "Effects11/EffectManager.h"
+#include "Effects11/PresetManager.h"
 #include "Effects11/SettingManager.h"
 
 #include "CloudShadows.h"
 #include "Deferred.h"
+#include "Globals.h"
 #include "IBL.h"
+#include "PostProcessing.h"
+#include "PostProcessingMode.h"
+#include "Presets/UnifiedPresetCatalog.h"
 #include "ProceduralSun.h"
 #include "ShaderCache.h"
 #include "SkySync.h"
@@ -18,6 +23,11 @@
 #include "Utils/Game.h"
 #include "Utils/Moon.h"
 #include "VolumetricLighting.h"
+
+bool Effects11::HasShaderDefine(RE::BSShader::Type)
+{
+	return IsActive();
+}
 
 namespace
 {
@@ -135,8 +145,9 @@ namespace
 			return false;
 
 		const bool masser = caster == SkySync::Caster::Masser;
-		const auto moonColor = Util::Moon::GetBlendColor(masser ? a_sky->masser : a_sky->secunda, masser ? Util::Moon::MasserBaseColor : Util::Moon::SecundaBaseColor,
-			skySync.settings.NewMoonIntensity, skySync.settings.CrescentMoonIntensity, skySync.settings.FullMoonIntensity);
+		const auto moonColor = Util::Moon::GetLightColor(masser ? a_sky->masser : a_sky->secunda, masser ? Util::Moon::MasserBaseColor : Util::Moon::SecundaBaseColor,
+			skySync.settings.NewMoonIntensity, skySync.settings.CrescentMoonIntensity, skySync.settings.FullMoonIntensity)
+		                           .GetColor();
 		a_light = { float3(moonColor.x, moonColor.y, moonColor.z), skySync.GetCelestialDirection(a_sky, caster), masser ? a_perFrame.MasserBillboardTan : a_perFrame.SecundaBillboardTan, 4.0f, false };
 		return true;
 	}
@@ -251,6 +262,9 @@ void Effects11::UpdateSkyScattering(PerFrame& a_data)
 
 Effects11::PerFrame Effects11::GetCommonBufferData()
 {
+	if (!IsActive())
+		return {};
+
 	if (!loaded)
 		return {};
 
@@ -368,18 +382,69 @@ void Effects11::RestoreDefaultSettings()
 	settings = {};
 }
 
+bool Effects11::IsUseEffectEnabled() const
+{
+	return loaded && SettingManager::GetSingleton().GetValue<bool>("UseEffect", "GLOBAL");
+}
+
+bool Effects11::IsPresetEnabled() const
+{
+	auto& manager = EffectManager::GetSingleton();
+	return IsUseEffectEnabled() && manager.IsInitialized() && manager.IsPresetLoaded();
+}
+
 void Effects11::ToggleEnabled()
 {
-	if (!EffectManager::GetSingleton().IsPresetLoaded())
+	using PostProcessingMode::Mode;
+	// Effects 11 running since startup has no prior mode, so it falls back to Post Processing when installed.
+	static Mode modeBeforeEffects11 = Mode::PostProcessing;
+	const Mode current = PostProcessingMode::Get();
+	if (current == Mode::Effects11) {
+		if (!PostProcessingMode::Set(modeBeforeEffects11))
+			PostProcessingMode::Set(Mode::Vanilla);
 		return;
+	}
+	if (PostProcessingMode::Set(Mode::Effects11))
+		modeBeforeEffects11 = current;
+}
+
+void Effects11::SetUseEffect(bool enabled)
+{
 	auto& settingManager = SettingManager::GetSingleton();
-	const uint32_t id = settingManager.GetSettingID("UseEffect", "GLOBAL");
-	settingManager.SetValue<bool>(id, !settingManager.GetValue<bool>(id));
+	settingManager.SetValue<bool>(settingManager.GetSettingID("UseEffect", "GLOBAL"), enabled);
 }
 
 void Effects11::SetupResources()
 {
+	// The active preset pack decides the preset; without one, or when it is gone, the default stays.
+	auto& presetManager = PresetManager::GetSingleton();
+	presetManager.DiscoverPresets();
+	if (const auto presetId = UnifiedPresetCatalog::GetSingleton().GetActiveEffects11PresetId(); !presetId.empty())
+		presetManager.SetActivePreset(presetId);
 	EffectManager::GetSingleton().Initialize();
+}
+
+void Effects11::PostSetupResources()
+{
+	resourcesReady = true;
+	Reset();
+}
+
+void Effects11::Reset()
+{
+	if (!resourcesReady)
+		return;
+	PostProcessingMode::ApplyPending();
+	const bool enabled = IsPresetEnabled();
+	if (enabled != presetActive) {
+		// UseEffect can also turn on from an ini reload or preset switch; Post Processing must still yield.
+		if (enabled)
+			PostProcessingMode::Set(PostProcessingMode::Mode::Effects11);
+		globals::shaderCache->Reload([this, enabled] { presetActive = enabled; });
+	} else if (!enabled && IsUseEffectEnabled() && EffectManager::GetSingleton().IsInitialized()) {
+		// UseEffect with no compiled preset has nothing to run, so fall back to the game's own post processing.
+		PostProcessingMode::Set(PostProcessingMode::Mode::Vanilla);
+	}
 }
 
 void Effects11::ClearShaderCache()
@@ -408,8 +473,10 @@ void Effects11::ClearShaderCache()
 	}
 
 	auto& effectManager = EffectManager::GetSingleton();
-	effectManager.enbAdaptation.ClearShaderCache();
-	effectManager.ReloadShaders();
+	if (effectManager.IsInitialized()) {
+		effectManager.enbAdaptation.ClearShaderCache();
+		effectManager.ReloadShaders();
+	}
 }
 
 void Effects11::Prepass()
@@ -562,44 +629,47 @@ void Effects11::OverrideWeather(RE::Sky* a_sky)
 		effectLightingColor = F3ToNi(NiToF3(effectLightingColor) * scale);
 	}
 
-	{
-		auto& fogFarColor = colors[(uint)RE::TESWeather::ColorTypes::kFogFar];
+	// A preset handing fog to CS leaves the vanilla fog values for Exponential Height Fog's scene settings
+	if (!IsHandedOff(E11Handoff::Feature::HeightFog)) {
+		{
+			auto& fogFarColor = colors[(uint)RE::TESWeather::ColorTypes::kFogFar];
 
-		auto fogFarColorF3 = NiToF3(fogFarColor);
+			auto fogFarColorF3 = NiToF3(fogFarColor);
 
-		auto fogColorCurve = settingManager.GetInterpolatedTimeOfDayValue("FogColorCurve", "ENVIRONMENT");
-		auto fogColorMultiplier = settingManager.GetInterpolatedTimeOfDayValue("FogColorMultiplier", "ENVIRONMENT");
+			auto fogColorCurve = settingManager.GetInterpolatedTimeOfDayValue("FogColorCurve", "ENVIRONMENT");
+			auto fogColorMultiplier = settingManager.GetInterpolatedTimeOfDayValue("FogColorMultiplier", "ENVIRONMENT");
 
-		auto fogColorFilter = settingManager.GetInterpolatedColorTimeOfDayValue("FogColorFilter", "ENVIRONMENT");
-		auto fogColorFilterAmount = settingManager.GetInterpolatedTimeOfDayValue("FogColorFilterAmount", "ENVIRONMENT");
+			auto fogColorFilter = settingManager.GetInterpolatedColorTimeOfDayValue("FogColorFilter", "ENVIRONMENT");
+			auto fogColorFilterAmount = settingManager.GetInterpolatedTimeOfDayValue("FogColorFilterAmount", "ENVIRONMENT");
 
-		fogFarColorF3 = Curve(fogFarColorF3, fogColorCurve);
-		fogFarColorF3 = ColorFilter(fogFarColorF3, fogColorFilter, fogColorFilterAmount);
-		fogFarColorF3 = Intensity(fogFarColorF3, fogColorMultiplier);
+			fogFarColorF3 = Curve(fogFarColorF3, fogColorCurve);
+			fogFarColorF3 = ColorFilter(fogFarColorF3, fogColorFilter, fogColorFilterAmount);
+			fogFarColorF3 = Intensity(fogFarColorF3, fogColorMultiplier);
 
-		fogFarColor = F3ToNi(fogFarColorF3);
+			fogFarColor = F3ToNi(fogFarColorF3);
 
-		auto& fogNearColor = colors[(uint)RE::TESWeather::ColorTypes::kFogNear];
+			auto& fogNearColor = colors[(uint)RE::TESWeather::ColorTypes::kFogNear];
 
-		auto fogNearColorF3 = NiToF3(fogNearColor);
+			auto fogNearColorF3 = NiToF3(fogNearColor);
 
-		fogNearColorF3 = Curve(fogNearColorF3, fogColorCurve);
-		fogNearColorF3 = ColorFilter(fogNearColorF3, fogColorFilter, fogColorFilterAmount);
-		fogNearColorF3 = Intensity(fogNearColorF3, fogColorMultiplier);
+			fogNearColorF3 = Curve(fogNearColorF3, fogColorCurve);
+			fogNearColorF3 = ColorFilter(fogNearColorF3, fogColorFilter, fogColorFilterAmount);
+			fogNearColorF3 = Intensity(fogNearColorF3, fogColorMultiplier);
 
-		fogNearColor = F3ToNi(fogNearColorF3);
-	}
+			fogNearColor = F3ToNi(fogNearColorF3);
+		}
 
-	{
-		a_sky->fogPower *= settingManager.GetInterpolatedTimeOfDayValue("FogCurveMultiplier", "ENVIRONMENT");
-	}
+		{
+			a_sky->fogPower *= settingManager.GetInterpolatedTimeOfDayValue("FogCurveMultiplier", "ENVIRONMENT");
+		}
 
-	{
-		auto fogAmountMultiplier = settingManager.GetInterpolatedTimeOfDayValue("FogAmountMultiplier", "ENVIRONMENT");
-		fogAmountMultiplier = std::max(fogAmountMultiplier, 1e-4f);
+		{
+			auto fogAmountMultiplier = settingManager.GetInterpolatedTimeOfDayValue("FogAmountMultiplier", "ENVIRONMENT");
+			fogAmountMultiplier = std::max(fogAmountMultiplier, 1e-4f);
 
-		a_sky->fogNear /= fogAmountMultiplier;
-		a_sky->fogFar /= fogAmountMultiplier;
+			a_sky->fogNear /= fogAmountMultiplier;
+			a_sky->fogFar /= fogAmountMultiplier;
+		}
 	}
 
 	if (enableEffect) {
@@ -719,6 +789,11 @@ void Effects11::OverrideWeather(RE::Sky* a_sky)
 
 void Effects11::CheckCommonData()
 {
+	if (!IsActive()) {
+		enableEffect = false;
+		return;
+	}
+
 	static Util::FrameChecker checker;
 	if (checker.IsNewFrame()) {
 		ENBHelper::Update();
@@ -726,7 +801,7 @@ void Effects11::CheckCommonData()
 		auto& settingManager = SettingManager::GetSingleton();
 		auto& effectManager = EffectManager::GetSingleton();
 
-		enableEffect = !globals::state->IsFullScreenMenuOpen() && globals::shaderCache->IsEnabled() && settingManager.GetValue<bool>("UseEffect", "GLOBAL") && effectManager.IsPresetLoaded();
+		enableEffect = !globals::state->IsFullScreenMenuOpen() && globals::shaderCache->IsEnabled() && effectManager.IsPresetLoaded();
 
 		effectManager.UpdateCommonData();
 
@@ -910,6 +985,12 @@ bool Effects11::WantsTonemapOwnership()
 	if (!effectManager.IsInitialized() || !effectManager.IsPresetLoaded())
 		return false;
 
+	// Post Processing tonemapping and Effects 11 tonemapping cannot share the frame; when PP
+	// wants ownership, this preset yields (avoids a black screen).
+	auto& postProcessing = globals::features::postProcessing;
+	if (postProcessing.loaded && postProcessing.WantsTonemapOwnership())
+		return false;
+
 	return enableEffect && !SettingManager::GetSingleton().GetValue<bool>("UseOriginalPostProcessing", "EFFECT");
 }
 
@@ -922,8 +1003,7 @@ bool Effects11::RenderTonemap(RE::RENDER_TARGET a_input, RE::RENDER_TARGET a_out
 	auto& renderTargets = globals::game::renderer->GetRuntimeData().renderTargets;
 	// Only report replacement after the effect chain actually wrote the output.
 	if (effectManager.ExecuteEffects(renderTargets[a_input], renderTargets[a_output])) {
-		// State::Reset bumps frameCount at the start of Present, before HDR Display composites this output
-		tonemapReplacedFrame = globals::state->frameCount + 1;
+		tonemapReplacedFrame = globals::state->frameCount;
 		return true;
 	}
 	return false;

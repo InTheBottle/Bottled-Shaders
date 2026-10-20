@@ -96,38 +96,38 @@ namespace LandscapeSeams
 }
 
 #if defined(TRUE_PBR)
-#	define LANDSCAPE_SEAMS_BLEND_EXTRA(INDEX, COLOR_TEX, NORM_TEX, AUX_TEX, WEIGHT)                                                                                  \
-		[branch] if ((WEIGHT) > 0.01)                                                                                                                                 \
-		{                                                                                                                                                             \
-			float weight = WEIGHT;                                                                                                                                    \
-			float4 landColor = SampleTerrain(COLOR_TEX, SampColorSampler, uv, sharedOffset);                                                                          \
-			float3 landColorRGB = landColor.rgb;                                                                                                                      \
-			[branch] if (!LandscapeSeams::HasFlag(LandscapeSeams::FlagPbr, INDEX))                                                                                    \
-			{                                                                                                                                                         \
-				landColorRGB = Color::SrgbToLinear(landColorRGB / Color::PBRLightingScale);                                                                           \
-			}                                                                                                                                                         \
-			float landAlpha = landColor.a;                                                                                                                            \
-			float4 landNormal = SampleTerrain(NORM_TEX, SampColorSampler, uv, sharedOffset);                                                                          \
-			float3 landNormalRGB = landNormal.rgb;                                                                                                                    \
-			float landNormalAlpha = landNormal.a;                                                                                                                     \
-			float4 landRMAOS;                                                                                                                                         \
-			[branch] if (LandscapeSeams::HasFlag(LandscapeSeams::FlagPbr, INDEX))                                                                                     \
-			{                                                                                                                                                         \
+#	define LANDSCAPE_SEAMS_BLEND_EXTRA(INDEX, COLOR_TEX, NORM_TEX, AUX_TEX, WEIGHT)                                                                                                       \
+		[branch] if ((WEIGHT) > 0.01)                                                                                                                                                      \
+		{                                                                                                                                                                                  \
+			float weight = WEIGHT;                                                                                                                                                         \
+			float4 landColor = SampleTerrainColor(COLOR_TEX, SampColorSampler, uv, sharedOffset, LandscapeSeams::HasFlag(LandscapeSeams::FlagPbr, INDEX));                                 \
+			float3 landColorRGB = landColor.rgb;                                                                                                                                           \
+			[branch] if (!LandscapeSeams::HasFlag(LandscapeSeams::FlagPbr, INDEX) && !LandscapeLayers::LinearLighting)                                                                     \
+			{                                                                                                                                                                              \
+				landColorRGB = TransferFunctions::Gamma22ToLinear(landColorRGB / Color::PBRLightingScale);                                                                                 \
+			}                                                                                                                                                                              \
+			float landAlpha = landColor.a;                                                                                                                                                 \
+			float4 landNormal = SampleTerrain(NORM_TEX, SampColorSampler, uv, sharedOffset);                                                                                               \
+			float3 landNormalRGB = landNormal.rgb;                                                                                                                                         \
+			float landNormalAlpha = landNormal.a;                                                                                                                                          \
+			float4 landRMAOS;                                                                                                                                                              \
+			[branch] if (LandscapeSeams::HasFlag(LandscapeSeams::FlagPbr, INDEX))                                                                                                          \
+			{                                                                                                                                                                              \
 				landRMAOS = SampleTerrain(AUX_TEX, SampColorSampler, uv, sharedOffset) * float4(LandscapeSeams::Data.PBRParams[INDEX].x, 1, 1, LandscapeSeams::Data.PBRParams[INDEX].z); \
-				[branch] if (LandscapeSeams::HasFlag(LandscapeSeams::FlagGlint, INDEX))                                                                               \
-				{                                                                                                                                                     \
-					glintParameters += weight * LandscapeSeams::Data.GlintParams[INDEX];                                                                              \
-				}                                                                                                                                                     \
-			}                                                                                                                                                         \
-			else                                                                                                                                                      \
-			{                                                                                                                                                         \
-				landRMAOS = float4(1 - landNormalAlpha, 0, 1, 0);                                                                                                     \
-			}                                                                                                                                                         \
-			blendedRMAOS += landRMAOS * weight;                                                                                                                       \
-			blendedRGB += landColorRGB * weight;                                                                                                                      \
-			blendedAlpha += landAlpha * weight;                                                                                                                       \
-			blendedNormalRGB += landNormalRGB * weight;                                                                                                               \
-			blendedNormalAlpha += landNormalAlpha * weight;                                                                                                           \
+				[branch] if (LandscapeSeams::HasFlag(LandscapeSeams::FlagGlint, INDEX))                                                                                                    \
+				{                                                                                                                                                                          \
+					glintParameters += weight * LandscapeSeams::Data.GlintParams[INDEX];                                                                                                   \
+				}                                                                                                                                                                          \
+			}                                                                                                                                                                              \
+			else                                                                                                                                                                           \
+			{                                                                                                                                                                              \
+				landRMAOS = float4(1 - landNormalAlpha, 0, 1, 0);                                                                                                                          \
+			}                                                                                                                                                                              \
+			blendedRMAOS += landRMAOS * weight;                                                                                                                                            \
+			blendedRGB += landColorRGB * weight;                                                                                                                                           \
+			blendedAlpha += landAlpha * weight;                                                                                                                                            \
+			blendedNormalRGB += landNormalRGB * weight;                                                                                                                                    \
+			blendedNormalAlpha += landNormalAlpha * weight;                                                                                                                                \
 		}
 #else
 #	define LANDSCAPE_SEAMS_BLEND_EXTRA(INDEX, COLOR_TEX, NORM_TEX, AUX_TEX, WEIGHT) \

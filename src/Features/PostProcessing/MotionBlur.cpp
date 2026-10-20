@@ -1,4 +1,7 @@
 #include "MotionBlur.h"
+
+#include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
+#include "Features/PostProcessing.h"
 #include "Features/Upscaling.h"
 #include "ShaderCache.h"
 #include "State.h"
@@ -85,25 +88,22 @@ void MotionBlur::CompileComputeShaders()
 void MotionBlur::ClearShaderCache()
 {
 	BumpShaderGeneration();
-	const auto shaderPtrs = std::array{
-		&horizontalPassShader,
-		&verticalPassShader,
-		&neighborMaxPassShader,
-		&blurPassShader
-	};
-
 	{
 		std::lock_guard lock(shaderMutex);
-		for (auto shader : shaderPtrs)
-			if ((*shader)) {
-				(*shader)->Release();
-				shader->detach();
-			}
+		// Release resources
+		horizontalPassShader = nullptr;
+		verticalPassShader = nullptr;
+		neighborMaxPassShader = nullptr;
+		blurPassShader = nullptr;
 	}
 
-	// Textures and constant buffers are deliberately left alone: the constant buffers are
-	// only ever created by SetupResources(), so releasing them here would make
-	// UpdateConstantBuffers() bail every frame and permanently disable the pass.
+	horizontalPassTexture = nullptr;
+	verticalPassTexture = nullptr;
+	neighborMaxTexture = nullptr;
+	blurOutputTexture = nullptr;
+
+	lastWidth = lastHeight = 0;
+
 	globals::shaderCache->InvalidateShaderSources();
 	CompileComputeShaders();
 }
@@ -150,9 +150,21 @@ void MotionBlur::DrawSettings()
 		"Very Short", "Short", "Medium", "Long", "Very Long"
 	};
 
-	int preset = static_cast<int>(settings.ScalePreset);
-	if (ImGui::Combo("Motion Length", &preset, presets, IM_ARRAYSIZE(presets))) {
-		settings.ScalePreset = static_cast<MotionScale>(preset);
+	const auto* cam = owner ? owner->GetActivePhysicalCameraState() : nullptr;
+	ImGui::BeginDisabled(cam != nullptr);
+
+	{
+		int preset = static_cast<int>(settings.ScalePreset);
+		const SceneWidgetInterceptor::ProxyScope proxy(&settings.ScalePreset, 1.0f);
+		if (ImGui::Combo("Motion Length", &preset, presets, IM_ARRAYSIZE(presets)) && !SceneWidgetInterceptor::IsArmed())
+			settings.ScalePreset = static_cast<MotionScale>(preset);
+	}
+
+	ImGui::EndDisabled();
+	if (cam) {
+		ImGui::TextDisabled(T("feature.post_processing.motion_blur.effective_shutter_scale", "Effective Velocity Scale (shutter %.0f°): %.0f"),
+			cam->ShutterAngleDeg,
+			std::clamp(CinematicCamera::kMotionBlurReferenceScale * cam->ShutterAngleDeg / 180.0f, 10.0f, 800.0f));
 	}
 
 	// Samples (each UI sample represents 2 actual samples)
@@ -377,8 +389,10 @@ bool MotionBlur::UpdateConstantBuffers()
 
 	bool updated = false;
 
-	// Get actual velocity scale value from preset
 	float velocityScale = GetScaleValueFromPreset(settings.ScalePreset);
+	if (const auto* cam = owner ? owner->GetActivePhysicalCameraState() : nullptr) {
+		velocityScale = std::clamp(CinematicCamera::kMotionBlurReferenceScale * cam->ShutterAngleDeg / 180.0f, 10.0f, 800.0f);
+	}
 	float2 velocityTextureScale = { 1.0f, 1.0f };
 	float2 targetResolution = { static_cast<float>(lastWidth), static_cast<float>(lastHeight) };
 

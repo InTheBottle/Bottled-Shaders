@@ -1,4 +1,4 @@
-#include "Common/Color.hlsli"
+#include "Common/ColorManagement.hlsli"
 #include "Common/FrameBuffer.hlsli"
 #include "Common/Random.hlsli"
 #include "Common/SharedData.hlsli"
@@ -104,6 +104,6 @@ float4 main(VS_OUTPUT_POST input) : SV_Target0
 	float3 direction = normalize(float3(LightUV - uv, 0.035));
 	float2 target = uv + direction.xy * (InvScreenWidth * float(StepCount) * 6.0);
 	float rays = RadialBlur(uv, target, GetNoise(input.pos.xy));
-	return float4(rays * Color::Sky(RaysColor), 1.0);
+	return float4(rays * ColorManagement::SRGBToWorking(RaysColor), 1.0);
 }
 #endif

@@ -1,5 +1,7 @@
 #include "Vignette.h"
 
+#include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
+
 #include "Features/PostProcessing.h"
 #include "I18n/I18n.h"
 #include "RasterPass.h"
@@ -15,7 +17,24 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 
 void Vignette::DrawSettings()
 {
-	ImGui::SliderFloat(T("feature.post_processing.vignette.focal_length", "Focal Length"), &settings.FocalLength, 0.1f, 2.f, "%.2f");
+	const auto* cam = owner ? owner->GetActivePhysicalCameraState() : nullptr;
+
+	float focalLength = settings.FocalLength;
+	if (cam) {
+		// Vignette focal length is relative to the image width, i.e. the
+		// horizontal sensor extent.
+		focalLength = std::clamp(cam->FocalLengthMM / std::max(cam->EffectiveSensorWidthMM, 0.1f), 0.1f, 2.0f);
+		ImGui::TextDisabled("%s", T("feature.post_processing.controlled_by_cinematic_camera", "Lens and focus are currently controlled by Cinematic Camera."));
+	}
+
+	ImGui::BeginDisabled(cam != nullptr);
+	{
+		const SceneWidgetInterceptor::ProxyScope proxy(&settings.FocalLength, 1.0f);
+		ImGui::SliderFloat(T("feature.post_processing.vignette.focal_length", "Focal Length"), &focalLength, 0.1f, 2.f, "%.2f");
+	}
+	ImGui::EndDisabled();
+	if (!cam && !SceneWidgetInterceptor::IsArmed())
+		settings.FocalLength = focalLength;
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::Text(T("feature.post_processing.vignette.the_focal_length_of_the_lens_relative_to", "The focal length of the lens, relative to image width."));
 
@@ -125,11 +144,16 @@ void Vignette::Draw(TextureInfo& inout_tex)
 	globals::profiler->BeginPass("PostProcessing::Vignette");
 	auto context = globals::d3d::context;
 
+	Settings effective = settings;
+	if (const auto* cam = owner ? owner->GetActivePhysicalCameraState() : nullptr) {
+		effective.FocalLength = std::clamp(cam->FocalLengthMM / std::max(cam->EffectiveSensorWidthMM, 0.1f), 0.1f, 2.0f);
+	}
+
 	float2 res = { (float)texOutput->desc.Width, (float)texOutput->desc.Height };
 	res = Util::ConvertToDynamic(res);
 	VignetteCB data = {
-		.settings = settings,
-		.AspectRatio = res.y / res.x / std::max(settings.Anamorphism, 0.1f),
+		.settings = effective,
+		.AspectRatio = res.y / res.x / std::max(effective.Anamorphism, 0.1f),
 		.RcpDynRes = float2(1.f) / res
 	};
 	vignetteCB->Update(data);

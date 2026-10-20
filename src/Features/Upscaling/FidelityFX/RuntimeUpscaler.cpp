@@ -1589,7 +1589,7 @@ bool FidelityFX::DispatchRuntimeUpscalerSingle(uint32_t a_contextIndex, ID3D11Re
 			dispatchParameters.preExposure = 1.0f;
 			// Menus produce no fresh motion vectors or depth; reset the history there
 			// rather than accumulating against stale reprojection data.
-			dispatchParameters.reset = state->IsMainOrLoadingMenuOpen();
+			dispatchParameters.reset = state->IsMainOrLoadingMenuOpen() || state->ShouldResetHistory();
 			dispatchParameters.cameraNear = *globals::game::cameraNear;
 			dispatchParameters.cameraFar = *globals::game::cameraFar;
 			dispatchParameters.cameraFovAngleVertical = Util::GetVerticalFOVRad();
@@ -1849,7 +1849,7 @@ bool FidelityFX::UpscaleRegion(uint32_t a_contextIndex, ID3D11Resource* a_color,
 	const bool runtimeFallbackReset = runtimeRequested && runtimeFallbackResetDispatchesRemaining > 0;
 	if (runtimeFallbackReset)
 		runtimeFallbackResetDispatchesRemaining--;
-	dispatchParameters.reset = state->IsMainOrLoadingMenuOpen() || runtimeFallbackReset;
+	dispatchParameters.reset = state->IsMainOrLoadingMenuOpen() || state->ShouldResetHistory() || runtimeFallbackReset;
 	dispatchParameters.preExposure = 1.0f;
 	dispatchParameters.flags = 0;
 

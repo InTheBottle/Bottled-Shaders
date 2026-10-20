@@ -1,4 +1,4 @@
-#include "Common/Color.hlsli"
+#include "Common/ColorManagement.hlsli"
 #include "Common/FrameBuffer.hlsli"
 #include "Common/GBuffer.hlsli"
 #include "Common/Math.hlsli"
@@ -271,17 +271,17 @@ void PlanFootstep(FootstepParticles::FootstepEvent footstep)
 		remaining -= count;
 	}
 
-	float3 fallbackColor = Color::Diffuse(GetSurfaceColor(surface));
+	float3 fallbackColor = Color::Albedo(ColorManagement::DiffuseToWorking(GetSurfaceColor(surface)));
 	float sampleWeight = saturate(coverage * 3.0);
 	float3 groundColor = lerp(fallbackColor, sampledColor, sampleWeight);
-	float3 snowColor = Color::Diffuse(GetSurfaceColor(FootstepParticles::SurfaceSnow));
+	float3 snowColor = Color::Albedo(ColorManagement::DiffuseToWorking(GetSurfaceColor(FootstepParticles::SurfaceSnow)));
 	if (surface == FootstepParticles::SurfaceIce)
-		snowColor = Color::Diffuse(GetSurfaceColor(FootstepParticles::SurfaceIce));
+		snowColor = Color::Albedo(ColorManagement::DiffuseToWorking(GetSurfaceColor(FootstepParticles::SurfaceIce)));
 	snowColor = lerp(snowColor, max(sampledColor, snowColor * 0.8), sampleWeight * 0.35);
 
 	gsGroundColor = groundColor;
 	gsSnowColor = snowColor;
-	gsWaterColor = lerp(Color::Diffuse(float3(0.80, 0.83, 0.86)), groundColor, 0.3 * (1.0 - puddle));
+	gsWaterColor = lerp(Color::Albedo(ColorManagement::DiffuseToWorking(float3(0.80, 0.83, 0.86))), groundColor, 0.3 * (1.0 - puddle));
 	gsSnowWeight = snowWeight;
 	gsWetness = wetness;
 }
@@ -352,7 +352,7 @@ void PlanWade(FootstepParticles::FootstepEvent footstep)
 		remaining -= count;
 	}
 
-	float3 snowColor = Color::Diffuse(GetSurfaceColor(FootstepParticles::SurfaceSnow));
+	float3 snowColor = Color::Albedo(ColorManagement::DiffuseToWorking(GetSurfaceColor(FootstepParticles::SurfaceSnow)));
 	snowColor = lerp(snowColor, max(sampledColor, snowColor * 0.8), saturate(coverage * 3.0) * 0.35);
 
 	gsGroundColor = snowColor;

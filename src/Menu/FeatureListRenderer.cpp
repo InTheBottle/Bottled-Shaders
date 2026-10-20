@@ -1,6 +1,7 @@
 #include "FeatureListRenderer.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cctype>
 #include <cmath>
 #include <format>
@@ -10,6 +11,9 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "CSEditor/SceneManager/FeatureOverwritesPanel.h"
+#include "CSEditor/SceneManager/SceneSettingsManager.h"
+#include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
 #include "Feature.h"
 #include "FeatureConstraints.h"
 #include "FeatureIssues.h"
@@ -19,23 +23,24 @@
 #include "I18n/I18n.h"
 #include "Menu.h"
 #include "Menu/AdvancedSettingsRenderer.h"
+#include "Menu/PresetsPageRenderer.h"
 #include "Menu/ProfilingRenderer.h"
 #include "Menu/ThemeManager.h"
-#include "SceneSettingsManager.h"
-#include "SettingsOverrideManager.h"
 #include "State.h"
 #include "Util.h"
 #include "Utils/UI.h"
 #include "Utils/VectorIcons.h"
-#include "WeatherVariableRegistry.h"
 
 namespace
 {
-	constexpr size_t CORE_MENU_COUNT = 2;
+	constexpr size_t CORE_MENU_COUNT = 4;
+
+	const char* CSEditorMenuName() { return T("menu.features.cs_editor", "CS Editor"); }
 
 	bool IsCoreMenu(const std::string& menuName)
 	{
-		return menuName == T("menu.features.general", "General") || menuName == T("menu.features.advanced", "Advanced");
+		return menuName == T("menu.features.presets", "Presets") || menuName == T("menu.features.general", "General") ||
+		       menuName == T("menu.features.advanced", "Advanced") || menuName == CSEditorMenuName();
 	}
 
 	constexpr std::string_view kNoSettingsSectionKey = "No Settings";
@@ -411,6 +416,95 @@ namespace
 	{
 		return ImGui::GetCurrentContext()->ActiveIdHasBeenEditedThisFrame;
 	}
+
+	/**
+	 * @brief Queues the warning popup for constraints that appeared since the last call; the first call only seeds.
+	 * Diffing every frame also catches changes made outside DrawSettings (e.g. Upscaling's render-loop resolutionScale).
+	 */
+	void DetectReactiveConstraints()
+	{
+		if (g_reactiveWarningShow)  // don't overwrite a pending popup
+			return;
+
+		auto currentConstraints = FeatureConstraints::GetAllActiveConstraints();
+
+		if (!g_knownConstraintKeysInitialised) {
+			// First time: seed known set, no popup
+			for (const auto& [settingId, result] : currentConstraints) {
+				g_knownConstraintKeys.insert(settingId.featureShortName + "|" + settingId.settingPath);
+			}
+			g_knownConstraintKeysInitialised = true;
+			return;
+		}
+
+		// Diff: find keys present now but not previously known
+		std::vector<std::pair<FeatureConstraints::SettingId, FeatureConstraints::ConstraintResult>> newConstraints;
+		std::unordered_set<std::string> currentKeys;
+		for (const auto& [settingId, result] : currentConstraints) {
+			std::string key = settingId.featureShortName + "|" + settingId.settingPath;
+			currentKeys.insert(key);
+			if (g_knownConstraintKeys.find(key) == g_knownConstraintKeys.end()) {
+				newConstraints.emplace_back(settingId, result);
+			}
+		}
+		// Update known set to current (removes keys for constraints that went away)
+		g_knownConstraintKeys = std::move(currentKeys);
+
+		if (!newConstraints.empty() && !globals::menu->GetSettings().SkipConstraintWarning) {
+			logger::info("Reactive constraint detection: {} new constraints", newConstraints.size());
+			for (const auto& [settingId, result] : newConstraints) {
+				logger::info("  - {}.{} forced to {} by {}", settingId.featureShortName, settingId.settingPath, FeatureConstraints::FormatConstraintValue(result.forcedValue), result.sources.empty() ? "?" : result.sources[0].featureName);
+			}
+			g_reactiveWarningShow = true;
+			g_reactiveWarningConstraints = std::move(newConstraints);
+			g_dontShowAgainCheckbox = false;
+		}
+	}
+}
+
+std::string FeatureListRenderer::TranslateCategory(std::string_view category)
+{
+	return Feature::TranslateCategory(category);
+}
+
+void FeatureListRenderer::DrawFeatureBody(Feature* feat)
+{
+	assert(feat && feat->loaded);
+
+	const ImVec2 cursorPosBefore = ImGui::GetCursorPos();
+	{
+		// Sketches live only while their feature is on screen; the next Update drops any other.
+		globals::sceneSettingsManager->RetainSketches(feat->GetShortName());
+		SceneWidgetInterceptor::Scope baselineScope({ .feature = feat, .baseline = true });
+		// ImGui raises this flag for any value edit; set only inside the call, it means this feature changed.
+		// Buttons that rewrite settings (a reset, a preset) raise no flag, so a finished click is checked instead.
+		const bool editedBefore = WasItemEditedThisFrame();
+		feat->DrawSettings();
+		if (feat->UsesMainSettings()) {
+			auto* state = globals::state;
+			const bool edited = !editedBefore && WasItemEditedThisFrame();
+			if (edited)
+				state->MarkSettingsChanged();
+			if (Util::InteractionEndedThisFrame()) {
+				// Those buttons also bypass the interceptor, so the scene layer's cached apply document must
+				// take their values before anything replays it.
+				globals::sceneSettingsManager->CaptureExternalFeatureChanges(feat, true);
+				if (!edited)
+					state->CheckFeatureSettingsChanged(feat);
+				state->InvalidateEditsUnderBaselines(feat);
+			}
+		}
+	}
+	const ImVec2 cursorPosAfter = ImGui::GetCursorPos();
+
+	DetectReactiveConstraints();
+
+	const float cursorEpsilon = 0.1f;
+	bool cursorMoved = (std::abs(cursorPosAfter.x - cursorPosBefore.x) > cursorEpsilon ||
+						std::abs(cursorPosAfter.y - cursorPosBefore.y) > cursorEpsilon);
+	if (!cursorMoved) {
+		ImGui::TextColored(globals::menu->GetSettings().Theme.StatusPalette.Disable, "%s", T("menu.features.no_settings_available", "There are no settings available for this feature."));
+	}
 }
 
 void FeatureListRenderer::RenderFeatureList(
@@ -482,8 +576,10 @@ std::vector<FeatureListRenderer::MenuFuncInfo> FeatureListRenderer::BuildMenuLis
 	}
 
 	auto menuList = std::vector<MenuFuncInfo>{
+		BuiltInMenu{ T("menu.features.presets", "Presets"), []() { PresetsPageRenderer::Render(); } },
 		BuiltInMenu{ T("menu.features.general", "General"), drawGeneralSettings, T("menu.features.general_description", "Shader compilation, keybindings, language and the look of this menu.") },
-		BuiltInMenu{ T("menu.features.advanced", "Advanced"), drawAdvancedSettings, T("menu.features.advanced_description", "Developer tools, logging, profiling and utility features.") }
+		BuiltInMenu{ T("menu.features.advanced", "Advanced"), drawAdvancedSettings, T("menu.features.advanced_description", "Developer tools, logging, profiling and utility features.") },
+		BuiltInMenu{ CSEditorMenuName(), []() {} }
 	};  // NOTE: The menu list is rebuilt every frame, so category expansion states
 	// persist correctly. This is acceptable since the list is small and built
 	// infrequently, but could be optimized if performance becomes an issue.
@@ -615,6 +711,17 @@ void FeatureListRenderer::HandlePendingFeatureSelection(
 				pendingFeatureSelection.clear();
 				return;
 			}
+		}
+	}
+
+	// Built-in pages such as Presets are addressed by their display name.
+	for (size_t i = 0; i < menuList.size(); ++i) {
+		if (const auto* page = std::get_if<BuiltInMenu>(&menuList[i]); page && page->name == pendingFeatureSelection && page->name != CSEditorMenuName()) {
+			selectedMenu = i;
+			g_selectedEntryKey = EntryKey(menuList[i]);
+			logger::info("Navigated to {} page", pendingFeatureSelection);
+			pendingFeatureSelection.clear();
+			return;
 		}
 	}
 
@@ -818,8 +925,13 @@ void FeatureListRenderer::ListMenuVisitor::operator()(const BuiltInMenu& menu)
 	if (isFeatureIssues)
 		ImGui::PushStyleColor(ImGuiCol_Text, globals::menu->GetSettings().Theme.StatusPalette.Error);
 
-	if (ImGui::Selectable(fmt::format(" {} ", menu.name).c_str(), key == currentKey, NavigationSelectableFlags(selectOnNav)))
+	if (menu.name == CSEditorMenuName()) {
+		// Launcher entry: opens the editor without leaving the current page.
+		if (ImGui::Selectable(fmt::format(" {} ", menu.name).c_str(), false))
+			CSEditor::OpenEditorWindow();
+	} else if (ImGui::Selectable(fmt::format(" {} ", menu.name).c_str(), key == currentKey, NavigationSelectableFlags(selectOnNav))) {
 		Select(key);
+	}
 
 	if (isFeatureIssues)
 		ImGui::PopStyleColor();
@@ -904,6 +1016,27 @@ void FeatureListRenderer::ListMenuVisitor::DrawFeatureRow(Feature* feat, bool in
 		ImGui::TextColored(StageTagColor(stage), "%s", Feature::GetReleaseStageTag(stage).c_str());
 	}
 
+	// A feature only authored for other scenes still gets a hollow dot, so its settings stay discoverable.
+	if (auto* sceneManager = globals::sceneSettingsManager; sceneManager->HasAnySceneEntriesForFeature(featureName)) {
+		const bool applying = sceneManager->IsFeatureOverridingBase(featureName);
+		ImGui::SameLine();
+		Util::DrawInlineIndicatorDot(ImGui::GetColorU32(Util::Colors::GetInfo()), applying);
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::TextUnformatted(applying ?
+									   T("menu.features.scene_indicator_overriding",
+										   "Scene Manager is overriding settings here. Blue settings show its values.") :
+									   T("menu.features.scene_indicator_configured",
+										   "Has Scene Manager settings for other times, weathers or locations."));
+
+		if (sceneManager->HasSketches(featureName)) {
+			ImGui::SameLine();
+			Util::DrawInlineIndicatorDot(ImGui::GetColorU32(Util::Colors::GetSuccess()), true);
+			if (auto _tt = Util::HoverTooltipWrapper())
+				ImGui::TextUnformatted(T("menu.features.scene_indicator_sketched",
+					"Has settings sketched over the Scene Manager's values. They revert once you leave this feature."));
+		}
+	}
+
 	const auto& search = globals::menu->featureSearch;
 	if (!inPinnedSection && !search.empty()) {
 		const auto& hits = GetSearchHits(search);
@@ -966,25 +1099,21 @@ void FeatureListRenderer::DrawMenuVisitor::operator()(Feature* feat)
 	featureChanged = false;
 
 	if (ImGui::BeginChild("##FeatureConfigFrame", { 0, 0 }, true)) {
-		// Compute scene-controlled state once for both header and settings
-		auto* sceneManager = globals::sceneSettingsManager;
-		bool sceneControlled = sceneManager->HasActiveSettingsForFeature(featureName) && !sceneManager->IsFeaturePaused(featureName);
-
 		// Render feature header with integrated action buttons
-		RenderFeatureHeader(feat, isDisabled, isLoaded, sceneControlled);
+		RenderFeatureHeader(feat, isDisabled, isLoaded);
 
 		// Render feature settings content
-		RenderFeatureSettings(feat, isDisabled, isLoaded, hasFailedMessage, sceneControlled);
+		RenderFeatureSettings(feat, isDisabled, isLoaded, hasFailedMessage);
 	}
 	ImGui::EndChild();
 
 	globals::menu->EndFeatureEditTracking(feat, featureChanged || (!editedBefore && WasItemEditedThisFrame()));
 	globals::menu->IgnoreSettingEditsThisFrame();
 	// Render reactive constraint warning outside the child window so it can appear as a top-level popup
-	RenderReactiveConstraintWarningDialog();
+	DrawConstraintWarningDialog(pendingFeatureSelection);
 }
 
-void FeatureListRenderer::DrawMenuVisitor::RenderFeatureHeader(Feature* feat, bool isDisabled, bool isLoaded, bool sceneControlled)
+void FeatureListRenderer::DrawMenuVisitor::RenderFeatureHeader(Feature* feat, bool isDisabled, bool isLoaded)
 {
 	auto& themeSettings = globals::menu->GetSettings().Theme;
 	const auto featureName = feat->GetShortName();
@@ -993,24 +1122,26 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureHeader(Feature* feat, bo
 	const float buttonPadding = ThemeManager::Constants::BUTTON_PADDING;
 	const float frameHeight = ImGui::GetFrameHeight();
 
-	const char* overrideButtonText = T("menu.features.apply_override", "Apply Override");
+	const char* baselinesButtonText = T("menu.features.use_baselines", "Use Baselines");
 	const char* restoreButtonText = T("menu.features.restore_defaults", "Restore Defaults");
 	const char* bootLabel = T("menu.features.load_at_boot", "Load at Boot");
 	const float bootToggleWidth = frameHeight * 1.6f;
-	const float overrideButtonWidth = ImGui::CalcTextSize(overrideButtonText).x + buttonPadding;
+	const float baselinesButtonWidth = ImGui::CalcTextSize(baselinesButtonText).x + buttonPadding;
 	const float restoreButtonWidth = ImGui::CalcTextSize(restoreButtonText).x + ImGui::GetFontSize() + style.ItemInnerSpacing.x + buttonPadding;
 
-	auto overrideManager = SettingsOverrideManager::GetSingleton();
-	const bool hasOverrides = overrideManager && overrideManager->HasFeatureOverrides(featureName);
-	const bool canOverride = !isDisabled && isLoaded && hasOverrides;
+	const bool canExport = !isDisabled && isLoaded && FeatureOverwritesPanel::HasExportableSettings(feat);
 	const bool canRestoreDefaults = !isDisabled && isLoaded && feat->HasSettings();
+	// Offered while the user's edits hide values one of their Baseline packs sets.
+	const bool canUseBaselines = canRestoreDefaults && feat->UsesMainSettings() && globals::state->HasEditsUnderBaselines(feat);
 	const bool canPin = isLoaded && feat->IsInMenu() && feat->GetCategory() != FeatureCategories::kUtility;
 
 	float actionsWidth = ImGui::CalcTextSize(bootLabel).x + style.ItemInnerSpacing.x + bootToggleWidth;
 	if (canPin)
 		actionsWidth += frameHeight + style.ItemSpacing.x;
-	if (canOverride)
-		actionsWidth += overrideButtonWidth + style.ItemSpacing.x;
+	if (canExport)
+		actionsWidth += frameHeight + style.ItemSpacing.x;
+	if (canUseBaselines)
+		actionsWidth += baselinesButtonWidth + style.ItemSpacing.x;
 	if (canRestoreDefaults)
 		actionsWidth += restoreButtonWidth + style.ItemSpacing.x;
 
@@ -1037,47 +1168,36 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureHeader(Feature* feat, bo
 			}
 		}
 
-		// Apply Override button (when feature has available overrides)
-		if (canOverride) {
-			nextItem(overrideButtonWidth);
-			{
-				auto _disabled = Util::DisableGuard(sceneControlled);
-				if (ImGui::Button(overrideButtonText, { overrideButtonWidth, 0 })) {
-					if (feat->ReapplyOverrideSettings()) {
-						featureChanged = true;
-						logger::info("Successfully reapplied override settings for {}", featureName);
-					} else {
-						logger::warn("Failed to reapply override settings for {}", featureName);
-					}
-				}
-			}
+		if (canExport) {
+			nextItem(frameHeight);
+			FeatureOverwritesPanel::DrawExportButton(feat, "##ExportOverwrite");
+		}
 
+		if (canUseBaselines) {
+			nextItem(baselinesButtonWidth);
+			if (ImGui::Button(baselinesButtonText, { baselinesButtonWidth, 0 })) {
+				globals::state->ClearFeatureEditsUnderBaselines(feat);
+				featureChanged = true;
+			}
 			if (auto _tt = Util::HoverTooltipWrapper()) {
-				if (sceneControlled) {
-					ImGui::Text(
-						"%s",
-						T("menu.features.cannot_apply_overrides_scene",
-							"Cannot apply overrides while scene-specific settings are active.\n"
-							"Pause scene settings for this feature first."));
-				} else {
-					ImGui::Text(
-						"%s",
-						T("menu.features.restore_override_tooltip",
-							"Restores original override settings from mod files.\n"
-							"This will discard your customizations and revert to\n"
-							"the mod author's recommended settings."));
-				}
+				ImGui::Text("%s", T("menu.features.use_baselines_tooltip",
+									  "Use Baseline preset values: your changes override settings your Baseline presets set. "
+									  "Click to drop those changes and use the presets' values. Your other changes stay."));
 			}
 		}
 
 		if (canRestoreDefaults) {
 			nextItem(restoreButtonWidth);
 			if (Util::Icons::Button(restoreButtonText, Util::Icons::Kind::Reload, { restoreButtonWidth, 0 })) {
-				feat->RestoreDefaultSettings();
+				// Clears the user's edits, so the feature shows what defaults and Baseline packs set.
+				if (feat->UsesMainSettings())
+					globals::state->RestoreFeatureLayers(feat);
+				else
+					feat->RestoreDefaultSettings();
 				featureChanged = true;
 			}
 			if (auto _tt = Util::HoverTooltipWrapper()) {
-				ImGui::Text("%s", T("menu.features.restore_defaults_tooltip", "Restore default settings for this feature.\nRevert undoes this until you save."));
+				ImGui::Text("%s", T("menu.features.restore_defaults_tooltip", "Restore defaults: clears your edits to this feature, back to what defaults and your Baseline presets set.\nRevert undoes this until you save."));
 			}
 		}
 
@@ -1145,10 +1265,14 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureHeader(Feature* feat, bo
 		drawActions();
 	}
 
+	// Drawn after all header items so the modal cannot clobber their hover state.
+	if (canExport)
+		FeatureOverwritesPanel::DrawExport();
+
 	ImGui::Separator();
 }
 
-void FeatureListRenderer::DrawMenuVisitor::RenderFeatureSettings(Feature* feat, bool isDisabled, bool isLoaded, bool hasFailedMessage, bool sceneControlled)
+void FeatureListRenderer::DrawMenuVisitor::RenderFeatureSettings(Feature* feat, bool isDisabled, bool isLoaded, bool hasFailedMessage)
 {
 	auto& themeSettings = globals::menu->GetSettings().Theme;
 
@@ -1158,106 +1282,11 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureSettings(Feature* feat, 
 		ImGui::Text("%s", T("menu.features.enable_to_access_config", "Turn on Load at Boot above and restart the game to change its settings."));
 	} else {
 		if (isLoaded) {
-			auto weatherRegistry = WeatherVariables::GlobalWeatherRegistry::GetSingleton();
-			if (weatherRegistry->HasWeatherSupport(feat->GetShortName())) {
-				bool paused = weatherRegistry->IsFeaturePaused(feat->GetShortName());
-				if (ImGui::Checkbox(T("menu.features.pause_weather_overrides", "Pause Weather Overrides"), &paused)) {
-					weatherRegistry->SetFeaturePaused(feat->GetShortName(), paused);
-				}
-				if (auto _tt = Util::HoverTooltipWrapper()) {
-					ImGui::Text(
-						"%s",
-						T("menu.features.pause_weather_tooltip",
-							"Temporarily disable weather-based setting adjustments for this feature.\n"
-							"This state is not saved."));
-				}
-				ImGui::Separator();
-			}
-
-			// Scene-specific settings toggle (Interior Only / TimeOfDay / Weather-Specific)
-			// Show toggle whenever scene entries exist for this feature, even if feature-paused
-			{
-				const auto& featureShortName = feat->GetShortName();
-				auto* sceneMgr = globals::sceneSettingsManager;
-				bool scenePaused = sceneMgr->IsFeaturePaused(featureShortName);
-				if (sceneControlled || scenePaused) {
-					bool active = !scenePaused;
-					if (Util::FeatureToggle("##PauseSceneSettings", &active))
-						sceneMgr->SetFeaturePaused(featureShortName, !active);
-					ImGui::SameLine();
-					ImGui::Text("%s", T("menu.features.scene_specific_settings", "Scene Specific Settings"));
-					if (auto _tt = Util::HoverTooltipWrapper()) {
-						ImGui::Text("%s", T(scenePaused ? "menu.features.scene_paused_tooltip" : "menu.features.scene_active_tooltip",
-											  scenePaused ? "Paused - click to resume" : "Active - click to pause"));
-					}
-					ImGui::Separator();
-				}
-			}
-
-			// Disable feature settings while scene overrides are actively applied (not paused)
-			if (sceneControlled)
-				ImGui::BeginDisabled();
-
-			ImVec2 cursorPosBefore = ImGui::GetCursorPos();
-			feat->DrawSettings();
+			DrawFeatureBody(feat);
 
 			if (feat != &globals::features::csEditor && ProfilingRenderer::HasFeatureTimers(feat->GetShortName())) {
 				ImGui::SeparatorText(T("menu.features.profiling", "Profiling"));
 				ProfilingRenderer::RenderFeatureTimers(feat->GetShortName());
-			}
-
-			ImVec2 cursorPosAfter = ImGui::GetCursorPos();
-
-			if (sceneControlled)
-				ImGui::EndDisabled();
-
-			// --- Reactive constraint detection ---
-			// Compare the current full constraint set against g_knownConstraintKeys.
-			// On the very first frame we just seed the set (no popup); after that
-			// any key that wasn't previously known triggers the warning.
-			// This catches both same-frame changes (e.g. TerrainBlending toggle)
-			// and next-frame changes (e.g. Upscaling, whose resolutionScale is
-			// updated in the render loop, not in DrawSettings).
-			if (!g_reactiveWarningShow) {  // don't overwrite a pending popup
-				auto currentConstraints = FeatureConstraints::GetAllActiveConstraints();
-
-				if (!g_knownConstraintKeysInitialised) {
-					// First time: seed known set, no popup
-					for (const auto& [settingId, result] : currentConstraints) {
-						g_knownConstraintKeys.insert(settingId.featureShortName + "|" + settingId.settingPath);
-					}
-					g_knownConstraintKeysInitialised = true;
-				} else {
-					// Diff: find keys present now but not previously known
-					std::vector<std::pair<FeatureConstraints::SettingId, FeatureConstraints::ConstraintResult>> newConstraints;
-					std::unordered_set<std::string> currentKeys;
-					for (const auto& [settingId, result] : currentConstraints) {
-						std::string key = settingId.featureShortName + "|" + settingId.settingPath;
-						currentKeys.insert(key);
-						if (g_knownConstraintKeys.find(key) == g_knownConstraintKeys.end()) {
-							newConstraints.emplace_back(settingId, result);
-						}
-					}
-					// Update known set to current (removes keys for constraints that went away)
-					g_knownConstraintKeys = std::move(currentKeys);
-
-					if (!newConstraints.empty() && !globals::menu->GetSettings().SkipConstraintWarning) {
-						logger::info("Reactive constraint detection: {} new constraints", newConstraints.size());
-						for (const auto& [settingId, result] : newConstraints) {
-							logger::info("  - {}.{} forced to {} by {}", settingId.featureShortName, settingId.settingPath, FeatureConstraints::FormatConstraintValue(result.forcedValue), result.sources.empty() ? "?" : result.sources[0].featureName);
-						}
-						g_reactiveWarningShow = true;
-						g_reactiveWarningConstraints = std::move(newConstraints);
-						g_dontShowAgainCheckbox = false;
-					}
-				}
-			}
-
-			const float cursorEpsilon = 0.1f;
-			bool cursorMoved = (std::abs(cursorPosAfter.x - cursorPosBefore.x) > cursorEpsilon ||
-								std::abs(cursorPosAfter.y - cursorPosBefore.y) > cursorEpsilon);
-			if (!cursorMoved) {
-				ImGui::TextColored(themeSettings.StatusPalette.Disable, "%s", T("menu.features.no_settings_available", "There are no settings available for this feature."));
 			}
 		} else {
 			if (FeatureIssues::IsObsoleteFeature(feat->GetShortName())) {
@@ -1289,7 +1318,7 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureSettings(Feature* feat, 
 	}
 }
 
-void FeatureListRenderer::DrawMenuVisitor::RenderReactiveConstraintWarningDialog()
+void FeatureListRenderer::DrawConstraintWarningDialog(std::string& pendingFeatureSelection)
 {
 	if (!g_reactiveWarningShow) {
 		return;

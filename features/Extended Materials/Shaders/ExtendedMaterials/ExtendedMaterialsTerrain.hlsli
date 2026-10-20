@@ -401,17 +401,30 @@
 		return true;
 	}
 
-	// One-tap height-difference shadow along L, shared by the directional and point-light paths.
-	// strengthScale carries the only difference between them.
-	float GetTerrainParallaxShadowMultiplier(PS_INPUT input, float2 coords, float mipLevel, float3 L, float sh0, float quality, float noise, DisplacementParams params[TERRAIN_LAYER_COUNT], StochasticOffsets sharedOffset, float strengthScale)
+	float GetTerrainParallaxShadowMultiplier(PS_INPUT input, float2 coords, float mipLevel, float3 L, float sh0, float quality, float noise, DisplacementParams params[TERRAIN_LAYER_COUNT], StochasticOffsets sharedOffset)
 	{
 		if (quality <= 0.0)
 			return 1.0;
 
+		float4 multipliers = rcp(float4(1, 2, 3, 4) + noise);
+		float4 sh = sh0.xxxx;
 		float weightsScratch[TERRAIN_LAYER_COUNT] = TERRAIN_LAYER_ZEROS;
 		float2 rayDir = L.xy * 0.1;
-		float shi = TERRAIN_HEIGHT_AT(coords + rayDir * rcp(1.0 + noise), mipLevel, weightsScratch);
-		return 1.0 - saturate(max(0, shi - sh0) * (ShadowIntensity * strengthScale));
+		float scale = 1.0;
+#	if defined(TRUE_PBR)
+		scale = TerrainMaxWeightedHeightScale(input, params);
+		if (scale < 0.01)
+			return 1.0;
+		rayDir *= scale;
+#	endif
+		sh.x = TERRAIN_HEIGHT_AT(coords + rayDir * multipliers.x, mipLevel, weightsScratch);
+		if (quality > 0.25)
+			sh.y = TERRAIN_HEIGHT_AT(coords + rayDir * multipliers.y, mipLevel, weightsScratch);
+		if (quality > 0.5)
+			sh.z = TERRAIN_HEIGHT_AT(coords + rayDir * multipliers.z, mipLevel, weightsScratch);
+		if (quality > 0.75)
+			sh.w = TERRAIN_HEIGHT_AT(coords + rayDir * multipliers.w, mipLevel, weightsScratch);
+		return 1.0 - saturate(dot(max(0, sh - sh0) / scale, ShadowIntensity)) * quality;
 	}
 
 #	undef TERRAIN_HEIGHT_AT

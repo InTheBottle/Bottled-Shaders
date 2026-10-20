@@ -1,5 +1,4 @@
-// Always kPOST_ZPREPASS_COPY, never TerrainBlending's blendedDepthTexture: that one is produced at
-// end of frame and would be a frame stale here, which made grass flicker on fast camera movement.
+// The live main depth uses an R24_UNORM_X8_TYPELESS view.
 #ifdef REVERSE_Z
 Texture2D<float> SrcDepth : register(t0);
 #else

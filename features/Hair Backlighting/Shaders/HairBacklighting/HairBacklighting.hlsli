@@ -2,7 +2,7 @@
 #define __HAIR_BACKLIGHTING_DEPENDENCY_HLSL__
 
 #include "Common/BRDF.hlsli"
-#include "Common/Color.hlsli"
+#include "Common/ColorManagement.hlsli"
 #include "Common/LightingCommon.hlsli"
 
 namespace HairBacklighting
@@ -68,7 +68,7 @@ namespace HairBacklighting
 #if defined(TRUE_PBR)
 		transmission *= BRDF::Diffuse_Lambert();
 #else
-		transmission *= Color::VanillaNormalization();
+		transmission *= Color::BRDFScale;
 #endif
 		lightingOutput.transmission += transmission;
 	}
