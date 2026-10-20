@@ -105,6 +105,7 @@ static std::tuple<float, float, float> CalculateSummaryData(float smoothedFrameT
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	PerformanceOverlay::Settings,
 	ShowInOverlay,
+	ShowWeatherPicker,
 	ShowDrawCalls,
 	ShowVRAM,
 	ShowCSPasses,
@@ -140,9 +141,20 @@ void PerformanceOverlay::DrawSettings()
 	auto menu = Menu::GetSingleton();
 	const auto& themeSettings = menu->GetTheme();
 	const auto& menuSettings = menu->GetSettings();
-	ImGui::Checkbox(T(TKEY("show_in_overlay"), "Show in Overlay"), &this->settings.ShowInOverlay);
+	ImGui::Checkbox(T(TKEY("show_in_overlay"), "Enable Performance Overlay"), &this->settings.ShowInOverlay);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T(TKEY("show_in_overlay_tooltip"), "Opens performance overlay in a separate window that stays open\neven when the main menu is closed. "));
+		ImGui::Text("%s", T(TKEY("toggle_with"), "Toggle with "));
+		ImGui::SameLine();
+		ImGui::TextColored(themeSettings.StatusPalette.CurrentHotkey, "%s",
+			Util::Input::KeyIdToString(menuSettings.OverlayToggleKey).c_str());
+	}
+
+	// Independent of the performance overlay: works with the overlay above switched off.
+	ImGui::SameLine();
+	ImGui::Checkbox(T(TKEY("show_weather_picker"), "Enable Weather Picker Widget"), &this->settings.ShowWeatherPicker);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("show_weather_picker_tooltip"), "Opens the weather picker, with weather details and rain & wetness analysis,\nin a separate window that stays open even when the main menu is closed."));
 		ImGui::Text("%s", T(TKEY("toggle_with"), "Toggle with "));
 		ImGui::SameLine();
 		ImGui::TextColored(themeSettings.StatusPalette.CurrentHotkey, "%s",
@@ -187,7 +199,7 @@ void PerformanceOverlay::DrawSettings()
 		ImGui::Checkbox(T(TKEY("show_border"), "Show Border"), &this->settings.ShowBorder);
 		ImGui::SliderFloat(T(TKEY("update_interval"), "Update Interval"), &this->settings.UpdateInterval, 0.001f, PerformanceOverlay::Settings::kMaxUpdateInterval, "%.2f seconds");
 		ImGui::SliderInt(T(TKEY("frame_history_size"), "Frame History Size"), &this->settings.FrameHistorySize,
-			this->settings.kMinFrameHistorySize, this->settings.kMaxFrameHistorySize);
+			this->settings.kMinFrameHistorySize, this->settings.kMaxFrameHistorySize, "%d", ImGuiSliderFlags_AlwaysClamp);
 
 		ImGui::Separator();
 		ImGui::Text("%s", T(TKEY("position"), "Position:"));
@@ -259,9 +271,6 @@ void PerformanceOverlay::DrawOverlay()
 		return;
 	}
 	if (!menu->overlayVisible) {
-		return;
-	}
-	if (this->settings.ShowVRAM && (!menu->GetDXGIAdapter3())) {
 		return;
 	}
 	if (!ImGui::GetCurrentContext()) {
@@ -653,22 +662,27 @@ void PerformanceOverlay::DrawABTestStatisticalValidity(const Menu::ThemeSettings
 	float totalDuration = aggregator.GetTotalTestDuration();
 	int totalFrames = aggregator.GetTotalFrameCount();
 	int excludedFrames = 0;
+	bool hasSamplesA = false;
+	bool hasSamplesB = false;
 	for (const auto& interval : aggregator.GetIntervals()) {
 		excludedFrames += interval.excludedFrames;
+		hasSamplesA = hasSamplesA || (interval.variant == ABVariant::A && !interval.frameRows.empty());
+		hasSamplesB = hasSamplesB || (interval.variant == ABVariant::B && !interval.frameRows.empty());
 	}
 	int validFrames = totalFrames;
 	int totalWithExcluded = totalFrames + excludedFrames;
 	float validPercent = (totalWithExcluded > 0) ? (100.0f * validFrames / totalWithExcluded) : 100.0f;
 
+	bool hasBothVariants = hasSamplesA && hasSamplesB;
 	bool hasEnoughSamples = validFrames >= kMinimumSamplesForValidity;
 	bool hasGoodDuration = totalDuration >= kMinimumTestDuration;
 	bool hasLowExclusionRate = validPercent >= kMinimumValidFramesPercent;
-	bool isStatisticallyValid = hasEnoughSamples && hasGoodDuration && hasLowExclusionRate;
+	bool isStatisticallyValid = hasBothVariants && hasEnoughSamples && hasGoodDuration && hasLowExclusionRate;
 
 	ImVec4 validityColor = theme.Palette.Text;
 	if (isStatisticallyValid) {
 		validityColor = theme.StatusPalette.SuccessColor;
-	} else if (validFrames >= kMinimumSamplesForMarginal && totalDuration >= kMinimumDurationForMarginal) {
+	} else if (hasBothVariants && validFrames >= kMinimumSamplesForMarginal && totalDuration >= kMinimumDurationForMarginal) {
 		validityColor = theme.StatusPalette.Warning;
 	} else {
 		validityColor = theme.StatusPalette.Error;
@@ -1209,15 +1223,11 @@ void PerformanceOverlay::DrawABTestSection(const std::vector<DrawCallRow>& allRo
 		// --- Settings diff section (inline, toggled) ---
 		if (showSettingsDiff) {
 			if (!this->settingsDiffLoaded) {
-				// Use cached memory data from ABTestingManager instead of loading from disk
-				if (abTestingManager && abTestingManager->HasCachedSnapshots()) {
-					// Pull structured diff entries directly from ABTestingManager (in-memory snapshots)
+				// Diff the in-memory snapshots ABTestingManager keeps of both configs
+				if (abTestingManager && abTestingManager->HasCachedSnapshots())
 					this->settingsDiff = abTestingManager->GetConfigDiffEntries();
-				} else {
-					this->settingsDiff = Util::FileSystem::LoadJsonDiff(
-						Util::PathHelpers::GetSettingsUserPath(),
-						Util::PathHelpers::GetSettingsTestPath());
-				}
+				else
+					this->settingsDiff.clear();
 				this->settingsDiffLoaded = true;
 			}
 			ImGui::TextUnformatted("Differences between USER (A) and TEST (B) configs:");
@@ -1250,21 +1260,12 @@ void PerformanceOverlay::DrawABTestSection(const std::vector<DrawCallRow>& allRo
 
 				// Sort the settings diff if needed
 				std::vector<SettingsDiffEntry> sortedDiff = this->settingsDiff;
-				if (const ImGuiTableSortSpecs* sortSpecs = ImGui::TableGetSortSpecs()) {
-					if (sortSpecs->SpecsCount > 0) {
-						int sortCol = sortSpecs->Specs->ColumnIndex;
-						bool sortAsc = sortSpecs->Specs->SortDirection == ImGuiSortDirection_Ascending;
-						std::sort(sortedDiff.begin(), sortedDiff.end(), [sortCol, sortAsc](const SettingsDiffEntry& a, const SettingsDiffEntry& b) {
-							if (sortCol == 0)
-								return sortAsc ? (a.path < b.path) : (a.path > b.path);
-							if (sortCol == 1)
-								return sortAsc ? (a.aValue < b.aValue) : (a.aValue > b.aValue);
-							if (sortCol == 2)
-								return sortAsc ? (a.bValue < b.bValue) : (a.bValue > b.bValue);
-							return false;
-						});
-					}
-				}
+				static const std::vector<Util::TableRowSortFunc<SettingsDiffEntry>> diffSorts = {
+					[](const SettingsDiffEntry& a, const SettingsDiffEntry& b, bool asc) { return asc ? (a.path < b.path) : (a.path > b.path); },
+					[](const SettingsDiffEntry& a, const SettingsDiffEntry& b, bool asc) { return asc ? (a.aValue < b.aValue) : (a.aValue > b.aValue); },
+					[](const SettingsDiffEntry& a, const SettingsDiffEntry& b, bool asc) { return asc ? (a.bValue < b.bValue) : (a.bValue > b.bValue); },
+				};
+				Util::SortTableRows(sortedDiff, Util::ReadTableSortSpec(0, true), diffSorts);
 				for (const auto& entry : sortedDiff) {
 					ImGui::TableNextRow();
 					ImGui::TableSetColumnIndex(0);
@@ -1951,6 +1952,9 @@ void PerformanceOverlay::UpdateGraphValues()
 	float deltaTime = (now.QuadPart - state.lastUpdateTime.QuadPart) /
 	                  static_cast<float>(state.overlayTimingFrequency.QuadPart);
 	state.lastUpdateTime = now;
+
+	if (!state.graphSampleGate.ShouldSample())
+		return;
 
 	// Insert latest frame time into circular buffer
 	float oldFrameTime = state.frameTimeHistory.GetData()[state.frameTimeHistory.GetHeadIdx()];  // what is the point of oldFrameTime?

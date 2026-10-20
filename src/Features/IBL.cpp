@@ -2,9 +2,9 @@
 
 #include "Deferred.h"
 #include "DynamicCubemaps.h"
+#include "JiayeStatement.h"
 #include "Shadercache.h"
 #include "State.h"
-#include "WeatherVariableRegistry.h"
 
 #include "Effects11.h"
 #include "Effects11/SettingManager.h"
@@ -29,43 +29,40 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	FogAmount,
 	DALCMode,
 	SkylightingAffectsEnv,
-	DisableInInteriors,
 	DisableInWorldMap,
 	DisableInLoadingScreen,
+	EffectNormalization,
+	EffectNormalizationMult,
+	MinEffectMult,
 	EnableReflectionFallback,
 	ReflectionFallbackDistance)
 
 void IBL::DrawSettings()
 {
-	if (globals::features::effects11.loaded) {
-		auto& enb = globals::features::effects11;
-		if (enb.enableEffect) {
-			ImGui::TextColored(globals::menu->GetSettings().Theme.StatusPalette.Warning, "%s", T("common.settings_managed_by_enb", "Settings are currently managed by ENB."));
-			return;
-		}
-	}
+	const Util::LockedSection enbLock(IsManagedByENB(),
+		T("common.settings_managed_by_enb", "This setting is managed by Effects 11."));
 
-	Util::WeatherUI::Checkbox(T(TKEY("enable_ibl"), "Enable IBL"), this, "EnableIBL", (bool*)&settings.EnableIBL);
+	ImGui::Checkbox(T(TKEY("enable_ibl"), "Enable IBL"), (bool*)&settings.EnableIBL);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T(TKEY("enable_ibl_tooltip"), "Toggle IBL. When enabled, ambient lighting is derived from cubemap spherical harmonics instead of the vanilla system."));
 	}
-	Util::WeatherUI::SliderFloat(T(TKEY("env_ibl_scale"), "Env IBL Scale"), this, "EnvIBLScale", &settings.EnvIBLScale, 0.0f, 10.0f, "%.2f");
+	ImGui::SliderFloat(T(TKEY("env_ibl_scale"), "Env IBL Scale"), &settings.EnvIBLScale, 0.0f, 10.0f, "%.2f");
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T(TKEY("env_ibl_scale_tooltip"), "Intensity multiplier for the environment IBL (from Dynamic Cubemaps).\nControls how strongly the surrounding environment contributes to ambient lighting."));
 	}
-	Util::WeatherUI::SliderFloat(T(TKEY("sky_ibl_scale"), "Sky IBL Scale"), this, "SkyIBLScale", &settings.SkyIBLScale, 0.0f, 10.0f, "%.2f");
+	ImGui::SliderFloat(T(TKEY("sky_ibl_scale"), "Sky IBL Scale"), &settings.SkyIBLScale, 0.0f, 10.0f, "%.2f");
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T(TKEY("sky_ibl_scale_tooltip"), "Intensity multiplier for the sky IBL (from the game's native reflections cubemap).\nControls how strongly the sky contributes to ambient lighting."));
 	}
-	Util::WeatherUI::SliderFloat(T(TKEY("env_ibl_saturation"), "Env IBL Saturation"), this, "EnvIBLSaturation", &settings.EnvIBLSaturation, 0.0f, 2.0f, "%.2f");
+	ImGui::SliderFloat(T(TKEY("env_ibl_saturation"), "Env IBL Saturation"), &settings.EnvIBLSaturation, 0.0f, 2.0f, "%.2f");
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T(TKEY("env_ibl_saturation_tooltip"), "Color saturation of the environment IBL.\nLower values produce more neutral ambient light; higher values produce more vivid color."));
 	}
-	Util::WeatherUI::SliderFloat(T(TKEY("sky_ibl_saturation"), "Sky IBL Saturation"), this, "SkyIBLSaturation", &settings.SkyIBLSaturation, 0.0f, 2.0f, "%.2f");
+	ImGui::SliderFloat(T(TKEY("sky_ibl_saturation"), "Sky IBL Saturation"), &settings.SkyIBLSaturation, 0.0f, 2.0f, "%.2f");
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T(TKEY("sky_ibl_saturation_tooltip"), "Color saturation of the sky IBL.\nLower values produce more neutral ambient light; higher values produce more vivid color."));
 	}
-	Util::WeatherUI::SliderFloat(T(TKEY("dalc_amount"), "DALC Amount"), this, "DALCAmount", &settings.DALCAmount, 0.0f, 1.0f, "%.2f");
+	ImGui::SliderFloat(T(TKEY("dalc_amount"), "DALC Amount"), &settings.DALCAmount, 0.0f, 1.0f, "%.2f");
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T(TKEY("dalc_amount_tooltip"),
 							  "Blends the IBL brightness toward the game's vanilla ambient (DALC) level.\n"
@@ -103,21 +100,17 @@ void IBL::DrawSettings()
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T(TKEY("enable_reflection_fallback_tooltip"), "Fades the dynamic environment IBL toward the ReflectionsCubemap-only IBL at distance, matching Water's reflection cubemap distance fallback."));
 	}
-	Util::WeatherUI::SliderFloat(T(TKEY("reflection_fallback_distance"), "Reflection Fallback Distance"), this, "ReflectionFallbackDistance", &settings.ReflectionFallbackDistance, 0.0f, 100000.0f, "%.0f");
+	ImGui::SliderFloat(T(TKEY("reflection_fallback_distance"), "Reflection Fallback Distance"), &settings.ReflectionFallbackDistance, 0.0f, 100000.0f, "%.0f");
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T(TKEY("reflection_fallback_distance_tooltip"), "Distance at which IBL is fully transitioned to the ReflectionsCubemap-only contribution."));
 	}
-	Util::WeatherUI::SliderFloat(T(TKEY("fog_mix"), "Fog Mix"), this, "FogAmount", &settings.FogAmount, 0.0f, 1.0f, "%.2f");
+	ImGui::SliderFloat(T(TKEY("fog_mix"), "Fog Mix"), &settings.FogAmount, 0.0f, 1.0f, "%.2f");
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T(TKEY("fog_mix_tooltip"), "Blends the fog color toward the IBL ambient color.\n0 = vanilla fog, 1 = fog fully tinted by IBL."));
 	}
 	ImGui::Checkbox(T(TKEY("preserve_fog_luminance"), "Preserve Fog Luminance"), (bool*)&settings.PreserveFogLuminance);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T(TKEY("preserve_fog_luminance_tooltip"), "When Fog Mix is active, rescales the IBL-tinted fog to keep the original fog brightness.\nPrevents fog from becoming too bright or too dark."));
-	}
-	ImGui::Checkbox(T(TKEY("disable_in_interiors"), "Disable in interiors"), &settings.DisableInInteriors);
-	if (auto _tt = Util::HoverTooltipWrapper()) {
-		ImGui::Text("%s", T(TKEY("disable_in_interiors_tooltip"), "Disables IBL in interior cells."));
 	}
 	ImGui::Checkbox(T(TKEY("disable_in_world_map"), "Disable in world map"), &settings.DisableInWorldMap);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -127,6 +120,14 @@ void IBL::DrawSettings()
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T(TKEY("disable_in_loading_screen_tooltip"), "Disables IBL during loading screens and the main menu."));
 	}
+	ImGui::Checkbox(T(TKEY("effect_normalization"), "Effect Normalization"), (bool*)&settings.EffectNormalization);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("effect_normalization_tooltip"), "Normalizes effect shader brightness based on IBL brightness."));
+	}
+	ImGui::SliderFloat(T(TKEY("effect_normalization_multiplier"), "Effect Normalization Multiplier"), &settings.EffectNormalizationMult, 0.0f, 100.0f, "%.2f");
+	ImGui::SliderFloat(T(TKEY("minimum_effect_multiplier"), "Minimum Effect Multiplier"), &settings.MinEffectMult, 0.0f, 10.0f, "%.2f");
+
+	JiayeStatement::GetSingleton()->DrawJSInfo();
 }
 
 #undef I18N_KEY_PREFIX
@@ -152,106 +153,6 @@ void IBL::RestoreDefaultSettings()
 	settings = {};
 }
 
-void IBL::RegisterWeatherVariables()
-{
-	if (globals::features::effects11.loaded) {
-		auto& enb = globals::features::effects11;
-		if (enb.enableEffect) {
-			auto& settingManager = SettingManager::GetSingleton();
-			if (settingManager.GetValue<bool>("EnableImageBasedLighting", "EFFECT")) {
-				return;
-			}
-		}
-	}
-
-	auto* registry = WeatherVariables::GlobalWeatherRegistry::GetSingleton()
-	                     ->GetOrCreateFeatureRegistry(GetShortName());
-	// Toggle IBL for this weather (SH-based ambient replaces vanilla)
-	registry->RegisterVariable(std::make_shared<WeatherVariables::WeatherVariable<bool>>(
-		"EnableIBL",
-		"Enable IBL",
-		"Enable or disable SH-based ambient lighting for this weather",
-		(bool*)&settings.EnableIBL,
-		true,
-		[](const bool& from, const bool& to, float factor) {
-			return factor > 0.5f ? to : from;  // Switch at transition midpoint
-		}));
-
-	// Intensity of environment IBL (from Dynamic Cubemaps)
-	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
-		"EnvIBLScale",
-		"Env IBL Scale",
-		"Intensity of environment IBL from the Dynamic Cubemaps environment cubemap",
-		&settings.EnvIBLScale,
-		1.0f,
-		0.0f, 10.0f));
-
-	// Intensity of sky IBL (from the game's native reflections cubemap)
-	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
-		"SkyIBLScale",
-		"Sky IBL Scale",
-		"Intensity of sky IBL from the game's native reflections cubemap",
-		&settings.SkyIBLScale,
-		1.0f,
-		0.0f, 10.0f));
-
-	// Color saturation of environment IBL
-	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
-		"EnvIBLSaturation",
-		"Env IBL Saturation",
-		"Color saturation of the environment IBL ambient contribution",
-		&settings.EnvIBLSaturation,
-		1.0f,
-		0.0f, 2.0f));
-
-	// Color saturation of sky IBL
-	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
-		"SkyIBLSaturation",
-		"Sky IBL Saturation",
-		"Color saturation of the sky IBL ambient contribution",
-		&settings.SkyIBLSaturation,
-		1.0f,
-		0.0f, 2.0f));
-
-	// Reflection-cubemap distance fallback toggle
-	registry->RegisterVariable(std::make_shared<WeatherVariables::WeatherVariable<bool>>(
-		"EnableReflectionFallback",
-		T("feature.ibl.enable_reflection_fallback", "Reflection Cubemap Distance Fallback"),
-		T("feature.ibl.enable_reflection_fallback_weather_tooltip", "Enable fading the dynamic environment IBL to ReflectionCubemap-only IBL at distance."),
-		(bool*)&settings.EnableReflectionFallback,
-		true,
-		[](const bool& from, const bool& to, float factor) {
-			return factor > 0.5f ? to : from;  // Switch at transition midpoint
-		}));
-
-	// Reflection-cubemap distance fallback distance
-	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
-		"ReflectionFallbackDistance",
-		T("feature.ibl.reflection_fallback_distance", "Reflection Fallback Distance"),
-		T("feature.ibl.reflection_fallback_distance_weather_tooltip", "Distance at which IBL is fully ReflectionCubemap-only."),
-		&settings.ReflectionFallbackDistance,
-		1024.0f,
-		0.0f, 100000.0f));
-
-	// How much IBL brightness is matched to vanilla ambient (DALC)
-	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
-		"DALCAmount",
-		"DALC Amount",
-		"Blend factor toward vanilla ambient brightness (0 = pure IBL, 1 = fully matched to DALC)",
-		&settings.DALCAmount,
-		1.0f,
-		0.0f, 1.0f));
-
-	// Fog color blending toward IBL ambient color
-	registry->RegisterVariable(std::make_shared<WeatherVariables::FloatVariable>(
-		"FogAmount",
-		"Fog Mix",
-		"Blends fog color toward IBL ambient color (0 = vanilla fog, 1 = fully IBL-tinted)",
-		&settings.FogAmount,
-		0.0f,
-		0.0f, 1.0f));
-}
-
 IBL::PerFrame IBL::GetCommonBufferData() const
 {
 	const bool sceneDisabled = IsDisabledForCurrentScene();
@@ -268,27 +169,28 @@ IBL::PerFrame IBL::GetCommonBufferData() const
 		.DALCMode = settings.DALCMode,
 		.SkylightingAffectsEnv = settings.SkylightingAffectsEnv,
 		.EnableReflectionFallback = settings.EnableReflectionFallback,
-		.ReflectionFallbackDistance = settings.ReflectionFallbackDistance
+		.ReflectionFallbackDistance = settings.ReflectionFallbackDistance,
+		.ENBSkyFalloff = globals::features::effects11.OwnsFeature(E11Handoff::Feature::IBL)
 	};
 
-	if (!sceneDisabled && globals::features::effects11.loaded) {
-		auto& enb = globals::features::effects11;
-		if (enb.enableEffect) {
-			auto& settingManager = SettingManager::GetSingleton();
-			if (settingManager.GetValue<bool>("EnableImageBasedLighting", "EFFECT")) {
-				data.EnableIBL = Util::IsInterior() ? 0u : 1u;
-				data.EnvIBLScale = 0.0f;
-				data.SkyIBLScale = settingManager.GetInterpolatedTimeOfDayValue("MultiplicativeAmount", "IMAGEBASEDLIGHTING");
-				data.DALCAmount = 1.0f;
-				data.EnvIBLSaturation = 1.0f;
-				data.SkyIBLSaturation = 1.0f;
-				data.DALCMode = 3;
-				data.FogAmount = 0.0f;
-			}
-		}
+	if (!sceneDisabled && IsManagedByENB()) {
+		auto& settingManager = SettingManager::GetSingleton();
+		data.EnableIBL = Util::IsInterior() ? 0u : 1u;
+		data.EnvIBLScale = 0.0f;
+		data.SkyIBLScale = settingManager.GetInterpolatedTimeOfDayValue("MultiplicativeAmount", "IMAGEBASEDLIGHTING");
+		data.DALCAmount = 1.0f;
+		data.EnvIBLSaturation = 1.0f;
+		data.SkyIBLSaturation = 1.0f;
+		data.DALCMode = 3;
+		data.FogAmount = 0.0f;
 	}
 
 	return data;
+}
+
+bool IBL::IsManagedByENB() const
+{
+	return globals::features::effects11.OwnsFeature(E11Handoff::Feature::IBL) && SettingManager::GetSingleton().GetValue<bool>("EnableImageBasedLighting", "EFFECT");
 }
 
 bool IBL::IsDisabledForCurrentScene() const
@@ -299,8 +201,7 @@ bool IBL::IsDisabledForCurrentScene() const
 
 	const bool inLoadingScreen = settings.DisableInLoadingScreen && state->IsMainOrLoadingMenuOpen();
 	const bool inWorldMap = settings.DisableInWorldMap && state->isMapMenuOpen;
-	const bool inInterior = settings.DisableInInteriors && Util::IsInterior();
-	return inLoadingScreen || inWorldMap || inInterior;
+	return inLoadingScreen || inWorldMap;
 }
 
 void IBL::ReflectionsPrepass()
@@ -315,8 +216,8 @@ void IBL::ReflectionsPrepass()
 			std::array<ID3D11ShaderResourceView*, 4> srvs = {
 				sceneDisabled ? nullptr : envIBLTexture->srv.get(),
 				sceneDisabled ? nullptr : skyIBLTexture->srv.get(),
-				staticDiffuseIBLTexture->srv.get(),
-				staticSpecularIBLTexture->srv.get()
+				staticDiffuseIBLTexture ? staticDiffuseIBLTexture->srv.get() : nullptr,
+				staticSpecularIBLTexture ? staticSpecularIBLTexture->srv.get() : nullptr
 			};
 			context->PSSetShaderResources(76, 4, srvs.data());
 		}

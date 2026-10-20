@@ -8,6 +8,8 @@
 #include "I18n/I18n.h"
 #include "LinearLighting.h"
 #include "Menu.h"
+#include "PostProcessing.h"
+#include "ScreenshotFeature.h"
 #include "ShaderCache.h"
 #include "State.h"
 #include "Upscaling.h"
@@ -408,11 +410,9 @@ void HDRDisplay::DrawSettings()
 		};
 		const char* forceEnableLabel = T(TKEY("force_enable_hdr"), "Force Enable HDR");
 		const char* cancelLabel = T(TKEY("cancel"), "Cancel");
-		const float buttonWidth = std::max({
-			ThemeManager::Constants::POPUP_BUTTON_WIDTH * Util::GetUIScale(),
+		const float buttonWidth = std::max({ ThemeManager::Constants::POPUP_BUTTON_WIDTH * Util::GetUIScale(),
 			buttonWidthForLabel(forceEnableLabel),
-			buttonWidthForLabel(cancelLabel)
-		});
+			buttonWidthForLabel(cancelLabel) });
 
 		if (ImGui::Button(forceEnableLabel, ImVec2(buttonWidth, 0))) {
 			{
@@ -495,7 +495,14 @@ void HDRDisplay::DrawSettings()
 			ImGui::TextUnformatted(T(TKEY("paper_white_tooltip_1"), "203 nits is the ITU BT.2408 reference. Increase for a brighter image."));
 		}
 
-		ImGui::SliderInt(T(TKEY("peak_brightness_nits"), "Peak Brightness (nits)"), reinterpret_cast<int*>(&currentPeakNits), 400, 10000);
+		// Under AutoHDR, show the capped range without overwriting the stored native peak unless edited
+		const bool autoHDRActive = globals::features::effects11.ReplacedTonemapperThisFrame();
+		const uint peakSliderMax = autoHDRActive ? kAutoHDRMaxNits : kHdrPeakNitsMax;
+		int displayedPeakNits = static_cast<int>(std::min(currentPeakNits, peakSliderMax));
+		// Logarithmic spreads the common 600-1000 nit range across more of the native slider
+		if (ImGui::SliderInt(T(TKEY("peak_brightness_nits"), "Peak Brightness (nits)"), &displayedPeakNits, kHdrPeakNitsMin, peakSliderMax, "%d",
+				autoHDRActive ? ImGuiSliderFlags_None : ImGuiSliderFlags_Logarithmic))
+			currentPeakNits = static_cast<uint>(displayedPeakNits);
 		{
 			std::lock_guard<std::mutex> lock(settingsMutex);
 			if (currentPeakNits <= settings.hdrPaperWhite) {
@@ -510,6 +517,9 @@ void HDRDisplay::DrawSettings()
 			ImGui::TextUnformatted(T(TKEY("peak_brightness_tooltip_0"), "Maximum brightness your display can produce."));
 			ImGui::TextUnformatted(T(TKEY("peak_brightness_tooltip_1"), "Set to match your display's actual peak brightness."));
 		}
+
+		if (autoHDRActive)
+			Util::Text::WrappedWarning(T(TKEY("auto_hdr_peak_cap"), "Effects11 AutoHDR is active: peak brightness is capped at %u nits."), kAutoHDRMaxNits);
 
 		ImGui::TextDisabled(T(TKEY("display_reports_max_nits"), "Display reports: %.0f nits max"), cachedDisplayMaxLuminance);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -556,6 +566,10 @@ void HDRDisplay::LoadSettings(json& o_json)
 	bool oldEnableHDR = settings.enableHDR;
 
 	settings = o_json;
+	settings.hdrPeakNits = std::clamp(settings.hdrPeakNits, kHdrPeakNitsMin, kHdrPeakNitsMax);
+	settings.hdrPaperWhite = std::clamp(settings.hdrPaperWhite, 80u, settings.hdrPeakNits - 1);
+	if (!std::isfinite(settings.hdrUIBrightness))
+		settings.hdrUIBrightness = 1.0f;
 
 	// Defer auto-detection to SetupResources where the swap chain is available.
 	// DetectHDR() needs globals::d3d::swapChain which isn't valid during early plugin init.
@@ -820,7 +834,7 @@ HDRDisplay::D3D12UIBufferMode HDRDisplay::GetD3D12UIBufferMode()
 	if (!globals::features::upscaling.d3d12SwapChainActive)
 		return mode;
 
-	const bool hdrReady = loaded && hdrDataCB && outputTexture;
+	const bool hdrReady = loaded && settings.enableHDR && hdrDataCB && outputTexture;
 	const bool hdrShaderAvailable = hdrReady && GetHDROutputCS() != nullptr;
 
 	mode.useUIBuffer = hdrShaderAvailable || IsFGCompositingThisFrame();
@@ -921,6 +935,9 @@ namespace
 			if (globals::features::hdrDisplay.IsPresentSuppressed())
 				return S_OK;
 
+			if (!globals::features::upscaling.d3d12SwapChainActive)
+				globals::features::screenshotFeature.ProcessCaptureRequest();
+
 			return func(This, SyncInterval, Flags);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
@@ -956,7 +973,10 @@ ID3D11BlendState* HDRDisplay::GetPatchedAlphaBlendState(ID3D11BlendState* origin
 {
 	auto it = patchedBlendStateCache.find(original);
 	if (it != patchedBlendStateCache.end())
-		return it->second ? it->second.get() : original;
+		return it->second.patched ? it->second.patched.get() : original;
+
+	auto& entry = patchedBlendStateCache[original];
+	entry.original.copy_from(original);
 
 	D3D11_BLEND_DESC desc{};
 	original->GetDesc(&desc);
@@ -975,7 +995,6 @@ ID3D11BlendState* HDRDisplay::GetPatchedAlphaBlendState(ID3D11BlendState* origin
 	}
 
 	if (!needsPatch) {
-		patchedBlendStateCache[original] = nullptr;
 		return original;
 	}
 
@@ -994,17 +1013,17 @@ ID3D11BlendState* HDRDisplay::GetPatchedAlphaBlendState(ID3D11BlendState* origin
 
 	winrt::com_ptr<ID3D11BlendState> patched;
 	if (FAILED(globals::d3d::device->CreateBlendState(&desc, patched.put()))) {
-		patchedBlendStateCache[original] = nullptr;
 		return original;
 	}
 
 	auto* raw = patched.get();
-	patchedBlendStateCache[original] = std::move(patched);
+	entry.patched = std::move(patched);
 	return raw;
 }
 
 HRESULT HDRDisplay::PresentToSwapChain(IDXGISwapChain* swapChain, UINT syncInterval, UINT flags)
 {
+	globals::features::screenshotFeature.ProcessCaptureRequest();
 	return SwapChainPresentBottom::func(swapChain, syncInterval, flags);
 }
 
@@ -1089,7 +1108,7 @@ HRESULT HDRDisplay::HandleSwapChainPresent(
 	const std::function<HRESULT(IDXGISwapChain*, UINT, UINT)>& presentChain)
 {
 	const bool frameGenActive = globals::features::upscaling.d3d12SwapChainActive;
-	const bool hdrReady = loaded && hdrDataCB && outputTexture && (settings.enableHDR || frameGenActive);
+	const bool hdrReady = loaded && hdrDataCB && outputTexture && settings.enableHDR;
 
 	D3D11_VIEWPORT savedViewport{};
 	UINT viewportCount = 1;
@@ -1175,6 +1194,7 @@ void HDRDisplay::ApplyHDR()
 				}
 			}
 
+			RestoreCleanScene();
 			state->EndPerfEvent();
 			return;
 		}
@@ -1197,6 +1217,7 @@ void HDRDisplay::ApplyHDR()
 		}
 	}
 
+	RestoreCleanScene();
 	state->EndPerfEvent();
 }
 
@@ -1276,6 +1297,15 @@ void HDRDisplay::SnapshotCleanScene()
 
 	globals::d3d::context->CopyResource(cleanSceneCapture->resource.get(), hdrTexture->resource.get());
 	cleanSceneCaptureFrame = globals::state->frameCount;
+}
+
+void HDRDisplay::RestoreCleanScene()
+{
+	if (!IsCleanSceneCaptureFresh() || !hdrTexture || !hdrTexture->resource ||
+		!cleanSceneCapture || !cleanSceneCapture->resource)
+		return;
+
+	globals::d3d::context->CopyResource(hdrTexture->resource.get(), cleanSceneCapture->resource.get());
 }
 
 bool HDRDisplay::IsCleanSceneCaptureFresh() const
@@ -1595,10 +1625,10 @@ HDRDisplay::HDRDataCB HDRDisplay::BuildHDRData() const
 
 	// Linear Lighting keeps the pipeline linear throughout.
 	// Without it, ISHDR gamma-encodes its output even in HDR mode.
-	bool isSceneLinear = globals::features::linearLighting.settings.enableLinearLighting;
+	bool isSceneLinear = globals::features::linearLighting.IsLinearLightingActive() && !isMainOrLoadingMenu && !globals::state->IsFlatWorldMapOpen();
 
-	// Use user-specified peak brightness for highlights compression
-	float effectivePeakNits = static_cast<float>(settings.hdrPeakNits);
+	const bool applyAutoHDR = globals::features::effects11.ReplacedTonemapperThisFrame();
+	float effectivePeakNits = static_cast<float>(applyAutoHDR ? std::min(settings.hdrPeakNits, kAutoHDRMaxNits) : settings.hdrPeakNits);
 
 	HDRDataCB data{};
 	data.enableHDR = settings.enableHDR ? 1.f : 0.f;
@@ -1611,7 +1641,8 @@ HDRDisplay::HDRDataCB HDRDisplay::BuildHDRData() const
 	// TweenMenu = pause UI. ScaleUIBrightnessForFG skips while GameIsPaused(), so HDROutputCS applies the same mid-alpha boost when compositing gamma UI.
 	data.fgTweenMenuMidAlphaBoost = (ui && ui->IsMenuOpen(RE::TweenMenu::MENU_NAME)) ? 1.f : 0.f;
 	data.previewSDR = 0.f;
-	data.applyAutoHDR = globals::features::effects11.ReplacedTonemapperThisFrame() ? 1.f : 0.f;
+	// Effects11 ENB presets are SDR; Jiaye SDR-only tonemappers opt in via Color Grading AutoHDR.
+	data.applyAutoHDR = (applyAutoHDR || globals::features::postProcessing.WantsAutoHDR()) ? 1.f : 0.f;
 	return data;
 }
 

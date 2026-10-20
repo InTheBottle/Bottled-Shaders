@@ -1,8 +1,10 @@
 #include "Fonts.h"
+#include "FontAtlasState.h"
 
 #include "../Globals.h"
 #include "../I18n/I18n.h"
 #include "../Utils/FileSystem.h"
+#include "../Utils/UI.h"
 #include "ThemeManager.h"
 
 #include <algorithm>
@@ -16,8 +18,17 @@
 #include <unordered_map>
 #include <unordered_set>
 
+static_assert(MenuFonts::kFontRoleCount == static_cast<size_t>(Menu::FontRole::Count),
+	"MenuFonts::kFontRoleCount must match Menu::FontRole::Count");
+
 namespace MenuFonts
 {
+	AtlasState& GetAtlasState()
+	{
+		static AtlasState state;
+		return state;
+	}
+
 	namespace
 	{
 		constexpr size_t RoleIndex(Menu::FontRole role)
@@ -186,12 +197,19 @@ namespace MenuFonts
 
 	bool BeginTabItemWithFont(const char* label, FontRole role, ImGuiTabItemFlags flags)
 	{
-		// Push the font for this role
-		FontRoleGuard guard(role);
+		if (Util::IsInsidePillTabBar())
+			return Util::BeginPillTabItem(label, nullptr, flags);
 
-		// Simply begin the tab item - padding adjustments should be handled
-		// by the tab bar wrapper, not individual tab items
+		FontRoleGuard guard(role);
 		return ImGui::BeginTabItem(label, nullptr, flags);
+	}
+
+	void EndTabItem()
+	{
+		if (Util::IsInsidePillTabBar())
+			Util::EndPillTabItem();
+		else
+			ImGui::EndTabItem();
 	}
 
 	namespace
@@ -199,7 +217,8 @@ namespace MenuFonts
 		std::unordered_map<std::string, ImFont*> g_previewFontsByFile;
 
 		const ImWchar g_previewGlyphRanges[] = {
-			0x0020, 0x00FF,  // Basic Latin + Latin-1 Supplement
+			0x0020,
+			0x00FF,  // Basic Latin + Latin-1 Supplement
 			0,
 		};
 
@@ -259,7 +278,7 @@ namespace MenuFonts
 				}
 			}
 		}
-	done_loading:;
+done_loading:;
 	}
 
 	ImFont* GetPreviewFont(const std::string& file)
@@ -292,24 +311,44 @@ namespace MenuFonts
 
 namespace Util
 {
+	namespace
+	{
+		/// Windows compares paths case-insensitively, and components can be non-ASCII.
+		bool PathComponentsEqual(const std::filesystem::path& lhs, const std::filesystem::path& rhs)
+		{
+			const auto& left = lhs.native();
+			const auto& right = rhs.native();
+			return left.size() == right.size() &&
+			       CompareStringOrdinal(left.data(), static_cast<int>(left.size()), right.data(), static_cast<int>(right.size()), TRUE) == CSTR_EQUAL;
+		}
+	}
+
 	// Security: Validate that a path stays within an allowed directory
 	bool IsPathWithinDirectory(const std::filesystem::path& basePath, const std::filesystem::path& testPath)
 	{
-		try {
-			// Canonicalize both paths to resolve all symlinks and .. sequences
-			auto canonicalBase = std::filesystem::canonical(basePath);
-			auto canonicalTest = std::filesystem::weakly_canonical(testPath);
-
-			// Check if test path is a subpath of base path
-			auto [baseIt, testIt] = std::mismatch(
-				canonicalBase.begin(), canonicalBase.end(),
-				canonicalTest.begin(), canonicalTest.end());
-
-			return baseIt == canonicalBase.end();
-		} catch (const std::filesystem::filesystem_error&) {
-			// If canonicalization fails, reject the path
+		if (basePath.empty() || testPath.empty())
 			return false;
+
+		std::error_code ec;
+		// Lexical only: resolving symlinks rejects legitimate files behind MO2/Vortex virtual trees
+		// and directory junctions, while lexically_normal still collapses the ".." this guards against.
+		const auto base = std::filesystem::absolute(basePath, ec).lexically_normal();
+		if (ec)
+			return false;
+		const auto test = std::filesystem::absolute(testPath, ec).lexically_normal();
+		if (ec)
+			return false;
+
+		auto baseIt = base.begin();
+		auto testIt = test.begin();
+		for (; baseIt != base.end(); ++baseIt, ++testIt) {
+			// lexically_normal leaves a trailing empty component on a directory path.
+			if (baseIt->empty())
+				break;
+			if (testIt == test.end() || !PathComponentsEqual(*baseIt, *testIt))
+				return false;
 		}
+		return true;
 	}
 
 	namespace
@@ -352,12 +391,6 @@ namespace Util
 			return normalized;
 		}
 
-		std::string ToLowerCopy(std::string value)
-		{
-			std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			return value;
-		}
-
 		// Font width variants that should be part of the style, not the family name
 		bool IsWidthVariant(const std::string& token)
 		{
@@ -366,7 +399,7 @@ namespace Util
 				"extended", "expanded", "wide",
 				"ultracompressed", "ultracondensed", "ultraexpanded"
 			};
-			std::string lower = ToLowerCopy(token);
+			std::string lower = Util::ToLower(token);
 			return std::find(widthVariants.begin(), widthVariants.end(), lower) != widthVariants.end();
 		}
 
@@ -421,8 +454,8 @@ namespace Util
 		std::string ExtractStyleName(const std::filesystem::path& relativePath, const std::string& family)
 		{
 			std::string stem = relativePath.stem().string();
-			std::string lowerStem = ToLowerCopy(stem);
-			std::string lowerFamily = ToLowerCopy(family);
+			std::string lowerStem = Util::ToLower(stem);
+			std::string lowerFamily = Util::ToLower(family);
 
 			// Remove family prefix if present
 			if (!lowerFamily.empty()) {
@@ -464,7 +497,7 @@ namespace Util
 				style += t;
 			}
 
-			if (style.empty() || ToLowerCopy(style) == lowerFamily) {
+			if (style.empty() || Util::ToLower(style) == lowerFamily) {
 				style = "Regular";
 			}
 			return style;
@@ -516,7 +549,7 @@ namespace Util
 			std::vector<std::string> prefixes = { "Font-", "Font_", "TTF-", "TTF_" };
 			for (const auto& prefix : prefixes) {
 				if (stem.size() > prefix.size() &&
-					ToLowerCopy(stem.substr(0, prefix.size())) == ToLowerCopy(prefix)) {
+					Util::ToLower(stem.substr(0, prefix.size())) == Util::ToLower(prefix)) {
 					stem = stem.substr(prefix.size());
 					break;
 				}
@@ -527,7 +560,7 @@ namespace Util
 
 		int StyleRank(const std::string& style)
 		{
-			std::string lower = ToLowerCopy(style);
+			std::string lower = Util::ToLower(style);
 			struct WeightRank
 			{
 				const char* token;
@@ -599,8 +632,7 @@ namespace Util
 						continue;
 					}
 
-					auto extension = entry.path().extension().string();
-					std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+					const auto extension = Util::ToLower(entry.path().extension().string());
 					if (extension != ".ttf" && extension != ".otf") {
 						continue;
 					}
@@ -614,12 +646,17 @@ namespace Util
 					}
 
 					std::filesystem::path relPath(relativePath);
+					// Skip leftover Fonts/Icons trees from older packages; icon fonts now live
+					// under Icons/glyphs and are loaded explicitly by ThemeManager.
+					if (auto it = relPath.begin(); it != relPath.end() && _stricmp(it->string().c_str(), "Icons") == 0) {
+						continue;
+					}
 					std::string family = ExtractFamilyName(relPath);
 					if (family.empty()) {
 						family = relPath.stem().string();
 					}
 					std::string style = ExtractStyleName(relPath, family);
-					std::string familyKey = ToLowerCopy(family);
+					std::string familyKey = Util::ToLower(family);
 					size_t familyIdx;
 					auto found = familyIndex.find(familyKey);
 					if (found == familyIndex.end()) {
@@ -710,7 +747,7 @@ namespace Util
 				return nullptr;
 			}
 
-			for (const char* candidate : {"Regular", "Normal", "Book"}) {
+			for (const char* candidate : { "Regular", "Normal", "Book" }) {
 				const int idx = FindStyleIndex(family, candidate);
 				if (Util::IEquals(family.styles[idx].style, candidate)) {
 					return &family.styles[idx];
@@ -759,8 +796,7 @@ namespace Util
 			}
 
 			auto isValidExtension = [](const std::filesystem::path& candidate) {
-				auto extension = candidate.extension().string();
-				std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+				const auto extension = Util::ToLower(candidate.extension().string());
 				return extension == ".ttf" || extension == ".otf";
 			};
 
@@ -770,13 +806,13 @@ namespace Util
 
 			// Performance: Use cached catalog for case-insensitive search instead of scanning filesystem
 			auto catalog = Fonts::DiscoverFontCatalog();  // Uses cache
-			std::string targetNormalized = ToLowerCopy(relative.generic_string());
-			std::string targetFilename = ToLowerCopy(relative.filename().string());
+			std::string targetNormalized = Util::ToLower(relative.generic_string());
+			std::string targetFilename = Util::ToLower(relative.filename().string());
 
 			for (const auto& family : catalog.families) {
 				for (const auto& style : family.styles) {
-					std::string fileLower = ToLowerCopy(style.file);
-					std::string filenameLower = ToLowerCopy(std::filesystem::path(style.file).filename().string());
+					std::string fileLower = Util::ToLower(style.file);
+					std::string filenameLower = Util::ToLower(std::filesystem::path(style.file).filename().string());
 
 					if (fileLower == targetNormalized || filenameLower == targetFilename) {
 						return true;

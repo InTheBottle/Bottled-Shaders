@@ -2,9 +2,10 @@
 
 #include <DirectXTex.h>
 
-#include "../I18n/I18n.h"
+#include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
 #include "Deferred.h"
 #include "DynamicCubemaps.h"
+#include "I18n/I18n.h"
 #include "IBL.h"
 #include "NRD.h"
 #include "Skylighting.h"
@@ -106,7 +107,7 @@ void ScreenSpaceGI::DrawSettings()
 
 		int resolutionMode = settings.QuarterRes ? 2 : (settings.HalfRes ? 1 : 0);
 		bool resolutionChanged = false;
-		if (ImGui::BeginTable("SSGI Resolution", 3)) {
+		if (!SceneWidgetInterceptor::IsArmed() && ImGui::BeginTable("SSGI Resolution", 3)) {
 			ImGui::TableNextColumn();
 			resolutionChanged |= ImGui::RadioButton(T(TKEY("full_resolution"), "Full Resolution"), &resolutionMode, 0);
 
@@ -139,7 +140,7 @@ void ScreenSpaceGI::DrawSettings()
 		}
 
 		if (showAdvanced) {
-			if (ImGui::SliderInt(T(TKEY("steps_per_slice"), "Steps Per Slice"), (int*)&settings.NumSteps, 1, 32)) {
+			if (ImGui::SliderInt(T(TKEY("steps_per_slice"), "Steps Per Slice"), (int*)&settings.NumSteps, 1, 32, "%d", ImGuiSliderFlags_AlwaysClamp)) {
 				resetReblurHistory = true;
 				hasMultiBounceHistory = false;
 			}
@@ -216,6 +217,11 @@ void ScreenSpaceGI::DrawSettings()
 			resetReblurHistory |= globals::features::nrd.DrawReblurSettings(settings.Reblur, showAdvanced, "ssgi_reblur");
 	}
 
+	// The buffer viewer has no scene-context meaning, so hide it while a Scene Manager replica
+	// is borrowing this panel to author overrides.
+	if (SceneWidgetInterceptor::IsArmed())
+		return;
+
 	///////////////////////////////
 	ImGui::SeparatorText(T(TKEY("debug"), "Debug"));
 
@@ -247,14 +253,21 @@ void ScreenSpaceGI::DrawSettings()
 
 void ScreenSpaceGI::LoadSettings(json& o_json)
 {
+	const auto previous = settings;
+
 	settings = o_json;
+	settings.NumSteps = std::clamp(settings.NumSteps, 1u, 32u);
 	if (settings.QuarterRes)
 		settings.HalfRes = false;
 	if (!settings.EnableREBLUR) {
 		settings.HalfRes = false;
 		settings.QuarterRes = false;
 	}
-	recompileFlag = true;
+	recompileFlag = recompileFlag ||
+	                settings.HalfRes != previous.HalfRes ||
+	                settings.QuarterRes != previous.QuarterRes ||
+	                settings.EnableGI != previous.EnableGI ||
+	                settings.EnableSH != previous.EnableSH;
 	resetReblurHistory = true;
 	outputReady = false;
 	hasMultiBounceHistory = false;
@@ -265,6 +278,33 @@ void ScreenSpaceGI::LoadSettings(json& o_json)
 void ScreenSpaceGI::SaveSettings(json& o_json)
 {
 	o_json = settings;
+}
+
+RE::BSEventNotifyControl ScreenSpaceGI::MenuOpenCloseEventHandler::ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*)
+{
+	if (a_event->menuName == RE::LoadingMenu::MENU_NAME && !a_event->opening)
+		globals::features::screenSpaceGI.queuedResetHistory = true;
+
+	return RE::BSEventNotifyControl::kContinue;
+}
+
+bool ScreenSpaceGI::MenuOpenCloseEventHandler::Register()
+{
+	static MenuOpenCloseEventHandler singleton;
+	auto ui = globals::game::ui;
+
+	if (!ui) {
+		logger::error("UI event source not found");
+		return false;
+	}
+
+	ui->GetEventSource<RE::MenuOpenCloseEvent>()->AddEventSink(&singleton);
+	return true;
+}
+
+void ScreenSpaceGI::PostPostLoad()
+{
+	MenuOpenCloseEventHandler::Register();
 }
 
 void ScreenSpaceGI::SetupResources()
@@ -505,6 +545,7 @@ void ScreenSpaceGI::SetupNRDResources()
 
 void ScreenSpaceGI::ClearShaderCache()
 {
+	queuedResetHistory = true;
 	outputReady = false;
 	static const std::vector<winrt::com_ptr<ID3D11ComputeShader>*> shaderPtrs = {
 		&prefilterDepthsCompute, &prefilterRadianceCompute, &prefilterNormalCompute, &giCompute, &compositeCompute
@@ -623,7 +664,8 @@ void ScreenSpaceGI::DrawSSGI()
 	auto imageSpaceManager = globals::game::imageSpaceManager;
 	auto& BSImagespaceShaderISSAOBlurH = imageSpaceManager->GetRuntimeData().BSImagespaceShaderISSAOBlurH;
 
-	BSImagespaceShaderISSAOBlurH->enableSAO = settings.EnableVanillaSSAO;
+	if (BSImagespaceShaderISSAOBlurH)
+		BSImagespaceShaderISSAOBlurH->enableSAO = settings.EnableVanillaSSAO;
 
 	const bool useSH = settings.EnableGI && settings.EnableSH;
 	const bool trackMultiBounce = settings.EnableGI && settings.EnableMultiBounce;
@@ -642,6 +684,15 @@ void ScreenSpaceGI::DrawSSGI()
 
 	ZoneScoped;
 	TracyD3D11Zone(globals::state->tracyCtx, "SSGI");
+
+	// Restarting accumulation drives the denoiser's lerp factor to 1, dropping stale
+	// history in one frame instead of fading it over MaxAccumFrames.
+	if (queuedResetHistory.exchange(false)) {
+		resetReblurHistory = true;
+		hasMultiBounceHistory = false;
+		hasFullResolutionMultiBounceHistory = false;
+		multiBounceHistoryUsesNRDOutput = false;
+	}
 
 	//////////////////////////////////////////////////////
 

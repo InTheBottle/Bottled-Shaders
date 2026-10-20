@@ -1,6 +1,6 @@
 
 #include "Common/BRDF.hlsli"
-#include "Common/Color.hlsli"
+#include "Common/ColorManagement.hlsli"
 #include "Common/FrameBuffer.hlsli"
 #include "Common/GBuffer.hlsli"
 #include "Common/MotionBlur.hlsli"
@@ -12,7 +12,7 @@ Texture2D<float3> SpecularTexture : register(t0);
 Texture2D<unorm float3> AlbedoTexture : register(t1);
 Texture2D<unorm float3> NormalRoughnessTexture : register(t2);
 Texture2D<float3> MasksTexture : register(t3);
-Texture2D<unorm float> Masks2Texture : register(t14);
+Texture2D<unorm float> Masks2Texture : register(t19);
 
 RWTexture2D<float4> MainRW : register(u0);
 RWTexture2D<float4> NormalTAAMaskSpecularMaskRW : register(u1);
@@ -96,6 +96,12 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 #	endif
 #endif
 
+#if defined(PHYSICAL_SKY)
+#	define PS_DEFERRED_RSRCS
+#	define PS_DEFERRED_SAMPLERS
+#	include "PhysicalSky/Common.hlsli"
+#endif
+
 [numthreads(8, 8, 1)] void main(uint3 dispatchID : SV_DispatchThreadID) {
 	// Early exit if dispatch thread is outside screen bounds
 	if (any(dispatchID.xy >= uint2(SharedData::BufferDim.xy)))
@@ -130,7 +136,7 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 	float3 debugCubemapIrradiance = 0;
 #endif
 
-	float3 linDiffuseColor = Color::IrradianceToLinear(diffuseColor);
+	float3 linDiffuseColor = ColorManagement::SceneToLinear(diffuseColor);
 	float3 normalWS = normalize(mul(FrameBuffer::CameraViewInverse, float4(normalVS, 0)).xyz);
 
 	float ssgiAo = 1.0;
@@ -141,7 +147,7 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 		ssgiAo = SampleSSGIAO(dispatchID.xy);
 		if (SharedData::ssgiSettings.EnableIL == 0)
 			ssgiAo = pow(max(ssgiAo, EPSILON_DIVISION), SharedData::ssgiSettings.AOPower);
-		float3 linAlbedo = Color::IrradianceToLinear(albedo / Color::PBRLightingScale);
+		float3 linAlbedo = ColorManagement::SceneToLinear(albedo / Color::PBRLightingScale);
 		float vertexAO = 1.0 - Masks2Texture[dispatchID.xy].x;
 		ssgiAo = saturate(ssgiAo / max(vertexAO, EPSILON_DIVISION));
 		multiBounceSSGIAo = MultiBounceAO(linAlbedo, ssgiAo);
@@ -191,14 +197,11 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 			directionalAmbientColor *= maxScale;
 
 			diffuseColor = max(0.0, diffuseColor - directionalAmbientColor);
-			linDiffuseColor = Color::IrradianceToLinear(diffuseColor);
-			linDiffuseColor *= sqrt(multiBounceSSGIAo);
-			diffuseColor = Color::IrradianceToGamma(linDiffuseColor);
+			diffuseColor = ColorManagement::SceneColor::ScaleByLinear(diffuseColor, sqrt(multiBounceSSGIAo));
 
-			float3 linDirectionalAmbientColor = Color::IrradianceToLinear(directionalAmbientColor);
-			directionalAmbientColor = Color::IrradianceToGamma(linDirectionalAmbientColor * multiBounceSSGIAo);
+			directionalAmbientColor = ColorManagement::SceneColor::ScaleByLinear(directionalAmbientColor, multiBounceSSGIAo);
 			diffuseColor += directionalAmbientColor;
-			linDiffuseColor = Color::IrradianceToLinear(diffuseColor);
+			linDiffuseColor = ColorManagement::SceneToLinear(diffuseColor);
 		}
 	}
 #endif
@@ -237,12 +240,12 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 
 				if (SharedData::iblSettings.DALCMode >= 2) {
 					float envLum = Color::RGBToLuminance(EnvTexture.SampleLevel(LinearSampler, R, 15));
-					envSpecular = Color::IrradianceToLinear((envSample / max(envLum, 0.001)) * directionalAmbientColorSpecular) * SharedData::iblSettings.DALCAmount;
-					skySpecular = Color::IrradianceToLinear(max(0, fullSample - envSample)) * SharedData::iblSettings.SkyIBLScale;
+					envSpecular = ColorManagement::SceneToLinear((envSample / max(envLum, 0.001)) * directionalAmbientColorSpecular) * SharedData::iblSettings.DALCAmount;
+					skySpecular = ColorManagement::SceneToLinear(max(0, fullSample - envSample)) * SharedData::iblSettings.SkyIBLScale;
 				} else {
 					float3 ratio = ImageBasedLighting::GetIBLRatio();
-					envSpecular = Color::IrradianceToLinear(envSample * ratio) * SharedData::iblSettings.EnvIBLScale;
-					skySpecular = Color::IrradianceToLinear(max(0, fullSample - envSample)) * SharedData::iblSettings.SkyIBLScale;
+					envSpecular = ColorManagement::SceneToLinear(envSample * ratio) * SharedData::iblSettings.EnvIBLScale;
+					skySpecular = ColorManagement::SceneToLinear(max(0, fullSample - envSample)) * SharedData::iblSettings.SkyIBLScale;
 				}
 #		if defined(SKYLIGHTING)
 				skySpecular *= skylightingSpecular;
@@ -261,29 +264,29 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 				float3 specularIrradiance = EnvTexture.SampleLevel(LinearSampler, R, level);
 				float specularIrradianceLuminance = Color::RGBToLuminance(EnvTexture.SampleLevel(LinearSampler, R, 15));
 				specularIrradiance = (specularIrradiance / max(specularIrradianceLuminance, 0.001)) * directionalAmbientColorSpecular;
-				finalIrradiance = Color::IrradianceToLinear(specularIrradiance);
+				finalIrradiance = ColorManagement::SceneToLinear(specularIrradiance);
 #	elif defined(SKYLIGHTING)
 				float3 specularIrradianceReflections = 0.0;
 				if (skylightingSpecular > 0.0) {
 					specularIrradianceReflections = EnvReflectionsTexture.SampleLevel(LinearSampler, R, level);
 					float lum = Color::RGBToLuminance(EnvReflectionsTexture.SampleLevel(LinearSampler, R, 15));
 					specularIrradianceReflections = (specularIrradianceReflections / max(lum, 0.001)) * directionalAmbientColorSpecular;
-					specularIrradianceReflections = Color::IrradianceToLinear(specularIrradianceReflections);
+					specularIrradianceReflections = ColorManagement::SceneToLinear(specularIrradianceReflections);
 				}
 				float3 specularIrradiance = 0.0;
 				if (skylightingSpecular < 1.0) {
 					specularIrradiance = EnvTexture.SampleLevel(LinearSampler, R, level);
 					float lum = Color::RGBToLuminance(EnvTexture.SampleLevel(LinearSampler, R, 15));
-					float dalcScaled = Color::IrradianceToGamma(Color::IrradianceToLinear(directionalAmbientColorSpecular) * skylightingSpecular);
+					float dalcScaled = ColorManagement::SceneColor::ScaleByLinear(directionalAmbientColorSpecular, skylightingSpecular);
 					specularIrradiance = (specularIrradiance / max(lum, 0.001)) * dalcScaled;
-					specularIrradiance = Color::IrradianceToLinear(specularIrradiance);
+					specularIrradiance = ColorManagement::SceneToLinear(specularIrradiance);
 				}
 				finalIrradiance = lerp(specularIrradiance, specularIrradianceReflections, skylightingSpecular);
 #	else
 				float3 specularIrradiance = EnvReflectionsTexture.SampleLevel(LinearSampler, R, level);
 				float specularIrradianceLuminance = Color::RGBToLuminance(EnvReflectionsTexture.SampleLevel(LinearSampler, R, 15));
 				specularIrradiance = (specularIrradiance / max(specularIrradianceLuminance, 0.001)) * directionalAmbientColorSpecular;
-				finalIrradiance = Color::IrradianceToLinear(specularIrradiance);
+				finalIrradiance = ColorManagement::SceneToLinear(specularIrradiance);
 #	endif
 			}
 
@@ -316,7 +319,13 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 
 #endif
 
-	color = Color::IrradianceToGamma(color);
+	color = ColorManagement::LinearToScene(color);
+
+#if defined(PHYSICAL_SKY)
+	if (SharedData::physSkyData.enabled && depth < 1 - 1e-6) {
+		color.xyz = PhysSky::CompositeAerialPerspective(color.xyz, normalize(positionWS.xyz), dispatchID.xy, length(positionWS.xyz), PhysSky::SampSv);
+	}
+#endif
 
 #if defined(DEBUG)
 
@@ -354,7 +363,7 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 		} else if (DebugView == 6) {
 			color = inputDiffuseColor;
 		} else if (DebugView == 7) {
-			color = Color::IrradianceToGamma(max(specularColor, 0));
+			color = ColorManagement::LinearToScene(max(specularColor, 0));
 		} else if (DebugView == 8) {
 #	if defined(SSGI)
 #		if defined(SSGI_SH)
@@ -364,7 +373,7 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 			float normHitDist;
 			REBLUR_BackEnd_UnpackRadianceAndNormHitDist(SsgiTexture[dispatchID.xy], color, normHitDist);
 #		endif
-			color = Color::IrradianceToGamma(max(color, 0));
+			color = ColorManagement::LinearToScene(max(color, 0));
 #	else
 			color = 0;
 #	endif
@@ -372,13 +381,13 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 #	if defined(SSR)
 			float normHitDist;
 			REBLUR_BackEnd_UnpackRadianceAndNormHitDist(SsrTexture[dispatchID.xy], color, normHitDist);
-			color = Color::IrradianceToGamma(max(color, 0));
+			color = ColorManagement::LinearToScene(max(color, 0));
 #	else
 			color = 0;
 #	endif
 		} else if (DebugView == 10) {
 #	if defined(DYNAMIC_CUBEMAPS)
-			color = Color::IrradianceToGamma(max(debugCubemapIrradiance, 0));
+			color = ColorManagement::LinearToScene(max(debugCubemapIrradiance, 0));
 #	else
 			color = 0;
 #	endif

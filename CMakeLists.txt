@@ -53,6 +53,16 @@ option(
 )
 option(TRACY_SUPPORT "Enable support for tracy profiler" OFF)
 option(
+    NVPERF_SUPPORT
+    "Enable the Nsight Perf range profiler in Remote Control (requires NVPERF_SDK_ROOT)"
+    OFF
+)
+set(NVPERF_SDK_ROOT
+    ""
+    CACHE PATH
+    "Nsight Perf SDK directory (the one holding include/nvperf_host.h)"
+)
+option(
     ENABLE_ENB_EXTENDER
     "Enable ENBExtender reimplementation (weather blending, time-of-day, technique bindings)"
     ON
@@ -61,6 +71,7 @@ message("\tAuto plugin deployment: ${AUTO_PLUGIN_DEPLOYMENT}")
 message("\tZip to dist: ${ZIP_TO_DIST}")
 message("\tAIO Zip to dist: ${AIO_ZIP_TO_DIST}")
 message("\tTracy profiler: ${TRACY_SUPPORT}")
+message("\tNsight Perf: ${NVPERF_SUPPORT}")
 
 # #######################################################################################################################
 # # Build version info from git
@@ -95,11 +106,13 @@ find_package(imgui CONFIG REQUIRED)
 find_package(EASTL CONFIG REQUIRED)
 find_package(directxtk CONFIG REQUIRED)
 find_package(directxtex CONFIG REQUIRED)
+find_package(libavif 1.4.1 EXACT CONFIG REQUIRED)
 find_path(CLIB_UTIL_INCLUDE_DIRS "ClibUtil/utils.hpp")
 find_package(pystring CONFIG REQUIRED)
 find_package(cppwinrt CONFIG REQUIRED)
 find_package(unordered_dense CONFIG REQUIRED)
 find_package(efsw CONFIG REQUIRED)
+find_package(xxHash CONFIG REQUIRED)
 find_package(Tracy CONFIG REQUIRED)
 find_package(directx-headers CONFIG REQUIRED)
 find_package(effects11 CONFIG REQUIRED)
@@ -167,18 +180,22 @@ target_link_libraries(
         EASTL
         Microsoft::DirectXTK
         Microsoft::DirectXTex
+        avif
         pystring::pystring
         unordered_dense::unordered_dense
         efsw::efsw
+        xxHash::xxhash
         Tracy::TracyClient
         Streamline
         NRD
         d3d12.lib
+        bcrypt.lib
         Microsoft::DirectX-Headers
         ${DETOURS_LIBRARY}
         Microsoft::Effects11
         windowsapp
         windowscodecs
+        comdlg32
 )
 
 # devbench bridge: opt-out via -DDEVBENCH_BRIDGE=OFF. When off, the port isn't required
@@ -186,6 +203,49 @@ target_link_libraries(
 if(DEVBENCH_BRIDGE)
     target_link_libraries(${PROJECT_NAME} PRIVATE DevBench::API)
     target_compile_definitions(${PROJECT_NAME} PRIVATE DEVBENCH_BRIDGE_ENABLED)
+endif()
+
+# Nsight Perf: opt-in via -DNVPERF_SUPPORT=ON -DNVPERF_SDK_ROOT=<sdk>. The SDK is a login-gated NVIDIA
+# download, so it is never fetched. nvperf_grfx_host.dll is delay-loaded (NvPerf.cpp loads it by path
+# before the first call), so the plugin still loads where the file is absent.
+if(NVPERF_SUPPORT)
+    find_path(
+        NVPERF_INCLUDE_DIR
+        nvperf_d3d11_target.h
+        PATHS "${NVPERF_SDK_ROOT}/include"
+        NO_DEFAULT_PATH
+    )
+    find_library(
+        NVPERF_LIBRARY
+        nvperf_grfx_host
+        PATHS "${NVPERF_SDK_ROOT}/lib/x64" "${NVPERF_SDK_ROOT}/bin/x64"
+        NO_DEFAULT_PATH
+    )
+    find_file(
+        NVPERF_DLL
+        nvperf_grfx_host.dll
+        PATHS "${NVPERF_SDK_ROOT}/bin/x64"
+        NO_DEFAULT_PATH
+    )
+    if(NOT NVPERF_INCLUDE_DIR OR NOT NVPERF_LIBRARY OR NOT NVPERF_DLL)
+        message(
+            FATAL_ERROR
+            "NVPERF_SUPPORT is ON but NVPERF_SDK_ROOT ('${NVPERF_SDK_ROOT}') lacks the Nsight Perf SDK: "
+            "need include/nvperf_d3d11_target.h (${NVPERF_INCLUDE_DIR}), "
+            "nvperf_grfx_host.lib (${NVPERF_LIBRARY}) and bin/x64/nvperf_grfx_host.dll (${NVPERF_DLL})"
+        )
+    endif()
+    target_include_directories(
+        ${PROJECT_NAME}
+        SYSTEM
+        PRIVATE "${NVPERF_INCLUDE_DIR}"
+    )
+    target_link_libraries(${PROJECT_NAME} PRIVATE "${NVPERF_LIBRARY}" delayimp)
+    target_link_options(
+        ${PROJECT_NAME}
+        PRIVATE "/DELAYLOAD:nvperf_grfx_host.dll"
+    )
+    target_compile_definitions(${PROJECT_NAME} PRIVATE NVPERF_ENABLED)
 endif()
 # https://gitlab.kitware.com/cmake/cmake/-/issues/24922#note_1371990
 if(MSVC_VERSION GREATER_EQUAL 1936 AND MSVC_IDE) # 17.6+
@@ -229,15 +289,11 @@ foreach(FEATURE_PATH ${FEATURE_CONFIG_FILES})
     string(STRIP "${CONFIG_VALUE}" CONFIG_VALUE)
     if(CONFIG_VALUE)
         string(
-            REGEX MATCH "[Vv]ersion = ([0-9]+)-([0-9]+)-([0-9]+)"
-            _
+            REGEX MATCH "[Vv]ersion[ \t]*=[ \t]*([0-9]+)-([0-9]+)-([0-9]+)"
+            _VERSION_MATCH
             "${CONFIG_VALUE}"
         )
-        if(
-            DEFINED CMAKE_MATCH_1
-            AND DEFINED CMAKE_MATCH_2
-            AND DEFINED CMAKE_MATCH_3
-        )
+        if(_VERSION_MATCH)
             set(ver_major ${CMAKE_MATCH_1})
             set(ver_minor ${CMAKE_MATCH_2})
             set(ver_patch ${CMAKE_MATCH_3})
@@ -373,6 +429,65 @@ target_sources(
 )
 
 # #######################################################################################################################
+# # Scene settings catalog
+# #######################################################################################################################
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+set(SCENE_SETTINGS_PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
+
+set(SCENE_SETTINGS_CATALOG_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(SCENE_SETTINGS_CATALOG_HEADER
+    "${SCENE_SETTINGS_CATALOG_DIR}/SceneSettingsCatalog.generated.h"
+)
+set(SCENE_SETTINGS_CATALOG_SOURCE
+    "${SCENE_SETTINGS_CATALOG_DIR}/SceneSettingsCatalog.generated.cpp"
+)
+set(SCENE_SETTINGS_ADAPTERS_SOURCE
+    "${SCENE_SETTINGS_CATALOG_DIR}/FeatureSceneSettingsAdapters.generated.cpp"
+)
+
+file(
+    GLOB_RECURSE SCENE_SETTINGS_CATALOG_INPUTS
+    LIST_DIRECTORIES false
+    CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cxx"
+)
+
+add_custom_command(
+    OUTPUT
+        "${SCENE_SETTINGS_CATALOG_HEADER}"
+        "${SCENE_SETTINGS_CATALOG_SOURCE}"
+        "${SCENE_SETTINGS_ADAPTERS_SOURCE}"
+    COMMAND
+        ${SCENE_SETTINGS_PYTHON_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_scene_settings_catalog.py"
+        --source-dir "${CMAKE_CURRENT_SOURCE_DIR}" --out-dir
+        "${SCENE_SETTINGS_CATALOG_DIR}" --min-entries 645 --min-controllable 538
+        --min-controllable-features 30
+    DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_scene_settings_catalog.py"
+        ${SCENE_SETTINGS_CATALOG_INPUTS}
+    COMMENT "Generating scene settings catalog"
+    VERBATIM
+)
+
+target_include_directories(
+    "${PROJECT_NAME}"
+    PRIVATE "${SCENE_SETTINGS_CATALOG_DIR}"
+)
+
+target_sources(
+    "${PROJECT_NAME}"
+    PRIVATE
+        "${SCENE_SETTINGS_CATALOG_HEADER}"
+        "${SCENE_SETTINGS_CATALOG_SOURCE}"
+        "${SCENE_SETTINGS_ADAPTERS_SOURCE}"
+)
+
+# #######################################################################################################################
 # # clang-format
 # #######################################################################################################################
 
@@ -477,7 +592,28 @@ list(TRANSFORM FEATURE_PATHS_SLASH APPEND /)
 
 # Install logic for AIO package
 # To copy AIO package at a folder do `${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --prefix ${AIO_DIR}`
-install(CODE "file(REMOVE_RECURSE \${CMAKE_INSTALL_PREFIX})")
+# The AIO staging folder is wiped before a fresh install so removed files don't linger. Any other
+# --prefix (e.g. a live Skyrim Data folder) is installed over in place and never deleted: a
+# recursive delete there would take every other mod with it.
+install(CODE "set(_cs_aio_dir \"${AIO_DIR}\")")
+install(
+    CODE
+        [[
+    cmake_path(ABSOLUTE_PATH CMAKE_INSTALL_PREFIX NORMALIZE OUTPUT_VARIABLE _cs_prefix)
+    cmake_path(ABSOLUTE_PATH _cs_aio_dir NORMALIZE OUTPUT_VARIABLE _cs_aio)
+    string(REGEX REPLACE "/$" "" _cs_prefix "${_cs_prefix}")
+    string(REGEX REPLACE "/$" "" _cs_aio "${_cs_aio}")
+    if(CMAKE_HOST_WIN32)
+        string(TOLOWER "${_cs_prefix}" _cs_prefix)
+        string(TOLOWER "${_cs_aio}" _cs_aio)
+    endif()
+    if(_cs_prefix STREQUAL _cs_aio)
+        file(REMOVE_RECURSE "${_cs_aio_dir}")
+    else()
+        message(STATUS "Installing over ${CMAKE_INSTALL_PREFIX} without cleaning it (only ${_cs_aio_dir} is cleaned first)")
+    endif()
+]]
+)
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION SKSE/Plugins COMPONENT SKSE)
 install(
     FILES $<TARGET_PDB_FILE:${PROJECT_NAME}>
@@ -490,7 +626,30 @@ install(
     COMPONENT Shaders
     PATTERN "Tests" EXCLUDE
 )
+# Icon fonts + licenses live under src/Menu/Icons/glyphs; deploy under Icons/glyphs (not Fonts).
+# CONFIGURE_DEPENDS picks up new TTFs / LICENSE files without editing this list.
+set(CS_ICON_FONT_SRC_DIR "${CMAKE_SOURCE_DIR}/src/Menu/Icons/glyphs")
+set(CS_ICON_FONT_DST_REL "Interface/CommunityShaders/Icons/glyphs")
+file(
+    GLOB CS_ICON_FONT_FILES
+    CONFIGURE_DEPENDS
+    LIST_DIRECTORIES FALSE
+    "${CS_ICON_FONT_SRC_DIR}/*.ttf"
+    "${CS_ICON_FONT_SRC_DIR}/*LICENSE*.txt"
+)
+install(
+    FILES ${CS_ICON_FONT_FILES}
+    DESTINATION ${CS_ICON_FONT_DST_REL}
+    COMPONENT Shaders
+)
 install(CODE "file(REMOVE \${CMAKE_INSTALL_PREFIX}/Core)" COMPONENT Shaders)
+if(NVPERF_SUPPORT)
+    install(
+        FILES "${NVPERF_DLL}"
+        DESTINATION SKSE/Plugins/CommunityShaders/NvPerf
+        COMPONENT SKSE
+    )
+endif()
 
 # #######################################################################################################################
 # # Automatic AIO preparation (incremental copy system)
@@ -540,6 +699,7 @@ if(AUTO_PLUGIN_DEPLOYMENT OR AIO_ZIP_TO_DIST)
         list(FILTER _tmp EXCLUDE REGEX "/Shaders/")
         list(APPEND _AIO_PACKAGE_FILES ${_tmp})
     endforeach()
+    list(APPEND _AIO_PACKAGE_FILES ${CS_ICON_FONT_FILES})
 
     # Prepare AIO by copying files only when different. This avoids updating
     # timestamps for unchanged files and prevents downstream incremental
@@ -588,6 +748,28 @@ if(AUTO_PLUGIN_DEPLOYMENT OR AIO_ZIP_TO_DIST)
     list(FILTER _AIO_PACKAGE_SOURCE_FILES EXCLUDE REGEX "/Tests/")
     list(FILTER _AIO_PACKAGE_SOURCE_FILES EXCLUDE REGEX "/Shaders/")
     append_copy_if_different(_prepare_aio_cmds _AIO_PACKAGE_SOURCE_FILES "${CMAKE_SOURCE_DIR}/package" "${AIO_DIR}")
+
+    # Icon fonts are sourced from src/Menu/Icons/glyphs (CS_ICON_FONT_FILES glob).
+    list(
+        APPEND _prepare_aio_cmds
+        COMMAND
+        ${CMAKE_COMMAND}
+        -E
+        make_directory
+        "${AIO_DIR}/${CS_ICON_FONT_DST_REL}"
+    )
+    foreach(_icon_font_src IN LISTS CS_ICON_FONT_FILES)
+        get_filename_component(_icon_font_name "${_icon_font_src}" NAME)
+        list(
+            APPEND _prepare_aio_cmds
+            COMMAND
+            ${CMAKE_COMMAND}
+            -E
+            copy_if_different
+            "${_icon_font_src}"
+            "${AIO_DIR}/${CS_ICON_FONT_DST_REL}/${_icon_font_name}"
+        )
+    endforeach()
 
     # Copy feature folders (only files, preserve existing files in AIO).
     # Shader files are excluded - copy_shaders.stamp owns the Shaders/ subdir
@@ -665,6 +847,20 @@ if(AUTO_PLUGIN_DEPLOYMENT OR AIO_ZIP_TO_DIST)
         COMMENT "Copying built DLL and PDB to AIO package"
         VERBATIM
     )
+    if(NVPERF_SUPPORT)
+        add_custom_command(
+            TARGET ${PROJECT_NAME}
+            POST_BUILD
+            COMMAND
+                ${CMAKE_COMMAND} -E make_directory
+                "${AIO_DIR}/SKSE/Plugins/CommunityShaders/NvPerf"
+            COMMAND
+                ${CMAKE_COMMAND} -E copy_if_different "${NVPERF_DLL}"
+                "${AIO_DIR}/SKSE/Plugins/CommunityShaders/NvPerf/nvperf_grfx_host.dll"
+            COMMENT "Copying nvperf_grfx_host.dll to AIO package"
+            VERBATIM
+        )
+    endif()
 
     # Only copy shaders when HLSL files change; copy individually so unchanged
     # files do not get their timestamps updated.
@@ -707,6 +903,7 @@ if(AUTO_PLUGIN_DEPLOYMENT OR AIO_ZIP_TO_DIST)
             file(
                 GLOB_RECURSE _feat_shaders
                 LIST_DIRECTORIES FALSE
+                CONFIGURE_DEPENDS
                 "${_fpath}/Shaders/*"
             )
             list(FILTER _feat_shaders EXCLUDE REGEX "/Tests/")
@@ -946,6 +1143,8 @@ find_program(
     PATHS "C:/Program Files/7-Zip" "C:/Program Files (x86)/7-Zip"
     DOC "7-Zip archiver for compressed packages"
 )
+# mx5 keeps the AIO well under Discord's 100 MB upload limit; mx1 is ~30 MB larger.
+set(SEVENZ_AIO_ARGS a -t7z -mx5 -mmt=on)
 
 # Zip base CommunityShaders and all addons as their own zip in dist folder
 if(ZIP_TO_DIST)
@@ -1051,8 +1250,7 @@ if(AIO_ZIP_TO_DIST)
             COMMAND
                 ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/dist"
             COMMAND ${CMAKE_COMMAND} -E rm -f "${AIO_ARCHIVE}"
-            COMMAND
-                "${SEVENZ_EXECUTABLE}" a -t7z -mx1 -mmt=on "${AIO_ARCHIVE}" *
+            COMMAND "${SEVENZ_EXECUTABLE}" ${SEVENZ_AIO_ARGS} "${AIO_ARCHIVE}" *
             COMMAND ${CMAKE_COMMAND} -E touch ${AIO_ZIP_STAMP}
             WORKING_DIRECTORY ${AIO_DIR}
             DEPENDS PREPARE_AIO ${CMAKE_CURRENT_BINARY_DIR}/copy_shaders.stamp
@@ -1185,8 +1383,7 @@ if(TARGET PREPARE_AIO)
             OUTPUT ${AIO_PACKAGE}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${DIST_PATH}"
             COMMAND ${CMAKE_COMMAND} -E rm -f "${AIO_PACKAGE}"
-            COMMAND
-                "${SEVENZ_EXECUTABLE}" a -t7z -mx1 -mmt=on "${AIO_PACKAGE}" *
+            COMMAND "${SEVENZ_EXECUTABLE}" ${SEVENZ_AIO_ARGS} "${AIO_PACKAGE}" *
             WORKING_DIRECTORY ${AIO_DIR}
             DEPENDS
                 ${CMAKE_CURRENT_BINARY_DIR}/prepare_aio.stamp
@@ -1213,10 +1410,7 @@ else()
     if(SEVENZ_EXECUTABLE)
         set(AIO_ARCHIVE_COMMAND
             "${SEVENZ_EXECUTABLE}"
-            a
-            -t7z
-            -mx1
-            -mmt=on
+            ${SEVENZ_AIO_ARGS}
             "${AIO_PACKAGE}"
             *
         )

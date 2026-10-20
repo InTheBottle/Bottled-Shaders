@@ -6,10 +6,9 @@
 #include "I18n/I18n.h"
 #include "Menu.h"
 #include "Menu/ThemeManager.h"
-#include "SceneSettingsManager.h"
+#include "NativeMenu/NativeMenu.h"
 #include "ShaderCache.h"
 #include "State.h"
-
 
 #define DLLEXPORT __declspec(dllexport)
 
@@ -85,13 +84,14 @@ void MessageHandler(SKSE::MessagingInterface::Message* message)
 				EngineFix::InstallOnPostPostLoadFixes();
 				FrameAnnotations::OnPostPostLoad();
 
+				globals::state->flatWorldMapLoaded = GetModuleHandleW(L"FlatMapMarkersSSE.dll") != nullptr;
+				if (globals::state->flatWorldMapLoaded)
+					logger::info("FlatMapMarkersSSE detected, treating the world map as flat art");
+
 				auto shaderCache = globals::shaderCache;
 
 				// Run feature PostPostLoad() first so features can disable themselves if needed
 				Feature::ForEachLoadedFeature("PostPostLoad", [](Feature* feature) { feature->PostPostLoad(); });
-
-				// Register scene settings event handler (Interior Only transitions)
-				SceneSettingsManager::MenuOpenCloseEventHandler::Register();
 
 				// Now validate disk cache after features have had a chance to modify their state
 				shaderCache->ValidateDiskCache();
@@ -131,6 +131,8 @@ void MessageHandler(SKSE::MessagingInterface::Message* message)
 				}
 
 				Feature::ForEachLoadedFeature("DataLoaded", [](Feature* feature) { feature->DataLoaded(); });
+
+				NativeMenu::Register();
 			}
 
 			break;
@@ -163,7 +165,7 @@ bool Load()
 	I18n::GetSingleton()->Init();
 
 	state->Load();
-	state->LoadTheme();  // Load theme settings from SettingsTheme.json
+	state->LoadTheme();  // Load the active theme preset
 
 	// Initialize theme system - create default themes and discover existing ones
 	globals::menu->CreateDefaultThemes();  // Creates JSON files if they don't exist
@@ -184,7 +186,8 @@ bool Load()
 		L"Data/SKSE/Plugins/NVIDIA_Reflex.dll",
 		L"Data/SKSE/Plugins/MARA.dll",
 		L"Data/SKSE/Plugins/NativeWaterLightStabilizer.dll",
-	    L"Data/SKSE/Plugins/DynamicWetness.dll"
+		L"Data/SKSE/Plugins/DynamicWetness.dll",
+		L"Data/SKSE/Plugins/NMN_DeformableTerrain.dll"
 	};
 
 	for (const auto dll : incompatibleDLLs) {
@@ -192,6 +195,30 @@ bool Load()
 			auto errorMessage = std::format("Incompatible DLL {} detected", stl::utf16_to_utf8(dll).value_or("<unicode conversion error>"s));
 			logger::error("{}", errorMessage);
 			errors.push_back(errorMessage);
+		}
+	}
+
+	const auto path = std::filesystem::path("Data/SKSE/Plugins/SexLabUtil.dll");
+
+	DWORD dummy;
+	const auto size = GetFileVersionInfoSizeW(path.c_str(), &dummy);
+
+	if (size) {
+		std::vector<std::byte> data(size);
+
+		if (GetFileVersionInfoW(path.c_str(), 0, size, data.data())) {
+			VS_FIXEDFILEINFO* info = nullptr;
+			UINT infoSize = 0;
+
+			if (VerQueryValueW(data.data(), L"\\", reinterpret_cast<void**>(&info), &infoSize) && info) {
+				const auto major = HIWORD(info->dwFileVersionMS);
+
+				if (major < 2) {
+					auto errorMessage = std::format("Incompatible version of SexLabUtil.dll detected. Use SexLab P+ instead");
+					logger::error("{}", errorMessage);
+					errors.push_back(errorMessage);
+				}
+			}
 		}
 	}
 

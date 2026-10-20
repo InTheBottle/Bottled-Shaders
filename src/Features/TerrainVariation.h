@@ -1,5 +1,12 @@
 #pragma once
 
+#include <shared_mutex>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
 /** @brief Reduces terrain texture tiling artifacts by adding stochastic variation to texture sampling. */
 struct TerrainVariation : Feature
 {
@@ -37,7 +44,8 @@ public:
 	struct alignas(16) Settings
 	{
 		uint32_t enableLODTerrainTilingFix = 1;
-		uint32_t pad[3]{};
+		uint32_t enableMeshSupport = 1;
+		uint32_t pad[2]{};
 	};
 
 	STATIC_ASSERT_ALIGNAS_16(Settings);
@@ -52,6 +60,36 @@ public:
 	virtual void SaveSettings(json& o_json) override;
 	virtual void RestoreDefaultSettings() override;
 
+	/** @brief Collects the diffuse texture paths referenced by every landscape texture record. */
+	virtual void DataLoaded() override;
 	/** @brief Initializes the feature and applies shader settings after plugin load. */
 	virtual void PostPostLoad() override;
+
+	// Guards landscapeDiffusePaths, landscapeDiffuseFileNames, meshTextureCache and meshTextureKeepAlive.
+	std::shared_mutex meshTextureMutex;
+	// Canonical diffuse paths of every land texture record, relative to textures/.
+	std::unordered_set<std::string> landscapeDiffusePaths;
+	// File names of the land texture diffuses that live under a landscape/ directory.
+	std::unordered_set<std::string> landscapeDiffuseFileNames;
+	// Keyed on the interned BSFixedString pointer of a diffuse texture name.
+	std::unordered_map<const char*, bool> meshTextureCache;
+	// Keeps every cached key interned so its pointer cannot be recycled.
+	std::vector<RE::BSFixedString> meshTextureKeepAlive;
+
+	/**
+	 * @brief Resolves whether a diffuse texture is painted on the landscape surface, memoising the result.
+	 * @details Matches the exact diffuse path of a land texture record, or a texture under a landscape/
+	 * directory that shares its file name with one (a mesh copy kept in a subfolder).
+	 * @param a_name The interned diffuse texture name from the shader property.
+	 * @return True if the texture qualifies for mesh stochastic variation.
+	 */
+	bool IsLandscapeDiffuseTexture(const RE::BSFixedString& a_name);
+
+	/**
+	 * @brief Flags qualifying non-landscape draws so the shader applies stochastic variation.
+	 * @param a_pass The render pass being set up.
+	 */
+	void BSLightingShader_SetupGeometry(RE::BSRenderPass* a_pass);
+
+	struct Hooks;
 };

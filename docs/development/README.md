@@ -4,6 +4,11 @@
 
 -   **[VSCode Setup](./vscode-setup.md)** - IDE configuration, extensions, and auto-deploy
 -   **[Shader Workflow](./shader-workflow.md)** - Fast shader iteration and deployment
+-   **[Nsight Perf](./nsight-perf.md)** - GPU hardware counters per render pass (Remote Control, `NVPERF_SUPPORT`)
+
+## Subsystems
+
+-   **[Scene Settings Framework](./scene-settings-framework.md)** - Interior/time-of-day/weather/location setting overrides, the generated catalog, and what the port left out
 
 ## Quick Links
 
@@ -11,7 +16,7 @@
 
 -   **Fast shader deployment:** `cmake --build build/ALL --target COPY_SHADERS`
 -   **Full build with deployment:** `.\BuildRelease.bat ALL-WITH-AUTO-DEPLOYMENT`
--   **Validate shader permutations:** `hlslkit-compile` (see `.claude/CLAUDE.md` "Shader Development and Testing")
+-   **Validate shader permutations:** `hlslkit-compile` (see `.claude/CLAUDE.md` "Shader validation")
 -   **Create a worktree with submodules + local preset:** `pwsh ./tools/new-worktree.ps1 -Name my-branch`
 -   **Install optional git alias:** `pwsh ./tools/install-worktree-alias.ps1`
 
@@ -19,7 +24,8 @@
 
 -   `ALL` - Standard build (no auto-deployment)
 -   `ALL-WITH-AUTO-DEPLOYMENT` - Build + deploy to game directory
--   `Dev` - Fast iteration preset (recommended for development)
+-   `Dev` - Optimized DLL + AIO folder (`BuildDev.bat`)
+-   `Dev-Fast` - Fastest iteration: Ninja, /Od, DLL only (`BuildDevFast.bat`)
 
 See `CMakePresets.json` for all available presets.
 

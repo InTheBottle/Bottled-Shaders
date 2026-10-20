@@ -1,5 +1,7 @@
 #include "Globals.h"
 
+#include "CSEditor/SceneManager/SceneManager.h"
+#include "CSEditor/SceneManager/SceneSettingsManager.h"
 #include "Deferred.h"
 #include "Features/CSEditor.h"
 #include "Features/CloudShadows.h"
@@ -10,20 +12,25 @@
 #include "Features/ExtendedTranslucency.h"
 #include "Features/GrassCollision.h"
 #include "Features/GrassLighting.h"
+#include "Features/GrassOptimizations.h"
 #include "Features/HDRDisplay.h"
 #include "Features/HairSpecular.h"
 #include "Features/HorizonFix.h"
 #include "Features/IBL.h"
 #include "Features/InteriorSun.h"
-#include "Features/InverseSquareLighting.h"
 #include "Features/LODBlending.h"
 #include "Features/LightLimitFix.h"
 #include "Features/LinearLighting.h"
 #include "Features/NRD.h"
 #include "Features/PerformanceOverlay.h"
+#include "Features/PhysicalSky.h"
+#include "Features/PostProcessing.h"
+#include "Features/PseudoSunBounce.h"
+#include "Features/RainRefraction.h"
 #include "Features/RemoteControl.h"
 #include "Features/RenderDoc.h"
 #include "Features/ScreenSpaceGI.h"
+#include "Features/ScreenSpacePointLightShadows.h"
 #include "Features/ScreenSpaceReflections.h"
 #include "Features/ScreenSpaceShadows.h"
 #include "Features/ScreenshotFeature.h"
@@ -37,17 +44,17 @@
 #include "Features/TerrainVariation.h"
 #include "Features/UnifiedWater.h"
 #include "Features/Upscaling.h"
+#include "Features/VanillaFresnel.h"
 #include "Features/VolumetricLighting.h"
 #include "Features/VolumetricShadows.h"
 #include "Features/WaterEffects.h"
 #include "Features/WetnessEffects.h"
 #include "Menu.h"
-#include "SceneSettingsManager.h"
+#include "Profiler.h"
 #include "ShaderCache.h"
 #include "State.h"
 #include "TruePBR.h"
 #include "Utils/Game.h"
-#include "WeatherManager.h"
 
 namespace globals
 {
@@ -66,6 +73,7 @@ namespace globals
 		ExtendedMaterials extendedMaterials{};
 		GrassCollision grassCollision{};
 		GrassLighting grassLighting{};
+		GrassOptimizations grassOptimizations{};
 		IBL ibl{};
 		LightLimitFix lightLimitFix{};
 		LinearLighting linearLighting{};
@@ -73,10 +81,12 @@ namespace globals
 		HairSpecular hairSpecular{};
 		HorizonFix horizonFix{};
 		InteriorSun interiorSun{};
-		InverseSquareLighting inverseSquareLighting{};
 		NRD nrd{};
+		PhysicalSky physicalSky{};
+		RainRefraction rainRefraction{};
 		ScreenSpaceGI screenSpaceGI{};
 		ScreenSpaceReflections screenSpaceReflections{};
+		ScreenSpacePointLightShadows screenSpacePointLightShadows{};
 		ScreenSpaceShadows screenSpaceShadows{};
 		Skylighting skylighting{};
 		TerrainVariation terrainVariation{};
@@ -86,6 +96,7 @@ namespace globals
 		TerrainHelper terrainHelper{};
 		TerrainShadows terrainShadows{};
 		UnifiedWater unifiedWater{};
+		VanillaFresnel vanillaFresnel{};
 		VolumetricLighting volumetricLighting{};
 		WaterEffects waterEffects{};
 		PerformanceOverlay performanceOverlay{};
@@ -100,7 +111,10 @@ namespace globals
 		CSEditor csEditor{};
 		ExponentialHeightFog exponentialHeightFog{};
 		TruePBR truePBR{};
+		SceneManager sceneManager{};
+		PostProcessing postProcessing{};
 		Skin skin{};
+		PseudoSunBounce pseudoSunBounce{};
 
 		namespace llf
 		{
@@ -161,13 +175,14 @@ namespace globals
 		REL::Relocation<const RE::NiRTTI*> NiBillboardNodeRTTI;
 		REL::Relocation<const RE::NiRTTI*> NiAlphaPropertyRTTI;
 		REL::Relocation<const RE::NiRTTI*> NiSourceTextureRTTI;
+		REL::Relocation<const RE::NiRTTI*> BSGrassShaderPropertyRTTI;
+		REL::Relocation<const RE::NiRTTI*> BSMultiStreamInstanceTriShapeRTTI;
 	}
 
 	State* state = nullptr;
 	Deferred* deferred = nullptr;
 	Menu* menu = nullptr;
 	SIE::ShaderCache* shaderCache = nullptr;
-	WeatherManager* weatherManager = nullptr;
 	SceneSettingsManager* sceneSettingsManager = nullptr;
 
 	static Profiler profilerInstance;
@@ -179,7 +194,6 @@ namespace globals
 		state = State::GetSingleton();
 		menu = Menu::GetSingleton();
 		deferred = Deferred::GetSingleton();
-		weatherManager = WeatherManager::GetSingleton();
 		sceneSettingsManager = SceneSettingsManager::GetSingleton();
 	}
 
@@ -221,6 +235,8 @@ namespace globals
 			NiBillboardNodeRTTI = { RE::NiBillboardNode::Ni_RTTI };
 			NiAlphaPropertyRTTI = { RE::NiAlphaProperty::Ni_RTTI };
 			NiSourceTextureRTTI = { RE::NiSourceTexture::Ni_RTTI };
+			BSGrassShaderPropertyRTTI = { RE::BSGrassShaderProperty::Ni_RTTI };
+			BSMultiStreamInstanceTriShapeRTTI = { RE::BSMultiStreamInstanceTriShape::Ni_RTTI };
 		}
 
 		d3d::device = reinterpret_cast<ID3D11Device*>(game::renderer->GetRuntimeData().forwarder);
@@ -233,6 +249,7 @@ namespace globals
 		using namespace game;
 		RefreshTES();
 		player = RE::PlayerCharacter::GetSingleton();
+		tes = RE::TES::GetSingleton();
 		sky = RE::Sky::GetSingleton();
 		utilityShader = RE::BSUtilityShader::GetSingleton();
 		imageSpaceManager = RE::ImageSpaceManager::GetSingleton();

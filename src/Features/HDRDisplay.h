@@ -53,6 +53,11 @@ public:
 	static constexpr float kHdrMenuScenePauseOrMap = 0.58f;
 	static constexpr float kHdrMenuSceneMainOrLoading = 1.f;
 
+	static constexpr uint kHdrPeakNitsMin = 400;
+	static constexpr uint kHdrPeakNitsMax = 10000;
+	// AutoHDR expansion stops looking good past this brightness, so its peak is capped here.
+	static constexpr uint kAutoHDRMaxNits = 500;
+
 	Settings settings;
 	std::mutex settingsMutex;
 
@@ -165,14 +170,14 @@ public:
 	{
 		float enableHDR;                 ///< 1.0 = HDR output with PQ, 0.0 = SDR output with gamma
 		float paperWhite;                ///< Reference white brightness in nits for HDR
-		float peakNits;                  ///< Maximum display brightness in nits for HDR
+		float peakNits;                  ///< Maximum display brightness in nits for HDR, capped to kAutoHDRMaxNits under AutoHDR
 		float skipUIComposite;           ///< 1.0 = FG handles UI, skip our compositing
 		float uiBrightness;              ///< UI brightness multiplier (Frame Gen compositing)
 		float isSceneLinear;             ///< 1.0 = Linear Lighting active, scene already linear
 		float pad0;                      ///< 1.0 = main menu/loading screen active
 		float fgTweenMenuMidAlphaBoost;  ///< 1.0 = TweenMenu (pause) open — FG UIBrightnessCS mid-alpha boost only
-		float previewSDR;                ///< 1.0 = emit sRGB SDR (crop preview) instead of PQ HDR10
-		float applyAutoHDR;              ///< 1.0 = Effects11 replaced ISHDR, so expand its SDR result into HDR
+		float previewSDR;                ///< 1.0 = emit gamma 2.2 SDR (crop preview) instead of PQ HDR10
+		float applyAutoHDR;              ///< 1.0 = expand SDR tonemap output (Effects11 or PP SDR tonemapper + AutoHDR) into HDR
 		float pad2;
 		float pad3;
 	};
@@ -186,8 +191,8 @@ public:
 
 	Texture2D* hdrTexture = nullptr;
 	Texture2D* outputTexture = nullptr;
-	Texture2D* uiTexture = nullptr;          // Separate UI render target for proper compositing
-	Texture2D* cleanSceneCapture = nullptr;  // Pre-blur copy of hdrTexture for clean captures
+	Texture2D* uiTexture = nullptr;            // Separate UI render target for proper compositing
+	Texture2D* cleanSceneCapture = nullptr;    // Pre-blur copy of hdrTexture for clean captures
 	uint cleanSceneCaptureFrame = UINT32_MAX;  // frameCount when cleanSceneCapture was last refreshed
 
 	ID3D11ComputeShader* hdrOutputCS = nullptr;
@@ -236,10 +241,18 @@ public:
 	std::vector<std::pair<RE::RENDER_TARGETS::RENDER_TARGET, SavedRenderTarget>> savedLDRTargets;
 
 private:
+	/** @brief Restores hdrTexture after the blurred scene has been composed for presentation. */
+	void RestoreCleanScene();
+
 	bool showHDRWarningPopup = false;
 	bool pendingHDREnable = false;
 	bool presentSuppressed = false;
-	std::unordered_map<ID3D11BlendState*, winrt::com_ptr<ID3D11BlendState>> patchedBlendStateCache;
+	struct PatchedBlendState
+	{
+		winrt::com_ptr<ID3D11BlendState> original;
+		winrt::com_ptr<ID3D11BlendState> patched;
+	};
+	std::unordered_map<ID3D11BlendState*, PatchedBlendState> patchedBlendStateCache;
 
 	HRESULT PresentToSwapChain(IDXGISwapChain* swapChain, UINT syncInterval, UINT flags);
 	void DrawImGuiForPresent(bool frameGenActive, bool hdrReady);

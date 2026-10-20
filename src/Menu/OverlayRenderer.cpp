@@ -13,14 +13,17 @@
 #include "CSEditor/EditorWindow.h"
 #include "Feature.h"
 #include "FeatureIssues.h"
+#include "Features/Effects11/Editor/Effects11Editor.h"
 #include "Features/Effects11/EffectManager.h"
 #include "Features/RenderDoc.h"
 #include "Globals.h"
 #include "I18n/I18n.h"
 #include "Menu.h"
+#include "Menu/CursorLoader.h"
+#include "Menu/FontAtlasState.h"
+#include "Presets/UnifiedPresetCatalog.h"
 #include "ShaderCache.h"
 #include "State.h"
-#include "Menu/CursorLoader.h"
 #include "Util.h"
 
 #include "Features/PerformanceOverlay.h"
@@ -150,13 +153,39 @@ void OverlayRenderer::RenderOverlay(
 	float& cachedFontSize,
 	float currentFontSize)
 {
+	// Always sync, including frames that skip drawing, so closing the last CS UI restores vanity.
+	menu.SyncVanityCamera();
+
 	processInputEventQueue();
 
+	// ImGui only takes game input while a CS window owns it. Otherwise status overlays
+	// (compile progress, performance overlay) would react to gameplay clicks and keys, and
+	// keys held while flying the editor camera would leak into the editor's widgets.
+	auto& io = ImGui::GetIO();
+	const bool acceptsInput = !menu.IsPreviewFlying() && menu.ShouldSwallowInput();
+	io.SetAppAcceptingEvents(acceptsInput);
+	if (!acceptsInput) {
+		io.ClearEventsQueue();
+		io.ClearInputKeys();
+		io.ClearInputMouse();
+		io.WantSetMousePos = false;
+		ImGui::ClearActiveID();
+	}
+
+	// Before the skip check so the editor's close edge is never missed.
+	auto* editorWindow = EditorWindow::GetSingleton();
+	if (editorWindow->open && !EditorWindow::CanBeOpen()) {
+		editorWindow->open = false;
+		if (editorWindow->IsInPreviewMode())
+			editorWindow->ExitPreviewMode();
+	}
+	editorWindow->UpdateOpenState();
+
 	if (ShouldSkipRendering()) {
-		auto& io = ImGui::GetIO();
 		io.ClearInputKeys();
 		io.ClearEventsQueue();
 		s_windowOverlapAlpha.clear();
+		EditorWindow::GetSingleton()->UpdateOpenState();
 		return;
 	}
 
@@ -166,28 +195,42 @@ void OverlayRenderer::RenderOverlay(
 	RenderShaderCompilationStatus(keyIdToString);
 	RenderShaderBlockingStatus();
 
-	auto* editorWindow = EditorWindow::GetSingleton();
-	if (editorWindow->open && !EditorWindow::CanBeOpen()) {
-		editorWindow->open = false;
-		if (editorWindow->IsInPreviewMode())
-			editorWindow->ExitPreviewMode();
-	}
-	editorWindow->UpdateOpenState();
+	// The Effects 11 editor and the Community Shaders menu are exclusive; the CS Editor hosts it.
+	auto& effects11Editor = Effects11Editor::GetSingleton();
+	if (effects11Editor.IsOpen() && menu.IsEnabled)
+		effects11Editor.Close(false);
+
 	if (editorWindow->open) {
 		bool flying = editorWindow->IsPreviewFlying();
-		auto& io = ImGui::GetIO();
 		io.MouseDrawCursor = !flying;
 		if (flying)
 			io.MousePos = { -FLT_MAX, -FLT_MAX };  // prevent hover/tooltips during active flying
 		editorWindow->Draw();
+	} else if (effects11Editor.IsOpen()) {
+		ImGui::GetIO().MouseDrawCursor = true;
+		effects11Editor.Draw();
 	} else if (menu.IsEnabled || HomePageRenderer::ShouldShowFirstTimeSetup()) {
 		ImGui::GetIO().MouseDrawCursor = true;
 		if (menu.IsEnabled) {
+			const auto& context = *ImGui::GetCurrentContext();
+			const bool editedBefore = context.ActiveIdHasBeenEditedThisFrame;
 			drawSettings();
+			// Only frames that edited something pay for the check; search boxes edit too, so it compares.
+			if (!editedBefore && context.ActiveIdHasBeenEditedThisFrame)
+				globals::state->CheckCoreSettingsChanged();
 		}
 	} else {
 		ImGui::GetIO().MouseDrawCursor = false;
 	}
+
+	// Enabling a Baseline pack can happen from either the menu or the CS editor, and the answer outlives the page.
+	if (editorWindow->open || menu.IsEnabled)
+		UnifiedPresetCatalog::GetSingleton().DrawBaselineOverlapPrompt();
+
+	// The editor draws its own notifications; while it is closed they still need a host, e.g. the
+	// "cannot open in a loading screen" warning raised by the toggle hotkey.
+	if (!editorWindow->open)
+		editorWindow->RenderNotifications();
 
 	RenderFeatureOverlays();
 	RenderFirstTimeSetupOverlay();
@@ -208,11 +251,15 @@ bool OverlayRenderer::ShouldSkipRendering()
 
 	return !(shaderCache->IsCompiling() ||
 			 Menu::GetSingleton()->IsEnabled ||
+			 HomePageRenderer::ShouldShowFirstTimeSetup() ||
 			 EditorWindow::GetSingleton()->open ||
+			 EditorWindow::GetSingleton()->HasNotifications() ||
+			 Effects11Editor::GetSingleton().IsOpen() ||
 			 abTestingManager->IsEnabled() ||
 			 (failed && !hide) ||
 			 effectFailed ||
 			 globals::features::performanceOverlay.settings.ShowInOverlay ||
+			 globals::features::performanceOverlay.settings.ShowWeatherPicker ||
 			 renderDoc->IsAvailable());
 }
 
@@ -220,7 +267,7 @@ void OverlayRenderer::HandleFontReload(Menu& menu, float& cachedFontSize, float 
 {
 	bool fontSizeChanged = std::abs(cachedFontSize - currentFontSize) > ThemeManager::Constants::FONT_CACHE_EPSILON;
 	std::string desiredSignature = menu.BuildFontSignature(currentFontSize);
-	bool signatureChanged = desiredSignature != menu.cachedFontSignature;
+	bool signatureChanged = desiredSignature != MenuFonts::GetAtlasState().cachedFontSignature;
 
 	if (fontSizeChanged || signatureChanged) {
 		if (!ThemeManager::ReloadFont(menu, cachedFontSize)) {
@@ -251,6 +298,7 @@ void OverlayRenderer::InitializeImGuiFrame(Menu& menu)
 			menu.lastDisplaySize.x, menu.lastDisplaySize.y, currentDisplaySize.x, currentDisplaySize.y);
 		menu.resetLayout = true;
 		EditorWindow::GetSingleton()->resetLayout = true;
+		Effects11Editor::GetSingleton().RequestLayoutReset();
 	}
 	menu.lastDisplaySize = currentDisplaySize;
 
@@ -320,7 +368,7 @@ void OverlayRenderer::RenderShaderCompilationStatus(const std::function<const ch
 		DrawEffects11Errors(themeSettings);
 
 		if (renderDocAvailable)
-			ImGui::TextColored(themeSettings.StatusPalette.Warning, renderDocInformation.c_str());
+			ImGui::TextColored(themeSettings.StatusPalette.Warning, "%s", renderDocInformation.c_str());
 
 		ImGui::End();
 		return;
@@ -337,7 +385,7 @@ void OverlayRenderer::RenderShaderCompilationStatus(const std::function<const ch
 		DrawEffects11Errors(themeSettings);
 
 		if (renderDocAvailable)
-			ImGui::TextColored(themeSettings.StatusPalette.Warning, renderDocInformation.c_str());
+			ImGui::TextColored(themeSettings.StatusPalette.Warning, "%s", renderDocInformation.c_str());
 
 		ImGui::End();
 	} else if (renderDocAvailable) {
@@ -346,7 +394,7 @@ void OverlayRenderer::RenderShaderCompilationStatus(const std::function<const ch
 			ImGui::End();
 			return;
 		}
-		ImGui::TextColored(themeSettings.StatusPalette.Warning, renderDocInformation.c_str());
+		ImGui::TextColored(themeSettings.StatusPalette.Warning, "%s", renderDocInformation.c_str());
 		ImGui::End();
 	}
 }
@@ -400,7 +448,6 @@ void OverlayRenderer::FinalizeImGuiFrame()
 	BackgroundBlur::RenderBackgroundBlur();
 
 	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-
 }
 
 void OverlayRenderer::RenderFirstTimeSetupOverlay()

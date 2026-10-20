@@ -1,5 +1,6 @@
 #include "Feature.h"
 
+#include "CSEditor/SceneManager/SceneManager.h"
 #include "FeatureIssues.h"
 #include "FeatureVersions.h"
 #include "Features/CSEditor.h"
@@ -11,17 +12,19 @@
 #include "Features/ExtendedTranslucency.h"
 #include "Features/GrassCollision.h"
 #include "Features/GrassLighting.h"
+#include "Features/GrassOptimizations.h"
 #include "Features/HDRDisplay.h"
 #include "Features/HairSpecular.h"
 #include "Features/HorizonFix.h"
 #include "Features/IBL.h"
 #include "Features/InteriorSun.h"
-#include "Features/InverseSquareLighting.h"
 #include "Features/LODBlending.h"
 #include "Features/LightLimitFix.h"
 #include "Features/LinearLighting.h"
 #include "Features/NRD.h"
 #include "Features/PerformanceOverlay.h"
+#include "Features/PostProcessing.h"
+#include "Features/RainRefraction.h"
 #include "Features/RemoteControl.h"
 #include "Features/RenderDoc.h"
 #include "Features/ScreenSpaceGI.h"
@@ -44,13 +47,12 @@
 #include "Features/WetnessEffects.h"
 #include "I18n/I18n.h"
 #include "Menu.h"
-#include "SettingsOverrideManager.h"
 #include "Utils/Format.h"
-#include "WeatherManager.h"
-#include "WeatherVariableRegistry.h"
 
 #include "State.h"
 #include "TruePBR.h"
+
+#include <unordered_map>
 
 void Feature::Load(json& o_json)
 {
@@ -155,14 +157,27 @@ void Feature::Load(json& o_json)
 			logger::error("Feature has empty short name, cannot add to feature issues list");
 		}
 	} else {
+		if (!UsesMainSettings())
+			return;
+
 		// No errors, load settings now
 		if (o_json[GetName()].is_structured()) {
 			logger::info("Loading {} settings", GetName());
 			try {
 				LoadSettings(o_json[GetName()]);
 			} catch (...) {
-				logger::warn("Invalid settings for {}, using default.", GetName());
+				// Plain defaults would be saved back as the user's edits, so the layered base is tried first.
+				logger::warn("Invalid settings for {}, using its defaults and Baseline packs.", GetName());
 				RestoreDefaultSettings();
+				if (const auto* base = globals::state->GetFeatureBase(GetName())) {
+					try {
+						auto baseSettings = *base;
+						LoadSettings(baseSettings);
+					} catch (...) {
+						logger::warn("Invalid Baseline settings for {}, using default.", GetName());
+						RestoreDefaultSettings();
+					}
+				}
 			}
 		} else {
 			logger::info("Loading default settings for {}", GetName());
@@ -173,7 +188,8 @@ void Feature::Load(json& o_json)
 
 void Feature::Save(json& o_json)
 {
-	SaveSettings(o_json[GetName()]);
+	if (UsesMainSettings())
+		SaveSettings(o_json[GetName()]);
 }
 
 bool Feature::ValidateCache(CSimpleIniA& a_ini)
@@ -195,6 +211,10 @@ bool Feature::ValidateCache(CSimpleIniA& a_ini)
 
 	if (loaded) {
 		auto versionInCache = a_ini.GetValue(ini_name.c_str(), "Version");
+		if (!versionInCache) {
+			logger::info("No cached version found. Installed {}", version);
+			return false;
+		}
 		if (strcmp(versionInCache, version.c_str()) != 0) {
 			logger::info("Change in version detected. Installed {} but {} in Disk Cache", version, versionInCache);
 			return false;
@@ -225,6 +245,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::volumetricShadows,
 		&globals::features::grassLighting,
 		&globals::features::grassCollision,
+		&globals::features::grassOptimizations,
 		&globals::features::screenSpaceShadows,
 		&globals::features::extendedMaterials,
 		&globals::features::wetnessEffects,
@@ -244,7 +265,6 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::terrainHelper,
 		&globals::features::volumetricLighting,
 		&globals::features::lodBlending,
-		&globals::features::inverseSquareLighting,
 		&globals::features::hairSpecular,
 		&globals::features::interiorSun,
 		&globals::features::terrainVariation,
@@ -254,14 +274,17 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::renderDoc,
 		&globals::features::remoteControl,
 		&globals::features::csEditor,
+		&globals::features::sceneManager,
 		&globals::features::screenshotFeature,
 		&globals::features::linearLighting,
 		&globals::features::effects11,
+		&globals::features::rainRefraction,
 		&globals::features::unifiedWater,
 		&globals::features::horizonFix,
 		&globals::features::exponentialHeightFog,
 		&globals::features::hdrDisplay,
-		&globals::features::skin
+		&globals::features::skin,
+		&globals::features::postProcessing
 	};
 
 	return features;
@@ -269,11 +292,16 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 
 Feature* Feature::FindFeatureByShortName(const std::string& shortName)
 {
-	for (auto* feature : GetFeatureList()) {
-		if (feature->loaded && feature->GetShortName() == shortName)
-			return feature;
-	}
-	return nullptr;
+	// GetShortName() returns by value, so index once rather than allocating per feature per call.
+	static const auto featuresByShortName = [] {
+		std::unordered_map<std::string, Feature*> index;
+		for (auto* feature : GetFeatureList())
+			index.emplace(feature->GetShortName(), feature);
+		return index;
+	}();
+
+	const auto it = featuresByShortName.find(shortName);
+	return it != featuresByShortName.end() && it->second->loaded ? it->second : nullptr;
 }
 
 std::vector<std::string> Feature::GetLoadedFeatureNames()
@@ -289,40 +317,15 @@ std::vector<std::string> Feature::GetLoadedFeatureNames()
 
 bool Feature::ToggleAtBootSetting()
 {
+	if (IsAlwaysEnabled())
+		return false;
 	auto state = globals::state;
 	const std::string featureName = GetShortName();
 	auto disabled = state->IsFeatureDisabled(featureName);
 	state->SetFeatureDisabled(featureName, !disabled);
+	state->CheckCoreSettingsChanged();
 
 	return state->IsFeatureDisabled(featureName);  // Return the new state
-}
-
-bool Feature::ReapplyOverrideSettings()
-{
-	auto overrideManager = SettingsOverrideManager::GetSingleton();
-	std::string featureName = GetShortName();
-
-	if (!overrideManager || !overrideManager->HasFeatureOverrides(featureName)) {
-		return false;
-	}
-
-	// Delete user override file to restore original override behavior
-	overrideManager->DeleteUserOverride(featureName);
-
-	// Get base settings and apply overrides fresh
-	json featureJson;
-	SaveSettings(featureJson);
-
-	// Apply overrides to the settings (without user customizations)
-	size_t appliedCount = overrideManager->ReapplyFeatureOverrides(featureName, featureJson);
-
-	if (appliedCount > 0) {
-		// Load the override settings back into the feature
-		LoadSettings(featureJson);
-		return true;
-	}
-
-	return false;
 }
 
 std::string Feature::GetDisplayCategory() const
@@ -364,13 +367,19 @@ std::string Feature::GetReleaseStageTag(ReleaseStage stage)
 	}
 }
 
+ImVec4 Feature::GetReleaseStageColor(ReleaseStage stage)
+{
+	const auto& statusPalette = globals::menu->GetTheme().StatusPalette;
+	return stage == ReleaseStage::Alpha ? statusPalette.Error : statusPalette.Warning;
+}
+
 void Feature::DrawUnloadedUI()
 {
 	// Prioritize detailed failure message if available
 	if (!failedLoadedMessage.empty()) {
 		// Use error color for all failure messages
 		auto& themeSettings = Menu::GetSingleton()->GetTheme();
-		ImGui::TextColored(themeSettings.StatusPalette.Error, failedLoadedMessage.c_str());
+		ImGui::TextColored(themeSettings.StatusPalette.Error, "%s", failedLoadedMessage.c_str());
 		return;
 	}
 
@@ -381,7 +390,7 @@ void Feature::DrawUnloadedUI()
 	std::string requiredVersion = Feature::GetFeatureRequiredVersion(GetShortName());
 
 	auto missingFileMessage = std::format("The {} file is missing. This feature is not installed! Version required: {}", ini_filename, requiredVersion);
-	ImGui::TextColored(themeSettings.StatusPalette.Error, missingFileMessage.c_str());
+	ImGui::TextColored(themeSettings.StatusPalette.Error, "%s", missingFileMessage.c_str());
 
 	// Also show feature summary if available
 	auto [description, keyFeatures] = GetFeatureSummary();

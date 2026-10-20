@@ -8,6 +8,7 @@ struct VolumetricShadows;
 struct ExtendedMaterials;
 struct GrassCollision;
 struct GrassLighting;
+struct GrassOptimizations;
 struct HairSpecular;
 struct HorizonFix;
 struct IBL;
@@ -15,10 +16,12 @@ struct LightLimitFix;
 struct LinearLighting;
 struct LODBlending;
 struct InteriorSun;
-struct InverseSquareLighting;
 struct NRD;
+struct PhysicalSky;
+struct RainRefraction;
 struct ScreenSpaceGI;
 struct ScreenSpaceReflections;
+struct ScreenSpacePointLightShadows;
 struct ScreenSpaceShadows;
 struct Skylighting;
 struct TerrainVariation;
@@ -28,6 +31,7 @@ struct TerrainBlending;
 struct TerrainHelper;
 struct TerrainShadows;
 struct UnifiedWater;
+struct VanillaFresnel;
 struct VolumetricLighting;
 struct WaterEffects;
 struct PerformanceOverlay;
@@ -39,8 +43,11 @@ struct CSEditor;
 struct Effects11;
 struct ExponentialHeightFog;
 struct HDRDisplay;
-struct ScreenshotFeature;
+struct PostProcessing;
 struct Skin;
+struct PseudoSunBounce;
+struct ScreenshotFeature;
+struct SceneManager;
 
 class State;
 class Deferred;
@@ -48,7 +55,6 @@ struct TruePBR;
 class RenderDoc;
 class RemoteControl;
 class Menu;
-class WeatherManager;
 class SceneSettingsManager;
 
 namespace SIE
@@ -99,6 +105,7 @@ namespace globals
 		extern ExtendedMaterials extendedMaterials;
 		extern GrassCollision grassCollision;
 		extern GrassLighting grassLighting;
+		extern GrassOptimizations grassOptimizations;
 		extern HairSpecular hairSpecular;
 		extern HorizonFix horizonFix;
 		extern IBL ibl;
@@ -106,10 +113,12 @@ namespace globals
 		extern LinearLighting linearLighting;
 		extern LODBlending lodBlending;
 		extern InteriorSun interiorSun;
-		extern InverseSquareLighting inverseSquareLighting;
 		extern NRD nrd;
+		extern PhysicalSky physicalSky;
+		extern RainRefraction rainRefraction;
 		extern ScreenSpaceGI screenSpaceGI;
 		extern ScreenSpaceReflections screenSpaceReflections;
+		extern ScreenSpacePointLightShadows screenSpacePointLightShadows;
 		extern ScreenSpaceShadows screenSpaceShadows;
 		extern Skylighting skylighting;
 		extern TerrainVariation terrainVariation;
@@ -119,6 +128,7 @@ namespace globals
 		extern TerrainHelper terrainHelper;
 		extern TerrainShadows terrainShadows;
 		extern UnifiedWater unifiedWater;
+		extern VanillaFresnel vanillaFresnel;
 		extern VolumetricLighting volumetricLighting;
 		extern WaterEffects waterEffects;
 		extern PerformanceOverlay performanceOverlay;
@@ -133,7 +143,10 @@ namespace globals
 		extern CSEditor csEditor;
 		extern ExponentialHeightFog exponentialHeightFog;
 		extern TruePBR truePBR;
+		extern SceneManager sceneManager;
+		extern PostProcessing postProcessing;
 		extern Skin skin;
+		extern PseudoSunBounce pseudoSunBounce;
 
 	}
 
@@ -241,6 +254,8 @@ namespace globals
 		extern REL::Relocation<const RE::NiRTTI*> NiBillboardNodeRTTI;
 		extern REL::Relocation<const RE::NiRTTI*> NiAlphaPropertyRTTI;
 		extern REL::Relocation<const RE::NiRTTI*> NiSourceTextureRTTI;
+		extern REL::Relocation<const RE::NiRTTI*> BSGrassShaderPropertyRTTI;
+		extern REL::Relocation<const RE::NiRTTI*> BSMultiStreamInstanceTriShapeRTTI;
 	}
 
 	extern State* state;
@@ -248,7 +263,6 @@ namespace globals
 	extern Menu* menu;
 	extern SIE::ShaderCache* shaderCache;
 	extern Profiler* profiler;
-	extern WeatherManager* weatherManager;
 	extern SceneSettingsManager* sceneSettingsManager;
 
 	/** @brief Initializes core singletons (ShaderCache, State, Menu, Deferred). Called once at plugin load. */
