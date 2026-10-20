@@ -134,7 +134,6 @@ void SampleSSGISpecular(uint2 pixCoord, sh2 lobe, inout float ao, out float3 il,
 	// pixels with no vertex AO contribution, so vertexAO defaults to 1.
 	float vertexAO = 1.0 - Masks2Texture[dispatchID.xy].x;
 	ssgiAo = saturate(ssgiAo / max(vertexAO, EPSILON_DIVISION));
-	const float ssgiDiffuseAo = ssgiAo;
 
 	float3 linAlbedo = Color::IrradianceToLinear(albedo / Color::PBRLightingScale);
 	float3 multiBounceSSGIAo = MultiBounceAO(linAlbedo, ssgiAo);
@@ -301,36 +300,6 @@ void SampleSSGISpecular(uint2 pixCoord, sh2 lobe, inout float ao, out float3 il,
 		color += reflectance * finalIrradiance;
 	}
 
-#endif
-
-#if defined(IBL)
-#	ifdef REVERSE_Z
-	const bool isSkyPixel = depth == 0.0;
-#	else
-	const bool isSkyPixel = depth == 1.0;
-#	endif
-	[branch] if (SharedData::iblSettings.EnableIBL && !isSkyPixel && (SharedData::iblSettings.AdditiveAmount > 0.0 || SharedData::iblSettings.ReflectiveAmount > 0.0))
-	{
-		static const float skyIBLMip = 5.0;
-		float3 viewWS = -normalize(positionWS.xyz);
-		float3 reflectionWS = reflect(-viewWS, normalWS);
-
-		float skyOcclusion = 1.0;
-#	if defined(SSGI)
-		skyOcclusion = ssgiDiffuseAo;
-#	endif
-#	if defined(SKYLIGHTING)
-		skyOcclusion *= Skylighting::EvaluateDiffuse(Skylighting::Sample(positionWS.xyz, normalWS), normalWS);
-#	endif
-
-		float3 skyDiffuse = max(0, EnvReflectionsTexture.SampleLevel(LinearSampler, normalWS, skyIBLMip) - EnvTexture.SampleLevel(LinearSampler, normalWS, skyIBLMip));
-		skyDiffuse = Color::IrradianceToLinear(skyDiffuse) * saturate(normalWS.z * 0.5001 + 0.501);
-
-		float3 skyReflection = max(0, EnvReflectionsTexture.SampleLevel(LinearSampler, reflectionWS, skyIBLMip) - EnvTexture.SampleLevel(LinearSampler, reflectionWS, skyIBLMip));
-		skyReflection = Color::IrradianceToLinear(skyReflection) * saturate(1.1 - abs(dot(viewWS, normalWS))) * saturate(reflectionWS.z);
-
-		color += (skyDiffuse * SharedData::iblSettings.AdditiveAmount + skyReflection * SharedData::iblSettings.ReflectiveAmount) * skyOcclusion;
-	}
 #endif
 
 	color = Color::IrradianceToGamma(color);

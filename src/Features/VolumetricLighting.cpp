@@ -1,5 +1,6 @@
 #include "VolumetricLighting.h"
 
+#include "CSEditor/SceneManager/WeatherTransition.h"
 #include "Effects11.h"
 #include "I18n/I18n.h"
 #include "InteriorSun.h"
@@ -447,9 +448,10 @@ void VolumetricLighting::FinishSkyUpdate(RE::Sky* a_sky)
 		const auto lastSunlight = GetWeatherSunlight(a_sky, a_sky->lastWeather, time, nightSunlight);
 		const auto currentSunlight = GetWeatherSunlight(a_sky, a_sky->currentWeather, time, nightSunlight);
 
+		const float volumetricPct = nightVolumetricLighting ? weatherPct : WeatherTransition::GetRawPct();
 		RE::BSVolumetricLightingRenderData blendedData{};
-		AccumulateRenderData(blendedData, lastData, 1.0f - weatherPct);
-		AccumulateRenderData(blendedData, currentData, weatherPct);
+		AccumulateRenderData(blendedData, lastData, 1.0f - volumetricPct);
+		AccumulateRenderData(blendedData, currentData, volumetricPct);
 		const RE::NiColor blendedSunlight = lastSunlight * (1.0f - weatherPct) + currentSunlight * weatherPct;
 
 		const float blendedBrightness = GetVolumetricBrightness(blendedData, blendedSunlight, std::lerp(intensityLast, intensityCurrent, weatherPct));
