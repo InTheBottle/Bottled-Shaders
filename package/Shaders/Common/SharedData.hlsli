@@ -396,7 +396,7 @@ namespace SharedData
 
 		float MasserBillboardTan;
 		float SecundaBillboardTan;
-		float SkyScatteringPad0;
+		float SkyScaleMultiplier;
 		float SkyScatteringPad1;
 
 		float3 VolumetricFogColorFilter;
