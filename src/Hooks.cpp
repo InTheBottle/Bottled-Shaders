@@ -1340,9 +1340,12 @@ namespace Hooks
 			if (*reinterpret_cast<const std::uint8_t*>(registerObjectCall) == 0xE8) {
 				logger::info("Hooking BSAccumProcess::RegisterObject for HiZ Occlusion");
 				stl::write_thunk_call<BSAccumProcess_RegisterObject>(registerObjectCall);
+				globals::features::hiZOcclusion.cullingHookInstalled = true;
 			} else {
 				logger::warn("HiZ Occlusion: unexpected code at BSAccumProcess::RegisterObject call site, early culling disabled");
 			}
+		} else {
+			logger::info("HiZ Occlusion: culling is only supported on AE before 1.7.99, skipping it on this game version");
 		}
 	}
 
