@@ -466,11 +466,11 @@ bool SkySync::Update(const RE::Sky* sky)
 	bool resetTransition = false;
 
 	if (cell != currentCell) {
-		resetTransition = true;
 		const auto prevCell = currentCell;
 		const bool resetFaderForCellChange = cell && prevCell &&
 		                                     (cell->IsInteriorCell() != currentCellInterior ||
 												 cell->GetRuntimeData().worldSpace != currentCellWorldspace);
+		resetTransition = !cell || !prevCell || resetFaderForCellChange;
 		if (cell)
 			SetSkyRotation(sky, cell);
 		else
@@ -518,14 +518,31 @@ bool SkySync::Update(const RE::Sky* sky)
 	lastGameHour = hour;
 
 	const bool transitionCompleted = std::exchange(immediateTransitionReady, false);
+	const bool wasTransitioning = shadowFader.transitioning;
 	shadowFader.Update(sky, directions, intensities, workingLightColors, settings.ShadowTransitionDuration, fadeAdvance, transitionCompleted || resetTransition);
+	const bool lightResynced = ResyncSwingingLight(wasTransitioning);
 
 	twilightCap = GetTwilightCap(climate->timing, hour, sunHeight);
 	UpdateMoonlightFade(fadeAdvance / SecondsPerGameHour, transitionCompleted);
 	// At night follow the light's own direction, so the dim stays continuous while it swings between moons
 	currentDim = sunBelowHorizon ? moonlightFade * GetHorizonDim(GetHeightAboveHorizon(shadowFader.currentDir)) : GetHorizonDim(sunHeight);
 
-	return transitionCompleted;
+	return transitionCompleted || resetTransition || lightResynced;
+}
+
+bool SkySync::ResyncSwingingLight(bool wasTransitioning)
+{
+	if (!shadowFader.transitioning) {
+		resyncedLightDir = shadowFader.currentDir;
+		return wasTransitioning;
+	}
+
+	const float resyncCos = DirectX::XMScalarCos(DirectX::XMConvertToRadians(LightResyncAngle));
+	if (shadowFader.intensityFactor <= 0.0f || shadowFader.currentDir.Dot(resyncedLightDir) >= resyncCos)
+		return false;
+
+	resyncedLightDir = shadowFader.currentDir;
+	return true;
 }
 
 float SkySync::GetHeightAboveHorizon(const RE::NiPoint3& dir) const

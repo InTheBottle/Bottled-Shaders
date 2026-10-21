@@ -194,6 +194,7 @@ private:
 	static constexpr float SecondsPerGameHour = 3600.0f;
 	static constexpr float AlignmentFadeStartAngle = 2.0f;
 	static constexpr float AlignmentFadeEndAngle = 15.0f;
+	static constexpr float LightResyncAngle = 1.0f;
 	static constexpr float MaxHorizonFadeHours = 1.5f;
 	static constexpr float DefaultSunAlphaTransTime = 2.0f;
 	static constexpr float AlternateSunHorizonOffsetHours = 0.25f;
@@ -236,12 +237,15 @@ private:
 	bool nightVolumetricLightingApplied = false;
 	bool sunBelowHorizon = false;
 	ShadowFader shadowFader;
+	RE::NiPoint3 resyncedLightDir = ZenithDirection;
 
 	void DisableOnConflict(std::string_view conflictName);
 
 	void PreparePendingTransitions();
 
 	bool Update(const RE::Sky* sky);
+
+	bool ResyncSwingingLight(bool wasTransitioning);
 
 	/** @brief Signed angle in radians of a sky-local direction above the effective horizon. */
 	float GetHeightAboveHorizon(const RE::NiPoint3& dir) const;
