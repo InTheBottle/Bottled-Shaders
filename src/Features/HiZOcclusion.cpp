@@ -724,6 +724,15 @@ void HiZOcclusion::Prepass()
 		return;
 	}
 
+	// Without the registration hook nothing is ever tested, so the pyramid would be wasted GPU work
+	if (!cullingHookInstalled) {
+		if (status != HiZStatus::Unsupported) {
+			status = HiZStatus::Unsupported;
+			statusMessage = "Culling hook not installed (AE 1.6 only)";
+		}
+		return;
+	}
+
 	if (settings.debugMode) {
 		logger::debug("HIZ Prepass - frame={}, pendingGeometry={}",
 			globals::state->frameCount, pendingGeometry.size());

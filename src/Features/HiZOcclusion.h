@@ -17,6 +17,7 @@ enum class HiZStatus : uint8_t
 	ResourcesReady,    // All resources initialized and valid
 	Running,           // Actively processing occlusion tests
 	ValidationFailed,  // Resource validation failed
+	Unsupported,       // Culling hook not installed on this game version
 	Error              // Error state - check statusMessage for details
 };
 
@@ -36,6 +37,8 @@ inline const char* HiZStatusToString(HiZStatus status)
 		return "Running";
 	case HiZStatus::ValidationFailed:
 		return "Validation Failed";
+	case HiZStatus::Unsupported:
+		return "Unsupported Game Version";
 	case HiZStatus::Error:
 		return "Error";
 	default:
@@ -98,6 +101,7 @@ struct HiZOcclusion : OverlayFeature
 	std::string statusMessage;           // Detailed error/info message for debugging
 	bool resourcesSetup = false;         // whether resources have been initialized
 	bool resourcesValid = false;         // whether current resources are valid and safe to use
+	bool cullingHookInstalled = false;   // set by Hooks; the registration hook only exists on AE before 1.7.99
 
 	// Per-frame tracking to verify build/draw order and availability
 	uint32_t lastBuiltFrame = 0;           // frame index when the pyramid was last built
