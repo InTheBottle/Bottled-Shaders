@@ -762,8 +762,6 @@ PS_OUTPUT main(PS_INPUT input)
 
 #	if defined(EFFECTS11)
 	const uint enbEffectClass = GetEnbEffectClass();
-	if (SharedData::enbSettings.EnableParticle && enbEffectClass == EnbEffectClass::Particle)
-		propertyColor *= SharedData::enbSettings.ParticleIntensity;
 #	endif
 
 #	if defined(EFFECTS11) && defined(IS_VOLUMETRIC_FOG)
@@ -816,6 +814,11 @@ PS_OUTPUT main(PS_INPUT input)
 #	if !defined(IS_VOLUMETRIC_FOG) && !defined(MULTBLEND) && !defined(MULTBLEND_DECAL) && !defined(EFFECTS11)
 	if (!(Permutation::VertexShaderDescriptor & Permutation::EffectFlags::SkyObject) && !isFire)
 		propertyColor *= Color::ParticleEffectMult();
+#	endif
+
+#	if defined(EFFECTS11)
+	if (SharedData::enbSettings.EnableParticle && enbEffectClass == EnbEffectClass::Particle)
+		propertyColor *= SharedData::enbSettings.ParticleIntensity;
 #	endif
 
 	float4 baseTexColor = float4(1, 1, 1, 1);
