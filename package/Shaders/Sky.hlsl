@@ -457,6 +457,7 @@ PS_OUTPUT main(PS_INPUT input)
 #	endif  // OCCLUSION
 
 	const bool inReflection = (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection) != 0;
+
 #	if defined(EXP_HEIGHT_FOG)
 	if (inReflection && SharedData::exponentialHeightFogSettings.enabled) {
 		float skyFogDistance = SharedData::CameraData.x;

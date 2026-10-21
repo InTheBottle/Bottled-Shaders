@@ -3560,8 +3560,9 @@ namespace SIE
 		auto shaderCache = globals::shaderCache;
 		if (!conditionVariable.wait(
 				lock, stoken,
-				[this, &shaderCache]() { return (!availableTasks.empty() || !pendingAuxTasks.empty()) &&
-			                                    // Use < (not <=) so push_task() never exceeds the limit.
+				[this, &shaderCache]() { return (!availableTasks.empty() || !demandedTasks.empty() || !pendingAuxTasks.empty()) &&
+			                                    // Count matrix and auxiliary tasks; ReleaseDispatchSlot()
+			                                    // decrements under this mutex before notifying the waiter.
 			                                    static_cast<int32_t>(dispatchedTasksInFlight.load(std::memory_order_relaxed)) <
 			                                        (!shaderCache->backgroundCompilation ? shaderCache->compilationThreadCount : shaderCache->backgroundCompilationThreadCount); })) {
 			/*Woke up because of a stop request. */
@@ -3577,13 +3578,15 @@ namespace SIE
 
 		// Matrix tasks are checked before aux so queued shader work always wins
 		// admission over standalone compute-shader work when both are ready.
-		if (!availableTasks.empty()) {
+		if (!availableTasks.empty() || !demandedTasks.empty()) {
 			// Startup policy: keep dispatching the hardest queued work first.
 			// This preserves the existing priority score while preventing light tasks
 			// from bypassing queued heavy shaders and stretching the tail.
-			auto bestIt = std::prev(availableTasks.end());
+			// Shaders the game is already drawing with go first, or they stay black behind the heavy tail.
+			auto& queue = demandedTasks.empty() ? availableTasks : demandedTasks;
+			auto bestIt = std::prev(queue.end());
 			ShaderCompilationTask task = *bestIt;
-			availableTasks.erase(bestIt);
+			queue.erase(bestIt);
 
 			if (task.GetPriority() >= kHeavyPriorityThreshold) {
 				heavyTasksInFlight.fetch_add(1, std::memory_order_relaxed);
@@ -3628,12 +3631,23 @@ namespace SIE
 		std::unique_lock lock(compilationMutex);
 		auto inProgressIt = tasksInProgress.find(task);
 		auto processedIt = processedTasks.find(task);
-		if (inProgressIt == tasksInProgress.end() && processedIt == processedTasks.end() && !globals::shaderCache->GetCompletedShader(task)) {
+		if (inProgressIt == tasksInProgress.end() && processedIt == processedTasks.end() && !demandedTasks.contains(task) && !globals::shaderCache->GetCompletedShader(task)) {
 			LARGE_INTEGER now;
 			QueryPerformanceCounter(&now);
 			auto queuedTask = task;
 			queuedTask.SetEnqueuedQpc(now.QuadPart);
-			auto [_, wasAdded] = availableTasks.insert(queuedTask);
+			bool wasAdded;
+			if (globals::shaderCache->backgroundCompilation) {
+				// Only the game's own draw requests reach Add, so anything queued now is demanded.
+				if (auto queued = availableTasks.extract(queuedTask)) {
+					demandedTasks.insert(std::move(queued));
+					wasAdded = false;
+				} else {
+					wasAdded = demandedTasks.insert(queuedTask).second;
+				}
+			} else {
+				wasAdded = availableTasks.insert(queuedTask).second;
+			}
 			if (wasAdded) {
 				// Increment counters inside the lock so that TryTakeNext, which reads
 				// IsCompiling() after waking up, sees the updated totalTasks and
@@ -3788,6 +3802,7 @@ namespace SIE
 	{
 		std::scoped_lock lock(compilationMutex);
 		availableTasks.clear();
+		demandedTasks.clear();
 		pendingAuxTasks.clear();
 		tasksInProgress.clear();
 		processedTasks.clear();
