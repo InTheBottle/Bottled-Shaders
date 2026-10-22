@@ -721,6 +721,35 @@ namespace SharedData
 		return GetScreenDepth(depth);
 	}
 
+	static const float WaterBlendWidth = 0.25;
+	static const float WaterBlendRange = 128.0;
+
+	float4 GetWaterTile(int2 cellInt)
+	{
+		float4 waterData = float4(1.0, 1.0, 1.0, -2147483648);
+		[flatten] if (all(cellInt >= 0) && all(cellInt < 5))
+			waterData = WaterData[cellInt.x + cellInt.y * 5];
+		return waterData;
+	}
+
+	float4 BlendWaterData(int2 cellInt, float2 cellFrac, float z)
+	{
+		const int2 side = int2(cellFrac.x < 0.5 ? -1 : 1, cellFrac.y < 0.5 ? -1 : 1);
+		const float2 edge = 0.5 - 0.5 * smoothstep(0.0, WaterBlendWidth, min(cellFrac, 1.0 - cellFrac));
+		const float4 weights = float4((1.0 - edge.x) * (1.0 - edge.y), edge.x * (1.0 - edge.y), (1.0 - edge.x) * edge.y, edge.x * edge.y);
+
+		const float4 own = GetWaterTile(cellInt);
+		const float4 acrossX = GetWaterTile(cellInt + int2(side.x, 0));
+		const float4 acrossY = GetWaterTile(cellInt + int2(0, side.y));
+		const float4 acrossXY = GetWaterTile(cellInt + side);
+
+		const float4 above = clamp(z - float4(own.w, acrossX.w, acrossY.w, acrossXY.w), -WaterBlendRange, WaterBlendRange);
+		const float ownAbove = z - own.w;
+		const float blendedAbove = dot(weights, above) + saturate(2.0 * weights.x - 1.0) * (ownAbove - above.x);
+		const float3 color = own.xyz * weights.x + acrossX.xyz * weights.y + acrossY.xyz * weights.z + acrossXY.xyz * weights.w;
+		return float4(color, z - blendedAbove);
+	}
+
 	// Returns water data for the tile containing worldPosition (camera-relative XY).
 	float4 GetWaterData(float3 worldPosition)
 	{
@@ -733,14 +762,7 @@ namespace SharedData
 		cellF -= cellFrac;                                  // align to cell borders
 		cellInt = round(cellF);
 
-		uint waterTile = (uint)clamp(cellInt.x + (cellInt.y * 5), 0, 24);  // remap xy to 0-24
-
-		float4 waterData = float4(1.0, 1.0, 1.0, -2147483648);
-
-		[flatten] if (cellInt.x < 5 && cellInt.x >= 0 && cellInt.y < 5 && cellInt.y >= 0)
-			waterData = WaterData[waterTile];
-
-		return waterData;
+		return BlendWaterData(cellInt, cellFrac, worldPosition.z);
 	}
 
 	float3 GetAmbient(float3 normal)
