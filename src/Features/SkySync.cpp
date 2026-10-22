@@ -332,7 +332,7 @@ void SkySync::ApplyMoonlightColors(RE::Sky* sky)
 		return;
 
 	const bool effects11Active = IsEffects11Active();
-	if (effects11Active ? shadowFader.nightWeight <= 0.0f : !sunBelowHorizon)
+	if (!sunBelowHorizon && !(effects11Active && shadowFader.nightWeight > 0.0f))
 		return;
 
 	// Vanilla blends sunset into night on the climate's colour timings, which outlast the sun, so drop the time blend
@@ -353,11 +353,8 @@ void SkySync::ApplyMoonlightColors(RE::Sky* sky)
 		auto& sunlight = sky->skyColor[RE::TESWeather::ColorTypes::kSunlight];
 		lightNightWeight = shadowFader.nightWeight;
 		sunlight += (nightSunlight - sunlight) * lightNightWeight;
-		return;
-	}
-
-	// Full night at once, since the light is dimmed out at the handover; undimmed, vanilla's blend avoids a pop
-	if (settings.DimSunlightUnderHorizon) {
+	} else if (settings.DimSunlightUnderHorizon) {
+		// Full night at once, since the light is dimmed out at the handover; undimmed, vanilla's blend avoids a pop
 		auto sunlightBlend = nightBlend(RE::TESWeather::ColorTypes::kSunlight);
 		sky->SetColor(sky->skyColor[RE::TESWeather::ColorTypes::kSunlight], &sunlightBlend, GetDirectionalFlash(sky));
 		lightNightWeight = 1.0f;
@@ -371,7 +368,7 @@ void SkySync::ApplyMoonlightColors(RE::Sky* sky)
 	moonNightWeight = twilightCap;
 	moonGlare += (nightMoonGlare - moonGlare) * moonNightWeight;
 
-	if (gVolumetricLighting && settings.DimVolumetricLighting) {
+	if (!effects11Active && gVolumetricLighting && settings.DimVolumetricLighting) {
 		*gVolumetricLighting = BlendNightVolumetricLighting(sky, currentWeight, lastWeight);
 		nightVolumetricLightingApplied = true;
 	}
