@@ -90,7 +90,7 @@ void SkySync::DrawSettings()
 
 	const bool effects11Active = IsEffects11Active();
 	if (effects11Active)
-		Util::Text::WrappedWarning("%s", T(TKEY("effects11_owns_colors"), "Effects 11 is active, so Sky Sync only moves the light with the sun and moons. The light colour, the horizon dim and volumetric lighting follow the preset."));
+		Util::Text::WrappedWarning("%s", T(TKEY("effects11_owns_colors"), "Effects 11 is active, so Sky Sync only moves the light with the sun and moons and gives the moons the weathers' night light colour. Grading, the horizon dim and volumetric lighting follow the preset."));
 	{
 		auto _effects11Disabled = Util::DisableGuard(effects11Active);
 		ImGui::Checkbox(T(TKEY("dim_sunlight_under_horizon"), "Dim Sunlight Under Horizon"), &settings.DimSunlightUnderHorizon);
@@ -191,6 +191,7 @@ void SkySync::DrawSettings()
 
 		ImGui::Text("Dim: %.3f", currentDim);
 		ImGui::Text("Applied sunlight factor: %.3f", appliedSunlightFactor);
+		ImGui::Text("Light night weight: %.3f", lightNightWeight);
 		ImGui::Text("Light colour and VL owner: %s", IsEffects11Active() ? "Effects 11" : "Sky Sync");
 
 		ImGui::Spacing();
@@ -326,8 +327,12 @@ void SkySync::ApplyMoonlightColors(RE::Sky* sky)
 	lightNightWeight = 0.0f;
 	nightVolumetricLightingApplied = false;
 	// Only where vanilla lights from weather colours; lighting templates and rooms are left alone
-	if (!settings.Enabled || !active || !sky || !sunBelowHorizon || !sky->currentWeather || sky->mode.get() != RE::Sky::Mode::kFull ||
-		sky->extLightingOverride || sky->currentRoom || sky->previousRoom || IsEffects11Active())
+	if (!settings.Enabled || !active || !sky || !sky->currentWeather || sky->mode.get() != RE::Sky::Mode::kFull ||
+		sky->extLightingOverride || sky->currentRoom || sky->previousRoom)
+		return;
+
+	const bool effects11Active = IsEffects11Active();
+	if (effects11Active ? shadowFader.nightWeight <= 0.0f : !sunBelowHorizon)
 		return;
 
 	// Vanilla blends sunset into night on the climate's colour timings, which outlast the sun, so drop the time blend
@@ -340,6 +345,16 @@ void SkySync::ApplyMoonlightColors(RE::Sky* sky)
 		};
 		return RE::Sky::COLOR_BLEND{ { nightColor(sky->currentWeather), {}, nightColor(sky->lastWeather), {} }, { currentWeight, 0.0f, lastWeight, 0.0f } };
 	};
+
+	if (effects11Active) {
+		auto sunlightBlend = nightBlend(RE::TESWeather::ColorTypes::kSunlight);
+		RE::NiColor nightSunlight;
+		sky->SetColor(nightSunlight, &sunlightBlend, GetDirectionalFlash(sky));
+		auto& sunlight = sky->skyColor[RE::TESWeather::ColorTypes::kSunlight];
+		lightNightWeight = shadowFader.nightWeight;
+		sunlight += (nightSunlight - sunlight) * lightNightWeight;
+		return;
+	}
 
 	// Full night at once, since the light is dimmed out at the handover; undimmed, vanilla's blend avoids a pop
 	if (settings.DimSunlightUnderHorizon) {
@@ -832,6 +847,7 @@ void SkySync::ShadowFader::Reset()
 	transitioning = false;
 	intensityFactor = startIntensityFactor = 1.0f;
 	vlFade = startVlFade = 1.0f;
+	nightWeight = startNightWeight = 0.0f;
 }
 
 void SkySync::ShadowFader::Update(const RE::Sky* sky, RE::NiPoint3 dirs[], float intensities[], std::optional<std::array<RE::NiColor, 3>> colors, float fadeDuration, float fadeAdvance, bool a_immediateTransition)
@@ -881,6 +897,7 @@ void SkySync::ShadowFader::Update(const RE::Sky* sky, RE::NiPoint3 dirs[], float
 		startDir = currentDir;
 		startIntensityFactor = intensityFactor;
 		startVlFade = vlFade;
+		startNightWeight = nightWeight;
 		fadeTimer = 0.0f;
 		transitioning = true;
 	}
@@ -896,11 +913,13 @@ void SkySync::ShadowFader::Update(const RE::Sky* sky, RE::NiPoint3 dirs[], float
 		SetLighting(sky, currentDir, intensity * intensityFactor, color);
 	};
 	const float targetVlFade = target == Caster::Zenith ? 0.0f : 1.0f;
+	const float targetNightWeight = target == Caster::Sun ? 0.0f : 1.0f;
 
 	if (!transitioning) {
 		currentDir = targetDir;
 		intensityFactor = 1.0f;
 		vlFade = targetVlFade;
+		nightWeight = targetNightWeight;
 		immediateTransitionRemaining = 0.0f;
 		applyLighting();
 		return;
@@ -927,8 +946,12 @@ void SkySync::ShadowFader::Update(const RE::Sky* sky, RE::NiPoint3 dirs[], float
 
 	// Fade out as the direction leaves the old caster and back in as it reaches the new one
 	const float fadeOut = startIntensityFactor * ComputeAlignmentFactor(currentDir, startDir);
-	intensityFactor = std::max(fadeOut, ComputeAlignmentFactor(currentDir, targetDir));
+	const float fadeIn = ComputeAlignmentFactor(currentDir, targetDir);
+	intensityFactor = std::max(fadeOut, fadeIn);
 	vlFade = std::lerp(startVlFade, targetVlFade, t);
+	const float outgoing = fadeOut * (1.0f - t);
+	const float incoming = fadeIn * t;
+	nightWeight = std::lerp(startNightWeight, targetNightWeight, outgoing + incoming > 0.0f ? incoming / (outgoing + incoming) : t);
 	applyLighting();
 }
 

@@ -75,7 +75,7 @@ public:
 	/** @brief How far this frame's moon glare was moved to the night colour, 0 to 1, so moon grading can follow it. */
 	float GetMoonNightWeight() const { return moonNightWeight; }
 
-	/** @brief 1 when this frame's sunlight was rebuilt from night colours, else 0, so light grading can follow it. */
+	/** @brief How far this frame's sunlight was moved to the night colour, 0 to 1, so light grading can follow it. */
 	float GetLightNightWeight() const { return lightNightWeight; }
 
 	/** @brief True when this frame's VL was rebuilt from the weathers' night VL. */
@@ -85,8 +85,8 @@ public:
 	float GetAppliedSunlightFactor() const { return appliedSunlightFactor; }
 
 	/**
-	 * @brief True while an Effects 11 preset is active. Sky Sync then only moves the light with the sun and moons and
-	 *        leaves the light colour, the horizon dim and volumetric lighting to the preset.
+	 * @brief True while an Effects 11 preset is active. Sky Sync then only moves the light with the sun and moons, giving
+	 *        the moons the night light colour, and leaves grading, the horizon dim and volumetric lighting to the preset.
 	 */
 	bool IsEffects11Active() const;
 
@@ -173,6 +173,8 @@ private:
 		float startIntensityFactor = 1.0f;
 		float vlFade = 1.0f;  // additionally scales VL, fading it out towards the zenith fallback
 		float startVlFade = 1.0f;
+		float nightWeight = 0.0f;
+		float startNightWeight = 0.0f;
 
 		/** @brief Fraction of the current transition completed, 0 to 1. */
 		float Progress(float fadeDuration) const { return fadeDuration > 0.0f ? fadeTimer / fadeDuration : 1.0f; }
