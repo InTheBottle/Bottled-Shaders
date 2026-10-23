@@ -940,8 +940,12 @@ void Effects11::FinishSkyUpdateColors(RE::Sky* a_sky)
 
 	const auto& sunlight = a_sky->skyColor[static_cast<uint>(RE::TESWeather::ColorTypes::kSunlight)];
 	volumetricSunColor = NiToF3(sunlight);
-	if (sunlightGraded && !Util::IsInterior())
-		volumetricSunColor += (ungradedSunlight - gradedSunlight) * globals::features::skySync.GetAppliedSunlightFactor();
+	if (sunlightGraded && !Util::IsInterior()) {
+		auto ungrade = [](float a_final, float a_ungraded, float a_graded) { return a_graded > 1e-6f ? a_final * a_ungraded / a_graded : a_final; };
+		volumetricSunColor = { ungrade(volumetricSunColor.x, ungradedSunlight.x, gradedSunlight.x),
+			ungrade(volumetricSunColor.y, ungradedSunlight.y, gradedSunlight.y),
+			ungrade(volumetricSunColor.z, ungradedSunlight.z, gradedSunlight.z) };
+	}
 	volumetricSunColor = float3::Max(volumetricSunColor, float3::Zero);
 }
 

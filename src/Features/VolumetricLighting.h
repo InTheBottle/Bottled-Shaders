@@ -96,6 +96,8 @@ public:
 	/** @brief Restores the engine's render data when the engine skipped this tick's rewrite, so the per-tick multipliers never stack. Call before any of them. */
 	void BeginSkyUpdate();
 
+	void DetectNightRenderData();
+
 	/**
 	 * @brief Rescales a weather transition's intensity so the brightness blends between the two weathers instead of overshooting both.
 	 * @param a_sky The sky whose weather transition is corrected.
@@ -203,6 +205,7 @@ private:
 	RE::BSVolumetricLightingRenderData engineRenderData{};
 	RE::BSVolumetricLightingRenderData writtenRenderData{};
 	bool hasWrittenRenderData = false;
+	bool nightRenderData = false;
 	GodRayBufferData godRayBufferData{ 0.0f, 1.0f, { 0.0f, 0.0f } };
 
 	TextureSize exteriorSizeInUnits;

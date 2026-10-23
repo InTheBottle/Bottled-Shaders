@@ -1,6 +1,5 @@
 #include "SkySync.h"
 #include "../I18n/I18n.h"
-#include "Effects11.h"
 #include "RE/B/BSVolumetricLightingRenderData.h"
 
 #include "LinearLighting.h"
@@ -88,31 +87,25 @@ void SkySync::DrawSettings()
 		ImGui::TextUnformatted(T(TKEY("horizon_elevation_tooltip"), "Elevation treated as the horizon, where light fades to zero and the sun and moons hand over. Lower it to let the light fade out slightly below the visible horizon."));
 	}
 
-	const bool effects11Active = IsEffects11Active();
-	if (effects11Active)
-		Util::Text::WrappedWarning("%s", T(TKEY("effects11_owns_colors"), "Effects 11 is active, so Sky Sync only moves the light with the sun and moons and gives the moons the weathers' night light colour. Grading, the horizon dim and volumetric lighting follow the preset."));
-	{
-		auto _effects11Disabled = Util::DisableGuard(effects11Active);
-		ImGui::Checkbox(T(TKEY("dim_sunlight_under_horizon"), "Dim Sunlight Under Horizon"), &settings.DimSunlightUnderHorizon);
+	ImGui::Checkbox(T(TKEY("dim_sunlight_under_horizon"), "Dim Sunlight Under Horizon"), &settings.DimSunlightUnderHorizon);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::TextUnformatted(T(TKEY("dim_sunlight_under_horizon_tooltip"), "Fade directional light to zero as the sun or moon approaches the horizon."));
+	}
+
+	ImGui::Checkbox(T(TKEY("fade_volumetric_lighting"), "Fade Volumetric Lighting"), &settings.DimVolumetricLighting);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::TextUnformatted(T(TKEY("fade_volumetric_lighting_tooltip"), "Also fade volumetric lighting with the directional dim around dawn and dusk."));
+	}
+
+	if (settings.DimSunlightUnderHorizon || settings.DimVolumetricLighting) {
+		ImGui::SliderFloat(T(TKEY("horizon_fade_duration"), "Moonlight Fade Duration"), &settings.HorizonFadeHours, 0.0f, MaxHorizonFadeHours, "%.1f h", ImGuiSliderFlags_AlwaysClamp);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::TextUnformatted(T(TKEY("dim_sunlight_under_horizon_tooltip"), "Fade directional light to zero as the sun or moon approaches the horizon."));
+			ImGui::TextUnformatted(T(TKEY("horizon_fade_duration_tooltip"), "How long (in game hours) moonlight takes to fade in once a moon casts shadows."));
 		}
 
-		ImGui::Checkbox(T(TKEY("fade_volumetric_lighting"), "Fade Volumetric Lighting"), &settings.DimVolumetricLighting);
+		ImGui::SliderFloat(T(TKEY("horizon_fade_elevation"), "Horizon Fade Elevation"), &settings.HorizonFadeElevation, 0.0f, MaxHorizonFadeElevation, "%.1f deg", ImGuiSliderFlags_AlwaysClamp);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::TextUnformatted(T(TKEY("fade_volumetric_lighting_tooltip"), "Also fade volumetric lighting with the directional dim around dawn and dusk."));
-		}
-
-		if (settings.DimSunlightUnderHorizon || settings.DimVolumetricLighting) {
-			ImGui::SliderFloat(T(TKEY("horizon_fade_duration"), "Moonlight Fade Duration"), &settings.HorizonFadeHours, 0.0f, MaxHorizonFadeHours, "%.1f h", ImGuiSliderFlags_AlwaysClamp);
-			if (auto _tt = Util::HoverTooltipWrapper()) {
-				ImGui::TextUnformatted(T(TKEY("horizon_fade_duration_tooltip"), "How long (in game hours) moonlight takes to fade in once a moon casts shadows."));
-			}
-
-			ImGui::SliderFloat(T(TKEY("horizon_fade_elevation"), "Horizon Fade Elevation"), &settings.HorizonFadeElevation, 0.0f, MaxHorizonFadeElevation, "%.1f deg", ImGuiSliderFlags_AlwaysClamp);
-			if (auto _tt = Util::HoverTooltipWrapper()) {
-				ImGui::TextUnformatted(T(TKEY("horizon_fade_elevation_tooltip"), "Height above the horizon at which the sun or moon light starts fading out. Higher = longer fade."));
-			}
+			ImGui::TextUnformatted(T(TKEY("horizon_fade_elevation_tooltip"), "Height above the horizon at which the sun or moon light starts fading out. Higher = longer fade."));
 		}
 	}
 
@@ -190,9 +183,6 @@ void SkySync::DrawSettings()
 		drawMoonEntry("Secunda", Caster::Secunda, sky ? getPhase(sky->secunda) : "Unknown");
 
 		ImGui::Text("Dim: %.3f", currentDim);
-		ImGui::Text("Applied sunlight factor: %.3f", appliedSunlightFactor);
-		ImGui::Text("Light night weight: %.3f", lightNightWeight);
-		ImGui::Text("Light colour and VL owner: %s", IsEffects11Active() ? "Effects 11" : "Sky Sync");
 
 		ImGui::Spacing();
 		ImGui::Separator();
@@ -288,36 +278,24 @@ void SkySync::DisableOnConflict(std::string_view conflictName)
 	logger::warn("[Sky Sync] {}", failedLoadedMessage);
 }
 
-bool SkySync::IsEffects11Active() const
-{
-	auto& effects11 = globals::features::effects11;
-	if (!effects11.loaded)
-		return false;
-	effects11.CheckCommonData();
-	return effects11.enableEffect;
-}
-
 void SkySync::OnSkyUpdateColors(RE::Sky* sky)
 {
-	appliedSunlightFactor = 1.0f;
 	if (!settings.Enabled || !active || !sky) {
 		flashWeight = 0.0f;
 		return;
 	}
 
-	const bool effects11Active = IsEffects11Active();
-	auto lightFactor = [&](bool dimmed) { return dimmed && !effects11Active ? shadowFader.intensityFactor * currentDim : shadowFader.intensityFactor; };
+	auto lightFactor = [&](bool dimmed) { return dimmed ? shadowFader.intensityFactor * currentDim : shadowFader.intensityFactor; };
 
 	auto& dirLight = sky->skyColor[static_cast<uint>(RE::TESWeather::ColorTypes::kSunlight)];
 	// Lightning strikes from overhead rather than the caster, so only the light under the flash is dimmed
 	const float flash = GetDirectionalFlash(sky);
 	const RE::NiColor flashLight{ std::min(flash, dirLight.red), std::min(flash, dirLight.green), std::min(flash, dirLight.blue) };
-	appliedSunlightFactor = lightFactor(settings.DimSunlightUnderHorizon);
-	dirLight = (dirLight - flashLight) * appliedSunlightFactor + flashLight;
+	dirLight = (dirLight - flashLight) * lightFactor(settings.DimSunlightUnderHorizon) + flashLight;
 	const float totalLight = dirLight.red + dirLight.green + dirLight.blue;
 	flashWeight = totalLight > 0.0f ? (flashLight.red + flashLight.green + flashLight.blue) / totalLight : 0.0f;
 
-	if (gVolumetricLighting && !effects11Active)
+	if (gVolumetricLighting)
 		gVolumetricLighting->intensity *= lightFactor(settings.DimVolumetricLighting) * shadowFader.vlFade;
 }
 
@@ -325,14 +303,9 @@ void SkySync::ApplyMoonlightColors(RE::Sky* sky)
 {
 	moonNightWeight = 0.0f;
 	lightNightWeight = 0.0f;
-	nightVolumetricLightingApplied = false;
 	// Only where vanilla lights from weather colours; lighting templates and rooms are left alone
-	if (!settings.Enabled || !active || !sky || !sky->currentWeather || sky->mode.get() != RE::Sky::Mode::kFull ||
+	if (!settings.Enabled || !active || !sky || !sunBelowHorizon || !sky->currentWeather || sky->mode.get() != RE::Sky::Mode::kFull ||
 		sky->extLightingOverride || sky->currentRoom || sky->previousRoom)
-		return;
-
-	const bool effects11Active = IsEffects11Active();
-	if (!sunBelowHorizon && !(effects11Active && shadowFader.nightWeight > 0.0f))
 		return;
 
 	// Vanilla blends sunset into night on the climate's colour timings, which outlast the sun, so drop the time blend
@@ -346,15 +319,8 @@ void SkySync::ApplyMoonlightColors(RE::Sky* sky)
 		return RE::Sky::COLOR_BLEND{ { nightColor(sky->currentWeather), {}, nightColor(sky->lastWeather), {} }, { currentWeight, 0.0f, lastWeight, 0.0f } };
 	};
 
-	if (effects11Active) {
-		auto sunlightBlend = nightBlend(RE::TESWeather::ColorTypes::kSunlight);
-		RE::NiColor nightSunlight;
-		sky->SetColor(nightSunlight, &sunlightBlend, GetDirectionalFlash(sky));
-		auto& sunlight = sky->skyColor[RE::TESWeather::ColorTypes::kSunlight];
-		lightNightWeight = shadowFader.nightWeight;
-		sunlight += (nightSunlight - sunlight) * lightNightWeight;
-	} else if (settings.DimSunlightUnderHorizon) {
-		// Full night at once, since the light is dimmed out at the handover; undimmed, vanilla's blend avoids a pop
+	// Full night at once, since the light is dimmed out at the handover; undimmed, vanilla's blend avoids a pop
+	if (settings.DimSunlightUnderHorizon) {
 		auto sunlightBlend = nightBlend(RE::TESWeather::ColorTypes::kSunlight);
 		sky->SetColor(sky->skyColor[RE::TESWeather::ColorTypes::kSunlight], &sunlightBlend, GetDirectionalFlash(sky));
 		lightNightWeight = 1.0f;
@@ -368,10 +334,8 @@ void SkySync::ApplyMoonlightColors(RE::Sky* sky)
 	moonNightWeight = twilightCap;
 	moonGlare += (nightMoonGlare - moonGlare) * moonNightWeight;
 
-	if (!effects11Active && gVolumetricLighting && settings.DimVolumetricLighting) {
+	if (gVolumetricLighting && settings.DimVolumetricLighting)
 		*gVolumetricLighting = BlendNightVolumetricLighting(sky, currentWeight, lastWeight);
-		nightVolumetricLightingApplied = true;
-	}
 }
 
 float SkySync::GetDirectionalFlash(const RE::Sky* sky)
@@ -478,11 +442,11 @@ bool SkySync::Update(const RE::Sky* sky)
 	bool resetTransition = false;
 
 	if (cell != currentCell) {
+		resetTransition = true;
 		const auto prevCell = currentCell;
 		const bool resetFaderForCellChange = cell && prevCell &&
 		                                     (cell->IsInteriorCell() != currentCellInterior ||
 												 cell->GetRuntimeData().worldSpace != currentCellWorldspace);
-		resetTransition = !cell || !prevCell || resetFaderForCellChange;
 		if (cell)
 			SetSkyRotation(sky, cell);
 		else
@@ -530,31 +494,14 @@ bool SkySync::Update(const RE::Sky* sky)
 	lastGameHour = hour;
 
 	const bool transitionCompleted = std::exchange(immediateTransitionReady, false);
-	const bool wasTransitioning = shadowFader.transitioning;
 	shadowFader.Update(sky, directions, intensities, workingLightColors, settings.ShadowTransitionDuration, fadeAdvance, transitionCompleted || resetTransition);
-	const bool lightResynced = ResyncSwingingLight(wasTransitioning);
 
 	twilightCap = GetTwilightCap(climate->timing, hour, sunHeight);
 	UpdateMoonlightFade(fadeAdvance / SecondsPerGameHour, transitionCompleted);
 	// At night follow the light's own direction, so the dim stays continuous while it swings between moons
 	currentDim = sunBelowHorizon ? moonlightFade * GetHorizonDim(GetHeightAboveHorizon(shadowFader.currentDir)) : GetHorizonDim(sunHeight);
 
-	return transitionCompleted || resetTransition || lightResynced;
-}
-
-bool SkySync::ResyncSwingingLight(bool wasTransitioning)
-{
-	if (!shadowFader.transitioning) {
-		resyncedLightDir = shadowFader.currentDir;
-		return wasTransitioning;
-	}
-
-	const float resyncCos = DirectX::XMScalarCos(DirectX::XMConvertToRadians(LightResyncAngle));
-	if (shadowFader.intensityFactor <= 0.0f || shadowFader.currentDir.Dot(resyncedLightDir) >= resyncCos)
-		return false;
-
-	resyncedLightDir = shadowFader.currentDir;
-	return true;
+	return transitionCompleted;
 }
 
 float SkySync::GetHeightAboveHorizon(const RE::NiPoint3& dir) const
@@ -813,21 +760,6 @@ SkySync::Caster SkySync::GetMoonLightCaster(const RE::Sky* sky) const
 	}
 }
 
-std::optional<RE::NiPoint3> SkySync::GetCelestialLightDirection(const RE::Sky* sky) const
-{
-	if (!active || !sky || !sky->root)
-		return std::nullopt;
-
-	const auto target = shadowFader.target;
-	RE::NiPoint3 dir = shadowFader.currentDir;
-	if (!shadowFader.transitioning && target != Caster::Zenith && rawDirections[static_cast<size_t>(target)].SqrLength() > 0.0f)
-		dir = rawDirections[static_cast<size_t>(target)];
-	dir = sky->root->world.rotate * dir;
-	if (dir.Unitize() <= FLT_EPSILON)
-		return std::nullopt;
-	return dir;
-}
-
 inline void SkySync::SetSunPosition(const RE::Sun* sun, const RE::NiPoint3& dir, const float distance)
 {
 	const auto position = dir * distance;
@@ -844,7 +776,6 @@ void SkySync::ShadowFader::Reset()
 	transitioning = false;
 	intensityFactor = startIntensityFactor = 1.0f;
 	vlFade = startVlFade = 1.0f;
-	nightWeight = startNightWeight = 0.0f;
 }
 
 void SkySync::ShadowFader::Update(const RE::Sky* sky, RE::NiPoint3 dirs[], float intensities[], std::optional<std::array<RE::NiColor, 3>> colors, float fadeDuration, float fadeAdvance, bool a_immediateTransition)
@@ -866,20 +797,10 @@ void SkySync::ShadowFader::Update(const RE::Sky* sky, RE::NiPoint3 dirs[], float
 			best = Caster::Zenith;
 		else if (!masserValid)
 			best = Caster::Secunda;
-		else if (!secundaValid)
+		else if (!secundaValid || intensities[static_cast<int>(Caster::Secunda)] <= intensities[static_cast<int>(Caster::Masser)])
 			best = Caster::Masser;
-		else {
-			// Each switch swings the shadows and dims the light, so near-equal moons keep the current caster
-			constexpr float switchMargin = 1.25f;
-			const float masserIntensity = intensities[static_cast<int>(Caster::Masser)];
-			const float secundaIntensity = intensities[static_cast<int>(Caster::Secunda)];
-			if (target == Caster::Masser)
-				best = secundaIntensity > masserIntensity * switchMargin ? Caster::Secunda : Caster::Masser;
-			else if (target == Caster::Secunda)
-				best = masserIntensity > secundaIntensity * switchMargin ? Caster::Masser : Caster::Secunda;
-			else
-				best = secundaIntensity <= masserIntensity ? Caster::Masser : Caster::Secunda;
-		}
+		else
+			best = Caster::Secunda;
 	} else {
 		best = Caster::Sun;
 	}
@@ -894,7 +815,6 @@ void SkySync::ShadowFader::Update(const RE::Sky* sky, RE::NiPoint3 dirs[], float
 		startDir = currentDir;
 		startIntensityFactor = intensityFactor;
 		startVlFade = vlFade;
-		startNightWeight = nightWeight;
 		fadeTimer = 0.0f;
 		transitioning = true;
 	}
@@ -910,13 +830,11 @@ void SkySync::ShadowFader::Update(const RE::Sky* sky, RE::NiPoint3 dirs[], float
 		SetLighting(sky, currentDir, intensity * intensityFactor, color);
 	};
 	const float targetVlFade = target == Caster::Zenith ? 0.0f : 1.0f;
-	const float targetNightWeight = target == Caster::Sun ? 0.0f : 1.0f;
 
 	if (!transitioning) {
 		currentDir = targetDir;
 		intensityFactor = 1.0f;
 		vlFade = targetVlFade;
-		nightWeight = targetNightWeight;
 		immediateTransitionRemaining = 0.0f;
 		applyLighting();
 		return;
@@ -943,12 +861,8 @@ void SkySync::ShadowFader::Update(const RE::Sky* sky, RE::NiPoint3 dirs[], float
 
 	// Fade out as the direction leaves the old caster and back in as it reaches the new one
 	const float fadeOut = startIntensityFactor * ComputeAlignmentFactor(currentDir, startDir);
-	const float fadeIn = ComputeAlignmentFactor(currentDir, targetDir);
-	intensityFactor = std::max(fadeOut, fadeIn);
+	intensityFactor = std::max(fadeOut, ComputeAlignmentFactor(currentDir, targetDir));
 	vlFade = std::lerp(startVlFade, targetVlFade, t);
-	const float outgoing = fadeOut * (1.0f - t);
-	const float incoming = fadeIn * t;
-	nightWeight = std::lerp(startNightWeight, targetNightWeight, outgoing + incoming > 0.0f ? incoming / (outgoing + incoming) : t);
 	applyLighting();
 }
 

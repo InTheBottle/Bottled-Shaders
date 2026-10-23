@@ -362,15 +362,38 @@ namespace
 		return result;
 	}
 
-	RE::BSVolumetricLightingRenderData GetWeatherVolumetricLighting(const RE::Sky* a_sky, const RE::TESWeather* a_weather, const WeatherTimeBlend& a_time, bool a_night, bool a_current)
+	RE::BSVolumetricLightingRenderData GetDefaultRenderData()
 	{
-		if (a_night)
-			return SkySync::BlendNightVolumetricLighting(a_sky, a_current ? 1.0f : 0.0f, a_current ? 0.0f : 1.0f);
+		static const auto intensity = RE::GetINISetting("fVolumetricLightingIntensity:Display");
+		static const auto customColorContribution = RE::GetINISetting("fVolumetricLightingCustomColorContribution:Display");
+		static const auto densityContribution = RE::GetINISetting("fVolumetricLightingDensityContribution:Display");
+		static const auto densityScale = RE::GetINISetting("fVolumetricLightingDensityScale:Display");
+		static const auto windSpeedScale = RE::GetINISetting("fVolumetricLightingWindSpeedScale:Display");
+		static const auto windFallingSpeed = RE::GetINISetting("fVolumetricLightingWindFallingSpeed:Display");
+		static const auto phaseContribution = RE::GetINISetting("fVolumetricLightingPhaseContribution:Display");
+		static const auto phaseScattering = RE::GetINISetting("fVolumetricLightingPhaseScattering:Display");
+		static const auto rangeFactor = RE::GetINISetting("fVolumetricLightingRangeFactor:Display");
 
+		auto value = [](const RE::Setting* setting) { return setting ? setting->GetFloat() : 0.0f; };
+		return {
+			value(intensity),
+			{ value(customColorContribution) },
+			{ 1.0f, 1.0f, 1.0f },
+			{ value(densityContribution), value(densityScale), value(windSpeedScale), value(windFallingSpeed) },
+			{ value(phaseContribution), value(phaseScattering) },
+			{ value(rangeFactor) }
+		};
+	}
+
+	RE::BSVolumetricLightingRenderData GetWeatherVolumetricLighting(const RE::TESWeather* a_weather, const WeatherTimeBlend& a_time, bool a_night)
+	{
 		auto record = [a_weather](RE::TESWeather::ColorTime a_colorTime) {
 			const auto form = a_weather ? a_weather->volumetricLighting[a_colorTime] : nullptr;
-			return form ? static_cast<const RE::BSVolumetricLightingRenderData&>(*form) : SkySync::GetDefaultVolumetricLighting();
+			return form ? static_cast<const RE::BSVolumetricLightingRenderData&>(*form) : GetDefaultRenderData();
 		};
+
+		if (a_night)
+			return record(RE::TESWeather::ColorTime::kNight);
 
 		RE::BSVolumetricLightingRenderData result{};
 		AccumulateRenderData(result, record(a_time.first), a_time.firstWeight);
@@ -426,6 +449,11 @@ void VolumetricLighting::BeginSkyUpdate()
 		engineRenderData = renderData;
 }
 
+void VolumetricLighting::DetectNightRenderData()
+{
+	nightRenderData = std::memcmp(&GetRenderData(), &engineRenderData, sizeof(RE::BSVolumetricLightingRenderData)) != 0;
+}
+
 void VolumetricLighting::FinishSkyUpdate(RE::Sky* a_sky)
 {
 	auto& renderData = GetRenderData();
@@ -433,9 +461,8 @@ void VolumetricLighting::FinishSkyUpdate(RE::Sky* a_sky)
 	const float weatherPct = a_sky ? a_sky->currentWeatherPct : 1.0f;
 	if (a_sky && a_sky->mode.get() == RE::Sky::Mode::kFull && a_sky->currentClimate && a_sky->currentWeather && a_sky->lastWeather &&
 		weatherPct > 0.0f && weatherPct < 1.0f) {
-		const auto& skySync = globals::features::skySync;
-		const bool nightVolumetricLighting = skySync.IsNightVolumetricLightingApplied();
-		const bool nightSunlight = skySync.GetLightNightWeight() >= 1.0f;
+		const bool nightVolumetricLighting = nightRenderData;
+		const bool nightSunlight = globals::features::skySync.GetLightNightWeight() >= 1.0f;
 		const auto time = GetWeatherTimeBlend(a_sky);
 
 		float intensityLast = 1.0f;
@@ -443,8 +470,8 @@ void VolumetricLighting::FinishSkyUpdate(RE::Sky* a_sky)
 		if (globals::features::effects11.loaded)
 			globals::features::effects11.GetGameVolumetricRaysIntensityEndpoints(intensityLast, intensityCurrent);
 
-		const auto lastData = GetWeatherVolumetricLighting(a_sky, a_sky->lastWeather, time, nightVolumetricLighting, false);
-		const auto currentData = GetWeatherVolumetricLighting(a_sky, a_sky->currentWeather, time, nightVolumetricLighting, true);
+		const auto lastData = GetWeatherVolumetricLighting(a_sky->lastWeather, time, nightVolumetricLighting);
+		const auto currentData = GetWeatherVolumetricLighting(a_sky->currentWeather, time, nightVolumetricLighting);
 		const auto lastSunlight = GetWeatherSunlight(a_sky, a_sky->lastWeather, time, nightSunlight);
 		const auto currentSunlight = GetWeatherSunlight(a_sky, a_sky->currentWeather, time, nightSunlight);
 

@@ -408,6 +408,7 @@ namespace WeatherExtensions
 			globals::features::volumetricLighting.BeginSkyUpdate();
 			// Moonlight colours feed Effects11's grading; the dim must follow it, as its colour filter lifts zero
 			globals::features::skySync.ApplyMoonlightColors(sky);
+			globals::features::volumetricLighting.DetectNightRenderData();
 			if (globals::features::effects11.loaded)
 				globals::features::effects11.OnSkyUpdateColors(sky);
 			globals::features::skySync.OnSkyUpdateColors(sky);

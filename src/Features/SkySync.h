@@ -17,7 +17,7 @@ public:
 	virtual std::string GetDisplayName() override { return T("feature.sky_sync.name", "Sky Sync"); }
 	virtual inline std::string GetShortName() override { return "SkySync"; }
 	virtual inline std::string GetFeatureModLink() override { return MakeNexusModURL(MOD_ID); }
-	virtual std::string_view GetCategory() const override { return FeatureCategories::kSkyAndWeather; }
+	virtual std::string_view GetCategory() const override { return FeatureCategories::kSky; }
 
 	/** @brief Returns a description and list of key features for the UI summary. */
 	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
@@ -75,26 +75,8 @@ public:
 	/** @brief How far this frame's moon glare was moved to the night colour, 0 to 1, so moon grading can follow it. */
 	float GetMoonNightWeight() const { return moonNightWeight; }
 
-	/** @brief How far this frame's sunlight was moved to the night colour, 0 to 1, so light grading can follow it. */
+	/** @brief 1 when this frame's sunlight was rebuilt from night colours, else 0, so light grading can follow it. */
 	float GetLightNightWeight() const { return lightNightWeight; }
-
-	/** @brief True when this frame's VL was rebuilt from the weathers' night VL. */
-	bool IsNightVolumetricLightingApplied() const { return nightVolumetricLightingApplied; }
-
-	/** @brief The factor this frame's sunlight was dimmed by, lightning excluded; 1 when nothing was dimmed. */
-	float GetAppliedSunlightFactor() const { return appliedSunlightFactor; }
-
-	/**
-	 * @brief True while an Effects 11 preset is active. Sky Sync then only moves the light with the sun and moons, giving
-	 *        the moons the night light colour, and leaves grading, the horizon dim and volumetric lighting to the preset.
-	 */
-	bool IsEffects11Active() const;
-
-	/** @brief The engine's VL fallback for weathers without a VL form, read from the fVolumetricLighting*:Display INI settings. */
-	static RE::BSVolumetricLightingRenderData GetDefaultVolumetricLighting();
-
-	/** @brief Blends the current and last weathers' night VL with the given weights, as vanilla's time-of-day VL blend does. */
-	static RE::BSVolumetricLightingRenderData BlendNightVolumetricLighting(const RE::Sky* sky, float currentWeight, float lastWeight);
 
 	/** @brief Installs rendering hooks and detects conflicting mods after plugin load. */
 	virtual void PostPostLoad() override;
@@ -131,13 +113,6 @@ public:
 	 */
 	Caster GetMoonLightCaster(const RE::Sky* sky) const;
 
-	/**
-	 * @brief Gets the world-space direction towards the current shadow caster, without the minimum shadow elevation hold or clamp.
-	 * @param sky The sky whose root rotation maps Sky Sync's directions into world space.
-	 * @return The unit direction, or nullopt if Sky Sync did not steer the light this frame.
-	 */
-	std::optional<RE::NiPoint3> GetCelestialLightDirection(const RE::Sky* sky) const;
-
 private:
 	enum class CellFlagExt : uint16_t
 	{
@@ -173,8 +148,6 @@ private:
 		float startIntensityFactor = 1.0f;
 		float vlFade = 1.0f;  // additionally scales VL, fading it out towards the zenith fallback
 		float startVlFade = 1.0f;
-		float nightWeight = 0.0f;
-		float startNightWeight = 0.0f;
 
 		/** @brief Fraction of the current transition completed, 0 to 1. */
 		float Progress(float fadeDuration) const { return fadeDuration > 0.0f ? fadeTimer / fadeDuration : 1.0f; }
@@ -196,7 +169,6 @@ private:
 	static constexpr float SecondsPerGameHour = 3600.0f;
 	static constexpr float AlignmentFadeStartAngle = 2.0f;
 	static constexpr float AlignmentFadeEndAngle = 15.0f;
-	static constexpr float LightResyncAngle = 1.0f;
 	static constexpr float MaxHorizonFadeHours = 1.5f;
 	static constexpr float DefaultSunAlphaTransTime = 2.0f;
 	static constexpr float AlternateSunHorizonOffsetHours = 0.25f;
@@ -235,19 +207,14 @@ private:
 	float moonNightWeight = 0.0f;
 	float lightNightWeight = 0.0f;
 	float flashWeight = 0.0f;  // lightning's share of this frame's directional light
-	float appliedSunlightFactor = 1.0f;
-	bool nightVolumetricLightingApplied = false;
 	bool sunBelowHorizon = false;
 	ShadowFader shadowFader;
-	RE::NiPoint3 resyncedLightDir = ZenithDirection;
 
 	void DisableOnConflict(std::string_view conflictName);
 
 	void PreparePendingTransitions();
 
 	bool Update(const RE::Sky* sky);
-
-	bool ResyncSwingingLight(bool wasTransitioning);
 
 	/** @brief Signed angle in radians of a sky-local direction above the effective horizon. */
 	float GetHeightAboveHorizon(const RE::NiPoint3& dir) const;
@@ -288,6 +255,12 @@ private:
 
 	/** @brief The lightning flash Sky::UpdateColors adds to the directional light, 0 during weather transitions as in vanilla. */
 	static float GetDirectionalFlash(const RE::Sky* sky);
+
+	/** @brief The engine's VL fallback for weathers without a VL form, read from the fVolumetricLighting*:Display INI settings. */
+	static RE::BSVolumetricLightingRenderData GetDefaultVolumetricLighting();
+
+	/** @brief Blends the current and last weathers' night VL with the given weights, as vanilla's time-of-day VL blend does. */
+	static RE::BSVolumetricLightingRenderData BlendNightVolumetricLighting(const RE::Sky* sky, float currentWeight, float lastWeight);
 
 	void ProcessSun(const RE::Sky* sky, const RE::NiPoint3& sunDir, float sunHeight, RE::NiPoint3 dirs[], float intensities[]);
 
