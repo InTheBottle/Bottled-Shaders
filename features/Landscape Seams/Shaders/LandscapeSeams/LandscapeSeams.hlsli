@@ -64,13 +64,17 @@ namespace LandscapeSeams
 		return (Data.Flags & mask) != 0;
 	}
 
-	float4 FetchSlice(int2 cell, float2 blend, int slice)
+	float4 CornerWeights(int2 cell, float2 blend)
 	{
-		float4 w00 = Weights.Load(int4(cell, slice, 0));
-		float4 w10 = Weights.Load(int4(cell + int2(1, 0), slice, 0));
-		float4 w01 = Weights.Load(int4(cell + int2(0, 1), slice, 0));
-		float4 w11 = Weights.Load(int4(cell + int2(1, 1), slice, 0));
-		return lerp(lerp(w00, w10, blend.x), lerp(w01, w11, blend.x), blend.y);
+		float4 forward = blend.x >= blend.y ? float4(1.0 - blend.x, blend.x - blend.y, 0.0, blend.y) : float4(1.0 - blend.y, 0.0, blend.y - blend.x, blend.x);
+		float4 backward = blend.x + blend.y <= 1.0 ? float4(1.0 - blend.x - blend.y, blend.x, blend.y, 0.0) : float4(0.0, 1.0 - blend.y, 1.0 - blend.x, blend.x + blend.y - 1.0);
+		return ((cell.x ^ cell.y) & 1) == 0 ? forward : backward;
+	}
+
+	float4 FetchSlice(int2 cell, float4 corners, int slice)
+	{
+		return Weights.Load(int4(cell, slice, 0)) * corners.x + Weights.Load(int4(cell + int2(1, 0), slice, 0)) * corners.y +
+		       Weights.Load(int4(cell + int2(0, 1), slice, 0)) * corners.z + Weights.Load(int4(cell + int2(1, 1), slice, 0)) * corners.w;
 	}
 
 	void Load(float2 worldXY, inout float4 weights1, inout float4 weights2)
@@ -83,10 +87,11 @@ namespace LandscapeSeams
 			float2 cellF = min(floor(grid), GridCells - 1.0);
 			float2 blend = grid - cellF;
 			int2 cell = int2(cellF);
+			float4 corners = CornerWeights(cell, blend);
 
-			float4 slice0 = FetchSlice(cell, blend, 0);
-			float4 slice1 = FetchSlice(cell, blend, 1);
-			float4 slice2 = FetchSlice(cell, blend, 2);
+			float4 slice0 = FetchSlice(cell, corners, 0);
+			float4 slice1 = FetchSlice(cell, corners, 1);
+			float4 slice2 = FetchSlice(cell, corners, 2);
 
 			weights1 = slice0;
 			weights2.xy = slice1.xy;
