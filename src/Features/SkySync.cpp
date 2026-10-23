@@ -695,7 +695,12 @@ void SkySync::ProcessMoon(const RE::Sky* sky, const Caster type, RE::NiPoint3 di
 	colors[idx] = {};
 
 	const auto moon = type == Caster::Masser ? sky->masser : sky->secunda;
-	if (!moon || moon->root->GetFlags().any(RE::NiAVObject::Flag::kHidden))
+	if (!moon)
+		return;
+
+	const auto rootFlags = moon->root->GetFlags();
+	const bool hiddenByWeather = rootFlags.any(RE::NiAVObject::Flag::kHidden) && sky->skyColor[RE::TESWeather::ColorTypes::kMoonGlare] == RE::NiColor{};
+	if (rootFlags.none(RE::NiAVObject::Flag::kDisplayObject) || hiddenByWeather)
 		return;
 
 	dirs[idx] = Util::Moon::GetFacingAxis(moon->root->local.rotate);
