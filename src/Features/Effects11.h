@@ -34,9 +34,6 @@ public:
 		};
 	}
 
-	/** @brief The active preset belongs to the active preset pack, so nothing goes in the user config. */
-	virtual bool UsesMainSettings() const override { return false; }
-
 	struct alignas(16) PerFrame
 	{
 		uint Enable;

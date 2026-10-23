@@ -751,6 +751,7 @@ void State::MarkSettingsSaved()
 	settingsChanged = false;
 	coreSettingsChanged = false;
 	savedCoreHash = HashCoreSettings();
+	globals::menu->ClearUnsavedChanges();
 }
 
 void State::CheckFeatureSettingsChanged(Feature* feature)

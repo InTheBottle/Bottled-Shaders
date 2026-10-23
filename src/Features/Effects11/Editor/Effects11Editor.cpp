@@ -947,7 +947,8 @@ void Effects11Editor::DrawCategoryWeatherToggle(const std::string& a_category)
 
 void Effects11Editor::DrawParticleOwnershipToggle()
 {
-	ImGui::Checkbox(T(TKEY("cs_particles"), "Let Community Shaders handle particles"), &globals::features::effects11.settings.IgnorePresetParticles);
+	if (ImGui::Checkbox(T(TKEY("cs_particles"), "Let Community Shaders handle particles"), &globals::features::effects11.settings.IgnorePresetParticles))
+		globals::menu->MarkUnsavedChanges();
 	Util::AddTooltip(T(TKEY("cs_particles_tip"),
 		"Lights smoke, mist and waterfalls with the weather's own Effect Lighting colour, scaled to follow the preset's direct and ambient lighting intensities, instead of the preset's [PARTICLE] values.\n"
 		"Saved with Community Shaders' Save Settings, not with the preset."));
