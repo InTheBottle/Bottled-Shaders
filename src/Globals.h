@@ -49,6 +49,7 @@ struct Skin;
 struct SnowCover;
 struct FootstepParticles;
 struct HairBacklighting;
+struct NightEye;
 struct FurShells;
 struct LandscapeSeams;
 struct SnowDeformation;
@@ -153,6 +154,7 @@ namespace globals
 		extern SnowCover snowCover;
 		extern FootstepParticles footstepParticles;
 		extern HairBacklighting hairBacklighting;
+		extern NightEye nightEye;
 		extern FurShells furShells;
 		extern LandscapeSeams landscapeSeams;
 		extern SnowDeformation snowDeformation;

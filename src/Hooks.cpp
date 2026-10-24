@@ -25,6 +25,7 @@
 #include "Features/InteriorSun.h"
 #include "Features/LandscapeSeams.h"
 #include "Features/LightLimitFix.h"
+#include "Features/NightEye.h"
 #include "Features/PostProcessing.h"
 #include "Features/RainRefraction.h"
 #include "Features/ReverseZ.h"
@@ -271,6 +272,8 @@ namespace LightingExtensions
 			globals::state->UpdateLightingShaderPermutation(pass);
 			func(shader, pass, renderFlags);
 			globals::state->UpdateLightingVariant(pass);
+			if (globals::features::nightEye.loaded)
+				globals::features::nightEye.SetupGeometry(pass);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -286,6 +289,8 @@ namespace EffectExtensions
 			ExternalEmittance::UpdatePermutation(pass);
 			globals::state->UpdateEffectShaderPermutation(pass);
 			globals::state->permutationData.EffectRadius = pass->geometry->worldBound.radius;
+			if (globals::features::nightEye.loaded)
+				globals::features::nightEye.SetupGeometry(pass);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -464,10 +469,14 @@ namespace PostProcessingExtensions
 			const auto input = static_cast<RE::RENDER_TARGET>(a3);
 			const auto output = static_cast<RE::RENDER_TARGET>(a4);
 
+			auto& nightEye = globals::features::nightEye;
+
 			// Effects11 replaces the pass outright; when it does, the vanilla call is skipped
 			// and HandlePostProcessing fixes up the render-target state the pass would have set.
-			if (state->HandlePostProcessing(input, output))
+			if (state->HandlePostProcessing(input, output)) {
+				nightEye.RenderPostProcess(output);
 				return;
+			}
 
 			// Post Processing runs its pipeline into kMAIN/kMAIN_COPY, then lets the vanilla
 			// pass run so ISHDR can take its POSTPROCESS passthrough branch.
@@ -476,6 +485,7 @@ namespace PostProcessingExtensions
 				postProcessing.PreProcess(input);
 
 			func(a1, a2, a3, a4, a5);
+			nightEye.RenderPostProcess(output);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};

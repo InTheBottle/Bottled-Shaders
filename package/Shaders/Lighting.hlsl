@@ -1059,6 +1059,10 @@ bool UseSkylightingShadowVisibility()
 
 #	include "Common/LightingEval.hlsli"
 
+#	if defined(NIGHT_EYE)
+#		include "NightEye/NightEye.hlsli"
+#	endif
+
 #	if defined(FUR_SHELLS) && !defined(FUR_SHELLS_DEPTH)
 [earlydepthstencil]
 #	endif
@@ -3249,6 +3253,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	color.xyz *= Color::PBRLightingScale;
 	specularColor *= Color::PBRLightingScale;
 	indirectLobeWeights.diffuse *= Color::PBRLightingScale;
+#	endif
+
+#	if defined(NIGHT_EYE)
+#		include "NightEye/LightingPS.hlsli"
 #	endif
 
 	float3 outputAlbedo = indirectLobeWeights.diffuse * vertexColor.xyz;

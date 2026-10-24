@@ -360,7 +360,12 @@ public:
 		NoSkyScattering = 1 << 12,
 		SnowRooftop = 1 << 13,
 		SnowLODTree = 1 << 14,
-		SourceAlphaBlend = 1 << 15
+		SourceAlphaBlend = 1 << 15,
+		NightEyeEyeshine = 1 << 16,
+		NightEyeMask = 1 << 17,
+		NightEyeActor = 1 << 18,
+		NightEyeEnemy = 1 << 19,
+		NightEyeAlly = 1 << 20
 	};
 
 	/** @brief Bitflags describing extra feature-specific properties related to terrain displacement and material models. */

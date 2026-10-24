@@ -27,6 +27,7 @@
 #include "Features/LandscapeSeams.h"
 #include "Features/LightLimitFix.h"
 #include "Features/LinearLighting.h"
+#include "Features/NightEye.h"
 #include "Features/PerformanceOverlay.h"
 #include "Features/PostProcessing.h"
 #include "Features/ProceduralSun.h"
@@ -120,6 +121,7 @@ namespace globals
 		SnowCover snowCover{};
 		FootstepParticles footstepParticles{};
 		HairBacklighting hairBacklighting{};
+		NightEye nightEye{};
 		FurShells furShells{};
 		LandscapeSeams landscapeSeams{};
 		SnowDeformation snowDeformation{};

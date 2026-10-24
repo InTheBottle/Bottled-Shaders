@@ -84,9 +84,6 @@ public:
 	winrt::com_ptr<ID3D11ComputeShader> colorCorrectionComputeShader;
 	winrt::com_ptr<ID3D11Buffer> colorCorrectionConstantBuffer;
 
-	winrt::com_ptr<ID3D11PixelShader> nightEyePixelShader;
-	winrt::com_ptr<ID3D11Buffer> nightEyeConstantBuffer;
-
 	// Standard-Z depth copy handed to .fx files when the scene depth is reversed
 	winrt::com_ptr<ID3D11ComputeShader> standardDepthComputeShader;
 	std::unique_ptr<Texture2D> standardDepthTexture;
@@ -97,7 +94,6 @@ public:
 	void CreateRenderStates();
 	void CreateCopyShaders();
 	void CreateColorCorrectionShader();
-	void CreateNightEyeShader();
 	void CreateStandardDepthShader();
 
 	/** @brief Depth SRV for .fx files: the scene depth, or a standard-Z (1 - z) copy of it when Reverse Z is active. */
@@ -148,9 +144,6 @@ public:
 
 		uint32_t enableRain = 0xFFFFFFFF;
 		uint32_t rainRefractionFactor = 0xFFFFFFFF;
-
-		uint32_t nightEyeEnable = 0xFFFFFFFF;
-		uint32_t nightEyeFadeTime = 0xFFFFFFFF;
 	} ids;
 
 	const CommonVariableData& GetCommonData() const { return commonData; }
@@ -173,8 +166,6 @@ public:
 
 	// Color correction using compute shader
 	void ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV);
-
-	void ApplyNightEye();
 
 	void ReloadShaders();
 

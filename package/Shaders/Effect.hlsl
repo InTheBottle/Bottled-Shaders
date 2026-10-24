@@ -622,6 +622,10 @@ float3 GetLightingShadow(float3 color, float3 worldPosition, float2 screenPositi
 }
 #	endif
 
+#	if defined(NIGHT_EYE)
+#		include "NightEye/NightEye.hlsli"
+#	endif
+
 PS_OUTPUT main(PS_INPUT input)
 {
 	PS_OUTPUT psout = (PS_OUTPUT)0;
@@ -883,6 +887,10 @@ PS_OUTPUT main(PS_INPUT input)
 
 	lightColor = Color::EffectMult(lightColor);
 
+#	if defined(NIGHT_EYE)
+#		include "NightEye/EffectActor.hlsli"
+#	endif
+
 #	if !defined(MOTIONVECTORS_NORMALS)
 	float fogFactor = input.FogParam.w;
 	float3 fogColor = input.FogParam.xyz;
@@ -940,6 +948,10 @@ PS_OUTPUT main(PS_INPUT input)
 	float3 blendedColor = lightColor.xyz;
 #	endif
 
+#	if defined(NIGHT_EYE)
+#		include "NightEye/EffectEyes.hlsli"
+#	endif
+
 	float4 finalColor = float4(blendedColor, alpha);
 #	if defined(MULTBLEND_DECAL)
 	finalColor.xyz *= alpha;
@@ -984,6 +996,9 @@ PS_OUTPUT main(PS_INPUT input)
 	psout.Masks2 = float4(0, 0, 0, finalColor.w);
 #		else
 	psout.Albedo = float4(psout.Diffuse.xyz * !(Permutation::VertexShaderDescriptor & Permutation::EffectFlags::SkyObject), finalColor.w);
+#			if defined(NIGHT_EYE)
+#				include "NightEye/EffectAlbedo.hlsli"
+#			endif
 	psout.Specular = float4(0, 0, 0, finalColor.w);
 	psout.Reflectance = float4(0, 0, 0, finalColor.w);
 	psout.Masks = float4(0, 0, 0, finalColor.w);

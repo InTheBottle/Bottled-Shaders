@@ -3,21 +3,8 @@
 #include "../EffectManager.h"
 #include "../SettingManager.h"
 #include "../TextureManager.h"
-#include "Features/Effects11.h"
 #include "Globals.h"
 #include "Utils/Game.h"
-
-bool ENBEffect::PresetHandlesNightEye()
-{
-	auto* nightEyeVariable = GetCachedVariable("KNActive");
-	if (!nightEyeVariable || !nightEyeVariable->IsValid())
-		return false;
-	for (const auto& uiVar : uiVariables) {
-		if (uiVar.type == UIVariableType::Bool && uiVar.name == "KNEnable")
-			return uiVar.boolValue;
-	}
-	return true;
-}
 
 void ENBEffect::Execute()
 {
@@ -84,9 +71,6 @@ void ENBEffect::UpdateEffectVariables()
 	params01[6] = { 1, 1, 1, 1 };
 
 	SetVectorVariable("Params01", &params01, sizeof(params01));
-
-	if (auto* nightEyeVariable = GetCachedVariable("KNActive"); nightEyeVariable && nightEyeVariable->IsValid())
-		nightEyeVariable->AsScalar()->SetBool(globals::features::effects11.IsNightEyeActive());
 
 	auto& textureManager = TextureManager::GetSingleton();
 	auto& settingManager = SettingManager::GetSingleton();

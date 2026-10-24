@@ -86,6 +86,11 @@ namespace Permutation
 		static const uint SnowRooftop = (1 << 13);
 		static const uint SnowLODTree = (1 << 14);
 		static const uint SourceAlphaBlend = (1 << 15);
+		static const uint NightEyeEyeshine = (1 << 16);
+		static const uint NightEyeMask = (1 << 17);
+		static const uint NightEyeActor = (1 << 18);
+		static const uint NightEyeEnemy = (1 << 19);
+		static const uint NightEyeAlly = (1 << 20);
 	}
 
 	namespace ExtraFeatureFlags

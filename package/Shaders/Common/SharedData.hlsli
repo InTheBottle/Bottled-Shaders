@@ -643,6 +643,15 @@ namespace SharedData
 		float pad0;
 	};
 
+	struct NightEyeSettings
+	{
+		float4 Eye;
+		float4 Actor;
+		float4 Enemy;
+		float4 Ally;
+		float4 Neutral;
+	};
+
 	cbuffer FeatureData : register(b6)
 	{
 		GrassLightingSettings grassLightingSettings;
@@ -672,6 +681,7 @@ namespace SharedData
 		HorizonFixSettings horizonFixSettings;
 		HairBacklightingSettings hairBacklightingSettings;
 		RainRefractionSettings rainRefractionSettings;
+		NightEyeSettings nightEyeSettings;
 	};
 
 	Texture2D<float4> DepthTexture : register(t17);

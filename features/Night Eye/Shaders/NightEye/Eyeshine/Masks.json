@@ -1,0 +1,253 @@
+[
+  {
+    "mask": "wolf.dds",
+    "geometry": [
+      "WolfBLACK",
+      "WolfREDUCED"
+    ],
+    "diffuse": [
+      "textures\\actors\\wolf\\wolf.dds",
+      "textures\\actors\\wolf\\wolfblack.dds",
+      "textures\\actors\\wolf\\wolfred.dds",
+      "textures\\pbr\\actors\\wolf\\wolf.dds",
+      "textures\\pbr\\actors\\wolf\\wolfblack.dds",
+      "textures\\pbr\\actors\\wolf\\wolfred.dds"
+    ]
+  },
+  {
+    "mask": "dragon.dds",
+    "geometry": [
+      "Boss Dragon:1",
+      "Bronze Dragon:1",
+      "Dragon:1",
+      "Ice Dragon",
+      "Odahviing:1",
+      "Parthurnax",
+      "Swamp Dragon"
+    ],
+    "diffuse": [
+      "textures\\actors\\dragon\\dragon.dds",
+      "textures\\actors\\dragon\\dragon_earth.dds",
+      "textures\\actors\\dragon\\dragon_snow.dds",
+      "textures\\actors\\dragon\\dragon_swamp.dds",
+      "textures\\actors\\dragon\\ohdaviing.dds",
+      "textures\\actors\\parthurnax\\parthurnax.dds",
+      "textures\\pbr\\actors\\dragon\\dragon.dds",
+      "textures\\pbr\\actors\\dragon\\dragon_earth.dds",
+      "textures\\pbr\\actors\\dragon\\dragon_snow.dds",
+      "textures\\pbr\\actors\\dragon\\dragon_swamp.dds",
+      "textures\\pbr\\actors\\dragon\\ohdaviing.dds",
+      "textures\\pbr\\actors\\parthurnax\\parthurnax.dds"
+    ]
+  },
+  {
+    "mask": "husky.dds",
+    "geometry": [
+      "HuskyBodyBare"
+    ],
+    "diffuse": [
+      "textures\\actors\\dlc01\\armoreddog\\husky.dds",
+      "textures\\pbr\\actors\\dlc01\\armoreddog\\husky.dds"
+    ]
+  },
+  {
+    "mask": "giant.dds",
+    "geometry": [
+      "giant_base:1",
+      "giant_med_cloth:2",
+      "giant_heavy_cloth:2"
+    ],
+    "diffuse": [
+      "textures\\actors\\giant\\giant.dds",
+      "textures\\pbr\\actors\\giant\\giant.dds"
+    ]
+  },
+  {
+    "mask": "horker.dds",
+    "geometry": [
+      "Horker:0"
+    ],
+    "diffuse": [
+      "textures\\actors\\horker\\horker.dds",
+      "textures\\pbr\\actors\\horker\\horker.dds"
+    ]
+  },
+  {
+    "mask": "mammoth.dds",
+    "geometry": [
+      "MammothWild:1",
+      "MammothBranded:1"
+    ],
+    "diffuse": [
+      "textures\\actors\\mammoth\\mammoth.dds",
+      "textures\\pbr\\actors\\mammoth\\mammoth.dds"
+    ]
+  },
+  {
+    "mask": "dog_iris.dds",
+    "geometry": [
+      "DOG_NewUV:0"
+    ],
+    "diffuse": [
+      "textures\\pbr\\actors\\dog\\dog.dds",
+      "textures\\actors\\dog\\dog.dds"
+    ]
+  },
+  {
+    "mask": "chaurus_eyes.dds",
+    "geometry": [
+      "New"
+    ],
+    "diffuse": [
+      "textures\\pbr\\actors\\chaurus\\chaurus.dds",
+      "textures\\actors\\chaurus\\chaurus.dds"
+    ]
+  },
+  {
+    "mask": "spider_eyes.dds",
+    "geometry": [
+      "S_Body0180percent"
+    ],
+    "diffuse": [
+      "textures\\pbr\\actors\\frostbitespider\\spiderdesat.dds",
+      "textures\\actors\\frostbitespider\\spiderdesat.dds"
+    ]
+  },
+  {
+    "mask": "troll.dds",
+    "geometry": [
+      "Troll Cave",
+      "Troll Frost:1",
+      "Uderfrykte:1",
+      "Troll Frost"
+    ],
+    "diffuse": [
+      "textures\\actors\\troll\\troll_cave.dds",
+      "textures\\pbr\\actors\\troll\\troll_cave.dds",
+      "textures\\actors\\troll\\troll.dds",
+      "textures\\actors\\troll\\uderfrykte.dds",
+      "textures\\pbr\\actors\\troll\\uderfrykte.dds",
+      "textures\\dlc01\\actors\\armoredtroll\\armoredfrosttroll.dds"
+    ]
+  },
+  {
+    "mask": "alduin.dds",
+    "geometry": [
+      "AlduinAnim:1"
+    ],
+    "diffuse": [
+      "textures\\actors\\alduin\\alduineyes.dds",
+      "textures\\pbr\\actors\\alduin\\alduineyes.dds"
+    ]
+  },
+  {
+    "mask": "fox_eyes.dds",
+    "geometry": [
+      "LowFox"
+    ],
+    "diffuse": [
+      "textures\\pbr\\actors\\fox\\fox.dds",
+      "textures\\actors\\fox\\fox.dds"
+    ]
+  },
+  {
+    "mask": "cow_eyes.dds",
+    "geometry": [
+      "highlandcow"
+    ],
+    "diffuse": [
+      "textures\\pbr\\actors\\highlandcow\\highlandcow.dds",
+      "textures\\actors\\highlandcow\\highlandcow.dds"
+    ]
+  },
+  {
+    "mask": "goat_eyes.dds",
+    "geometry": [
+      "Goat"
+    ],
+    "diffuse": [
+      "textures\\pbr\\actors\\goat\\goat.dds",
+      "textures\\actors\\goat\\goat_d.dds"
+    ]
+  },
+  {
+    "mask": "skeever_eyes.dds",
+    "geometry": [
+      "SKeeverUVBakeOver:0"
+    ],
+    "diffuse": [
+      "textures\\pbr\\actors\\skeever\\skeever.dds",
+      "textures\\actors\\skeever\\skeever.dds"
+    ]
+  },
+  {
+    "mask": "mudcrab_eyes.dds",
+    "geometry": [
+      "Crab1",
+      "Crab2",
+      "Crab3"
+    ],
+    "diffuse": [
+      "textures\\pbr\\actors\\mudcrab\\mudcrab.dds",
+      "textures\\actors\\mudcrab\\mudcrab.dds"
+    ]
+  },
+  {
+    "mask": "chicken_iris.dds",
+    "geometry": [
+      "chicken"
+    ],
+    "diffuse": [
+      "textures\\pbr\\actors\\chicken\\chicken.dds",
+      "textures\\actors\\chicken\\chicken.dds"
+    ]
+  },
+  {
+    "mask": "hagraven_eyes.dds",
+    "geometry": [
+      "Hagraven_GEO"
+    ],
+    "diffuse": [
+      "textures\\pbr\\actors\\hagraven\\hagraven.dds",
+      "textures\\actors\\hagraven\\hagraven_d.dds"
+    ]
+  },
+  {
+    "mask": "spriggan_eyes.dds",
+    "geometry": [
+      "1"
+    ],
+    "diffuse": [
+      "textures\\1spriggan\\willow_base_color.dds"
+    ]
+  },
+  {
+    "mask": "frost_giant.dds",
+    "geometry": [
+      "Frost Giant"
+    ],
+    "diffuse": [
+      "textures\\actors\\dlc01\\frostgiant\\frostgiant_d.dds",
+      "textures\\actors\\dlc02\\dlc2frostgiant\\dlc2frostgiant_d.dds",
+      "textures\\pbr\\actors\\dlc01\\frostgiant\\frostgiant.dds"
+    ]
+  },
+  {
+    "mask": "riekling_eyes.dds",
+    "geometry": [
+      "Eyes",
+      "Eyes01",
+      "Eyes02",
+      "Eyes04",
+      "Eyes05",
+      "Eyes06",
+      "Eyes07",
+      "Eyes08",
+      "ReiklingBody"
+    ],
+    "diffuse": [
+      "textures\\actors\\dlc02\\riekling\\RieklingBody_D.dds",
+      "textures\\pbr\\actors\\dlc02\\riekling\\rieklingbody.dds"
+    ]
+  }
+]
