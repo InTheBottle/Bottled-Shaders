@@ -2056,6 +2056,16 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		worldNormal = normalize(worldNormal - viewDirection * (min(dot(worldNormal, viewDirection), 0.0) - 1e-3));
 #	endif
 
+#	if defined(DEFERRED) && !defined(LANDSCAPE)
+	[branch] if (SharedData::terrainBlendingSettings.Enabled)
+	{
+		const float visibleDepth = SharedData::GetScreenDepth(SharedData::DepthTexture.Load(int3(input.Position.xy, 0)).x);
+		const float terrainCover = saturate((SharedData::GetScreenDepth(input.Position.z) - visibleDepth) / 10.0);
+		if (terrainCover > 0.0)
+			worldNormal = normalize(lerp(worldNormal, float3(0, 0, 1), terrainCover));
+	}
+#	endif
+
 #	if defined(MODELSPACENORMALS)
 	float3 vertexNormal = worldNormal;
 #	endif
@@ -2874,6 +2884,12 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #			else
 	const bool localShadowSkinned = false;
 #			endif
+#			if defined(DEFERRED)
+	const float3 visibleViewPosition = LightLimitFix::GetVisibleSurfacePosition(viewPosition, input.Position.xy);
+	const float3 localShadowPosition = input.WorldPosition.xyz + FrameBuffer::ViewToWorld(visibleViewPosition - viewPosition, false);
+#			else
+	const float3 localShadowPosition = input.WorldPosition.xyz;
+#			endif
 #			if defined(DEFERRED) && defined(LLF_CONTACT_SHADOWS)
 	float contactShadowStrengthScale = 0.0;
 	const uint contactShadowSteps = LightLimitFix::GetContactShadowSteps(viewPosition.z, contactShadowStrengthScale);
@@ -2907,7 +2923,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow)
 		{
 			const float3 localShadowEye = LightLimitFix::FirstPerson ? LightLimitFix::WorldEyePosition.xyz : FrameBuffer::CameraPosAdjust.xyz;
-			shadowComponent = LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, input.WorldPosition.xyz, localShadowEye, normalizedLightDirection, localShadowSkinned, screenNoise);
+			shadowComponent = LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, localShadowPosition, localShadowEye, normalizedLightDirection, localShadowSkinned, screenNoise);
 			lightShadow *= shadowComponent;
 		}
 		else if (Permutation::PixelShaderDescriptor & Permutation::LightingFlags::DefShadow)
@@ -2929,7 +2945,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		[branch] if (contactShadowSteps > 0 && shadowComponent > 0.0 && lightAngle > 0.0 && !(light.lightFlags & LightLimitFix::LightFlags::Simple))
 		{
 			float3 lightVectorVS = mul((float3x3)FrameBuffer::CameraView, lightDirection);
-			float contactShadow = LightLimitFix::ContactShadows(LinearSampler, viewPosition, screenNoise, lightVectorVS, lightDist, contactShadowSteps, contactShadowStrengthScale);
+			float contactShadow = LightLimitFix::ContactShadows(LinearSampler, visibleViewPosition, screenNoise, lightVectorVS, lightDist, contactShadowSteps, contactShadowStrengthScale);
 			shadowComponent *= contactShadow;
 			lightShadow *= contactShadow;
 		}
