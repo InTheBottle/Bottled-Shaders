@@ -366,7 +366,6 @@ public:
 		IsEye = 1 << 7,
 		NoSnow = 1 << 8,
 		NoFoliageTint = 1 << 9,
-		IsAurora = 1 << 10,
 		IsMoon = 1 << 11,
 		NoSkyScattering = 1 << 12,
 		SnowRooftop = 1 << 13,
@@ -444,11 +443,6 @@ public:
 	 * @param a_pass The render pass to inspect.
 	 */
 	void UpdateSkyShaderPermutation(RE::BSRenderPass* a_pass);
-	/**
-	 * @brief Flags effect shader passes that draw the aurora (sky objects under the sky's aurora root).
-	 * @param a_pass The render pass to inspect.
-	 */
-	void UpdateEffectShaderPermutation(RE::BSRenderPass* a_pass);
 	/**
 	 * @brief Checks whether directional shadows are available for the current scene.
 	 * @returns true if directional shadows are present, false otherwise.

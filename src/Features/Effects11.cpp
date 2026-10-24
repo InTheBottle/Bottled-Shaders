@@ -293,8 +293,6 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 	data.StarsAnimationTime = settingManager.GetValue<float>("StarsAnimationTime", "SKY");
 	data.StarsAnimationDensity = settingManager.GetValue<float>("StarsAnimationDensity", "SKY");
 	data.StarsAnimationIntensity = settingManager.GetValue<float>("StarsAnimationIntensity", "SKY");
-	data.AuroraIntensity = settingManager.GetInterpolatedTimeOfDayValue("AuroraBorealisIntensity", "SKY");
-	data.AuroraCurve = settingManager.GetInterpolatedTimeOfDayValue("AuroraBorealisCurve", "SKY");
 	data.FixBlackCrush = settingManager.GetValue<bool>("FixBlackCrush", "SKY");
 
 	data.VolumetricRaysDesaturation = settingManager.GetInterpolatedTimeOfDayValue("Desaturation", "GAMEVOLUMETRICRAYS");

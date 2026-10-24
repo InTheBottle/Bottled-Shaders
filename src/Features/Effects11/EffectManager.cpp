@@ -273,8 +273,6 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterFloatSetting("StarsAnimationTime", "SKY", 0.3f, 0.0f, 1.0f, 0.01f, false);
 	settingManager.RegisterFloatSetting("StarsAnimationDensity", "SKY", 10.0f, 0.0f, 10.0f, 0.01f, false);
 	settingManager.RegisterFloatSetting("StarsAnimationIntensity", "SKY", 10.0f, 0.0f, 10.0f, 0.01f, false);
-	settingManager.RegisterTimeOfDaySetting("AuroraBorealisIntensity", "SKY", 1.0f, 0.0f, 30000.0f, 0.01f, true);
-	settingManager.RegisterTimeOfDaySetting("AuroraBorealisCurve", "SKY", 1.0f, 0.1f, 8.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("CloudsVertexAlphaBoost", "SKY", 0.0f, 0.0f, 2.0f, 0.01f, true);
 	settingManager.RegisterFloatSetting("CloudsEdgeClamp", "SKY", 0.5f, 0.05f, 8.0f, 0.01f, false);
 	settingManager.RegisterFloatSetting("CloudsEdgeIntensity", "SKY", 2.0f, 0.0f, 30000.0f, 0.01f, false);

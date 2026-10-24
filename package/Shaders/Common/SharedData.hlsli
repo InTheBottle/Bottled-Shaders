@@ -418,12 +418,7 @@ namespace SharedData
 		float StarsAnimationTime;
 		float StarsAnimationDensity;
 		float StarsAnimationIntensity;
-		float AuroraIntensity;
-
-		float AuroraCurve;
 		uint FixBlackCrush;
-		float NightSkyPad0;
-		float NightSkyPad1;
 
 		uint VolumetricRaysSampleCount;
 		uint GameVolumetricRaysDisableDithering;

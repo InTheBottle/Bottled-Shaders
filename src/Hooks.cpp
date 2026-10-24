@@ -287,7 +287,6 @@ namespace EffectExtensions
 		{
 			func(shader, pass, renderFlags);
 			ExternalEmittance::UpdatePermutation(pass);
-			globals::state->UpdateEffectShaderPermutation(pass);
 			globals::state->permutationData.EffectRadius = pass->geometry->worldBound.radius;
 			if (globals::features::nightEye.loaded)
 				globals::features::nightEye.SetupGeometry(pass);
