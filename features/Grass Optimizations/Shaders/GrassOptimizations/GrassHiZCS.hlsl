@@ -22,7 +22,7 @@ cbuffer HiZParams : register(b0)
 
 	const int2 src = int2(tid.xy) * HIZ_DOWNSAMPLE_FACTOR;
 
-	// Out of bounds reads as far, so an edge tile reduces to the far value and can only under-cull.
+	// Out of bounds reads as far, so an edge tile reduces to 1.0 and can only under-cull.
 #ifdef REVERSE_Z
 	float d = 1.0;
 #else
