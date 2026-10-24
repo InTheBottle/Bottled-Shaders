@@ -314,7 +314,7 @@ cbuffer AlphaTestRefCB : register(b11)
 }
 
 #	if SHADOWFILTER == 8
-static const uint ShadowPCFSampleCount = 12;
+static const uint ShadowPCFSampleCount = 16;
 #	else
 static const uint ShadowPCFSampleCount = 8;
 #	endif
@@ -322,9 +322,7 @@ static const uint ShadowPCFSampleCount = 8;
 float2 GetShadowPCFOffset(uint index)
 {
 #	if SHADOWFILTER == 8
-	float2 direction;
-	sincos(float(index) * Math::PI * (3.0 - sqrt(5.0)), direction.y, direction.x);
-	return direction * sqrt((float(index) + 0.5) / float(ShadowPCFSampleCount));
+	return Random::PoissonSampleOffsets16[index];
 #	else
 	return Random::SpiralSampleOffsets8[index];
 #	endif

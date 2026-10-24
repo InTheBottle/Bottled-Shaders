@@ -152,7 +152,7 @@ void SampleSSGISpecular(uint2 pixCoord, sh2 lobe, inout float ao, out float3 il,
 #		if defined(SKYLIGHTING)
 		float3 positionMS = positionWS.xyz;
 		sh2 skylightingSH = Skylighting::Sample(positionMS.xyz, normalWS);
-		float skylightingDiffuse = Skylighting::EvaluateDiffuse(skylightingSH, normalWS);
+		float skylightingDiffuse = Skylighting::EvaluateDiffuse(skylightingSH, normalWS, Skylighting::GetFadeOutFactor(positionMS));
 		directionalAmbientColor = ImageBasedLighting::GetDiffuseIBLOccluded(vanillaDALC, -normalWS, skylightingDiffuse) * albedo;
 #		else
 		directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(vanillaDALC, -normalWS) * albedo;
@@ -216,11 +216,11 @@ void SampleSSGISpecular(uint2 pixCoord, sh2 lobe, inout float ao, out float3 il,
 
 #	if defined(SKYLIGHTING)
 		float3 positionMS = positionWS.xyz;
-		positionMS.z = min(positionMS.z, SharedData::skylightingSettings.PosOffset.z + Skylighting::ARRAY_SIZE.z * 0.5 - Skylighting::CELL_SIZE.z);
 
-		sh2 skylightingSH = Skylighting::Sample(positionMS.xyz, R);
-		float skylightingSpecular = Skylighting::EvaluateSpecular(skylightingSH, specularLobe);
-		float skylightingVisibility = Skylighting::EvaluateVisibility(skylightingSH);
+		sh2 skylightingSH = Skylighting::Sample(Skylighting::ClampToArrayHeight(positionMS), R);
+		float skylightingFadeOut = Skylighting::GetHorizontalFadeOutFactor(positionMS);
+		float skylightingSpecular = Skylighting::EvaluateSpecular(skylightingSH, specularLobe, skylightingFadeOut);
+		float skylightingVisibility = Skylighting::EvaluateVisibility(skylightingSH, skylightingFadeOut);
 #	endif
 
 #	if defined(IBL)

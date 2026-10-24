@@ -207,6 +207,17 @@ PS_OUTPUT main(PS_INPUT input)
 		discard;
 	}
 
+	float3 ddx = ddx_coarse(input.WorldPosition.xyz);
+	float3 ddy = ddy_coarse(input.WorldPosition.xyz);
+	float3 normal = -normalize(cross(ddx, ddy));
+
+	float3 directionalAmbientColor = max(0, Color::Ambient(SharedData::GetAmbient(normal)));
+#		if defined(IBL)
+	if (SharedData::iblSettings.EnableIBL) {
+		directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -normal);
+	}
+#		endif
+
 #		if defined(DEFERRED)
 	float3 viewPosition = mul(FrameBuffer::CameraView, float4(input.WorldPosition.xyz, 1)).xyz;
 	float2 screenUV = FrameBuffer::ViewToUV(viewPosition);
@@ -228,10 +239,6 @@ PS_OUTPUT main(PS_INPUT input)
 		diffuseColor *= ExponentialHeightFog::GetSunlightFogAttenuation(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz);
 	}
 #			endif
-
-	float3 ddx = ddx_coarse(input.WorldPosition.xyz);
-	float3 ddy = ddy_coarse(input.WorldPosition.xyz);
-	float3 normal = -normalize(cross(ddx, ddy));
 
 #			if defined(SNOW_COVER)
 	if (SharedData::snowCoverSettings.EnableSnowCover) {
@@ -256,13 +263,6 @@ PS_OUTPUT main(PS_INPUT input)
 			skylight *= saturate(input.WorldPosition.z - SharedData::GetWaterData(input.WorldPosition.xyz).w);
 		}
 		SnowCover::ApplySnowFoliageBase(baseColor.xyz, snowNormal, snowPosition, snowEnvMult, snowMult * skylight);
-	}
-#			endif
-
-	float3 directionalAmbientColor = max(0, Color::Ambient(SharedData::GetAmbient(normal)));
-#			if defined(IBL)
-	if (SharedData::iblSettings.EnableIBL) {
-		directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -normal);
 	}
 #			endif
 	diffuseColor += directionalAmbientColor;
@@ -294,10 +294,6 @@ PS_OUTPUT main(PS_INPUT input)
 	}
 #			endif
 
-	float3 ddx = ddx_coarse(input.WorldPosition.xyz);
-	float3 ddy = ddy_coarse(input.WorldPosition.xyz);
-	float3 normal = normalize(cross(ddx, ddy));
-
 #			if defined(SNOW_COVER)
 	if (SharedData::snowCoverSettings.EnableSnowCover) {
 		// A LOD billboard is a vertical quad, so the raw geometric normal has z == 0 and the angle mask rejects it outright.
@@ -321,13 +317,6 @@ PS_OUTPUT main(PS_INPUT input)
 			skylight *= saturate(input.WorldPosition.z - SharedData::GetWaterData(input.WorldPosition.xyz).w);
 		}
 		SnowCover::ApplySnowFoliageBase(baseColor.xyz, snowNormal, snowPosition, snowEnvMult, snowMult * skylight);
-	}
-#			endif
-
-	float3 directionalAmbientColor = Color::Ambient(SharedData::GetAmbient(normal));
-#			if defined(IBL)
-	if (SharedData::iblSettings.EnableIBL) {
-		directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -normal);
 	}
 #			endif
 	diffuseColor += directionalAmbientColor;
