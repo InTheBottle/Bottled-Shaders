@@ -31,7 +31,7 @@ public:
 		float ShadowContrast = 1.0f;
 		uint Enable = 1;
 		uint SampleCount = 1;
-		uint FilterShadowMask = 1;
+		uint FilterShadowMask = 0;
 		uint pad0[2];
 	};
 

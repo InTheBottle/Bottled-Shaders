@@ -1796,7 +1796,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float3 hairTint = 0;
 
 	if (SharedData::hairSpecularSettings.Enabled) {
-		hairTint = ColorManagement::SRGBToWorking(lerp(1, TintColor.xyz, input.Color.y));
+		hairTint = ColorManagement::SRGBToWorking(lerp(1, Color::EnbColorPow(TintColor.xyz), input.Color.y));
 		baseColor.xyz *= hairTint;
 		baseColor.xyz = Hair::Saturation(baseColor.xyz, SharedData::hairSpecularSettings.HairSaturation);
 		baseColor.xyz *= SharedData::hairSpecularSettings.BaseColorMult;
@@ -1831,6 +1831,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	sampledLodLandColor = TexLandLodBlend1Sampler.Sample(SampLandLodBlend1Sampler, input.TexCoord0.zw);
 	lodLandColor = ColorManagement::DiffuseToWorking(sampledLodLandColor);
 #		endif
+	lodLandColor.xyz = Color::EnbColorPow(lodLandColor.xyz);
 
 #		if defined(LOD_BLENDING)
 	lodLandColor.xyz = pow(abs(lodLandColor.xyz), SharedData::lodBlendingSettings.LODTerrainGamma) * SharedData::lodBlendingSettings.LODTerrainBrightness;
@@ -2031,9 +2032,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	} else {
 		if (projWeight > 0) {
 #			if defined(TRUE_PBR)
-			baseColor.xyz = Color::LinearSRGBToWorking(ProjectedUVParams2.xyz);
+			baseColor.xyz = Color::Albedo(Color::LinearSRGBToWorking(ProjectedUVParams2.xyz));
 #			else
-			baseColor.xyz = ColorManagement::SRGBToWorking(ProjectedUVParams2.xyz);
+			baseColor.xyz = Color::Albedo(ColorManagement::SRGBToWorking(ProjectedUVParams2.xyz));
 #			endif
 #			if defined(SNOW)
 			useSnowDecalSpecular = true;

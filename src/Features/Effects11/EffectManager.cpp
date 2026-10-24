@@ -243,7 +243,7 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterTimeOfDaySetting("ColorPow", "ENVIRONMENT", 1.0f, 1.0f, 2.2f, 0.01f, true);
 
 	settingManager.RegisterBoolSetting("DisableWrongSkyMath", "SKY", false, false);
-	settingManager.RegisterBoolSetting("FixBlackCrush", "SKY", false, false);
+	settingManager.RegisterBoolSetting("FixBlackCrush", "SKY", true, false);
 	settingManager.RegisterTimeOfDaySetting("GradientIntensity", "SKY", 1.0f, 0.0f, 30000.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("GradientDesaturation", "SKY", 0.0f, -1.0f, 1.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("GradientTopIntensity", "SKY", 1.0f, 0.0f, 30000.0f, 0.01f, true);

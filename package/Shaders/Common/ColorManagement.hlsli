@@ -34,12 +34,19 @@ namespace Color
 		return PBRMaterialIsGammaEncoded ? TransferFunctions::LinearToGamma22(linearColor) : linearColor;
 	}
 
-	float3 Albedo(float3 color)
+	/** @brief Applies the Effects 11 [ENVIRONMENT] ColorPow curve to a diffuse color while its preset is on. */
+	float3 EnbColorPow(float3 color)
 	{
 #	if defined(EFFECTS11)
 		if (SharedData::enbSettings.Enable)
 			color = pow(abs(color), SharedData::enbSettings.ColorPow);
 #	endif
+		return color;
+	}
+
+	float3 Albedo(float3 color)
+	{
+		color = EnbColorPow(color);
 #	if defined(TRUE_PBR)
 		color = LinearToPBRMaterial(color);
 #	endif
