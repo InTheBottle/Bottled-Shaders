@@ -592,8 +592,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	if (SharedData::exponentialHeightFogSettings.enabled)
 		dirLightColor *= ExponentialHeightFog::GetSunlightFogAttenuation(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz);
 #				endif
+	float3 cloudScatterColor = dirLightColor;
+	float cloudScatter = 0.0;
 	if (!SharedData::InInterior)
-		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz);
+		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, cloudScatter);
 #				if defined(WATER_EFFECTS)
 	dirLightColor *= WaterEffects::ComputeCaustics(SharedData::GetWaterData(input.WorldPosition.xyz), input.WorldPosition.xyz);
 #				endif
@@ -702,6 +704,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	if (SharedData::iblSettings.EnableIBL)
 		directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -normal);
 #				endif
+	directionalAmbientColor += ShadowSampling::GetCloudScatterLighting(cloudScatterColor, cloudScatter, normal);
 	directColor += indirectLobes.diffuse * directionalAmbientColor;
 	float3 outputAlbedo = indirectLobes.diffuse;
 	directionalAmbientColor *= outputAlbedo;
@@ -903,9 +906,12 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 	float4 shadowColor = TexShadowMaskSampler.Load(int3(input.HPosition.xy, 0));
 
+	float3 cloudScatterColor = dirLightColor;
+	float cloudScatter = 0.0;
+
 	// Apply world shadow (terrain shadows, cloud shadows) directly to light color
 	if (!SharedData::InInterior)
-		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz);
+		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, cloudScatter);
 #				if defined(WATER_EFFECTS)
 	dirLightColor *= WaterEffects::ComputeCaustics(SharedData::GetWaterData(input.WorldPosition.xyz), input.WorldPosition.xyz);
 #				endif
@@ -1072,6 +1078,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -normal);
 #				endif
 
+	directionalAmbientColor += ShadowSampling::GetCloudScatterLighting(cloudScatterColor, cloudScatter, normal);
 	directionalAmbientColor *= reflectionAlbedo * canopyVisibility;
 	diffuseColor += directionalAmbientColor;
 
@@ -1178,10 +1185,12 @@ PS_OUTPUT main(PS_INPUT input)
 	float4 shadowColor = TexShadowMaskSampler.Load(int3(input.HPosition.xy, 0));
 
 	float3 dirLightColor = Color::DirectionalLight(SharedData::DirLightColor.xyz);
+	float3 cloudScatterColor = dirLightColor;
+	float cloudScatter = 0.0;
 
 	// Apply world shadow (terrain shadows, cloud shadows) directly to light color
 	if (!SharedData::InInterior)
-		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz);
+		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, cloudScatter);
 #			if defined(WATER_EFFECTS)
 	dirLightColor *= WaterEffects::ComputeCaustics(SharedData::GetWaterData(input.WorldPosition.xyz), input.WorldPosition.xyz);
 #			endif
@@ -1278,6 +1287,8 @@ PS_OUTPUT main(PS_INPUT input)
 	if (SharedData::iblSettings.EnableIBL)
 		directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -normal);
 #			endif
+
+	directionalAmbientColor += ShadowSampling::GetCloudScatterLighting(cloudScatterColor, cloudScatter, normal);
 
 	float3 albedo = baseColor.xyz * vertexColor;
 

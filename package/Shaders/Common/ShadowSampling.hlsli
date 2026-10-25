@@ -47,8 +47,10 @@ namespace ShadowSampling
 		return SharedData::HasDirectionalShadows;
 	}
 
-	float GetWorldShadow(float3 positionWS, float3 offset)
+	float GetWorldShadow(float3 positionWS, float3 offset, out float cloudScatter)
 	{
+		cloudScatter = 0.0;
+
 		if (SharedData::InInterior || SharedData::HideSky || SharedData::InMapMenu)
 			return 1.0;
 
@@ -58,10 +60,29 @@ namespace ShadowSampling
 #endif
 
 #if defined(CLOUD_SHADOWS)
-		worldShadow *= CloudShadows::GetCloudShadowMult(positionWS, LinearSampler);
+		float cloudShadow = CloudShadows::GetCloudShadowMult(positionWS, LinearSampler);
+		cloudScatter = worldShadow * (1.0 - cloudShadow) * SharedData::cloudShadowsSettings.Scattering;
+		worldShadow *= cloudShadow;
 #endif
 
 		return worldShadow;
+	}
+
+	float GetWorldShadow(float3 positionWS, float3 offset)
+	{
+		float cloudScatter;
+		return GetWorldShadow(positionWS, offset, cloudScatter);
+	}
+
+	float3 GetCloudScatterLighting(float3 dirLightColor, float cloudScatter, float3 normal)
+	{
+		float3 deckDirection = normalize(SharedData::DirLightDirection.xyz + float3(0, 0, 1));
+		float wrap = saturate(dot(normal, deckDirection) * 0.5 + 0.5);
+		float3 scatterColor = dirLightColor * (cloudScatter * wrap * wrap * Color::BRDFScale);
+#if defined(TRUE_PBR)
+		scatterColor /= Color::PBRLightingCompensation;
+#endif
+		return scatterColor;
 	}
 
 	float Get3DFilteredShadow(float3 positionWS, float3 viewDirection, float2 screenPosition, out float surfaceShadow)
