@@ -2937,6 +2937,8 @@
     "feature.screen_space_gi.visual_il": "Visual - IL",
     "feature.screen_space_shadows.bilinear_threshold": "Bilinear Threshold",
     "feature.screen_space_shadows.bilinear_threshold_tooltip": "Depth threshold for edge detection during bilinear interpolation. Higher values smooth more aggressively across edges.",
+    "feature.screen_space_shadows.denoise": "Denoise",
+    "feature.screen_space_shadows.denoise_tooltip": "Depth-aware blur that removes the striping the ray march leaves on characters, hair and other thin occluders.",
     "feature.screen_space_shadows.description": "Screen Space Shadows enhances shadow quality by adding detailed contact shadows and improving shadow accuracy.\nThis technique adds fine-detail shadows that traditional shadow mapping might miss.",
     "feature.screen_space_shadows.enable": "Enable",
     "feature.screen_space_shadows.enable_tooltip": "Enable screen-space contact shadows from the sun/moon direction.",

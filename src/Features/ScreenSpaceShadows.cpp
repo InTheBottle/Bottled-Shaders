@@ -24,7 +24,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	SurfaceThickness,
 	BilinearThreshold,
 	ShadowContrast,
-	FilterShadowMask)
+	FilterShadowMask,
+	Denoise)
 
 void ScreenSpaceShadows::DrawSettings()
 {
@@ -48,6 +49,10 @@ void ScreenSpaceShadows::DrawSettings()
 		ImGui::SliderFloat(T(TKEY("shadow_contrast"), "Shadow Contrast"), &bendSettings.ShadowContrast, 0.0f, 4.0f);
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text("%s", T(TKEY("shadow_contrast_tooltip"), "Contrast boost for the shadow transition. Higher values produce harder shadow edges."));
+
+		ImGui::Checkbox(T(TKEY("denoise"), "Denoise"), (bool*)&bendSettings.Denoise);
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("denoise_tooltip"), "Depth-aware blur that removes the striping the ray march leaves on characters, hair and other thin occluders."));
 
 		ImGui::Checkbox(T(TKEY("filter_shadow_mask"), "Filter Shadow Mask"), (bool*)&bendSettings.FilterShadowMask);
 		if (auto _tt = Util::HoverTooltipWrapper())
@@ -75,6 +80,13 @@ void ScreenSpaceShadows::ClearShaderCache()
 		shadowMaskFilterCS = nullptr;
 	}
 	shadowMaskFilterCompileFailed = false;
+	for (auto*& shader : denoiseCS) {
+		if (shader) {
+			shader->Release();
+			shader = nullptr;
+		}
+	}
+	denoiseCompileFailed = false;
 }
 
 void ScreenSpaceShadows::OnShadowMaskRendered()
@@ -119,6 +131,60 @@ ID3D11ComputeShader* ScreenSpaceShadows::GetComputeRaymarch()
 		raymarchCS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\ScreenSpaceShadows\\RaymarchCS.hlsl", defines, "cs_5_0");
 	}
 	return raymarchCS;
+}
+
+ID3D11ComputeShader* ScreenSpaceShadows::GetDenoiseCS(bool a_crossRay)
+{
+	auto& shader = denoiseCS[a_crossRay ? 1 : 0];
+	if (!shader && !denoiseCompileFailed) {
+		std::vector<std::pair<const char*, const char*>> defines;
+		if (globals::features::terrainBlending.loaded)
+			defines.push_back({ "TERRAIN_BLENDING", "" });
+		if (a_crossRay)
+			defines.push_back({ "CROSS_RAY", "" });
+		shader = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\ScreenSpaceShadows\\DenoiseCS.hlsl", defines, "cs_5_0");
+		if (!shader) {
+			logger::error("[SSS] Failed to compile the denoise shader, denoising disabled");
+			denoiseCompileFailed = true;
+		}
+	}
+	return shader;
+}
+
+void ScreenSpaceShadows::DenoiseShadows(ID3D11ShaderResourceView* a_depthSRV, uint a_width, uint a_height)
+{
+	auto crossRayShader = GetDenoiseCS(true);
+	auto tileShader = GetDenoiseCS(false);
+	if (!crossRayShader || !tileShader || !denoiseTexture)
+		return;
+
+	TracyD3D11Zone(globals::state->tracyCtx, "SSS - Denoise");
+	globals::profiler->BeginPass("ScreenSpaceShadows::Denoise");
+
+	auto context = globals::d3d::context;
+	const uint groupsX = (a_width + 7) / 8;
+	const uint groupsY = (a_height + 7) / 8;
+
+	ID3D11UnorderedAccessView* uav = denoiseTexture->uav.get();
+	context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
+	ID3D11ShaderResourceView* views[2] = { a_depthSRV, screenSpaceShadowsTexture->srv.get() };
+	context->CSSetShaderResources(0, 2, views);
+	context->CSSetShader(crossRayShader, nullptr, 0);
+	context->Dispatch(groupsX, groupsY, 1);
+
+	views[1] = nullptr;
+	context->CSSetShaderResources(0, 2, views);
+	uav = screenSpaceShadowsTexture->uav.get();
+	context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
+	views[1] = denoiseTexture->srv.get();
+	context->CSSetShaderResources(0, 2, views);
+	context->CSSetShader(tileShader, nullptr, 0);
+	context->Dispatch(groupsX, groupsY, 1);
+
+	views[1] = nullptr;
+	context->CSSetShaderResources(0, 2, views);
+
+	globals::profiler->EndPass();
 }
 
 ID3D11ComputeShader* ScreenSpaceShadows::GetShadowMaskFilterCS()
@@ -336,8 +402,11 @@ void ScreenSpaceShadows::DrawShadows()
 
 	Dispatch(GetComputeRaymarch(), lightProjectionF.data(), InvTexSizeX, InvTexSizeY);
 
-	ID3D11ShaderResourceView* views[1]{ nullptr };
-	context->CSSetShaderResources(0, 1, views);
+	if (bendSettings.Denoise)
+		DenoiseShadows(depthSRV, (uint)viewportSize[0], (uint)viewportSize[1]);
+
+	ID3D11ShaderResourceView* views[2]{ nullptr, nullptr };
+	context->CSSetShaderResources(0, 2, views);
 
 	ID3D11UnorderedAccessView* uavs[1]{ nullptr };
 	context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
@@ -439,6 +508,10 @@ void ScreenSpaceShadows::SetupResources()
 		screenSpaceShadowsTexture = new Texture2D(texDesc, "SSS::ShadowTexture");
 		screenSpaceShadowsTexture->CreateSRV(srvDesc);
 		screenSpaceShadowsTexture->CreateUAV(uavDesc);
+
+		denoiseTexture = new Texture2D(texDesc, "SSS::DenoiseTexture");
+		denoiseTexture->CreateSRV(srvDesc);
+		denoiseTexture->CreateUAV(uavDesc);
 	}
 
 	shadowMaskFilterCB = new ConstantBuffer(ConstantBufferDesc<ShadowMaskFilterCB>(), "SSS::ShadowMaskFilterCB");
