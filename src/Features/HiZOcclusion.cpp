@@ -728,7 +728,7 @@ void HiZOcclusion::Prepass()
 	if (!cullingHookInstalled) {
 		if (status != HiZStatus::Unsupported) {
 			status = HiZStatus::Unsupported;
-			statusMessage = "Culling hook not installed (AE 1.6 only)";
+			statusMessage = "Culling hook not installed (unsupported runtime or call site already patched)";
 		}
 		return;
 	}
@@ -2015,7 +2015,7 @@ const char* HiZOcclusion::GetRenderModeName(uint32_t renderMode)
 bool HiZOcclusion::IsMainViewRegistration(uint32_t renderMode, const RE::BSGraphics::BSShaderAccumulator* accum)
 {
 	if (renderMode == 12) {
-		static REL::Relocation<RE::BSGraphics::BSShaderAccumulator**> worldShadowMaskAccumulator{ REL::ID(415008) };
+		static REL::Relocation<RE::BSGraphics::BSShaderAccumulator**> worldShadowMaskAccumulator{ REL::RelocationID(528063, 415008) };
 		return accum == *worldShadowMaskAccumulator;
 	}
 	return accum->camera == RE::Main::WorldRootCamera();

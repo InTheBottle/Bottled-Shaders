@@ -1349,9 +1349,9 @@ namespace Hooks
 		stl::write_thunk_call<BSLightingShader_SetupGeometry_GeometrySetupConstantPointLights>(REL::RelocationID(100565, 107300).address() + Util::VersionedRelocation::Select(0x523, 0xB0E, 0xB30));
 
 		// Hook engine primary object registration for HIZ Occlusion
-		if (REL::Module::IsAE() && !Util::VersionedRelocation::IsAtLeastAE1799()) {
-			const auto registerObjectCall = REL::RelocationID(0, 76558).address() + 0xD3;
-			if (*reinterpret_cast<const std::uint8_t*>(registerObjectCall) == 0xE8) {
+		if (!REL::Module::IsVR()) {
+			const auto registerObjectCall = REL::RelocationID(74809, 76558).address() + REL::Relocate(0x73, 0xD3);
+			if (Util::VersionedRelocation::IsCallTo(registerObjectCall, REL::RelocationID(99923, 106567).address())) {
 				logger::info("Hooking BSAccumProcess::RegisterObject for HiZ Occlusion");
 				stl::write_thunk_call<BSAccumProcess_RegisterObject>(registerObjectCall);
 				globals::features::hiZOcclusion.cullingHookInstalled = true;
@@ -1359,7 +1359,7 @@ namespace Hooks
 				logger::warn("HiZ Occlusion: unexpected code at BSAccumProcess::RegisterObject call site, early culling disabled");
 			}
 		} else {
-			logger::info("HiZ Occlusion: culling is only supported on AE before 1.7.99, skipping it on this game version");
+			logger::info("HiZ Occlusion: culling is not supported on Skyrim VR, skipping it");
 		}
 	}
 

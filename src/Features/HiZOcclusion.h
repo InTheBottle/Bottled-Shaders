@@ -101,7 +101,7 @@ struct HiZOcclusion : OverlayFeature
 	std::string statusMessage;           // Detailed error/info message for debugging
 	bool resourcesSetup = false;         // whether resources have been initialized
 	bool resourcesValid = false;         // whether current resources are valid and safe to use
-	bool cullingHookInstalled = false;   // set by Hooks; the registration hook only exists on AE before 1.7.99
+	bool cullingHookInstalled = false;   // set by Hooks; the registration hook is skipped on VR
 
 	// Per-frame tracking to verify build/draw order and availability
 	uint32_t lastBuiltFrame = 0;           // frame index when the pyramid was last built
