@@ -11,6 +11,7 @@
 #include "PostProcessing/Composite.h"
 #include "PostProcessing/DoF.h"
 #include "PostProcessing/HistogramAutoExposure.h"
+#include "PostProcessing/ImageSpaceModifiers.h"
 #include "PostProcessing/LUT.h"
 #include "PostProcessing/LensFlare.h"
 #include "PostProcessing/LocalExposure.h"
@@ -175,6 +176,7 @@ struct PostProcessing : Feature
 	struct ImageSpaceManager
 	{
 		RE::ImageSpaceData gameISData;
+		ImageSpaceModifiers::Frame modifiers;
 	};
 
 	std::unique_ptr<ImageSpaceManager> imageSpaceManager = std::make_unique<ImageSpaceManager>();

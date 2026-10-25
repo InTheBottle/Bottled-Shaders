@@ -324,6 +324,7 @@ void PostProcessing::DrawSettings()
 				imageSpaceManager->gameISData.modData.data[RE::ImageSpaceModData::kDOFRange],
 				imageSpaceManager->gameISData.modData.data[RE::ImageSpaceModData::kDOFMode]);
 			ImGui::Text(T("feature.post_processing.motion_blur_strength", "Motion Blur Strength: %.3f"), imageSpaceManager->gameISData.modData.data[RE::ImageSpaceModData::kMotionBlurStrength]);
+			ImGui::Text(T("feature.post_processing.active_modifiers", "Active Modifiers: %d"), static_cast<int>(imageSpaceManager->modifiers.contributions.size()));
 			ImGui::TreePop();
 		}
 		ImGui::TreePop();
@@ -804,7 +805,7 @@ void PostProcessing::UpdateVanillaEffects(bool active)
 		       (!inMainLoadingMenu || (!linear && !feature->DisableInMainLoadingMenu()));
 	};
 
-	skipVanillaDoF = replaces(FeaturePipelineIndex::DoF);
+	skipVanillaDoF = replaces(FeaturePipelineIndex::DoF) && !ImageSpaceModifiers::WantsDepthOfField();
 	skipVanillaBloom = globals::state->enablePShaders && globals::state->ShaderEnabled(RE::BSShader::Type::ImageSpace) &&
 	                   (replaces(FeaturePipelineIndex::PhysicalGlare) || replaces(FeaturePipelineIndex::CODBloom));
 	if (skipVanillaBloom) {
@@ -863,6 +864,7 @@ void PostProcessing::Prepass()
 	} else if (const auto& currentBaseData = iSRuntimeData.currentBaseData) {
 		imageSpaceManager->gameISData.baseData = *currentBaseData;
 	}
+	ImageSpaceModifiers::Snapshot(imageSpaceManager->modifiers);
 }
 
 void PostProcessing::PostPostLoad()
@@ -871,4 +873,5 @@ void PostProcessing::PostPostLoad()
 	stl::write_vfunc<0x6, VanillaDoF_IsActive>(RE::VTABLE_ImageSpaceEffectDepthOfField[0]);
 	stl::write_vfunc<0x1, VanillaBlur_Render>(RE::VTABLE_ImageSpaceEffectBlur[0]);
 	stl::write_vfunc<0x2, BSImagespaceShaderRefraction_SetupTechnique>(RE::VTABLE_BSImagespaceShaderRefraction[0]);
+	ImageSpaceModifiers::Install();
 }

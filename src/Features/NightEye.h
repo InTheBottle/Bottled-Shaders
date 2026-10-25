@@ -94,6 +94,7 @@ struct NightEye : Feature
 	virtual void RestoreDefaultSettings() override;
 	/** @brief Recompiles the Night Eye post-process shader. */
 	virtual void ClearShaderCache() override;
+	virtual void PostPostLoad() override;
 
 	/** @brief Grades the tone-mapped image in place while a Night Eye effect is active. */
 	void RenderPostProcess(RE::RENDER_TARGET a_output);
@@ -106,6 +107,8 @@ struct NightEye : Feature
 	bool IsEffectActive() const { return active.load(std::memory_order_acquire); }
 	/** @brief Returns the current Night Eye blend, from 0 when inactive to 1 when fully faded in. */
 	float GetActivation() const { return activation; }
+	bool ReplacesImageSpaceModifier(const RE::TESImageSpaceModifier* a_modifier) const;
+	bool IsVisionModifier(const RE::TESImageSpaceModifier* a_modifier) const;
 
 	Settings settings;
 
@@ -129,6 +132,9 @@ private:
 	ID3D11ShaderResourceView* GetEyeshineMask(RE::BSRenderPass* a_pass);
 
 	std::vector<const RE::EffectSetting*> effects;
+	std::vector<const RE::TESImageSpaceModifier*> imageSpaceModifiers;
+	std::vector<const RE::TESImageSpaceModifier*> visionModifiers;
+	std::atomic<bool> postProcessReady{ false };
 	std::atomic<bool> active{ false };
 	std::atomic<bool> queryPending{ false };
 	std::atomic<std::shared_ptr<const Affiliations>> affiliations;

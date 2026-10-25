@@ -72,6 +72,7 @@ struct ColorGrading : public PostProcessFeature
 		float3 gameCinematicBlend = { 0.f, 0.f, 0.f };
 		float gameFadeBlend = 1.0f;
 		float gameTintBlend = 0.f;
+		float gameModifierBlend = 1.0f;
 		bool useLog = true;
 		uint logType = 0;
 		bool invertLog = true;

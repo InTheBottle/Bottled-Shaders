@@ -51,6 +51,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	gameCinematicBlend,
 	gameFadeBlend,
 	gameTintBlend,
+	gameModifierBlend,
 	useLog,
 	logType,
 	invertLog,
@@ -607,6 +608,9 @@ void ColorGrading::DrawSettings()
 		ImGui::Text(T(TKEY("cinematic_blend_tooltip"), "Saturation, Brightness and Contrast."));
 	ImGui::SliderFloat(T(TKEY("fade_blend"), "Fade Blend"), &settings.gameFadeBlend, 0.f, 1.f, "%.3f");
 	ImGui::SliderFloat(T(TKEY("tint_blend"), "Tint Blend"), &settings.gameTintBlend, 0.f, 1.f, "%.3f");
+	ImGui::SliderFloat(T(TKEY("modifier_blend"), "Modifier Blend"), &settings.gameModifierBlend, 0.f, 1.f, "%.3f");
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::Text(T(TKEY("modifier_blend_tooltip"), "Saturation, brightness, contrast and tint from temporary imagespace modifiers such as spells, Night Eye and survival effects."));
 	ImGui::SeparatorText(T(TKEY("color_space_transform"), "Color Space Transform"));
 	{
 		auto& spaces = getAvailableColorSpaces();
@@ -666,6 +670,7 @@ void ColorGrading::LoadSettings(json& o_json)
 		settings = o_json;
 		auto& spaces = getAvailableColorSpaces();
 		settings.processColorSpace = std::clamp(settings.processColorSpace, 0, static_cast<int>(spaces.size()) - 1);
+		settings.gameModifierBlend = std::isfinite(settings.gameModifierBlend) ? std::clamp(settings.gameModifierBlend, 0.f, 1.f) : 1.f;
 
 		auto& tonemappers = TonemapperInfo::GetTonemappers();
 		if (auto it = std::ranges::find_if(tonemappers, [&](TonemapperInfo& x) { return settings.currentTonemapper == x.name; });
@@ -980,6 +985,8 @@ void ColorGrading::Draw(TextureInfo& inout_tex)
 	auto& pp = globals::features::postProcessing;
 
 	RE::ImageSpaceData imageSpaceData = pp.imageSpaceManager->gameISData;
+	const auto gameImageSpace = ImageSpaceModifiers::Resolve(imageSpaceData, pp.imageSpaceManager->modifiers,
+		{ .cinematic = settings.gameCinematicBlend, .tint = settings.gameTintBlend, .fade = settings.gameFadeBlend, .modifiers = settings.gameModifierBlend });
 	auto& hdr = globals::features::hdrDisplay;
 	const bool hdrEnabled = hdr.loaded && hdr.settings.enableHDR;
 	UpdateColorSpaceTransforms(hdrEnabled);
@@ -1022,9 +1029,9 @@ void ColorGrading::Draw(TextureInfo& inout_tex)
 		.shadowsOffset = settings.shadowsOffset,
 		.midtonesOffset = settings.midtonesOffset,
 		.highlightsOffset = settings.highlightsOffset,
-		.cinematic = float4{ std::lerp(1.f, imageSpaceData.baseData.cinematic.saturation, settings.gameCinematicBlend.x), std::lerp(1.f, imageSpaceData.baseData.cinematic.brightness, settings.gameCinematicBlend.y), std::lerp(1.f, imageSpaceData.baseData.cinematic.contrast, settings.gameCinematicBlend.z), imageSpaceData.baseAmount },
-		.fade = float4{ imageSpaceData.modData.data[RE::ImageSpaceModData::kFadeR], imageSpaceData.modData.data[RE::ImageSpaceModData::kFadeG], imageSpaceData.modData.data[RE::ImageSpaceModData::kFadeB], imageSpaceData.modData.data[RE::ImageSpaceModData::kFadeAmount] * settings.gameFadeBlend },
-		.tint = float4{ imageSpaceData.baseData.tint.color.red, imageSpaceData.baseData.tint.color.green, imageSpaceData.baseData.tint.color.blue, imageSpaceData.baseData.tint.amount * settings.gameTintBlend },
+		.cinematic = float4{ gameImageSpace.cinematic.x, gameImageSpace.cinematic.y, gameImageSpace.cinematic.z, imageSpaceData.baseAmount },
+		.fade = gameImageSpace.fade,
+		.tint = gameImageSpace.tint,
 		// Tonemappers and their gamut matrices require scene-linear input.
 		.logType = settings.useLog ? ((1u << settings.logType) | ((settings.invertLog || settings.enableTonemap) ? (1u << 3u) : 0u)) : 0u,
 		.skipLDR = settings.skipLDR,

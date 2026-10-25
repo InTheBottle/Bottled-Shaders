@@ -5,6 +5,7 @@
 #include <DDSTextureLoader.h>
 
 #include "Features/HDRDisplay.h"
+#include "Features/PostProcessing/ImageSpaceModifiers.h"
 #include "I18n/I18n.h"
 #include "Profiler.h"
 #include "State.h"
@@ -368,6 +369,7 @@ bool NightEye::PrepareShaders()
 	if (!newVertex || !newPixel) {
 		logger::error("[NightEye] Night Eye shader compilation failed; the previous shader is kept when available");
 		shaderCompileFailed = true;
+		postProcessReady.store(vertexShader && pixelShader && sampler && blendState && rasterizerState && depthStencilState, std::memory_order_release);
 		return vertexShader && pixelShader;
 	}
 
@@ -376,6 +378,7 @@ bool NightEye::PrepareShaders()
 	vertexShader = std::move(newVertex);
 	pixelShader = std::move(newPixel);
 	shaderCompileFailed = false;
+	postProcessReady.store(sampler && blendState && rasterizerState && depthStencilState, std::memory_order_release);
 	return true;
 }
 
@@ -428,6 +431,8 @@ bool NightEye::PrepareInput(ID3D11Texture2D* a_output, ID3D11RenderTargetView* a
 void NightEye::DataLoaded()
 {
 	effects.clear();
+	imageSpaceModifiers.clear();
+	visionModifiers.clear();
 	if (auto* handler = RE::TESDataHandler::GetSingleton()) {
 		struct EffectForm
 		{
@@ -441,11 +446,45 @@ void NightEye::DataLoaded()
 			if (auto* effect = handler->LookupForm<RE::EffectSetting>(form.localId, form.plugin))
 				effects.push_back(effect);
 		}
+
+		struct ModifierForm
+		{
+			RE::FormID localId;
+			std::string_view plugin;
+			bool vision;
+		};
+		constexpr std::array modifierForms{ ModifierForm{ 0x6B108, "Skyrim.esm", true },
+			ModifierForm{ 0x6B10A, "Skyrim.esm", true },
+			ModifierForm{ 0x6B10B, "Skyrim.esm", false },
+			ModifierForm{ 0x2C242C, "GodsAndWorship.esp", true } };
+		for (const auto& form : modifierForms) {
+			if (auto* modifier = handler->LookupForm<RE::TESImageSpaceModifier>(form.localId, form.plugin)) {
+				imageSpaceModifiers.push_back(modifier);
+				if (form.vision)
+					visionModifiers.push_back(modifier);
+			}
+		}
 	}
-	logger::info("[NightEye] Resolved {} listed Night Eye magic effects", effects.size());
+	logger::info("[NightEye] Resolved {} listed Night Eye magic effects and {} imagespace modifiers", effects.size(), imageSpaceModifiers.size());
 
 	LoadEyeshineMaskTable();
 	queryElapsed = kQueryInterval;
+}
+
+bool NightEye::ReplacesImageSpaceModifier(const RE::TESImageSpaceModifier* a_modifier) const
+{
+	return loaded && settings.Enabled && postProcessReady.load(std::memory_order_acquire) && a_modifier &&
+	       std::ranges::find(imageSpaceModifiers, a_modifier) != imageSpaceModifiers.end();
+}
+
+bool NightEye::IsVisionModifier(const RE::TESImageSpaceModifier* a_modifier) const
+{
+	return a_modifier && std::ranges::find(visionModifiers, a_modifier) != visionModifiers.end();
+}
+
+void NightEye::PostPostLoad()
+{
+	ImageSpaceModifiers::Install();
 }
 
 void NightEye::GameLoaded()
@@ -457,14 +496,16 @@ void NightEye::GameLoaded()
 void NightEye::QueryGame(bool a_actorVision)
 {
 	EffectVisitor visitor{ effects };
+	bool found = false;
 	auto* player = RE::PlayerCharacter::GetSingleton();
 	if (player && player->GetParentCell() && !globals::state->IsMainOrLoadingMenuOpen()) {
 		if (auto* target = player->GetMagicTarget())
 			target->VisitEffects(visitor);
+		found = visitor.found || ImageSpaceModifiers::IsNightEyeActive();
 	}
 
 	std::shared_ptr<const Affiliations> snapshot;
-	if (visitor.found && a_actorVision) {
+	if (found && a_actorVision) {
 		if (auto* lists = RE::ProcessLists::GetSingleton()) {
 			auto values = std::make_shared<Affiliations>();
 			const auto count = std::min<std::uint32_t>(lists->highActorHandles.size(), kMaximumActorHandles);
@@ -485,7 +526,7 @@ void NightEye::QueryGame(bool a_actorVision)
 	}
 
 	affiliations.store(std::move(snapshot), std::memory_order_release);
-	active.store(visitor.found, std::memory_order_release);
+	active.store(found, std::memory_order_release);
 	queryPending.store(false, std::memory_order_release);
 }
 
