@@ -26,7 +26,7 @@ public:
 
 	struct BendSettings
 	{
-		float SurfaceThickness = 0.02f;
+		float SurfaceThickness = 0.01f;
 		float BilinearThreshold = 0.02f;
 		float ShadowContrast = 1.0f;
 		uint Enable = 1;

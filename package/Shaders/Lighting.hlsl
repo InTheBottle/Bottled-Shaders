@@ -2771,10 +2771,23 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		endif
 		{
 			float2 screenSpaceShadows = ScreenSpaceShadows::GetScreenSpaceShadows(input.Position.xyz, screenUV, screenNoise);
+#		if defined(SKINNED) || defined(SKIN) || defined(HAIR)
+			screenSpaceShadows.x = lerp(1.0, screenSpaceShadows.x, saturate(4.0 * dirLightAngle));
+#		endif
 			if (dirLightAngle >= 0.0)
 				dirDetailedShadow *= screenSpaceShadows.x;
 			dirTransmissionContactShadow = dirLightAngle >= 0.0 ? screenSpaceShadows.x : screenSpaceShadows.y;
 		}
+	}
+#	endif
+
+#	if defined(SCREEN_SPACE_SHADOWS) && !defined(DEFERRED) && defined(HAIR)
+	if (!SharedData::InInterior && dirLightAngle > 0.0) {
+		const float sceneDepth = SharedData::GetScreenDepth(SharedData::DepthTexture.Load(int3(input.Position.xy, 0)).x);
+		const float fragmentDepth = SharedData::GetScreenDepth(input.Position.z);
+		const float surfaceMatch = saturate(1.0 - abs(fragmentDepth - sceneDepth) / max(0.02 * sceneDepth, 1.0));
+		const float screenSpaceShadow = ScreenSpaceShadows::GetScreenSpaceShadow(input.Position.xyz, screenUV, screenNoise);
+		dirDetailedShadow *= lerp(1.0, screenSpaceShadow, saturate(4.0 * dirLightAngle) * surfaceMatch);
 	}
 #	endif
 
