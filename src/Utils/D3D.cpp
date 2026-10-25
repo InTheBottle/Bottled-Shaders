@@ -321,9 +321,7 @@ namespace Util
 		std::optional<ShaderDDC::Entry> diskEntry;
 		if (globals::shaderCache->IsDiskCache() && IsCacheableTarget(ProgramType)) {
 			diskEntry.emplace(FilePath, L"Data/Shaders", GetCompileShaderCacheGroup(FilePath), macros.data(), Program, ProgramType, flags, 0u, L".cso");
-			winrt::com_ptr<ID3DBlob> cachedBlob;
-			cachedBlob.attach(diskEntry->Load());
-			if (cachedBlob) {
+			if (auto cachedBlob = diskEntry->Load()) {
 				ID3D11DeviceChild* shader = nullptr;
 				if (SUCCEEDED(CreateShaderObject(device, ProgramType, cachedBlob.get(), &shader))) {
 					logger::debug("Loaded {} from {}", str, Util::WStringToString(diskEntry->GetPath()));
