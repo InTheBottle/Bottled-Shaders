@@ -102,28 +102,39 @@ namespace SnowCover
 		return distMult * saturate(mult + weatherMult) * smoothstep(SharedData::snowCoverSettings.minAngle, SharedData::snowCoverSettings.maxAngle, worldNormal.z);
 	}
 
+	bool AffectsFoliageTint()
+	{
+#	if defined(GRASS)
+		return SharedData::snowCoverSettings.AffectGrassTint;
+#	else
+		return SharedData::snowCoverSettings.AffectTreeTint;
+#	endif
+	}
+
+	float2 GetFoliageSnowUV(float3 worldNormal, float3 p)
+	{
+		return frac(SharedData::snowCoverSettings.UVScale * (p.xy + worldNormal.xy) / 100);
+	}
+
+	float3 SampleFoliageSnowAlbedo(float2 uv)
+	{
+		float3 snowSample = SnowAlbedo.Sample(SampColorSampler, uv).rgb;
+#	if defined(TRUE_PBR)
+		return Color::Albedo(Color::LinearSRGBToWorking(snowSample)) * SharedData::snowCoverSettings.MainTint.rgb;
+#	else
+		return Color::Albedo(ColorManagement::DiffuseToWorking(TransferFunctions::LinearToGamma22(snowSample))) * SharedData::snowCoverSettings.MainTint.rgb * Color::PBRLightingScale;
+#	endif
+	}
+
 	void ApplySnowFoliageBase(inout float3 color, float3 worldNormal, float3 p, float env_mult, float mult)
 	{
 		[branch] if (mult > 0)
 			mult *= 1 - GetFireMelt(p);
-#	if defined(GRASS)
-		if (SharedData::snowCoverSettings.AffectGrassTint) {
-#	else
-		if (SharedData::snowCoverSettings.AffectTreeTint) {
-#	endif
+		if (AffectsFoliageTint())
 			ApplyFoliageColor(color, env_mult);
-		}
 		if (mult < 0.01)
 			return;
-		float2 uv = frac(SharedData::snowCoverSettings.UVScale * (p.xy + worldNormal.xy) / 100);
-		float3 snowSample = SnowAlbedo.Sample(SampColorSampler, uv).rgb;
-#	if defined(TRUE_PBR)
-		float3 diffuse = Color::Albedo(Color::LinearSRGBToWorking(snowSample)) * SharedData::snowCoverSettings.MainTint.rgb * Color::PBRLightingScale;
-#	else
-		float3 diffuse = Color::Albedo(ColorManagement::DiffuseToWorking(TransferFunctions::LinearToGamma22(snowSample))) * SharedData::snowCoverSettings.MainTint.rgb * Color::PBRLightingScale;
-#	endif
-
-		color = lerp(color, diffuse, mult);
+		color = lerp(color, SampleFoliageSnowAlbedo(GetFoliageSnowUV(worldNormal, p)), mult);
 	}
 
 	void ApplySnowFoliage(inout float3 color, float3 worldNormal, float3 p, float skylight, float viewDist, float distMult)
@@ -132,6 +143,31 @@ namespace SnowCover
 		float mult = GetFoliageSnowBase(worldNormal, p, viewDist, distMult, env_mult) * skylight;
 		ApplySnowFoliageBase(color, worldNormal, p, env_mult, mult);
 	}
+
+#	if defined(TRUE_PBR)
+	void ApplySnowFoliagePBR(inout MaterialProperties material, float3 worldNormal, float3 p, float skylight, float viewDist)
+	{
+		float env_mult;
+		float mult = GetFoliageSnowBase(worldNormal, p, viewDist, 1, env_mult) * skylight;
+		[branch] if (mult > 0)
+			mult *= 1 - GetFireMelt(p);
+		if (AffectsFoliageTint()) {
+			ApplyFoliageColor(material.BaseColor, env_mult);
+			ApplyFoliageColor(material.SubsurfaceColor, env_mult);
+		}
+		if (mult < 0.01)
+			return;
+		float2 uv = GetFoliageSnowUV(worldNormal, p);
+		float3 albedo = SampleFoliageSnowAlbedo(uv);
+		float4 rmaos = SnowRmaos.Sample(SampColorSampler, uv);
+		material.BaseColor = lerp(material.BaseColor, albedo, mult);
+		material.SubsurfaceColor = lerp(material.SubsurfaceColor, albedo, mult);
+		material.Roughness = lerp(material.Roughness, rmaos.x, mult);
+		material.Metallic = lerp(material.Metallic, rmaos.y, mult);
+		material.F0 = lerp(material.F0, rmaos.w * SharedData::snowCoverSettings.mainSpec, mult);
+		material.AO = lerp(material.AO, rmaos.z, mult * 0.5);
+	}
+#	endif
 
 #	if !defined(BASIC_SNOW_COVER)
 	float ApplySnowBase(float3 worldNormal, inout float2 uv, out bool alt, float disp, float3 p, float skylight, float waterDist, float viewDist, float lift)
