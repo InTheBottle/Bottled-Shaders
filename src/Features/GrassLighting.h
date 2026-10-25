@@ -11,7 +11,7 @@ public:
 	virtual inline std::string_view GetShaderDefineName() override { return "GRASS_LIGHTING"; }
 	/** @brief Returns true only for Grass shader type. */
 	virtual bool HasShaderDefine(RE::BSShader::Type shaderType) override { return shaderType == RE::BSShader::Type::Grass; };
-	virtual std::string_view GetCategory() const override { return FeatureCategories::kGrassAndFoliage; }
+	virtual std::string_view GetCategory() const override { return FeatureCategories::kGrass; }
 
 	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
 	{
@@ -34,23 +34,17 @@ public:
 		// Only consumed by the GRASS_OPTIMIZATIONS permutation, for grass drawn with an LOD mesh.
 		float MidLODBrightness = 1.0f;
 		float FarLODBrightness = 1.0f;
-
-		float VertexAOStrength = 1.0f;
-		float SoftLighting = 0.4f;
-		float RootOcclusion = 0.5f;
-		float TipScattering = 0.5f;
-
-		float NormalStrength = 1.0f;
-		float SpecularAAStrength = 1.0f;
-		uint EnableWrappedLighting = false;
-		float SphereNormalStrength = 3.0f;
-
-		float ClassicScattering = 0.25f;
-		float TransmissionSaturation = 1.4f;
-		float AmbientFloor = 0.3f;
-		float AmbientSkyBias = 1.0f;
+		float PBRWrappedLightingAmount = 0.5f;
+		float SubsurfaceBalance = 1.0f;
+		float CanopyOcclusion = 0.5f;
+		float ClumpShading = 0.5f;
 	};
 	STATIC_ASSERT_ALIGNAS_16(Settings);
+	static_assert(sizeof(Settings) == 48);
+	static_assert(offsetof(Settings, PBRWrappedLightingAmount) == 32);
+	static_assert(offsetof(Settings, SubsurfaceBalance) == 36);
+	static_assert(offsetof(Settings, CanopyOcclusion) == 40);
+	static_assert(offsetof(Settings, ClumpShading) == 44);
 
 	Settings settings;
 
@@ -60,5 +54,4 @@ public:
 	virtual void LoadSettings(json& o_json) override;
 	virtual void SaveSettings(json& o_json) override;
 	virtual void RestoreDefaultSettings() override;
-
 };

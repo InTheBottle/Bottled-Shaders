@@ -59,21 +59,10 @@ namespace SharedData
 		// Only read by the GRASS_OPTIMIZATIONS permutation, for grass drawn with an LOD mesh.
 		float MidLODBrightness;
 		float FarLODBrightness;
-
-		float VertexAOStrength;
-		float SoftLighting;
-		float RootOcclusion;
-		float TipScattering;
-
-		float NormalStrength;
-		float SpecularAAStrength;
-		bool EnableWrappedLighting;
-		float SphereNormalStrength;
-
-		float ClassicScattering;
-		float TransmissionSaturation;
-		float AmbientFloor;
-		float AmbientSkyBias;
+		float PBRWrappedLightingAmount;
+		float SubsurfaceBalance;
+		float CanopyOcclusion;
+		float ClumpShading;
 	};
 
 	struct CPMSettings
@@ -144,7 +133,6 @@ namespace SharedData
 		float MaxRainWetness;
 		float MaxPuddleWetness;
 		float MaxShoreWetness;
-		float GrassWetnessRoughness;
 
 		uint ShoreRange;
 		float PuddleRadius;
@@ -174,6 +162,7 @@ namespace SharedData
 		float RippleRadius;
 		float RippleBreadth;
 		float RippleLifetimeRcp;
+		float pad0;
 	};
 
 	struct SkylightingSettings
@@ -508,15 +497,6 @@ namespace SharedData
 		uint pad;
 	};
 
-	struct FoliageLightingSettings
-	{
-		uint EnableFoliageScattering;
-		uint EnableFoliageAmbientBoost;
-		uint EnableFoliageAmbientFlip;
-		float FoliageAmbientAmount;
-		uint EnableGrassScattering;
-		uint3 pad;
-	};
 
 	struct SkinData
 	{
@@ -533,7 +513,6 @@ namespace SharedData
 	{
 		uint Enable;
 		uint EnableGGX;
-		uint EnableGGXOnGrass;
 		uint EnableDynamicCubemapsConversion;
 		uint EnableEyeSpecialHandling;
 		float RoughnessMultiplier;
@@ -542,7 +521,7 @@ namespace SharedData
 		float MinF0;
 		float CubemapToF0Multiplier;
 		float ComplexMaterialF0Multiplier;
-		float pad;
+		float2 pad;
 	};
 
 	struct SnowCoverSettings
@@ -635,7 +614,7 @@ namespace SharedData
 		float RefractionFactor;
 		float MotionBluriness;
 		float Brightness;
-		float pad0;
+		float Visibility;
 	};
 
 	struct NightEyeSettings
@@ -668,7 +647,6 @@ namespace SharedData
 		TerrainBlendingSettings terrainBlendingSettings;
 		ExponentialHeightFogSettings exponentialHeightFogSettings;
 		TruePBRSettings truePBRSettings;
-		FoliageLightingSettings foliageLightingSettings;
 		SkinData skinData;
 		VanillaFresnelSettings vanillaFresnelSettings;
 		SnowCoverSettings snowCoverSettings;

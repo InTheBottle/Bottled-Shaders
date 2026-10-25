@@ -19,7 +19,7 @@ namespace ShaderDDC
 			uint32_t a_flags, uint32_t a_stripFlags, std::wstring_view a_extension);
 
 		[[nodiscard]] const std::wstring& GetPath() const { return path; }
-		[[nodiscard]] ID3DBlob* Load() const;
+		[[nodiscard]] winrt::com_ptr<ID3DBlob> Load() const;
 		bool Store(ID3DBlob* a_blob) const;
 
 	private:

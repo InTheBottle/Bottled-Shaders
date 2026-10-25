@@ -900,6 +900,8 @@ std::string RenderDoc::BuildAutomaticCaptureComments(const std::string& userComm
 
 	// Plugin version
 	auto pluginVersion = Util::GetFormattedVersion(Plugin::VERSION);
+	if (Plugin::BUILD_DESCRIBE != std::format("v{}", pluginVersion))
+		pluginVersion += " " + Util::GetBuildLabel();
 	comments += std::format("{} {}\n", Plugin::DISPLAY_NAME, pluginVersion);
 
 	// Enabled features

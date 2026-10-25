@@ -15,18 +15,10 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	ComplexGrassThreshold,
 	MidLODBrightness,
 	FarLODBrightness,
-	VertexAOStrength,
-	SoftLighting,
-	RootOcclusion,
-	TipScattering,
-	NormalStrength,
-	SpecularAAStrength,
-	EnableWrappedLighting,
-	SphereNormalStrength,
-	ClassicScattering,
-	TransmissionSaturation,
-	AmbientFloor,
-	AmbientSkyBias)
+	PBRWrappedLightingAmount,
+	SubsurfaceBalance,
+	CanopyOcclusion,
+	ClumpShading)
 
 void GrassLighting::DrawSettings()
 {
@@ -40,16 +32,6 @@ void GrassLighting::DrawSettings()
 		ImGui::SliderFloat(T(TKEY("specular_strength"), "Specular Strength"), &settings.SpecularStrength, 0.0f, 1.0f);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T(TKEY("specular_strength_tooltip"), "Specular highlight strength."));
-		}
-
-		ImGui::SliderFloat(T(TKEY("normal_strength"), "Normal Strength"), &settings.NormalStrength, 0.0f, 2.0f, "%.2f");
-		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("normal_strength_tooltip"), "Scales the tangent-space normal map. Below 1 flattens harsh normals, above 1 deepens them."));
-		}
-
-		ImGui::SliderFloat(T(TKEY("specular_aa"), "Specular Anti-Aliasing"), &settings.SpecularAAStrength, 0.0f, 2.0f, "%.2f");
-		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("specular_aa_tooltip"), "Widens roughness where the normal varies quickly across a pixel, removing shimmering highlights on distant grass."));
 		}
 
 		ImGui::Spacing();
@@ -68,36 +50,32 @@ void GrassLighting::DrawSettings()
 	if (ImGui::TreeNodeEx(T(TKEY("effects"), "Effects"), ImGuiTreeNodeFlags_DefaultOpen)) {
 		ImGui::SliderFloat(T(TKEY("sss_amount"), "SSS Amount"), &settings.SubsurfaceScatteringAmount, 0.0f, 1.0f);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("sss_tooltip"),
-								  "Subsurface Scattering (SSS) amount. "
-								  "Soft lighting controls how evenly lit an object is. "
-								  "Back lighting illuminates the back face of an object. "
-								  "Combined to model the transport of light through the surface."));
+			ImGui::TextWrapped("%s", T(TKEY("sss_tooltip"), "Subsurface scattering strength for non-PBR grass. Zero disables it. SSS Balance distributes the subsurface light between the two sides without changing its total. PBR subsurface scattering is controlled by the material and its texture."));
+		}
+		ImGui::SliderFloat(T(TKEY("sss_balance"), "SSS Balance"), &settings.SubsurfaceBalance, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::TextWrapped("%s", T(TKEY("sss_balance_tooltip"), "Share of non-PBR subsurface light sent to the side of a blade facing away from the light, shining through; the lit side receives the rest. 0 keeps it on the lit side, 0.5 splits it equally and 1 (default) sends all of it through. Does not change reflected light or the total subsurface strength. PBR balance is controlled by the material."));
 		}
 
-		ImGui::SliderFloat(T(TKEY("tip_scattering"), "Tip Scattering"), &settings.TipScattering, 0.0f, 1.0f, "%.2f");
+		ImGui::SliderFloat(T(TKEY("canopy_occlusion"), "Canopy Occlusion"), &settings.CanopyOcclusion, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("tip_scattering_tooltip"), "Biases subsurface scattering toward the thin blade tips and away from the thicker base."));
+			ImGui::TextWrapped("%s", T(TKEY("canopy_occlusion_tooltip"), "Darkens grass toward the root of each plant, where the blades above block sunlight and sky. Zero disables it; 1 leaves roots almost unlit. Applies to PBR and non-PBR grass."));
 		}
-
-		ImGui::SliderFloat(T(TKEY("classic_scattering"), "Classic Scattering"), &settings.ClassicScattering, 0.0f, 2.0f, "%.2f");
+		ImGui::SliderFloat(T(TKEY("clump_shading"), "Clump Shading"), &settings.ClumpShading, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("classic_scattering_tooltip"),
-								  "Restores the wrapped scattering lobe used before deferred rendering. "
-								  "Fills the terminator with tinted, light-through-the-blade colour instead of letting grass fall to flat ambient, "
-								  "which is what gave older versions their lush look. "
-								  "Set to 0 for the purely view-dependent transmission model."));
-		}
-
-		ImGui::SliderFloat(T(TKEY("transmission_saturation"), "Transmission Saturation"), &settings.TransmissionSaturation, 1.0f, 2.5f, "%.2f");
-		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("transmission_saturation_tooltip"),
-								  "How much more saturated light passing through a blade is than light reflected off it. "
-								  "Raise for more vivid backlit grass; 1.0 tints scattering with the plain surface colour."));
+			ImGui::TextWrapped("%s", T(TKEY("clump_shading_tooltip"), "Rounds grass lighting toward the plant's dome shape. Basic and PBR grass also receive extra shadowing on the side facing away from a light. Complex grass keeps its normal-map detail without that extra shadowing. Does not affect meshes with authored sphere normals. Zero disables it."));
 		}
 
 		ImGui::Spacing();
 		ImGui::Spacing();
+		ImGui::TreePop();
+	}
+
+	if (ImGui::TreeNodeEx(T(TKEY("pbr_grass"), "PBR Grass"), ImGuiTreeNodeFlags_DefaultOpen)) {
+		ImGui::SliderFloat(T(TKEY("pbr_wrapped_lighting_amount"), "PBR Wrapped Lighting Amount"), &settings.PBRWrappedLightingAmount, 0.0f, 1.0f);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::TextWrapped("%s", T(TKEY("pbr_wrapped_lighting_tooltip"), "Softens lighting on PBR grass by overlapping the lit-side and shine-through lighting where a blade turns edge-on to the light. Zero uses plain Lambert lighting, which can leave normal-mapped streaks nearly black under a high sun. Default 0.5. Each side keeps its total energy."));
+		}
 		ImGui::TreePop();
 	}
 
@@ -111,57 +89,6 @@ void GrassLighting::DrawSettings()
 								  "This option will treat their grass settings like non-complex grass. "
 								  "This was the default in Bottled Shaders < 0.7.0"));
 		}
-
-		ImGui::Spacing();
-		ImGui::SliderFloat(T(TKEY("soft_lighting"), "Soft Lighting"), &settings.SoftLighting, 0.0f, 1.0f, "%.2f");
-		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("soft_lighting_tooltip"), "Wraps direct light around the blade, strongest at the tips. Softens the hard terminator on flat grass cards."));
-		}
-
-		ImGui::Checkbox(T(TKEY("enable_wrapped_lighting"), "Legacy Wrapped Lighting"), (bool*)&settings.EnableWrappedLighting);
-		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("enable_wrapped_lighting_tooltip"),
-								  "Restores the older, stronger wrapped lighting model, on both complex and non-complex grass. "
-								  "Light wraps a fixed amount past the terminator everywhere above the blade root, rather than ramping up to the tip. "
-								  "Useful for grass that reads as too dark at midday with the sun overhead. Takes the greater of this and Soft Lighting."));
-		}
-
-		ImGui::SliderFloat(T(TKEY("sphere_normal"), "Rounded Clump Normals"), &settings.SphereNormalStrength, 0.0f, 3.0f, "%.2f");
-		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("sphere_normal_tooltip"),
-								  "Bends each blade's normal outward from the base of its clump, ramping in toward the tips. "
-								  "Makes a clump light as a rounded volume rather than a set of flat cards, and breaks up the uniform "
-								  "shading that makes grass read as a flat plate. Set to 0 to use the raw mesh normals."));
-		}
-
-		ImGui::SliderFloat(T(TKEY("root_occlusion"), "Root Occlusion"), &settings.RootOcclusion, 0.0f, 1.0f, "%.2f");
-		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("root_occlusion_tooltip"), "Darkens ambient light toward the base of each blade, grounding grass against the terrain."));
-		}
-
-		ImGui::SliderFloat(T(TKEY("vertex_occlusion"), "Vertex Occlusion"), &settings.VertexAOStrength, 0.0f, 1.0f, "%.2f");
-		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("vertex_occlusion_tooltip"), "How much of the mesh vertex colour darkening is applied as ambient occlusion."));
-		}
-
-		ImGui::SliderFloat(T(TKEY("sky_bias"), "Ambient Sky Bias"), &settings.AmbientSkyBias, 0.0f, 1.0f, "%.2f");
-		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("sky_bias_tooltip"),
-								  "Treats grass as thin, sky-exposed foliage when gathering ambient light, so the back of a blade is not "
-								  "lit as though it faced the ground. Without this, the engine flips the normal on every back face and the "
-								  "ambient probe reconstructs to black there, which is the main cause of dark speckles at grazing angles "
-								  "and over distance. Matches what Skylighting already does. Lower only if grass looks too flat."));
-		}
-
-		ImGui::SliderFloat(T(TKEY("ambient_floor"), "Ambient Floor"), &settings.AmbientFloor, 0.0f, 1.0f, "%.2f");
-		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("ambient_floor_tooltip"),
-								  "Least ambient light a blade can receive, as a fraction of the average ambient. "
-								  "The ambient probe is a low-order spherical harmonic whose reconstruction goes negative for normals "
-								  "facing away from the sky; clamping that to zero turns any such blade pure black, which reads as dark "
-								  "speckles at grazing angles and over distance. Raise if grass still speckles, lower for deeper contrast."));
-		}
-
 		ImGui::Spacing();
 		ImGui::SliderFloat(T(TKEY("brightness"), "Brightness"), &settings.BasicGrassBrightness, 0.0f, 1.0f);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -190,6 +117,10 @@ void GrassLighting::DrawSettings()
 void GrassLighting::LoadSettings(json& o_json)
 {
 	settings = o_json;
+	settings.SubsurfaceScatteringAmount = std::clamp(settings.SubsurfaceScatteringAmount, 0.0f, 1.0f);
+	settings.SubsurfaceBalance = std::clamp(settings.SubsurfaceBalance, 0.0f, 1.0f);
+	settings.CanopyOcclusion = std::clamp(settings.CanopyOcclusion, 0.0f, 1.0f);
+	settings.ClumpShading = std::clamp(settings.ClumpShading, 0.0f, 1.0f);
 }
 
 void GrassLighting::SaveSettings(json& o_json)

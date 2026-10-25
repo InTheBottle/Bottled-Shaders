@@ -11,7 +11,6 @@
 #include "Features/ExponentialHeightFog.h"
 #include "Features/ExtendedMaterials.h"
 #include "Features/ExtendedTranslucency.h"
-#include "Features/FoliageLighting.h"
 #include "Features/FootstepParticles.h"
 #include "Features/FurShells.h"
 #include "Features/GrassCollision.h"
@@ -210,7 +209,6 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 {
 	static std::vector<Feature*> features = {
 		&globals::features::truePBR,
-		&globals::features::foliageLighting,
 		&globals::features::volumetricShadows,
 		&globals::features::grassLighting,
 		&globals::features::grassCollision,

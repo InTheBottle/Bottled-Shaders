@@ -32,29 +32,44 @@ namespace
 	/** @brief Draws the bottle logo followed by the product title on one line. */
 	TitleRowMetrics RenderTitleRow()
 	{
-		auto title = std::format("{} {}", Plugin::DISPLAY_NAME, Util::GetFormattedVersion(Plugin::VERSION));
-
-		MenuFonts::FontRoleGuard titleFont(Menu::FontRole::Title);
-
-		const float fontSize = ImGui::GetFontSize();
-		const float logoHeight = fontSize * kLogoHeightRatio;
-		const float logoWidth = logoHeight * Util::Icons::kBottleAspect;
-		const float gap = fontSize * kLogoTextGapRatio;
-		const float rowHeight = ImMax(logoHeight, ImGui::GetTextLineHeight());
+		const auto versionStr = Util::GetFormattedVersion(Plugin::VERSION);
+		const auto title = std::format("{} {}", Plugin::DISPLAY_NAME, versionStr);
+		const bool showBuildTag = Plugin::BUILD_DESCRIBE != std::format("v{}", versionStr);
 
 		const ImVec2 origin = ImGui::GetCursorScreenPos();
-		Util::Icons::DrawBottle(ImGui::GetWindowDrawList(),
-			ImVec2(origin.x, origin.y + (rowHeight - logoHeight) * 0.5f),
-			logoHeight,
-			ImGui::GetColorU32(ImGuiCol_Text));
+		TitleRowMetrics metrics{};
+		{
+			MenuFonts::FontRoleGuard titleFont(Menu::FontRole::Title);
 
-		ImGui::SetCursorScreenPos(ImVec2(origin.x + logoWidth + gap, origin.y + (rowHeight - ImGui::GetTextLineHeight()) * 0.5f));
-		ImGui::TextUnformatted(title.c_str());
+			const float fontSize = ImGui::GetFontSize();
+			const float logoHeight = fontSize * kLogoHeightRatio;
+			const float logoWidth = logoHeight * Util::Icons::kBottleAspect;
+			const float gap = fontSize * kLogoTextGapRatio;
+			const float rowHeight = ImMax(logoHeight, ImGui::GetTextLineHeight());
 
-		ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + rowHeight));
+			Util::Icons::DrawBottle(ImGui::GetWindowDrawList(),
+				ImVec2(origin.x, origin.y + (rowHeight - logoHeight) * 0.5f),
+				logoHeight,
+				ImGui::GetColorU32(ImGuiCol_Text));
+
+			ImGui::SetCursorScreenPos(ImVec2(origin.x + logoWidth + gap, origin.y + (rowHeight - ImGui::GetTextLineHeight()) * 0.5f));
+			ImGui::TextUnformatted(title.c_str());
+
+			metrics = { logoWidth + gap + ImGui::CalcTextSize(title.c_str()).x, rowHeight };
+		}
+
+		if (showBuildTag) {
+			const auto buildTag = Util::GetBuildLabel();
+			const float spacing = ImGui::GetStyle().ItemSpacing.x;
+			ImGui::SetCursorScreenPos(ImVec2(origin.x + metrics.width + spacing, origin.y + (metrics.height - ImGui::GetTextLineHeight()) * 0.5f));
+			ImGui::TextDisabled("%s", buildTag.c_str());
+			metrics.width += spacing + ImGui::CalcTextSize(buildTag.c_str()).x;
+		}
+
+		ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + metrics.height));
 		ImGui::Dummy(ImVec2(0.0f, 0.0f));
 
-		return { logoWidth + gap + ImGui::CalcTextSize(title.c_str()).x, rowHeight };
+		return metrics;
 	}
 
 	float IconLabelButtonWidth(const char* label)

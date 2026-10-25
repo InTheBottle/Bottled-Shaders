@@ -237,9 +237,10 @@ namespace Skylighting
 	sh2 SampleSpecular(sh2 skylightingSH, float3 positionMS)
 	{
 		const float3 clampedMS = ClampToArrayHeight(positionMS);
-		sh2 result = skylightingSH;
-		[branch] if (clampedMS.z != positionMS.z) result = SampleNoBias(clampedMS);
-		return result;
+		sh2 specularSH = skylightingSH;
+		[branch] if (clampedMS.z != positionMS.z)
+			specularSH = SampleNoBias(clampedMS);
+		return specularSH;
 	}
 #endif
 }

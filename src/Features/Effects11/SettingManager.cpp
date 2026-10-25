@@ -1,5 +1,6 @@
 #include "SettingManager.h"
 
+#include "IniSerialization.h"
 #include "PresetManager.h"
 #include "WeatherManager.h"
 #include <Windows.h>
@@ -378,14 +379,14 @@ void SettingManager::SetValueInternal(uint32_t id, const T& value)
 		// Update all weather IDs sharing the same file
 		auto& weatherManager = WeatherManager::GetSingleton();
 		auto* entry = weatherManager.FindWeatherEntry(targetWeatherID);
-
-		// A weather missing from the weather list still scopes the edit to itself instead of the global value
-		const std::vector<uint32_t> fallbackIDs{ targetWeatherID };
-		const auto& linkedIDs = entry ? entry->weatherIDs : fallbackIDs;
+		if (!entry) {
+			setting.currentValue = value;
+			return;
+		}
 
 		// Only the periods the edit changed become weather-defined; the rest keep following enbseries.ini
 		const uint8_t editedPeriods = ChangedPeriods(ResolveWeatherValue(targetWeatherID, id), value);
-		for (uint32_t linkedID : linkedIDs) {
+		for (uint32_t linkedID : entry->weatherIDs) {
 			auto& data = weatherData[linkedID];
 			if (data.size() < allSettings.size()) {
 				auto oldSize = data.size();
@@ -1063,25 +1064,6 @@ uint8_t SettingManager::LoadSettingFromFile(const std::string& filePath, const s
 
 void SettingManager::SaveSettingToFile(const std::string& filePath, const std::string& section, const std::string& key, const Setting& setting, uint8_t periodMask)
 {
-	auto formatFloat = [](float value) -> std::string {
-		// Six decimals: presets use values finer than 0.001, and saving any time-of-day period rewrites every defined one
-		char temp[64];
-		sprintf_s(temp, "%.6f", value);
-		std::string result = temp;
-
-		// Remove trailing zeros
-		while (result.length() > 1 && result.back() == '0') {
-			result.pop_back();
-		}
-
-		// Ensure at least one decimal place (add .0 if needed)
-		if (result.back() == '.') {
-			result += '0';
-		}
-
-		return result;
-	};
-
 	switch (setting.type) {
 	case SettingType::Bool:
 		{
@@ -1092,7 +1074,7 @@ void SettingManager::SaveSettingToFile(const std::string& filePath, const std::s
 	case SettingType::Float:
 		{
 			float value = std::get<float>(setting.currentValue);
-			std::string formatted = formatFloat(value);
+			std::string formatted = Effects11Util::Ini::FormatFloat(value);
 			WritePrivateProfileStringA(section.c_str(), key.c_str(), formatted.c_str(), filePath.c_str());
 			break;
 		}
@@ -1104,7 +1086,7 @@ void SettingManager::SaveSettingToFile(const std::string& filePath, const std::s
 				if (!(periodMask & PeriodBit(i)))
 					continue;
 				std::string fullKey = key + timeOfDayNames[i];
-				std::string formatted = formatFloat(timeOfDayValue.values[i]);
+				std::string formatted = Effects11Util::Ini::FormatFloat(timeOfDayValue.values[i]);
 				WritePrivateProfileStringA(section.c_str(), fullKey.c_str(), formatted.c_str(), filePath.c_str());
 			}
 			break;
@@ -1118,7 +1100,8 @@ void SettingManager::SaveSettingToFile(const std::string& filePath, const std::s
 					continue;
 				std::string fullKey = key + timeOfDayNames[i];
 				const auto& color = colorTimeOfDayValue.values[i];
-				std::string formatted = formatFloat(color.x) + ", " + formatFloat(color.y) + ", " + formatFloat(color.z);
+				const float rgb[3] = { color.x, color.y, color.z };
+				std::string formatted = Effects11Util::Ini::FormatFloatList(rgb);
 				WritePrivateProfileStringA(section.c_str(), fullKey.c_str(), formatted.c_str(), filePath.c_str());
 			}
 			break;

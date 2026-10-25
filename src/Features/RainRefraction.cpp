@@ -20,7 +20,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	MotionTransparency,
 	ScreenRefraction,
 	RefractionFactor,
-	RefractionBlur)
+	RefractionBlur,
+	Visibility)
 
 namespace
 {
@@ -88,11 +89,16 @@ namespace
 
 void RainRefraction::DrawSettings()
 {
-	const Util::LockedSection enbLock(IsManagedByENB(),
-		T("common.settings_managed_by_enb", "This setting is managed by Effects 11."));
-
 	if (!defaultRaindrops.status.empty())
 		Util::Text::WrappedWarning("%s", defaultRaindrops.status.c_str());
+
+	ImGui::SliderFloat(T(TKEY("visibility"), "Drop Visibility"), &settings.Visibility, kMinVisibility, kMaxVisibility, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("visibility_tooltip"), "Exaggerates how much each drop differs from the scene behind it, so rain stands out more.\n1 = physically based. Also applies while Effects 11 manages the other rain settings."));
+	}
+
+	const Util::LockedSection enbLock(IsManagedByENB(),
+		T("common.settings_managed_by_enb", "This setting is managed by Effects 11."));
 
 	ImGui::Checkbox(T(TKEY("enable"), "Enable"), &settings.Enable);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -132,6 +138,7 @@ void RainRefraction::LoadSettings(json& o_json)
 	settings.MotionTransparency = std::clamp(settings.MotionTransparency, 0.0f, 1.0f);
 	settings.RefractionFactor = std::clamp(settings.RefractionFactor, 0.0f, kMaxRefractionFactor);
 	settings.RefractionBlur = std::clamp(settings.RefractionBlur, 0.0f, kMaxRefractionBlur);
+	settings.Visibility = std::clamp(settings.Visibility, kMinVisibility, kMaxVisibility);
 }
 
 void RainRefraction::SaveSettings(json& o_json)
@@ -205,7 +212,8 @@ RainRefraction::PerFrame RainRefraction::GetCommonBufferData()
 		.ScreenRefraction = settings.ScreenRefraction,
 		.RefractionFactor = settings.RefractionFactor,
 		.MotionBluriness = settings.RefractionBlur,
-		.Brightness = 1.0f
+		.Brightness = 1.0f,
+		.Visibility = settings.Visibility
 	};
 
 	if (IsManagedByENB()) {

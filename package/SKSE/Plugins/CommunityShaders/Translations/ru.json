@@ -1,10 +1,5 @@
 {
     "_meta": {
-        "auto_generated": true,
-        "generator": "tools/extract-i18n.py",
-        "language": "Russian",
-        "locale": "ru",
-        "note": "НЕ РЕДАКТИРУЙТЕ ВРУЧНУЮ. Запустите: python tools/extract-i18n.py --write"
     },
     "cs_editor.actions": "Действия",
     "cs_editor.active": "Активно:",
@@ -1855,9 +1850,9 @@
     "menu.setup.new_install_line1": "Похоже, это новая установка, обновление или",
     "menu.setup.new_install_line2": "переустановка Bottled Shaders.",
     "menu.setup.press_any_key": "Нажмите любую клавишу для назначения...",
-    "menu.setup.press_to_close": "Нажмите Escape или Enter для продолжения",
     "menu.toggle_error_message_tooltip": "Скрыть или показать сообщение об ошибке шейдера. Установка неисправна. Проверьте обновления и порядок загрузки. Подробности в BottledShaders.log и на странице Nexus Mods или Discord.",
     "menu.window_title": "{name} {version}",
+    "menu.window_title_dev": "{name} {version} {build}",
     "overlay.modified_features": "Обнаружены функции, возможно изменившие шейдеры. Проверьте «Проблемы с функциями».",
     "overlay.shader_blocking_active": "Блокировка шейдеров активна",
     "overlay.uncompiled_warning": "ПРЕДУПРЕЖДЕНИЕ: нескомпилированные шейдеры вызовут визуальные ошибки или заикания при загрузке.",

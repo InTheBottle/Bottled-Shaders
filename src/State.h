@@ -6,6 +6,7 @@
 
 #include <Buffer.h>
 #include <atomic>
+#include <d3d11_1.h>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -459,7 +460,8 @@ public:
 		float EffectRadius;
 		uint BaseTextureIsWorking;
 		uint RenderToUI;
-		uint pad;
+		// Model-space height of the grass mesh being drawn, for root-to-tip canopy occlusion.
+		float GrassCanopyHeight;
 
 		bool operator==(const PermutationCB& other) const
 		{
@@ -467,7 +469,8 @@ public:
 			       PixelShaderDescriptor == other.PixelShaderDescriptor &&
 			       ExtraShaderDescriptor == other.ExtraShaderDescriptor &&
 			       ExtraFeatureDescriptor == other.ExtraFeatureDescriptor &&
-			       EffectRadius == other.EffectRadius && BaseTextureIsWorking == other.BaseTextureIsWorking && RenderToUI == other.RenderToUI;
+			       EffectRadius == other.EffectRadius && BaseTextureIsWorking == other.BaseTextureIsWorking && RenderToUI == other.RenderToUI &&
+			       GrassCanopyHeight == other.GrassCanopyHeight;
 		}
 	};
 	STATIC_ASSERT_ALIGNAS_16(PermutationCB);
@@ -606,6 +609,6 @@ private:
 
 	std::optional<TonemapOwner> tonemapOwner;
 	uint historyResetFrame = UINT_MAX;
-	std::shared_ptr<REX::W32::ID3DUserDefinedAnnotation> pPerf;
+	winrt::com_ptr<ID3DUserDefinedAnnotation> pPerf;
 	std::mutex statsMutex;
 };

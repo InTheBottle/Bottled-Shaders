@@ -33,8 +33,10 @@ public:
 	static constexpr float kMaxMotionStretch = 3.0f;
 	static constexpr float kMaxRefractionFactor = 2.0f;
 	static constexpr float kMaxRefractionBlur = 1.0f;
+	static constexpr float kMinVisibility = 1.0f;
+	static constexpr float kMaxVisibility = 4.0f;
 
-	/** @brief User settings, used while Effects 11 is not active; mirrors the preset's [RAIN] Enable, MotionStretch, MotionTransparency, RefractionFactor and MotionBluriness. */
+	/** @brief User settings. All but Visibility are used only while Effects 11 is not active, mirroring the preset's [RAIN] Enable, MotionStretch, MotionTransparency, RefractionFactor and MotionBluriness. */
 	struct Settings
 	{
 		bool Enable = true;
@@ -43,6 +45,7 @@ public:
 		bool ScreenRefraction = true;
 		float RefractionFactor = 1.0f;
 		float RefractionBlur = 0.0f;
+		float Visibility = 1.5f;
 	} settings;
 
 	/** @brief Feature buffer data, matching RainRefractionSettings in SharedData.hlsli; Enable is cleared when the raindrop texture or blend state is missing. */
@@ -55,7 +58,7 @@ public:
 		float RefractionFactor;
 		float MotionBluriness;
 		float Brightness;
-		float pad0;
+		float Visibility;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
 

@@ -118,6 +118,10 @@ public:
 
 	bool initialized = false;
 	bool IsEnabled = false;
+	float openFade = 0.0f;  // 0 = closed, 1 = fully open; eased toward IsEnabled each frame
+
+	/** @brief Eases openFade toward IsEnabled, or snaps to it when the menu fade setting is off. */
+	void UpdateOpenFade(float deltaTime);
 
 	/** @brief Loads menu settings from JSON, including legacy migration */
 	void Load(json& o_json);
@@ -235,6 +239,7 @@ public:
 		bool UseSimplePalette = false;      // DEPRECATED: No longer affects behavior. UI now shows both Simple and Advanced controls.
 		float TooltipHoverDelay = 0.5f;     // tooltip hover delay in seconds
 		bool BackgroundBlurEnabled = true;  // enable background blur effect
+		bool MenuFadeEnabled = true;        // fade the menu and its blur in and out when it is toggled
 		bool UseCustomCursor = false;       // use theme cursor images instead of default ImGui cursors
 		struct CursorImageSettings
 		{

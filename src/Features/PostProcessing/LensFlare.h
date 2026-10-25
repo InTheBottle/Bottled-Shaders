@@ -170,8 +170,6 @@ struct LensFlare : public PostProcessFeature
 
 	virtual void Draw(TextureInfo&) override;
 
-	virtual inline void Reset() override { bokehFFTDirty = true; }
-
 private:
 	struct BokehFFTCache
 	{

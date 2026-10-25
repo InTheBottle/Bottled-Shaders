@@ -20,6 +20,7 @@ struct DirectContext
 	float detailedShadow;
 	float softShadow;
 #if defined(TRUE_PBR)
+	float backTransmissionVisibility;
 	float3 coatWorldNormal;
 	float3 coatViewDir;
 	float3 coatLightDir;
@@ -51,6 +52,10 @@ struct IndirectLobeWeights
 {
 	float3 diffuse;
 	float3 specular;
+#if defined(TRUE_PBR)
+	float3 frontTransmission;
+	float3 backTransmission;
+#endif
 };
 
 #if defined(TRUE_PBR)
@@ -93,6 +98,8 @@ struct MaterialProperties
 	float3 F0;
 	float3 SubsurfaceColor;
 	float Thickness;
+	float SubsurfaceBalance;
+	float ThinSurfaceSpecularWeight;
 	float3 CoatColor;
 	float CoatStrength;
 	float CoatRoughness;
@@ -107,30 +114,6 @@ struct MaterialProperties
 	float Noise;
 #endif
 };
-
-namespace Foliage
-{
-	namespace Constants
-	{
-		static const float Wrap = 0.5f;
-		static const float ScatterRoughness = 0.6f;
-		static const float Pi = 3.14159265f;
-	}
-}
-
-// Cheap view-dependent foliage transmission shared by PBR and vanilla foliage paths.
-float GetFoliageTransmission(float NdotL, float VdotL)
-{
-	const float wrapDenominator = (1.0f + Foliage::Constants::Wrap) * (1.0f + Foliage::Constants::Wrap);
-	float wrappedBacklight = saturate((-NdotL + Foliage::Constants::Wrap) / wrapDenominator);
-
-	float forwardScatter = saturate(-VdotL);
-	const float scatterAlpha2 = Foliage::Constants::ScatterRoughness * Foliage::Constants::ScatterRoughness;
-	float scatterDenominator = forwardScatter * forwardScatter * (scatterAlpha2 - 1.0f) + 1.0f;
-	float scatter = scatterAlpha2 / (Foliage::Constants::Pi * scatterDenominator * scatterDenominator);
-
-	return wrappedBacklight * scatter;
-}
 
 float ShininessToRoughness(float shininess)
 {

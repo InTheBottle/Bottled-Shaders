@@ -8,7 +8,6 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	VanillaFresnel::Settings,
 	Enable,
 	EnableGGX,
-	EnableGGXOnGrass,
 	EnableDynamicCubemapsConversion,
 	EnableEyeSpecialHandling,
 	RoughnessMultiplier,
@@ -109,7 +108,6 @@ void VanillaFresnel::DrawSettings()
 {
 	ImGui::Checkbox("Enable Vanilla Fresnel", reinterpret_cast<bool*>(&settings.Enable));
 	ImGui::Checkbox("Enable Phong to GGX", reinterpret_cast<bool*>(&settings.EnableGGX));
-	ImGui::Checkbox("Enable Phong to GGX on Grass", reinterpret_cast<bool*>(&settings.EnableGGXOnGrass));
 	if (!settings.EnableGGX) {
 		settings.EnableDynamicCubemapsConversion = false;
 	}

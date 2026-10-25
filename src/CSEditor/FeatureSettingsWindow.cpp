@@ -222,10 +222,12 @@ namespace
 			ScenePresetExport::OpenBaseline(selectedFeature);
 	}
 
-	/** @brief The main menu's Save Settings, drawn with its icon so it reads apart from the editor's own save. */
+	/** @brief The main menu's Save Settings. */
 	void DrawSaveSettingsButton()
 	{
 		ImGui::SameLine();
+		// SameLine snaps to the title's line, not the re-centred export button beside it.
+		ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, ImGui::GetItemRectMin().y));
 		const char* tooltip = T(TKEY("features_save_settings_tooltip"),
 			"Save Settings: saves feature settings and everything in the CS editor.");
 		const auto paint = [](ImDrawList* drawList, ImVec2 center, float size, ImU32 color) {
@@ -245,6 +247,7 @@ namespace
 		const auto title = std::format("{}###CSEditorFeatures", T(TKEY("base_settings_window"), "Base Settings"));
 		const bool visible = Util::BeginWithCustomHeader(title.c_str(), &open, [] {
 			// Follows the title, so the previous item is the title text and gives the row's centre.
+			ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x + ImGui::GetStyle().ItemSpacing.x * 2.0f, ImGui::GetCursorScreenPos().y));
 			DrawBaselineExportButton((ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) * 0.5f);
 			DrawSaveSettingsButton();
 		});
