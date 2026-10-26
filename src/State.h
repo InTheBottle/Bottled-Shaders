@@ -345,8 +345,11 @@ public:
 		uint liteDescriptor = 0;
 		ID3D11PixelShader* full = nullptr;
 		ID3D11PixelShader* lite = nullptr;
+		ID3D11PixelShader* detail = nullptr;
+		ID3D11PixelShader* bound = nullptr;
 		bool resolved = false;
-		bool liteBound = false;
+		bool detailEligible = false;
+		bool detailResolved = false;
 	};
 	LightingVariantState lightingVariant;
 	float waterGridTop = 0.0f;

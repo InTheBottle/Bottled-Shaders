@@ -1,0 +1,274 @@
+{
+    "exclude": [
+        "**/effects/**",
+        "**/sky/**",
+        "**/water/**",
+        "**/cubemaps/**",
+        "**/interface/**",
+        "**/terrain/**",
+        "**/lod/**",
+        "**/actors/character/**",
+        "**/books/**",
+        "**/ingredients/**",
+        "**/food/**",
+        "**/potions/**",
+        "**/signage/**",
+        "**/shadowmarks/**",
+        "**/loreloadscreens/**",
+        "**/*glass*",
+        "**/*crystal*",
+        "**/*gem*",
+        "**/*stalhrim*",
+        "**/*stahlrim*",
+        "**/*icicle*",
+        "**/*glacier*",
+        "**/*icefloe*",
+        "**/ice*",
+        "**/*decal*",
+        "**/*blood*",
+        "**/*plant*",
+        "**/*vine*",
+        "**/*ivy*",
+        "**/*leaves*",
+        "**/*leaf*",
+        "**/*branch*",
+        "**/*grass*",
+        "**/*fern*",
+        "**/*clover*",
+        "**/*web*",
+        "**/*mushroom*",
+        "**/*mossalpha*",
+        "**/*window*",
+        "**/*blueprint*",
+        "**/*forgeheat*",
+        "**/*backlight*"
+    ],
+    "rules": [
+        {
+            "match": ["**/*bark*", "**/trees/**/*stump*", "**/*driftwood*"],
+            "exclude": ["**/*barkeep*"],
+            "set": "bark",
+            "scale": 4,
+            "priority": 50
+        },
+        {
+            "match": ["**/architecture/**/*tree*", "**/telvannitower/**", "**/falmerstaff/**", "**/*thatch*", "**/byohhouse/**"],
+            "set": "none",
+            "priority": 40
+        },
+        {
+            "match": ["**/weapons/**/*wood*"],
+            "set": "wood",
+            "scale": 4,
+            "priority": 35
+        },
+        {
+            "match": ["**/weapons/**/*bow*", "**/weapons/**/*staff*"],
+            "exclude": [
+                "**/*dwarven*",
+                "**/dwarven*/**",
+                "**/*elven*",
+                "**/elven/**",
+                "**/*orcish*",
+                "**/orcish/**",
+                "**/*ebony*",
+                "**/ebony/**",
+                "**/*daedric*",
+                "**/daedric/**",
+                "**/*dragonbone*",
+                "**/dragonbone/**",
+                "**/*goldensaint*",
+                "**/goldensaint/**",
+                "**/*darkseducer*",
+                "**/darkseducer/**",
+                "**/*falmer*",
+                "**/*magnus*"
+            ],
+            "set": "wood",
+            "scale": 4,
+            "priority": 30
+        },
+        {
+            "match": ["**/*scabbard*", "**/*sheath*", "**/*quiver*", "**/*rayskin*"],
+            "set": "leather",
+            "scale": 4,
+            "priority": 25
+        },
+        {
+            "match": ["**/architecture/whiterun/**/*carv*", "**/architecture/whiterun/**/*trim*", "**/architecture/whiterun/**/*throne*", "**/architecture/whiterun/**/*panel*"],
+            "set": "wood",
+            "scale": 6,
+            "priority": 25
+        },
+        {
+            "match": ["**/*plaster*", "**/*stucco*"],
+            "set": "plaster",
+            "scale": 6,
+            "priority": 20
+        },
+        {
+            "match": ["**/clothes/**/*boot*", "**/clothes/**/*shoe*", "**/clothes/**/*glove*", "**/clothes/**/*belt*", "**/*leather*", "**/*hide*", "**/*saddle*", "**/*pelt*", "**/armor/thievesguild/**", "**/armor/forsworn/**", "**/armor/stormcloaks/**"],
+            "set": "leather",
+            "scale": 4,
+            "priority": 20
+        },
+        {
+            "match": ["**/*cloth*", "**/*fabric*", "**/*linen*", "**/*burlap*", "**/*canvas*", "**/*rug*", "**/*carpet*", "**/*banner*", "**/*tapestry*", "**/*curtain*", "**/*bedroll*", "**/*pillow*", "**/*sack*", "**/tents/**", "**/*sail*", "**/*rope*", "**/*fishingnet*", "**/*fringe*", "**/*tatteredflag*", "**/*stallroof*"],
+            "set": "fabric",
+            "scale": 4,
+            "priority": 20
+        },
+        {
+            "match": ["**/architecture/**/*slate*", "**/architecture/**/*tile*", "**/architecture/**/*block*"],
+            "set": "stone",
+            "scale": 6,
+            "priority": 20
+        },
+        {
+            "match": [
+                "**/architecture/**/*wood*",
+                "**/architecture/**/*plank*",
+                "**/architecture/**/*log*",
+                "**/architecture/**/*beam*",
+                "**/architecture/**/*shingle*",
+                "**/architecture/**/*siding*",
+                "**/architecture/**/*lattice*",
+                "**/architecture/**/*board*",
+                "**/architecture/**/*stockade*",
+                "**/architecture/**/*panel*",
+                "**/architecture/**/*post*",
+                "**/architecture/**/*fence*",
+                "**/architecture/**/*walkway*",
+                "**/architecture/**/*coffin*",
+                "**/architecture/**/*mill*",
+                "**/dungeons/**/*wood*",
+                "**/dungeons/**/*plank*",
+                "**/dungeons/ships/**"
+            ],
+            "set": "wood",
+            "scale": 6,
+            "priority": 20
+        },
+        {
+            "match": ["**/furniture/**", "**/clutter/**/*wood*", "**/clutter/**/*plank*", "**/clutter/**/*barrel*", "**/clutter/**/*crate*", "**/clutter/**/*bucket*", "**/clutter/**/*cart*", "**/clutter/**/*table*", "**/clutter/**/*chair*", "**/clutter/**/*shelf*", "**/clutter/**/*bench*", "**/clutter/**/*coffin*", "**/clutter/stockade/**"],
+            "set": "wood",
+            "scale": 4,
+            "priority": 20
+        },
+        {
+            "match": ["**/dungeons/**/*metal*", "**/dungeons/**/*bronze*", "**/architecture/**/*metal*", "**/architecture/**/*iron*", "**/architecture/**/*grate*", "**/architecture/**/*chain*", "**/architecture/**/*brazier*", "**/architecture/**/*shield*", "**/architecture/**/*nail*"],
+            "exclude": ["**/*environment*"],
+            "set": "metal",
+            "scale": 6,
+            "priority": 20
+        },
+        {
+            "match": ["**/*metal*", "**/*iron*", "**/*steel*", "**/*dwarven*", "**/*dwemer*", "**/*bronze*", "**/*ingot*", "**/*anvil*", "**/*kettle*", "**/*tankard*", "**/*goblet*", "**/*lantern*", "**/blacksmith/**", "**/armor/**/*plate*", "**/armor/**/*mail*", "**/armor/orcish/**", "**/armor/ebony*/**", "**/armor/elven/**", "**/armor/daedric/**", "**/armor/blades/**"],
+            "exclude": ["**/*environment*"],
+            "set": "metal",
+            "scale": 4,
+            "priority": 20
+        },
+        {
+            "match": [
+                "**/architecture/**/*stone*",
+                "**/architecture/**/*rock*",
+                "**/architecture/**/*brick*",
+                "**/architecture/**/*cobble*",
+                "**/architecture/**/*marble*",
+                "**/architecture/**/*slab*",
+                "**/architecture/**/*wall*",
+                "**/architecture/**/*floor*",
+                "**/architecture/**/*stair*",
+                "**/architecture/**/*step*",
+                "**/architecture/**/*pillar*",
+                "**/architecture/**/*column*",
+                "**/architecture/**/*coloumn*",
+                "**/architecture/**/*col0*",
+                "**/architecture/**/*carving*",
+                "**/architecture/**/*statue*",
+                "**/architecture/**/*staue*",
+                "**/architecture/**/*bust*",
+                "**/architecture/**/*sculpt*",
+                "**/architecture/**/*fountain*",
+                "**/architecture/**/*mosaic*",
+                "**/architecture/**/*rubble*",
+                "**/dungeons/**/*stone*",
+                "**/dungeons/**/*rock*",
+                "**/landscape/**/*rock*",
+                "**/landscape/**/*stone*",
+                "**/landscape/**/*cliff*",
+                "**/landscape/**/*mountain*",
+                "**/landscape/**/*boulder*",
+                "**/landscape/**/*slab*"
+            ],
+            "set": "stone",
+            "scale": 6,
+            "priority": 20
+        },
+        {
+            "match": ["**/clutter/**/*stone*", "**/clutter/**/*rock*", "**/statues/**", "**/clutter/**/*statue*"],
+            "set": "stone",
+            "scale": 4,
+            "priority": 20
+        },
+        {
+            "match": ["**/architecture/**/*door*", "**/architecture/**/*gate*", "**/architecture/farmhouse/**/*roof*", "**/architecture/whiterun/**/*roof*", "**/architecture/riften/**/*roof*", "**/architecture/thirsk/**/*roof*", "**/architecture/shackkit/**/*roof*"],
+            "set": "wood",
+            "scale": 6,
+            "priority": 15
+        },
+        {
+            "match": ["**/weapons/**"],
+            "set": "metal",
+            "scale": 3,
+            "priority": 10
+        },
+        {
+            "match": ["**/clothes/**"],
+            "set": "fabric",
+            "scale": 4,
+            "priority": 10
+        },
+        {
+            "match": ["**/dungeons/dwemerruins/**", "**/dungeons/dwemer/**"],
+            "set": "metal",
+            "scale": 6,
+            "priority": 10
+        },
+        {
+            "match": ["**/architecture/farmhouse/**", "**/architecture/whiterun/**", "**/architecture/riften/**", "**/architecture/thirsk/**", "**/architecture/orclonghouse/**", "**/architecture/hearse/**", "**/architecture/shackkit/**", "**/architecture/docks/**"],
+            "set": "wood",
+            "scale": 6,
+            "priority": 10
+        },
+        {
+            "match": [
+                "**/dungeons/nordic/**",
+                "**/dungeons/imperial/**",
+                "**/dungeons/caves/**",
+                "**/dungeons/mines/**",
+                "**/dungeons/riften/**",
+                "**/architecture/markarth/**",
+                "**/architecture/windhelm/**",
+                "**/architecture/solitude/**",
+                "**/architecture/highhrothgar/**",
+                "**/architecture/skyhaventemple/**",
+                "**/architecture/sovngarde/**",
+                "**/architecture/winterhold/**",
+                "**/architecture/snowelfruins/**",
+                "**/architecture/dawnguard/**",
+                "**/architecture/ravenrock/**"
+            ],
+            "set": "stone",
+            "scale": 6,
+            "priority": 10
+        },
+        {
+            "match": ["**/architecture/**"],
+            "set": "generic",
+            "scale": 6,
+            "priority": 0
+        }
+    ]
+}

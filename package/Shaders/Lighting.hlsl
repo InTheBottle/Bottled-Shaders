@@ -46,6 +46,10 @@
 #	include "FurShells/FurShells.hlsli"
 #endif
 
+#if defined(DETAIL_MAPS)
+#	include "DetailMaps/DetailMaps.hlsli"
+#endif
+
 #if defined(VSHADER)
 struct VS_INPUT
 {
@@ -1780,6 +1784,17 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	if defined(WORLD_MAP)
 	normal.xyz = GetWorldMapNormal(input, normal.xyz, sampledBaseColor.xyz);
 #	endif  // WORLD_MAP
+
+#	if defined(DETAIL_MAPS) && !defined(MODELSPACENORMALS) && !defined(LANDSCAPE)
+	DetailMaps::Detail detailSample = DetailMaps::GetDetail(uv, viewPosition.z, SampNormalSampler);
+	baseColor.xyz *= detailSample.Albedo;
+	normal.xyz = DetailMaps::ApplyNormal(normal.xyz, detailSample);
+#		if defined(TRUE_PBR)
+	rawRMAOS.x = saturate(rawRMAOS.x + detailSample.Roughness);
+#		else
+	glossiness = saturate(glossiness * (1.0 - detailSample.Roughness));
+#		endif
+#	endif
 
 #	if defined(LANDSCAPE)
 #		if defined(SNOW) && !defined(TRUE_PBR)

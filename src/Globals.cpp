@@ -5,6 +5,7 @@
 #include "Deferred.h"
 #include "Features/CSEditor.h"
 #include "Features/CloudShadows.h"
+#include "Features/DetailMaps.h"
 #include "Features/DynamicCubemaps.h"
 #include "Features/Effects11.h"
 #include "Features/ExponentialHeightFog.h"
@@ -121,6 +122,7 @@ namespace globals
 		HairBacklighting hairBacklighting{};
 		NightEye nightEye{};
 		FurShells furShells{};
+		DetailMaps detailMaps{};
 		LandscapeSeams landscapeSeams{};
 		SnowDeformation snowDeformation{};
 		SceneManager sceneManager{};

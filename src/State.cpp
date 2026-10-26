@@ -16,6 +16,7 @@
 #include "FeatureIssues.h"
 #include "Features/CSEditor.h"
 #include "Features/CloudShadows.h"
+#include "Features/DetailMaps.h"
 #include "Features/Effects11.h"
 #include "Features/ExponentialHeightFog.h"
 #include "Features/HDRDisplay.h"
@@ -72,14 +73,18 @@ void State::BeginLightingVariants(RE::BSShader* a_shader, bool a_skipPixelShader
 		!shaderCache->IsEnabled() || !shaderCache->IsAsync() || !ShaderEnabled(RE::BSShader::Type::Lighting))
 		return;
 
+	auto& detailMaps = globals::features::detailMaps;
+	detailMaps.InvalidateBindings();
 	const auto liteDescriptor = SIE::ShaderCache::GetLiteLightingDescriptor(modifiedPixelDescriptor);
-	if (!liteDescriptor)
+	const bool detailEligible = detailMaps.IsEligible(modifiedPixelDescriptor);
+	if (!liteDescriptor && !detailEligible)
 		return;
 
 	lightingVariant.shader = a_shader;
 	lightingVariant.descriptor = modifiedPixelDescriptor;
 	lightingVariant.vanillaDescriptor = currentPixelDescriptor;
 	lightingVariant.liteDescriptor = liteDescriptor;
+	lightingVariant.detailEligible = detailEligible;
 }
 
 void State::UpdateLightingVariant(RE::BSRenderPass* a_pass)
@@ -88,24 +93,40 @@ void State::UpdateLightingVariant(RE::BSRenderPass* a_pass)
 	if (!variant.shader)
 		return;
 
-	constexpr auto noSnowCover = static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::NoSnowCover);
-	constexpr auto noWetness = static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::NoWetness);
-	bool useLite = ((variant.liteDescriptor & noSnowCover) == 0 || globals::features::snowCover.IsSnowFree(a_pass, variant.descriptor, variant.vanillaDescriptor)) &&
-	               ((variant.liteDescriptor & noWetness) == 0 || globals::features::wetnessEffects.IsDry(a_pass, variant.descriptor));
-
-	if (useLite && !variant.resolved) {
+	auto shaderCache = globals::shaderCache;
+	if (!variant.resolved) {
 		variant.resolved = true;
-		auto shaderCache = globals::shaderCache;
 		auto* full = shaderCache->FindPixelShader(*variant.shader, variant.descriptor);
-		auto* lite = full ? shaderCache->FindPixelShader(*variant.shader, variant.liteDescriptor) : nullptr;
+		auto* lite = full && variant.liteDescriptor ? shaderCache->FindPixelShader(*variant.shader, variant.liteDescriptor) : nullptr;
 		variant.full = full ? reinterpret_cast<ID3D11PixelShader*>(full->shader) : nullptr;
 		variant.lite = lite ? reinterpret_cast<ID3D11PixelShader*>(lite->shader) : nullptr;
 	}
-	useLite = useLite && variant.lite;
+	if (!variant.full)
+		return;
 
-	if (useLite != variant.liteBound) {
-		globals::d3d::context->PSSetShader(useLite ? variant.lite : variant.full, nullptr, 0);
-		variant.liteBound = useLite;
+	ID3D11PixelShader* target = variant.full;
+	if (variant.detailEligible && globals::features::detailMaps.BindPass(a_pass)) {
+		if (!variant.detailResolved) {
+			variant.detailResolved = true;
+			auto* detail = shaderCache->GetPixelShader(*variant.shader, variant.descriptor | static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::DetailMaps));
+			variant.detail = detail ? reinterpret_cast<ID3D11PixelShader*>(detail->shader) : nullptr;
+		}
+		if (variant.detail)
+			target = variant.detail;
+	}
+
+	if (target == variant.full && variant.lite) {
+		constexpr auto noSnowCover = static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::NoSnowCover);
+		constexpr auto noWetness = static_cast<uint>(SIE::ShaderCache::LightingShaderFlags::NoWetness);
+		const bool useLite = ((variant.liteDescriptor & noSnowCover) == 0 || globals::features::snowCover.IsSnowFree(a_pass, variant.descriptor, variant.vanillaDescriptor)) &&
+		                     ((variant.liteDescriptor & noWetness) == 0 || globals::features::wetnessEffects.IsDry(a_pass, variant.descriptor));
+		if (useLite)
+			target = variant.lite;
+	}
+
+	if (target != (variant.bound ? variant.bound : variant.full)) {
+		globals::d3d::context->PSSetShader(target, nullptr, 0);
+		variant.bound = target;
 	}
 }
 

@@ -13,6 +13,7 @@
 #include "State.h"
 #include "Utils/D3D.h"
 
+#include "Features/DetailMaps.h"
 #include "Features/DynamicCubemaps.h"
 #include "Features/LandscapeSeams.h"
 #include "Features/LightLimitFix.h"
@@ -143,7 +144,7 @@ namespace SIE
 		static void GetLightingShaderDefines(uint32_t descriptor, std::span<D3D_SHADER_MACRO> defines)
 		{
 			static REL::Relocation<void(uint32_t, D3D_SHADER_MACRO*)> VanillaGetLightingShaderDefines(RELOCATION_ID(101631, 108698));
-			VanillaGetLightingShaderDefines(descriptor & ~(static_cast<uint32_t>(ShaderCache::LightingShaderFlags::Reflections) | static_cast<uint32_t>(ShaderCache::LightingShaderFlags::NoSnowCover) | static_cast<uint32_t>(ShaderCache::LightingShaderFlags::NoWetness)), defines.data());
+			VanillaGetLightingShaderDefines(descriptor & ~(static_cast<uint32_t>(ShaderCache::LightingShaderFlags::Reflections) | static_cast<uint32_t>(ShaderCache::LightingShaderFlags::NoSnowCover) | static_cast<uint32_t>(ShaderCache::LightingShaderFlags::NoWetness) | static_cast<uint32_t>(ShaderCache::LightingShaderFlags::DetailMaps)), defines.data());
 
 			size_t lastIndex = std::ranges::find_if(defines, [](const D3D_SHADER_MACRO& macro) { return macro.Name == nullptr; }) - defines.begin();
 
@@ -167,6 +168,9 @@ namespace SIE
 				if ((descriptor & static_cast<uint32_t>(ShaderCache::LightingShaderFlags::FurShellsDepth)) != 0) {
 					defines[lastIndex++] = { "FUR_SHELLS_DEPTH", nullptr };
 				}
+			}
+			if ((descriptor & static_cast<uint32_t>(ShaderCache::LightingShaderFlags::DetailMaps)) != 0) {
+				defines[lastIndex++] = { "DETAIL_MAPS", nullptr };
 			}
 
 			const bool noSnowCover = (descriptor & static_cast<uint32_t>(ShaderCache::LightingShaderFlags::NoSnowCover)) != 0;
@@ -2739,7 +2743,7 @@ namespace SIE
 		using Techniques = LightingShaderTechniques;
 		constexpr uint32_t excluded = static_cast<uint32_t>(Flags::Skinned) | static_cast<uint32_t>(Flags::Reflections) | static_cast<uint32_t>(Flags::WorldMap) |
 		                              static_cast<uint32_t>(Flags::FurShells) | static_cast<uint32_t>(Flags::FurShellsDepth) |
-		                              static_cast<uint32_t>(Flags::NoSnowCover) | static_cast<uint32_t>(Flags::NoWetness);
+		                              static_cast<uint32_t>(Flags::NoSnowCover) | static_cast<uint32_t>(Flags::NoWetness) | static_cast<uint32_t>(Flags::DetailMaps);
 		if ((descriptor & static_cast<uint32_t>(Flags::Deferred)) == 0 || (descriptor & excluded) != 0)
 			return 0;
 
@@ -2780,7 +2784,8 @@ namespace SIE
 		using Techniques = LightingShaderTechniques;
 		constexpr uint32_t excluded = static_cast<uint32_t>(Flags::Deferred) | static_cast<uint32_t>(Flags::Skinned) | static_cast<uint32_t>(Flags::Reflections) |
 		                              static_cast<uint32_t>(Flags::WorldMap) | static_cast<uint32_t>(Flags::FurShells) | static_cast<uint32_t>(Flags::FurShellsDepth) |
-		                              static_cast<uint32_t>(Flags::LandscapeSeams) | static_cast<uint32_t>(Flags::NoSnowCover) | static_cast<uint32_t>(Flags::NoWetness);
+		                              static_cast<uint32_t>(Flags::LandscapeSeams) | static_cast<uint32_t>(Flags::NoSnowCover) | static_cast<uint32_t>(Flags::NoWetness) |
+		                              static_cast<uint32_t>(Flags::DetailMaps);
 		if ((descriptor & excluded) != 0)
 			return false;
 
@@ -2801,12 +2806,15 @@ namespace SIE
 	{
 		using Flags = LightingShaderFlags;
 		using Techniques = LightingShaderTechniques;
-		constexpr uint32_t derived = static_cast<uint32_t>(Flags::Reflections) | static_cast<uint32_t>(Flags::NoSnowCover) | static_cast<uint32_t>(Flags::NoWetness);
+		constexpr uint32_t derived = static_cast<uint32_t>(Flags::Reflections) | static_cast<uint32_t>(Flags::NoSnowCover) | static_cast<uint32_t>(Flags::NoWetness) |
+		                             static_cast<uint32_t>(Flags::DetailMaps);
 		if ((descriptor & derived) != 0)
 			return;
 
 		if (const auto lite = GetLiteLightingDescriptor(descriptor))
 			std::ignore = GetPixelShader(shader, lite);
+		if (globals::features::detailMaps.ShouldPrecompile(descriptor))
+			std::ignore = GetPixelShader(shader, descriptor | static_cast<uint32_t>(Flags::DetailMaps));
 		if (IsReflectionsCandidate(descriptor))
 			std::ignore = GetPixelShader(shader, descriptor | static_cast<uint32_t>(Flags::Reflections));
 

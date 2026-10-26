@@ -699,7 +699,8 @@ namespace SIE
 			CharacterLight = 1 << 22,
 			AdditionalAlphaMask = 1 << 23,
 			NoWetness = 1u << 29,
-			NoSnowCover = 1u << 30
+			NoSnowCover = 1u << 30,
+			DetailMaps = 1u << 31
 		};
 
 		enum class BloodSplatterShaderTechniques

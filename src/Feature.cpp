@@ -5,6 +5,7 @@
 #include "FeatureVersions.h"
 #include "Features/CSEditor.h"
 #include "Features/CloudShadows.h"
+#include "Features/DetailMaps.h"
 #include "Features/DynamicCubemaps.h"
 #include "Features/ProceduralSun.h"
 #include "Features/Effects11.h"
@@ -259,6 +260,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::hairBacklighting,
 		&globals::features::nightEye,
 		&globals::features::furShells,
+		&globals::features::detailMaps,
 		&globals::features::landscapeSeams,
 		&globals::features::snowDeformation
 	};

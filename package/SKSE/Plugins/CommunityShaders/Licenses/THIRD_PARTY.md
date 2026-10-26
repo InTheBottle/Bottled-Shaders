@@ -13,6 +13,7 @@ Community Shaders is GPL-3.0 (see COPYING.txt) WITH the Modding Exception and GP
 | `Shaders/Common/Color.hlsli` (color conversion section)                                                                               | Google LLC      | Apache-2.0 | Header in file                                                                     |
 | `Shaders/Common/Color.hlsli` (Luma Framework adaptation)                                                                              | Filippo Tarpini | MIT        | Comment in file                                                                    |
 | Night Eye (`src/Features/NightEye.*`, `Shaders/NightEye/*` including the eyeshine masks), ported from Truly Night Eye 1.0              | Aswordmaster    | GPL-3.0-or-later with the Modding and Linking exceptions | SPDX header in each file                                       |
+| Detail map textures (`Shaders/DetailMaps/Sets/*.dds`), processed from ambientCG materials                                              | ambientCG       | CC0-1.0    | [CREDITS.md](../../../../Shaders/DetailMaps/Sets/CREDITS.md)                       |
 
 ## Inspired by
 
