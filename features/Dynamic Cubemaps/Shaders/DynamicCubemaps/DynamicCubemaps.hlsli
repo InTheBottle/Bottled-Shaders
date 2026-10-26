@@ -67,7 +67,7 @@ namespace DynamicCubemaps
 					// Mode 2/3: DALC-normalized env scaled by DALCAmount + sky overlay
 					float envLum = Color::RGBToLuminance(EnvTexture.SampleLevel(SampColorSampler, R, 15));
 					envSpecular = ColorManagement::SceneToLinear((envSample / max(envLum, 0.001)) * directionalAmbientColorSpecular) * SharedData::iblSettings.DALCAmount;
-					skySpecular = ColorManagement::SceneToLinear(max(0, fullSample - envSample)) * SharedData::iblSettings.SkyIBLScale;
+					skySpecular = ColorManagement::SceneToLinear(max(0, fullSample - envSample)) * SharedData::iblSettings.SkySpecularIBLScale;
 #			if defined(SKYLIGHTING)
 					envSpecular *= (SharedData::iblSettings.DALCMode == 3) ? skylightingVisibility : 1.0;
 					skySpecular *= skylightingSpecular;
@@ -76,7 +76,7 @@ namespace DynamicCubemaps
 					// Mode 0/1: IBL ratio-based
 					float3 ratio = ImageBasedLighting::GetIBLRatio();
 					envSpecular = ColorManagement::SceneToLinear(envSample * ratio) * SharedData::iblSettings.EnvIBLScale;
-					skySpecular = ColorManagement::SceneToLinear(max(0, fullSample - envSample)) * SharedData::iblSettings.SkyIBLScale;
+					skySpecular = ColorManagement::SceneToLinear(max(0, fullSample - envSample)) * SharedData::iblSettings.SkySpecularIBLScale;
 #			if defined(SKYLIGHTING)
 					skySpecular *= skylightingSpecular;
 #			endif

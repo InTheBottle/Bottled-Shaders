@@ -54,7 +54,9 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	TruePBR::Settings,
 	VertexAOStrength,
 	EnableMicroShadows,
-	MicroShadowStrength);
+	MicroShadowStrength,
+	EnableMultiScatter,
+	EnableHorizonOcclusion);
 
 #define CHECK_PBR_TEXTURE(textureName)                                                                         \
 	if (!(pbrMaterial->textureName)) {                                                                         \
@@ -128,6 +130,14 @@ void TruePBR::DrawSettings()
 			if (auto _tt = Util::HoverTooltipWrapper())
 				ImGui::Text("%s", T(TKEY("micro_shadow_strength_tooltip"), "How strongly ambient occlusion darkens direct light."));
 		}
+
+		ImGui::Checkbox(T(TKEY("multi_scatter"), "Multiple Scattering"), (bool*)&settings.EnableMultiScatter);
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("multi_scatter_tooltip"), "Restores the specular energy rough surfaces lose to single-bounce reflections, so rough metals keep their brightness instead of turning dull grey."));
+
+		ImGui::Checkbox(T(TKEY("horizon_occlusion"), "Horizon Occlusion"), (bool*)&settings.EnableHorizonOcclusion);
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("horizon_occlusion_tooltip"), "Darkens reflections that a normal map tilts below the surface, keeping bumps and crevices from catching a flat sheen of sky."));
 
 		ImGui::TreePop();
 	}

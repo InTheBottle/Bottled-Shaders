@@ -134,7 +134,8 @@ IBL::PerFrame IBL::GetCommonBufferData() const
 		.SkyIBLSaturation = settings.SkyIBLSaturation,
 		.FogAmount = settings.FogAmount,
 		.DALCMode = settings.DALCMode,
-		.ENBSkyFalloff = globals::features::effects11.OwnsFeature(E11Handoff::Feature::IBL)
+		.ENBSkyFalloff = globals::features::effects11.OwnsFeature(E11Handoff::Feature::IBL),
+		.SkySpecularIBLScale = settings.SkyIBLScale
 	};
 
 	if (!sceneDisabled && IsManagedByENB()) {
@@ -142,6 +143,7 @@ IBL::PerFrame IBL::GetCommonBufferData() const
 		data.EnableIBL = Util::IsInterior() ? 0u : 1u;
 		data.EnvIBLScale = 0.0f;
 		data.SkyIBLScale = settingManager.GetInterpolatedTimeOfDayValue("MultiplicativeAmount", "IMAGEBASEDLIGHTING");
+		data.SkySpecularIBLScale = 1.0f;
 		data.DALCAmount = 1.0f;
 		data.EnvIBLSaturation = 1.0f;
 		data.SkyIBLSaturation = 1.0f;

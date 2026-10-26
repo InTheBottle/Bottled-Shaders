@@ -93,7 +93,7 @@ namespace PBR
 	float3 SpecularMicrofacet(float roughness, float3 F0, float NdotL, float NdotV, float NdotH, float VdotH, out float3 F)
 	{
 		float D = BRDF::D_GGX(roughness, NdotH);
-		float G = BRDF::Vis_SmithJointApprox(roughness, NdotV, NdotL);
+		float G = BRDF::Vis_SmithJoint(roughness, NdotV, NdotL);
 		F = BRDF::F_Schlick(F0, VdotH);
 
 		return D * G * F;
@@ -125,6 +125,12 @@ namespace PBR
 	{
 		float2 specularBRDF = BRDF::EnvBRDF(roughness, NdotV);
 		return F0 * specularBRDF.x + specularBRDF.y;
+	}
+
+	float3 SpecularMultiScatter(float3 F0, float roughness, float NdotV)
+	{
+		float2 specularBRDF = BRDF::EnvBRDF(roughness, NdotV);
+		return 1.0 + F0 * (1.0 / max(specularBRDF.x + specularBRDF.y, EPSILON_DIVISION) - 1.0);
 	}
 
 	float3 GetThinSurfaceNormal(float3 N, float3 V)

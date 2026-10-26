@@ -2884,6 +2884,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	DirectLightingOutput dirLightOutput;
 #	if defined(TRUE_PBR)
 	dirLightContext = CreateDirectLightingContext(worldNormal.xyz, coatWorldNormal, vertexNormal.xyz, refractedViewDirection, viewDirection, refractedDirLightDirection, DirLightDirection, dirLightColor, dirDetailedShadow, dirSoftShadow);
+	material.SpecularMultiScatter = SharedData::truePBRSettings.EnableMultiScatter != 0 ? PBR::SpecularMultiScatter(material.F0, material.Roughness, saturate(abs(dot(dirLightContext.worldNormal, dirLightContext.viewDir)) + EPSILON_DOT_CLAMP)) : 1.0;
 	if (thinSurfaceNormals)
 		dirLightContext.backTransmissionVisibility = PBR::GetThinSurfaceBackTransmissionVisibility(thinSurfaceFaceNormal, DirLightDirection);
 #	else

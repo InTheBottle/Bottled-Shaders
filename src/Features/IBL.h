@@ -74,7 +74,7 @@ public:
 		float FogAmount;
 		uint DALCMode;
 		uint ENBSkyFalloff;
-		float pad0;
+		float SkySpecularIBLScale;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
 

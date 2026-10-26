@@ -22,7 +22,7 @@ namespace PBR
 			float D_max = BRDF::D_GGX(roughness, 1);
 			D = Glints::SampleGlints2023NDF(noise, logDensity, microfacetRoughness, densityRandomization, glintCache, glintH, D, D_max).x;
 		}
-		float G = BRDF::Vis_SmithJointApprox(roughness, NdotV, NdotL);
+		float G = BRDF::Vis_SmithJoint(roughness, NdotV, NdotL);
 		F = BRDF::F_Schlick(F0, VdotH);
 
 		return D * G * F;
@@ -278,6 +278,7 @@ namespace PBR
 #else
 			float3 Fr = SpecularMicrofacet(material.Roughness, material.F0, max(specularNdotL, EPSILON_DOT_CLAMP), specularNdotV, satNdotH, satVdotH, F);
 #endif
+			Fr *= material.SpecularMultiScatter;
 #if defined(TREE_ANIM)
 			float3 kD = 1.0f - saturate(SpecularDirectionalAlbedo(material.F0, material.Roughness, saturate(abs(NdotV))));
 #else
@@ -354,10 +355,13 @@ namespace PBR
 		const float3 V = context.viewDir;
 
 #if defined(TREE_ANIM)
-		float NdotV = saturate(dot(GetThinSurfaceNormal(N, V), V));
+		const float3 specularN = GetThinSurfaceNormal(N, V);
+		const float3 horizonN = dot(N, V) < 0.0 ? -context.vertexNormal : context.vertexNormal;
 #else
-		float NdotV = saturate(dot(N, V));
+		const float3 specularN = N;
+		const float3 horizonN = context.vertexNormal;
 #endif
+		float NdotV = saturate(dot(specularN, V));
 
 #if !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
 		[branch] if ((PBRFlags & Flags::HairMarschner) != 0)
@@ -392,6 +396,8 @@ namespace PBR
 
 			// Energy conservation: diffuse receives only what specular does not reflect
 			lobeWeights.diffuse *= 1 - lobeWeights.specular;
+			[branch] if (SharedData::truePBRSettings.EnableMultiScatter != 0)
+				lobeWeights.specular *= SpecularMultiScatter(material.F0, material.Roughness, NdotV);
 
 #if !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
 			[branch] if ((PBRFlags & Flags::TwoLayer) != 0)
@@ -417,6 +423,8 @@ namespace PBR
 		lobeWeights.diffuse *= MultiBounceAO(material.BaseColor, material.AO);
 		float alpha = material.Roughness * material.Roughness;
 		lobeWeights.specular *= SpecularOcclusion(NdotV, alpha, material.AO);
+		[branch] if (SharedData::truePBRSettings.EnableHorizonOcclusion != 0)
+			lobeWeights.specular *= SpecularHorizonOcclusion(specularN, V, horizonN);
 	}
 }
 

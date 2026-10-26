@@ -83,10 +83,12 @@ public:
 		float VertexAOStrength = 1.0f;
 		uint EnableMicroShadows = 1;
 		float MicroShadowStrength = 1.0f;
-		uint pad;
+		uint EnableMultiScatter = 1;
+		uint EnableHorizonOcclusion = 1;
+		uint pad[3];
 	};
 	STATIC_ASSERT_ALIGNAS_16(Settings);
-	static_assert(sizeof(Settings) == 16);
+	static_assert(sizeof(Settings) == 32);
 
 	Settings settings;
 
