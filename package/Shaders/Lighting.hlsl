@@ -2178,9 +2178,13 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		const float visibleRawDepth = SharedData::DepthTexture.Load(int3(input.Position.xy, 0)).x;
 		const float visibleDepth = SharedData::GetScreenDepth(visibleRawDepth);
 #		endif
+#		if defined(REVERSE_Z)
+		const float buriedDepth = max(SharedData::GetScreenDepth(input.Position.z) - visibleDepth, 0.0);
+#		else
 		// Objects read the 16-bit blended depth, so ignore differences within one of its steps.
 		const float depthStep = SharedData::GetScreenDepth(visibleRawDepth + 1.0 / 65535.0) - visibleDepth;
 		const float buriedDepth = max(viewPosition.z - visibleDepth - depthStep, 0.0);
+#		endif
 		[branch] if (buriedDepth > 0.0)
 		{
 			// A downward normal passes through zero halfway, so fall back to up there instead of normalizing it

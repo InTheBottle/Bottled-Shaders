@@ -122,8 +122,12 @@ namespace
 		uint32_t weightedSteps;
 		uint32_t useNoise;
 		float invScreenWidth;
+		float cloudGapIntensity;
+		float cloudGapExponent;
+		float lightDiscTan;
+		float pad0;
 	};
-	static_assert(sizeof(SunRaysData) == 80);
+	static_assert(sizeof(SunRaysData) == 96);
 
 	bool SelectSunRaysLight(RE::Sky* a_sky, const Effects11::PerFrame& a_perFrame, bool a_sunRays, bool a_moonRays, SunRaysLight& a_light)
 	{
@@ -1214,6 +1218,11 @@ void Effects11::DrawSunRays()
 	data.maskBrightness = lightPeak;
 	data.maskExponent = light.maskExponent;
 	data.invScreenWidth = 1.0f / std::max(resolution.x, 1.0f);
+
+	const float gapSpread = DirectX::XMConvertToRadians(std::clamp(settingManager.GetValue<float>("CloudGapRaysSpread", "RAYS"), 5.0f, 80.0f));
+	data.cloudGapIntensity = std::max(settingManager.GetInterpolatedTimeOfDayValue("CloudGapRays", "RAYS"), 0.0f);
+	data.cloudGapExponent = std::log(0.5f) / std::log(std::cos(gapSpread));
+	data.lightDiscTan = std::sqrt(1.0f - std::pow(0.5f, 1.0f / light.maskExponent)) * light.billboardTan;
 
 	Effects11Util::D3D11ScopedPostFxBackup stateBackup;
 	stateBackup.Save(context);

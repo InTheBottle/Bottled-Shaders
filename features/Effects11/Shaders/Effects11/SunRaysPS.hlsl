@@ -5,10 +5,6 @@
 
 SamplerState LinearSampler : register(s0);
 
-#if defined(MASK) && defined(CLOUD_SHADOWS)
-#	include "CloudShadows/CloudShadows.hlsli"
-#endif
-
 Texture2D<float> RaysTexture : register(t0);
 
 cbuffer SunRaysData : register(b1)
@@ -26,7 +22,30 @@ cbuffer SunRaysData : register(b1)
 	uint WeightedSteps;
 	uint UseNoise;
 	float InvScreenWidth;
+	float CloudGapIntensity;
+	float CloudGapExponent;
+	float LightDiscTan;
+	float SunRaysPad0;
 }
+
+#if defined(MASK) && defined(CLOUD_SHADOWS)
+#	include "CloudShadows/CloudShadows.hlsli"
+
+float GetCloudTransmittance(float3 direction)
+{
+	return saturate(1.0 - CloudShadows::CloudShadowsTexture.SampleLevel(LinearSampler, direction, 0));
+}
+
+float GetLightTransmittance()
+{
+	float3 tangent = normalize(cross(abs(LightDirection.z) < 0.999 ? float3(0, 0, 1) : float3(1, 0, 0), LightDirection)) * LightDiscTan;
+	float3 bitangent = cross(LightDirection, tangent);
+	float transmittance = 2.0 * GetCloudTransmittance(LightDirection);
+	transmittance += GetCloudTransmittance(LightDirection + tangent) + GetCloudTransmittance(LightDirection - tangent);
+	transmittance += GetCloudTransmittance(LightDirection + bitangent) + GetCloudTransmittance(LightDirection - bitangent);
+	return transmittance / 6.0;
+}
+#endif
 
 struct VS_OUTPUT_POST
 {
@@ -81,10 +100,17 @@ float main(VS_OUTPUT_POST input) : SV_Target0
 
 	float tanAngleSq = max(1.0 - cosAngle * cosAngle, 0.0) / (cosAngle * cosAngle);
 	float radiusSq = tanAngleSq / max(LightBillboardTan * LightBillboardTan, 1e-8);
-	float mask = MaskBrightness * pow(saturate(1.0 - radiusSq), MaskExponent);
+	float source = pow(saturate(1.0 - radiusSq), MaskExponent);
 
 #	if defined(CLOUD_SHADOWS)
-	mask *= saturate(1.0 - CloudShadows::CloudShadowsTexture.SampleLevel(LinearSampler, viewDirection, 0));
+	[branch] if (CloudGapIntensity > 0.0)
+		source += CloudGapIntensity * (1.0 - GetLightTransmittance()) * pow(saturate(cosAngle), CloudGapExponent);
+#	endif
+
+	float mask = MaskBrightness * source;
+
+#	if defined(CLOUD_SHADOWS)
+	mask *= GetCloudTransmittance(viewDirection);
 #	endif
 
 	float2 edge = abs(uv * 2.0 - 1.0);

@@ -354,6 +354,8 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterTimeOfDaySetting("SunRaysMultiplier", "RAYS", 1.0f, 0.0f, 30000.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("MoonRaysMultiplier", "RAYS", 1.0f, 0.0f, 30000.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("SkyColorAmount", "RAYS", 0.0f, 0.0f, 100.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("CloudGapRays", "RAYS", 1.0f, 0.0f, 10.0f, 0.01f, true);
+	settingManager.RegisterFloatSetting("CloudGapRaysSpread", "RAYS", 30.0f, 5.0f, 80.0f, 1.0f, false);
 
 	settingManager.SetCategoryDependency("BLOOM", "EnableBloom", "EFFECT");
 	settingManager.SetCategoryDependency("LENS", "EnableLens", "EFFECT");
