@@ -509,7 +509,7 @@ void ColorGrading::DrawSettings()
 		// Tonemapping curve visualization (GPU-evaluated, RGB overlay)
 		if (ImGui::TreeNode(T(TKEY("curve_preview"), "Curve Preview"))) {
 			curveReadbackRequested = true;
-			curveReadbackRequestFrame = ImGui::GetFrameCount();
+			curveReadbackRequestFrame = static_cast<int>(globals::state->frameCount);
 
 			if (settings.skipLUT) {
 				ImGui::TextDisabled(T(TKEY("curve_preview_requires_lut"), "Enable LUT generation to see curve preview (uncheck 'Skip LUT')"));
@@ -830,6 +830,7 @@ void ColorGrading::SetupResources()
 		};
 
 		texLUT = std::make_unique<Texture3D>(lutTexDesc, "ColorGrading::LUT3D");
+		lutValid = false;
 		texLUT->CreateSRV(lutSrvDesc);
 		texLUT->CreateUAV(lutUavDesc);
 	}
@@ -1065,7 +1066,8 @@ void ColorGrading::Draw(TextureInfo& inout_tex)
 	context->CSSetSamplers(0, 1, samplers.data());
 	ID3D11UnorderedAccessView* uav = nullptr;
 
-	if (!settings.skipLUT) {
+	const uint64_t generation = shaderGeneration.load(std::memory_order_relaxed);
+	if (!settings.skipLUT && (!lutValid || lutShader != lutgenCS.get() || lutGeneration != generation || memcmp(&colorCBData, lutKey.data(), sizeof(ColorCB)) != 0)) {
 		// LUT Gen
 		uav = texLUT->uav.get();
 		context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
@@ -1075,6 +1077,11 @@ void ColorGrading::Draw(TextureInfo& inout_tex)
 		uav = nullptr;
 		context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
 		context->CSSetShader(nullptr, nullptr, 0);
+
+		lutValid = lutgenCS.get() != nullptr;
+		lutShader = lutgenCS.get();
+		lutGeneration = generation;
+		memcpy(lutKey.data(), &colorCBData, sizeof(ColorCB));
 	}
 
 	// Apply Color Grading (via LUT or direct)
@@ -1122,7 +1129,7 @@ void ColorGrading::Draw(TextureInfo& inout_tex)
 	const bool curveReadbackActive =
 		curveReadbackRequested &&
 		ImGui::GetCurrentContext() &&
-		curveReadbackRequestFrame >= ImGui::GetFrameCount() - 1;
+		curveReadbackRequestFrame >= static_cast<int>(globals::state->frameCount) - 1;
 	if (!curveReadbackActive)
 		curveReadbackRequested = false;
 

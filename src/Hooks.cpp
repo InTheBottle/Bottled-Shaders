@@ -335,25 +335,20 @@ namespace GrassExtensions
 	{
 		static void thunk(RE::BSShader* shader, RE::BSRenderPass* pass, uint32_t renderFlags)
 		{
-			// Replace vanilla setup and pixel constants for passes handled by Grass Optimizations.
-			if (!globals::features::grassOptimizations.SetupGrassPass(shader, pass)) {
-				func(shader, pass, renderFlags);
-				LegacyGraphicsCompatibility::BindLegacyGrassPerGeometryToPixelShader();
-			}
+			// Grass Optimizations' setup replaces this for its buckets, and covered shapes draw nothing.
+			if (globals::features::grassOptimizations.SetupGrassPass(shader, pass) != GrassOptimizations::GrassPassSetup::kNative)
+				return;
+
+			func(shader, pass, renderFlags);
+			LegacyGraphicsCompatibility::BindLegacyGrassPerGeometryToPixelShader();
 
 			auto state = globals::state;
-
-			state->permutationData.ExtraShaderDescriptor &= ~static_cast<uint32_t>(State::ExtraShaderDescriptors::GrassSphereNormal);
+			const auto* shaderProperty = static_cast<RE::BSShaderProperty*>(pass->geometry->GetGeometryRuntimeData().shaderProperty.get());
+			state->SetGrassSphereNormal(shaderProperty && shaderProperty->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kEffectLighting));
 
 			// Grass meshes are rooted at the model origin, so the model bound's center sits about halfway up the mesh.
 			const auto& bound = pass->geometry->GetModelData().modelBound;
 			state->permutationData.GrassCanopyHeight = bound.center.z > 1.0f ? 2.0f * bound.center.z : std::max(bound.center.z + bound.radius, 1.0f);
-
-			if (auto* shaderProperty = static_cast<RE::BSShaderProperty*>(pass->geometry->GetGeometryRuntimeData().shaderProperty.get())) {
-				if (shaderProperty->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kEffectLighting)) {
-					state->permutationData.ExtraShaderDescriptor |= static_cast<uint32_t>(State::ExtraShaderDescriptors::GrassSphereNormal);
-				}
-			}
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -538,7 +533,15 @@ struct IDXGISwapChain_Present
 			SyncInterval,
 			Flags,
 			[&](IDXGISwapChain* swapChain, UINT syncInterval, UINT presentFlags) {
-				return func(swapChain, syncInterval, presentFlags);
+				LARGE_INTEGER frequency, presentStart, presentEnd;
+				QueryPerformanceFrequency(&frequency);
+				QueryPerformanceCounter(&presentStart);
+				const HRESULT presentResult = func(swapChain, syncInterval, presentFlags);
+				QueryPerformanceCounter(&presentEnd);
+				const float presentMs = static_cast<float>(static_cast<double>(presentEnd.QuadPart - presentStart.QuadPart) * 1000.0 / static_cast<double>(frequency.QuadPart));
+				auto& smoothPresentTimeMs = globals::state->smoothPresentTimeMs;
+				smoothPresentTimeMs = smoothPresentTimeMs * 0.95f + presentMs * 0.05f;
+				return presentResult;
 			});
 
 		globals::state->Reset();
@@ -1057,6 +1060,13 @@ namespace Hooks
 		{
 			auto& hiz = globals::features::hiZOcclusion;
 			if (hiz.loaded && hiz.settings.enableHiZCulling) {
+				const uint32_t renderMode = accum->GetRuntimeData().renderMode;
+				const uint8_t pass = renderMode < 30 ? HiZOcclusion::GetPassKind(renderMode) : 0;
+				const bool collectStats = hiz.IsCollectingStats();
+				if (!collectStats && (pass == 0 || !hiz.settings.cullRenderMode[renderMode])) {
+					return func(accum, object, flags);
+				}
+
 				auto* geo = netimmerse_cast<RE::BSGeometry*>(object);
 
 				if (!geo || geo->worldBound.radius <= 0.0f) {
@@ -1068,17 +1078,16 @@ namespace Hooks
 					return func(accum, object, flags);
 				}
 
-				hiz.stats.accumRegisterCalls.fetch_add(1, std::memory_order_relaxed);
-
-				const uint32_t renderMode = accum->GetRuntimeData().renderMode;
+				if (collectStats)
+					hiz.stats.accumRegisterCalls.fetch_add(1, std::memory_order_relaxed);
 
 				if (renderMode >= 30) {
 					return func(accum, object, flags);
 				}
 
-				hiz.stats.renderModeCalls[renderMode].fetch_add(1, std::memory_order_relaxed);
+				if (collectStats)
+					hiz.stats.renderModeCalls[renderMode].fetch_add(1, std::memory_order_relaxed);
 
-				const uint8_t pass = HiZOcclusion::GetPassKind(renderMode);
 				const bool allowCulling = pass != 0 && hiz.settings.cullRenderMode[renderMode] &&
 				                          (pass != HiZOcclusion::kCameraPass || HiZOcclusion::IsMainViewRegistration(renderMode, accum)) &&
 				                          !globals::features::skylighting.inOcclusion &&

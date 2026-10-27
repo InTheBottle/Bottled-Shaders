@@ -100,6 +100,10 @@ HiZOcclusion::~HiZOcclusion()
 		hiZBuildLevel0CS->Release();
 		hiZBuildLevel0CS = nullptr;
 	}
+	if (hiZBuildMip01CS) {
+		hiZBuildMip01CS->Release();
+		hiZBuildMip01CS = nullptr;
+	}
 	if (hiZDownsampleCS) {
 		hiZDownsampleCS->Release();
 		hiZDownsampleCS = nullptr;
@@ -496,6 +500,12 @@ void HiZOcclusion::DrawSettings()
 	}
 
 	stats.Reset();
+	statsDrawnFrame.store(globals::state->frameCount, std::memory_order_relaxed);
+}
+
+bool HiZOcclusion::IsCollectingStats() const
+{
+	return globals::state->frameCount - statsDrawnFrame.load(std::memory_order_relaxed) <= 1;
 }
 
 void HiZOcclusion::DrawOverlay()
@@ -587,6 +597,17 @@ void HiZOcclusion::InitShaders()
 		}
 	}
 
+	if (!hiZBuildMip01CS) {
+		auto fusedDefines = shaderDefines;
+		fusedDefines.push_back({ "BUILD_MIP1", "" });
+		try {
+			hiZBuildMip01CS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\HiZOcclusion\\HiZBuildLevel0CS.hlsl", fusedDefines, "cs_5_0");
+		} catch (const std::exception& e) {
+			hiZBuildMip01CS = nullptr;
+			logger::warn("HiZBuildLevel0CS BUILD_MIP1 compilation exception: {}", e.what());
+		}
+	}
+
 	if (!hiZDownsampleCS) {
 		try {
 			hiZDownsampleCS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\HiZOcclusion\\HiZDownsampleCS.hlsl", shaderDefines, "cs_5_0");
@@ -653,6 +674,10 @@ void HiZOcclusion::ClearShaderCache()
 	if (hiZBuildLevel0CS) {
 		hiZBuildLevel0CS->Release();
 		hiZBuildLevel0CS = nullptr;
+	}
+	if (hiZBuildMip01CS) {
+		hiZBuildMip01CS->Release();
+		hiZBuildMip01CS = nullptr;
 	}
 	if (hiZDownsampleCS) {
 		hiZDownsampleCS->Release();
@@ -1101,6 +1126,8 @@ bool HiZOcclusion::InitHiZResources()
 		stats.recreateDurationMS = static_cast<float>(recreateDuration);
 	}
 
+	const bool fusedMip1 = hiZBuildMip01CS && hiZMipCount >= 2 && hiZUAVs.size() >= 2 && hiZUAVs[1];
+
 	// Build level 0 from depth with safety checks
 	{
 		// Verify all required resources are valid before proceeding
@@ -1120,27 +1147,36 @@ bool HiZOcclusion::InitHiZResources()
 
 		ID3D11ShaderResourceView* srvs[1] = { depthSRV };
 		context->CSSetShaderResources(0, 1, srvs);
-		ID3D11UnorderedAccessView* uavs[1] = { hiZUAVs[0] };
-		context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
-		context->CSSetShader(hiZBuildLevel0CS, nullptr, 0);
 
 		const uint32_t tgX = 16, tgY = 16;
-		uint32_t groupsX = (hiZWidth + tgX - 1) / tgX;
-		uint32_t groupsY = (hiZHeight + tgY - 1) / tgY;
-		context->Dispatch(groupsX, groupsY, 1);
+		if (fusedMip1) {
+			ID3D11UnorderedAccessView* uavs[2] = { hiZUAVs[0], hiZUAVs[1] };
+			context->CSSetUnorderedAccessViews(0, 2, uavs, nullptr);
+			context->CSSetShader(hiZBuildMip01CS, nullptr, 0);
+			const uint32_t mip1W = std::max(1u, desiredW >> 1);
+			const uint32_t mip1H = std::max(1u, desiredH >> 1);
+			context->Dispatch((mip1W + tgX - 1) / tgX, (mip1H + tgY - 1) / tgY, 1);
+		} else {
+			ID3D11UnorderedAccessView* uavs[1] = { hiZUAVs[0] };
+			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+			context->CSSetShader(hiZBuildLevel0CS, nullptr, 0);
+			uint32_t groupsX = (hiZWidth + tgX - 1) / tgX;
+			uint32_t groupsY = (hiZHeight + tgY - 1) / tgY;
+			context->Dispatch(groupsX, groupsY, 1);
+		}
 
 		// Unbind (must pass arrays, not raw nullptr, when Count > 0)
-		ID3D11UnorderedAccessView* nullUAVs_lvl0[1] = { nullptr };
-		context->CSSetUnorderedAccessViews(0, 1, nullUAVs_lvl0, nullptr);
+		ID3D11UnorderedAccessView* nullUAVs_lvl0[2] = { nullptr, nullptr };
+		context->CSSetUnorderedAccessViews(0, 2, nullUAVs_lvl0, nullptr);
 		ID3D11ShaderResourceView* nullSRVs_lvl0[1] = { nullptr };
 		context->CSSetShaderResources(0, 1, nullSRVs_lvl0);
 		context->CSSetShader(nullptr, nullptr, 0);
 	}
 
 	// Downsample pyramid with farthest-depth reduction
-	uint32_t srcW = desiredW;
-	uint32_t srcH = desiredH;
-	for (uint32_t mip = 0; mip + 1 < hiZMipCount; ++mip) {
+	uint32_t srcW = fusedMip1 ? std::max(1u, desiredW >> 1) : desiredW;
+	uint32_t srcH = fusedMip1 ? std::max(1u, desiredH >> 1) : desiredH;
+	for (uint32_t mip = fusedMip1 ? 1u : 0u; mip + 1 < hiZMipCount; ++mip) {
 		uint32_t dstW = std::max(1u, srcW >> 1);
 		uint32_t dstH = std::max(1u, srcH >> 1);
 

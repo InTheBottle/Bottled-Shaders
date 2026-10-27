@@ -225,17 +225,14 @@ void TerrainHelper::BSLightingShader_SetupMaterial(RE::BSLightingShaderMaterialB
 		return;
 	}
 
-	ExtendedSlots materialBase;
-	{
-		const std::shared_lock lock(extendedSlotsMutex);
+	const std::shared_lock lock(extendedSlotsMutex);
 
-		const auto it = extendedSlots.find(material->hashKey);
-		if (it == extendedSlots.end()) {
-			// hash does not exists
-			return;
-		}
-		materialBase = it->second;
+	const auto it = extendedSlots.find(material->hashKey);
+	if (it == extendedSlots.end()) {
+		// hash does not exists
+		return;
 	}
+	const auto& materialBase = it->second;
 
 	const auto state = globals::state;
 	const auto& stateData = globals::game::graphicsState->GetRuntimeData();

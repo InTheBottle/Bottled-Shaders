@@ -339,7 +339,9 @@ public:
 		for (auto* feature : GetFeatureList()) {
 			if (feature->loaded) {
 #ifdef TRACY_ENABLE
-				{
+				if (!TracyIsConnected) {
+					callback(feature);
+				} else {
 					const auto zoneName = std::format("{}::{}", feature->GetShortName(), methodName);
 					ZoneTransientN(___tracy_feature_zone, zoneName.c_str(), true);
 					if (emitGpuZone) {

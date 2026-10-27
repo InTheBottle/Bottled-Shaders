@@ -480,6 +480,14 @@ void ExponentialHeightFog::ClearShaderCache()
 		farConservativeDepthCS->Release();
 		farConservativeDepthCS = nullptr;
 	}
+	if (conservativeDepthGroupCS) {
+		conservativeDepthGroupCS->Release();
+		conservativeDepthGroupCS = nullptr;
+	}
+	if (farConservativeDepthGroupCS) {
+		farConservativeDepthGroupCS->Release();
+		farConservativeDepthGroupCS = nullptr;
+	}
 	if (lightScatteringCS) {
 		lightScatteringCS->Release();
 		lightScatteringCS = nullptr;
@@ -780,8 +788,13 @@ ID3D11ComputeShader* ExponentialHeightFog::GetMaterialSetupCS()
 	return materialSetupCS;
 }
 
-ID3D11ComputeShader* ExponentialHeightFog::GetConservativeDepthCS()
+ID3D11ComputeShader* ExponentialHeightFog::GetConservativeDepthCS(bool a_groupReduce)
 {
+	if (a_groupReduce) {
+		if (!conservativeDepthGroupCS)
+			conservativeDepthGroupCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\ExponentialHeightFog\\VolumetricFogConservativeDepthCS.hlsl", { { "GROUP_REDUCE", "" } }, "cs_5_0"));
+		return conservativeDepthGroupCS;
+	}
 	if (!conservativeDepthCS)
 		conservativeDepthCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\ExponentialHeightFog\\VolumetricFogConservativeDepthCS.hlsl", {}, "cs_5_0"));
 	return conservativeDepthCS;
@@ -831,8 +844,13 @@ ID3D11ComputeShader* ExponentialHeightFog::GetFarMaterialSetupCS()
 	return farMaterialSetupCS;
 }
 
-ID3D11ComputeShader* ExponentialHeightFog::GetFarConservativeDepthCS()
+ID3D11ComputeShader* ExponentialHeightFog::GetFarConservativeDepthCS(bool a_groupReduce)
 {
+	if (a_groupReduce) {
+		if (!farConservativeDepthGroupCS)
+			farConservativeDepthGroupCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\ExponentialHeightFog\\VolumetricFogConservativeDepthCS.hlsl", { { "VOLUMETRIC_FOG_FAR_GRID", "" }, { "GROUP_REDUCE", "" } }, "cs_5_0"));
+		return farConservativeDepthGroupCS;
+	}
 	if (!farConservativeDepthCS)
 		farConservativeDepthCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\ExponentialHeightFog\\VolumetricFogConservativeDepthCS.hlsl", { { "VOLUMETRIC_FOG_FAR_GRID", "" } }, "cs_5_0"));
 	return farConservativeDepthCS;
@@ -959,7 +977,9 @@ void ExponentialHeightFog::Prepass()
 		totalFarPlane);
 	const bool farGridEnabled = nearEndDepth + 1.0 < totalFarPlane;
 
-	auto* conservativeDepthShader = GetConservativeDepthCS();
+	const bool nearGroupReduce = std::clamp(settings.volumetricGridPixelSize, 4u, 64u) >= 8;
+	const bool farGroupReduce = std::clamp(settings.volumetricFarGridPixelSize, 4u, 64u) >= 8;
+	auto* conservativeDepthShader = GetConservativeDepthCS(nearGroupReduce);
 	auto* materialSetupShader = GetMaterialSetupCS();
 	auto* lightScatteringShader = GetLightScatteringCS();
 	auto* integrationShader = GetIntegrationCS();
@@ -967,7 +987,7 @@ void ExponentialHeightFog::Prepass()
 		ReleaseVolumetricResources();
 		return;
 	}
-	if (farGridEnabled && (!GetFarConservativeDepthCS() || !GetFarMaterialSetupCS() || !GetFarLightScatteringCS() || !GetFarIntegrationCS())) {
+	if (farGridEnabled && (!GetFarConservativeDepthCS(farGroupReduce) || !GetFarMaterialSetupCS() || !GetFarLightScatteringCS() || !GetFarIntegrationCS())) {
 		ReleaseVolumetricResources();
 		return;
 	}
@@ -1132,6 +1152,7 @@ void ExponentialHeightFog::Prepass()
 		Texture3D* integrated;
 		ID3D11ComputeShader* materialSetupCS;
 		ID3D11ComputeShader* conservativeDepthCS;
+		bool groupReduce;
 		ID3D11ComputeShader* lightScatteringCS;
 		ID3D11ComputeShader* integrationCS;
 		bool hasPrevConservativeDepth;
@@ -1148,7 +1169,10 @@ void ExponentialHeightFog::Prepass()
 			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 			context->CSSetShader(p.conservativeDepthCS, nullptr, 0);
 			globals::profiler->BeginPass(p.name);
-			context->Dispatch(groupX, groupY, 1);
+			if (p.groupReduce)
+				context->Dispatch(p.gridSize.x, p.gridSize.y, 1);
+			else
+				context->Dispatch(groupX, groupY, 1);
 			globals::profiler->EndPass();
 			uavs[0] = nullptr;
 			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
@@ -1212,6 +1236,7 @@ void ExponentialHeightFog::Prepass()
 		integratedLightScattering.get(),
 		materialSetupShader,
 		conservativeDepthShader,
+		nearGroupReduce,
 		lightScatteringShader,
 		integrationShader,
 		temporalHistoryValid && hasConservativeDepthHistory,
@@ -1226,7 +1251,8 @@ void ExponentialHeightFog::Prepass()
 			temporalHistoryValidFar ? lightScatteringFarHistory.get() : nullptr,
 			integratedLightScatteringFar.get(),
 			GetFarMaterialSetupCS(),
-			GetFarConservativeDepthCS(),
+			GetFarConservativeDepthCS(farGroupReduce),
+			farGroupReduce,
 			GetFarLightScatteringCS(),
 			GetFarIntegrationCS(),
 			temporalHistoryValidFar && hasConservativeDepthFarHistory,

@@ -198,4 +198,8 @@ struct ColorGrading : public PostProcessFeature
 	int curveReadbackRequestFrame = -1;
 	bool curveNeedsUpdate = true;
 	std::array<char, sizeof(ColorCB)> prevCurveCB = {};
+	std::array<char, sizeof(ColorCB)> lutKey = {};
+	ID3D11ComputeShader* lutShader = nullptr;
+	uint64_t lutGeneration = 0;
+	bool lutValid = false;
 };

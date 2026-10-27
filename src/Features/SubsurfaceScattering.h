@@ -73,6 +73,7 @@ public:
 	Texture2D* diffuseNoAlbedoTex = nullptr;
 
 	ID3D11ComputeShader* prepassSS = nullptr;
+	ID3D11ComputeShader* prepassBurleySS = nullptr;
 	ID3D11ComputeShader* horizontalSSBlur = nullptr;
 	ID3D11ComputeShader* verticalSSBlur = nullptr;
 	ID3D11ComputeShader* burleySS = nullptr;

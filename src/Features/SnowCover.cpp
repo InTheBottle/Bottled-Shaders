@@ -516,12 +516,13 @@ void SnowCover::ReleaseTextures()
 
 void SnowCover::Reload()
 {
+	const char* currentWorldspace = GetWorldspace();
+	if (last_worldspace == currentWorldspace)
+		return;
 	std::ifstream fileStream;
 	std::filesystem::path path;
 	try {
-		std::string curr_worldspace = GetWorldspace();
-		if (curr_worldspace == last_worldspace)
-			return;
+		std::string curr_worldspace = currentWorldspace;
 		last_worldspace = curr_worldspace;
 		ResetWorldConfig();
 		ReleaseTextures();
@@ -1075,8 +1076,18 @@ void SnowCover::BSLightingShader_Setup(RE::BSRenderPass* a_pass)
 	auto name = a_pass->geometry->name.c_str();
 	// Hash once per pass; fnv_hash dereferences unguarded and BSFixedString::c_str() can be null.
 	const uint64_t nameHash = name ? FormIdParser::fnv_hash(name) : 0;
-	if ((a_pass->geometry->HasAnimation() || (userData && ((userData->GetObjectReference() && userData->GetObjectReference()->IsBoundAnimObject()) || userData->CanBeMoved()))) && !(name && whitelist.contains(nameHash))) {
-		if (settings.AffectHavok && userData && userData->formType != RE::FormType::ActorCharacter && userData->CanBeMoved())
+	static const RE::BSFixedString bsxKey{ "BSX" };
+	const auto* bsxFlags = a_pass->geometry->GetExtraData<RE::BSXFlags>(bsxKey);
+	const bool hasAnimation = bsxFlags && (bsxFlags->value & 2) != 0;
+	auto* baseObject = userData ? userData->GetObjectReference() : nullptr;
+	int canBeMoved = -1;
+	const auto movable = [&]() {
+		if (canBeMoved < 0)
+			canBeMoved = userData->CanBeMoved() ? 1 : 0;
+		return canBeMoved == 1;
+	};
+	if ((hasAnimation || (userData && ((baseObject && baseObject->IsBoundAnimObject()) || movable()))) && !(name && whitelist.contains(nameHash))) {
+		if (settings.AffectHavok && userData && userData->formType != RE::FormType::ActorCharacter && movable())
 			state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::NoSnow;
 		else
 			state->permutationData.ExtraShaderDescriptor |= (uint)State::ExtraShaderDescriptors::NoSnow;

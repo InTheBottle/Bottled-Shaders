@@ -262,7 +262,7 @@ bool OverlayRenderer::ShouldSkipRendering()
 
 	uint32_t effectFailed = EffectManager::GetSingleton().IsInitialized() ? EffectManager::GetSingleton().GetFailedEffectCount() : 0;
 
-	return !(shaderCache->IsCompiling() ||
+	return !((shaderCache->IsCompiling() && (!shaderCache->backgroundCompilation || shaderCache->IsShowBackgroundOverlay())) ||
 			 Menu::GetSingleton()->IsEnabled ||
 			 Menu::GetSingleton()->openFade > 0.0f ||
 			 SetupRenderer::ShouldShowFirstTimeSetup() ||

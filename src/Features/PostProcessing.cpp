@@ -355,11 +355,15 @@ void PostProcessing::ProcessSettings(json& o_json)
 	logger::debug("Loading post processing settings...");
 
 	for (auto& feat : pipeline) {
-		if (feat && o_json.contains(feat->GetType())) {
+		if (!feat)
+			continue;
+		const auto featIt = o_json.find(feat->GetType());
+		if (featIt != o_json.end()) {
 			try {
+				const auto& featJson = *featIt;
 				if (!feat->IsAutoEnabled())
-					feat->enabled = o_json.value(feat->GetType(), json::object()).value("enabled", true);
-				json featSettings = o_json.value(feat->GetType(), json::object()).value("settings", json::object());
+					feat->enabled = featJson.value("enabled", true);
+				json featSettings = featJson.value("settings", json::object());
 				feat->LoadSettings(featSettings);
 			} catch (const json::exception& e) {
 				logger::warn("Failed to load Post Processing settings for {}: {}", feat->GetType(), e.what());

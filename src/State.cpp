@@ -49,6 +49,7 @@
 #ifdef TRACY_ENABLE
 static thread_local std::vector<TracyCZoneCtx> s_tracyPerfZones;
 #endif
+static thread_local std::vector<bool> s_perfEventEmitted;
 
 void State::UpdateLightingShaderPermutation(RE::BSRenderPass* a_pass)
 {
@@ -242,8 +243,6 @@ void State::Draw()
 
 void State::Debug()
 {
-	auto lock = Lock();
-
 	if (frameChecker.IsNewFrame()) {
 		// Smooth draw calls and frame times for all shader types
 		for (int i = 0; i < magic_enum::enum_integer(RE::BSShader::Type::Total) + 1; ++i) {
@@ -288,7 +287,7 @@ void State::Debug()
 		drawCalls[magic_enum::enum_integer(RE::BSShader::Type::Total)]++;
 	}
 
-	if (currentShader && updateShader && frameAnnotations) {
+	if (currentShader && updateShader && AnnotateDraws()) {
 		BeginPerfEvent(std::format("Draw: CS {}::{:x}::{}", magic_enum::enum_name(currentShader->shaderType.get()), permutationData.PixelShaderDescriptor, currentShader->fxpFilename));
 		SetPerfMarker(std::format("Defines: {}", SIE::ShaderCache::GetDefinesString(*currentShader, permutationData.PixelShaderDescriptor)));
 		EndPerfEvent();
@@ -353,6 +352,14 @@ bool State::HandlePostProcessing(RE::RENDER_TARGET a_input, RE::RENDER_TARGET a_
  * shader descriptor tracking, increments and atomically publishes the frame
  * count, and disables reflection and improved snow shaders.
  */
+void State::SetGrassSphereNormal(bool sphereNormal)
+{
+	if (sphereNormal)
+		permutationData.ExtraShaderDescriptor |= static_cast<uint32_t>(ExtraShaderDescriptors::GrassSphereNormal);
+	else
+		permutationData.ExtraShaderDescriptor &= ~static_cast<uint32_t>(ExtraShaderDescriptors::GrassSphereNormal);
+}
+
 void State::Reset()
 {
 	globals::profiler->EndFrame();
@@ -398,7 +405,11 @@ void State::Reset()
 	}
 
 	// Disable "improved" snow shader, unsupported
-	RE::GetINISetting("bEnableImprovedSnow:Display")->data.b = false;
+	static RE::Setting* improvedSnow = nullptr;
+	if (!improvedSnow)
+		improvedSnow = RE::GetINISetting("bEnableImprovedSnow:Display");
+	if (improvedSnow)
+		improvedSnow->data.b = false;
 
 	activeReflections = false;
 }
@@ -1369,8 +1380,23 @@ uint32_t State::GetRuntimePixelBits(const RE::BSShader& a_shader)
 	return a_shader.shaderType.get() == RE::BSShader::Type::Water ? static_cast<uint32_t>(SIE::ShaderCache::WaterShaderFlags::Wading) : 0u;
 }
 
+bool State::PerfEventsConsumed() const
+{
+	if ((pPerf && pPerf->GetStatus()) || NvPerf::RangesActive())
+		return true;
+#ifdef TRACY_ENABLE
+	return TracyIsConnected;
+#else
+	return false;
+#endif
+}
+
 void State::BeginPerfEvent(std::string_view title)
 {
+	const bool emit = PerfEventsConsumed();
+	s_perfEventEmitted.push_back(emit);
+	if (!emit)
+		return;
 #ifdef TRACY_ENABLE
 	// Use dynamic source location so Tracy displays the title as the zone name
 	// rather than the static function name "BeginPerfEvent".
@@ -1390,6 +1416,14 @@ void State::BeginPerfEvent(std::string_view title)
 
 void State::EndPerfEvent()
 {
+	if (s_perfEventEmitted.empty()) {
+		logger::warn("EndPerfEvent called without a matching BeginPerfEvent");
+		return;
+	}
+	const bool emitted = s_perfEventEmitted.back();
+	s_perfEventEmitted.pop_back();
+	if (!emitted)
+		return;
 #ifdef TRACY_ENABLE
 	if (!s_tracyPerfZones.empty()) {
 		TracyCZoneEnd(s_tracyPerfZones.back());
@@ -1405,6 +1439,8 @@ void State::EndPerfEvent()
 
 void State::SetPerfMarker(std::string_view title)
 {
+	if (!PerfEventsConsumed())
+		return;
 	pPerf->SetMarker(std::wstring(title.begin(), title.end()).c_str());
 }
 

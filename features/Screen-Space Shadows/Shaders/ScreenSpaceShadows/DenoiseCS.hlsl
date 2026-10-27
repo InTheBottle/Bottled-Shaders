@@ -45,34 +45,48 @@ float GetWeight(float distanceSq, float spatialFalloff, float residual)
 
 static const int Radius = 6;
 static const float Sigma = 3.0;
+static const int GroupSize = 8;
+static const int TileSize = GroupSize + 2 * Radius;
 
-float LoadDepth(int2 texel, int2 renderSize)
+groupshared float TileDepth[TileSize * TileSize];
+groupshared float2 TileValue[TileSize * TileSize];
+
+uint GetTileIndex(int2 tileTexel)
 {
-	return DepthTexture[clamp(texel, 0, renderSize - 1)];
+	return tileTexel.y * TileSize + tileTexel.x;
 }
 
-float GetDepthGradient(int2 texel, int2 axis, float centerDepth, int2 renderSize)
+float GetDepthGradient(int2 tileCenter, int2 axis, float centerDepth)
 {
-	float backward = centerDepth - LoadDepth(texel - axis, renderSize);
-	float forward = LoadDepth(texel + axis, renderSize) - centerDepth;
+	float backward = centerDepth - TileDepth[GetTileIndex(tileCenter - axis)];
+	float forward = TileDepth[GetTileIndex(tileCenter + axis)] - centerDepth;
 	return abs(backward) < abs(forward) ? backward : forward;
 }
 
-[numthreads(8, 8, 1)] void main(uint3 dispatchID : SV_DispatchThreadID) {
+[numthreads(GroupSize, GroupSize, 1)] void main(uint3 dispatchID : SV_DispatchThreadID, uint3 groupID : SV_GroupID, uint3 groupThreadID : SV_GroupThreadID, uint groupIndex : SV_GroupIndex) {
 	int2 renderSize = GetRenderSize();
+	int2 tileOrigin = int2(groupID.xy) * GroupSize - Radius;
+	for (uint t = groupIndex; t < uint(TileSize * TileSize); t += uint(GroupSize * GroupSize)) {
+		int2 tileTexel = clamp(tileOrigin + int2(t % uint(TileSize), t / uint(TileSize)), 0, renderSize - 1);
+		TileDepth[t] = DepthTexture[tileTexel];
+		TileValue[t] = InputTexture[tileTexel];
+	}
+	GroupMemoryBarrierWithGroupSync();
+
 	if (any(dispatchID.xy >= uint2(renderSize)))
 		return;
 
 	int2 texel = int2(dispatchID.xy);
-	float2 center = InputTexture[texel];
-	float centerDepth = DepthTexture[texel];
+	int2 tileCenter = int2(groupThreadID.xy) + Radius;
+	float2 center = TileValue[GetTileIndex(tileCenter)];
+	float centerDepth = TileDepth[GetTileIndex(tileCenter)];
 
 	if (IsSky(centerDepth)) {
 		OutputTexture[texel] = center;
 		return;
 	}
 
-	float2 depthGradient = float2(GetDepthGradient(texel, int2(1, 0), centerDepth, renderSize), GetDepthGradient(texel, int2(0, 1), centerDepth, renderSize));
+	float2 depthGradient = float2(GetDepthGradient(tileCenter, int2(1, 0), centerDepth), GetDepthGradient(tileCenter, int2(0, 1), centerDepth));
 	float depthScale = GetDepthScale(centerDepth);
 	float spatialFalloff = rcp(2.0 * Sigma * Sigma);
 
@@ -88,12 +102,14 @@ float GetDepthGradient(int2 texel, int2 axis, float centerDepth, int2 renderSize
 		if (i == 0)
 			continue;
 
-		int2 sampleTexel = clamp(texel + int2(round(across * i)), 0, renderSize - 1);
-		float sampleDepth = DepthTexture[sampleTexel];
+		int2 offset = int2(round(across * i));
+		int2 sampleTexel = clamp(texel + offset, 0, renderSize - 1);
+		uint sampleIndex = GetTileIndex(tileCenter + offset);
+		float sampleDepth = TileDepth[sampleIndex];
 		float residual = (sampleDepth - (centerDepth + dot(float2(sampleTexel - texel), depthGradient))) * depthScale;
 		float weight = IsSky(sampleDepth) ? 0.0 : GetWeight(float(i * i), spatialFalloff, residual);
 
-		filtered += InputTexture[sampleTexel] * weight;
+		filtered += TileValue[sampleIndex] * weight;
 		weightSum += weight;
 	}
 
