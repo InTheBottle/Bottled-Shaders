@@ -618,6 +618,9 @@ namespace SharedData
 		float MotionBluriness;
 		float Brightness;
 		float Visibility;
+		float4 TextureBounds;
+		float2 TextureRadiusScale;
+		float2 pad0;
 	};
 
 	struct NightEyeSettings

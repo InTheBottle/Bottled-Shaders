@@ -48,7 +48,7 @@ struct ReverseZ : Feature
 	void InstallRuntimeHooks();
 	void ApplyReverseProjection(void* a_cameraStateEntry, const RE::NiCamera* a_camera);
 	void ReversePublishedProjection();
-	void FixupMappedFrameBuffer(globals::FrameBuffer& a_frameBuffer);
+	bool FixupMappedFrameBuffer(globals::FrameBuffer& a_frameBuffer);
 	void TracePublishedCamera(const RE::NiCamera* a_camera);
 	[[nodiscard]] bool IsConvertedDepthTarget(uint32_t a_target) const;
 	[[nodiscard]] bool ExpectPublishedReversal(const RE::NiCamera* a_camera, bool a_renderingCubemap) const;

@@ -770,7 +770,21 @@ namespace Util
 			if (shaderCache->IsDiskCache()) {
 				shaderCache->DeleteDiskCache();
 			}
+			shaderCache->SetRecachePending(true);
 		}
+	}
+
+	void DrawRecacheBanner()
+	{
+		auto* shaderCache = globals::shaderCache;
+		if (!shaderCache || !shaderCache->IsRecachePending())
+			return;
+		if (StatusBanner(ICON_TI_REFRESH,
+				T("ui.recache_banner",
+					"A full shader recache is pending and will run on the next game restart. Click to dismiss."),
+				Colors::GetWarning()))
+			shaderCache->SetRecachePending(false);
+		ImGui::Spacing();
 	}
 
 	void RequestClearShaderCacheConfirmation()

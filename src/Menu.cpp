@@ -818,6 +818,7 @@ void Menu::DrawSettings()
 
 		HandleMenuShortcuts();
 		MenuHeaderRenderer::RenderHeader(isDocked);
+		Util::DrawRecacheBanner();
 
 		// Static storage for menu state - must persist across frames
 		static size_t selectedMenu = 0;

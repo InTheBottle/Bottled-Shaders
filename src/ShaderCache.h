@@ -429,6 +429,9 @@ namespace SIE
 		void SetDiskCache(bool value);
 		/** @brief Deletes the entire on-disk shader cache directory. */
 		void DeleteDiskCache();
+		/** @brief True after a user action cleared every shader, until the menu banner is dismissed. */
+		bool IsRecachePending() const { return recachePending; }
+		void SetRecachePending(bool value) { recachePending = value; }
 		void RemoveLegacyDiskCache();
 		void TrimDiskCache();
 		void InvalidateShaderSources();
@@ -914,6 +917,7 @@ namespace SIE
 		bool isDump = false;
 		bool hideError = false;
 		bool useFileWatcher = false;
+		bool recachePending = false;
 
 		std::stop_source ssource;
 		std::mutex vertexShadersMutex;

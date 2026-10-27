@@ -623,15 +623,15 @@ void ReverseZ::FlipUploadedInverse(Matrix& a_matrix)
 	ReverseUploadedInverse(a_matrix);
 }
 
-void ReverseZ::FixupMappedFrameBuffer(globals::FrameBuffer& a_frameBuffer)
+bool ReverseZ::FixupMappedFrameBuffer(globals::FrameBuffer& a_frameBuffer)
 {
 	if (!activeThisBoot || !g_reversalActive.load(std::memory_order_relaxed) || !g_projectionReversed)
-		return;
+		return false;
 
 	const auto& proj = a_frameBuffer.CameraProj;
 	const bool perspective = std::abs(proj.m[3][3]) < 1e-4f && std::abs(std::abs(proj.m[3][2]) - 1.0f) < 1e-3f;
 	if (!perspective || proj.m[2][2] * proj.m[3][2] < 0.0f)
-		return;
+		return false;
 
 	static bool logged = false;
 	if (!logged) {
@@ -646,6 +646,7 @@ void ReverseZ::FixupMappedFrameBuffer(globals::FrameBuffer& a_frameBuffer)
 	ReverseUploadedInverse(a_frameBuffer.CameraProjUnjitteredInverse);
 	ReverseUploadedInverse(a_frameBuffer.CameraViewProjInverse);
 	ReverseUploadedInverse(a_frameBuffer.CameraProjInverse);
+	return true;
 }
 
 void ReverseZ::TracePublishedCamera(const RE::NiCamera* a_camera)

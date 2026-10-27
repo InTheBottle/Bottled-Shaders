@@ -12,7 +12,8 @@ struct LensFlare : public PostProcessFeature
 	virtual bool WritesToMainTexture() const override { return false; }
 	virtual inline bool DisableInMainLoadingMenu() const override { return true; }
 
-	TextureInfo GetFlareOutput() const;
+	/// Get the half-resolution ghosts and halo; Composite applies the final mix.
+	TextureInfo GetGhostHaloOutput() const;
 
 	static constexpr int NUM_GHOSTS = 8;
 	static constexpr uint FFT_MIN = 128;
@@ -123,7 +124,6 @@ struct LensFlare : public PostProcessFeature
 
 	eastl::unique_ptr<ConstantBuffer> lensFlareCB = nullptr;
 
-	eastl::unique_ptr<Texture2D> texFlare = nullptr;      // full resolution (final output)
 	eastl::unique_ptr<Texture2D> texThreshold = nullptr;  // half resolution
 	eastl::unique_ptr<Texture2D> texGhostHalo = nullptr;  // half resolution
 	eastl::unique_ptr<Texture2D> texBlurTemp = nullptr;   // quarter resolution
@@ -141,7 +141,6 @@ struct LensFlare : public PostProcessFeature
 	winrt::com_ptr<ID3D11ComputeShader> ghostHaloCS = nullptr;
 	winrt::com_ptr<ID3D11ComputeShader> blurDownCS = nullptr;
 	winrt::com_ptr<ID3D11ComputeShader> blurUpCS = nullptr;
-	winrt::com_ptr<ID3D11ComputeShader> mixCS = nullptr;
 
 	// FFT ghost pipeline shaders (self-contained in lensflare_fft.cs.hlsl)
 	static constexpr uint FFT_VARIANT_COUNT = 4;
@@ -189,4 +188,4 @@ private:
 	void PrepareBokehFFT(BokehFFTCache& cache, const LensFlareCB& data);
 };
 
-inline PostProcessFeature::TextureInfo LensFlare::GetFlareOutput() const { return outputReady ? TextureInfo{ texFlare->resource.get(), texFlare->srv.get() } : TextureInfo{}; }
+inline PostProcessFeature::TextureInfo LensFlare::GetGhostHaloOutput() const { return outputReady ? TextureInfo{ texGhostHalo->resource.get(), texGhostHalo->srv.get() } : TextureInfo{}; }

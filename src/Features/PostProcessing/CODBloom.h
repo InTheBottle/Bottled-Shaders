@@ -13,7 +13,8 @@ struct CODBloom : public PostProcessFeature
 	virtual bool WritesToMainTexture() const override { return false; }
 	virtual inline bool DisableInMainLoadingMenu() const override { return true; }
 
-	TextureInfo GetBloomOutput() const { return outputReady ? TextureInfo{ texBloom->resource.get(), texBloomMipSRVs[0].get() } : TextureInfo{}; }
+	/// Get mip 1 of the accumulated bloom; Composite performs the final upsample.
+	TextureInfo GetBloomOutput() const { return outputReady ? TextureInfo{ texBloom->resource.get(), texBloomMipSRVs[1].get() } : TextureInfo{}; }
 
 	constexpr static size_t s_BloomMips = 9;
 

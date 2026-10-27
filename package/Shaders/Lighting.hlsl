@@ -349,6 +349,10 @@ VS_OUTPUT main(VS_INPUT input)
 
 typedef VS_OUTPUT PS_INPUT;
 
+#if defined(TERRAIN_BLENDING)
+// Terrain Blending is loaded; objects only read its settings, so they keep this after the undef below.
+#	define TERRAIN_BLENDING_OBJECTS
+#endif
 #if !defined(LANDSCAPE)
 #	undef TERRAIN_BLENDING
 #endif
@@ -2160,19 +2164,29 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	endif
 
 #	if defined(DEFERRED) && defined(LIGHT_LIMIT_FIX)
-	const float visibleSceneDepth = SharedData::GetScreenDepth(SharedData::DepthTexture.Load(int3(input.Position.xy, 0)).x);
+	const float visibleRawDepth = SharedData::DepthTexture.Load(int3(input.Position.xy, 0)).x;
+	const float visibleSceneDepth = SharedData::GetScreenDepth(visibleRawDepth);
 #	endif
-#	if defined(DEFERRED) && !defined(LANDSCAPE)
+#	if defined(DEFERRED) && !defined(LANDSCAPE) && defined(TERRAIN_BLENDING_OBJECTS)
+	// Terrain Blending fades terrain over the part of an object below the terrain surface, where the scene
+	// depth holds the terrain. Light that part like the terrain it fades into by bending its normal up.
 	[branch] if (SharedData::terrainBlendingSettings.Enabled)
 	{
 #		if defined(LIGHT_LIMIT_FIX)
 		const float visibleDepth = visibleSceneDepth;
 #		else
-		const float visibleDepth = SharedData::GetScreenDepth(SharedData::DepthTexture.Load(int3(input.Position.xy, 0)).x);
+		const float visibleRawDepth = SharedData::DepthTexture.Load(int3(input.Position.xy, 0)).x;
+		const float visibleDepth = SharedData::GetScreenDepth(visibleRawDepth);
 #		endif
-		const float terrainCover = saturate((SharedData::GetScreenDepth(input.Position.z) - visibleDepth) / 10.0);
-		if (terrainCover > 0.0)
-			worldNormal = normalize(lerp(worldNormal, float3(0, 0, 1), terrainCover));
+		// Objects read the 16-bit blended depth, so ignore differences within one of its steps.
+		const float depthStep = SharedData::GetScreenDepth(visibleRawDepth + 1.0 / 65535.0) - visibleDepth;
+		const float buriedDepth = max(viewPosition.z - visibleDepth - depthStep, 0.0);
+		[branch] if (buriedDepth > 0.0)
+		{
+			// A downward normal passes through zero halfway, so fall back to up there instead of normalizing it
+			const float3 blendedNormal = lerp(worldNormal, float3(0, 0, 1), saturate(buriedDepth / 10.0));
+			worldNormal = dot(blendedNormal, blendedNormal) > 1e-6 ? normalize(blendedNormal) : float3(0, 0, 1);
+		}
 	}
 #	endif
 

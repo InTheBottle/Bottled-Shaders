@@ -1,5 +1,7 @@
 #pragma once
 
+#include "RainRefraction/TextureFootprint.h"
+
 #include <winrt/base.h>
 
 #include "Buffer.h"
@@ -59,6 +61,9 @@ public:
 		float MotionBluriness;
 		float Brightness;
 		float Visibility;
+		float4 TextureBounds{ 0, 0, 1, 1 };  ///< UV rectangle of the raindrop texture's alpha coverage
+		float2 TextureRadiusScale{ 1, 1 };   ///< Billboard half-extents per unit drop radius
+		float2 pad0{};
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
 
@@ -66,6 +71,7 @@ public:
 	struct RaindropTexture
 	{
 		winrt::com_ptr<ID3D11ShaderResourceView> srv;
+		RainRefractionTexture::Footprint footprint;
 		std::string status;  ///< Failure reason; empty when loaded
 	};
 
@@ -90,7 +96,7 @@ public:
 	/** @brief Loads enbraindrops.png from the Effects 11 preset folder; called whenever a preset is applied. */
 	void LoadPresetRaindrops(const std::filesystem::path& a_presetPath);
 
-	/** @brief Binds the raindrop texture and the vertex shader feature buffers for refractive rain passes. */
+	/** @brief Binds the vertex shader feature buffers for rain passes, plus the raindrop texture while refraction is active. */
 	void ModifyParticle();
 	/** @brief Switches refractive rain passes to alpha blending and binds the scene behind the rain. */
 	void ParticleShaderHacks();
