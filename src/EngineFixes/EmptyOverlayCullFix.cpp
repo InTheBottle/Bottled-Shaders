@@ -1,47 +1,57 @@
 #include "EmptyOverlayCullFix.h"
 
+#include "Utils/FileSystem.h"
+#include "Utils/Format.h"
+
 namespace
 {
-	// RaceMenu's default sDefaultTexture, matched as a suffix so the "textures\" prefix is optional.
-	constexpr std::string_view DefaultOverlayTexture = "actors\\character\\overlays\\default.dds";
+	// RaceMenu's sDefaultTexture when skee64.ini leaves it unset.
+	constexpr std::string_view RaceMenuDefaultTexture = "textures\\actors\\character\\overlays\\default.dds";
 
-	bool HasDefaultOverlayDiffuse(RE::BSLightingShaderProperty* property)
+	std::string ReadRaceMenuDefaultTexture()
 	{
-		auto* material = static_cast<RE::BSLightingShaderMaterialBase*>(property->material);
-		if (!material || !material->textureSet)
-			return false;
-
-		const char* path = material->textureSet->GetTexturePath(RE::BSTextureSet::Texture::kDiffuse);
-		if (!path)
-			return false;
-
-		const std::string_view diffuse(path);
-		return diffuse.size() >= DefaultOverlayTexture.size() &&
-		       _strnicmp(diffuse.data() + diffuse.size() - DefaultOverlayTexture.size(), DefaultOverlayTexture.data(), DefaultOverlayTexture.size()) == 0;
+		const auto iniPath = Util::PathHelpers::GetDataPath() / "SKSE" / "Plugins" / "skee64.ini";
+		std::array<wchar_t, MAX_PATH> value{};
+		GetPrivateProfileStringW(L"Overlays/Data", L"sDefaultTexture", L"", value.data(), static_cast<DWORD>(value.size()), iniPath.c_str());
+		return value[0] != L'\0' ? Util::WStringToString(value.data()) : std::string(RaceMenuDefaultTexture);
 	}
 
-	bool IsEmptyOverlay(RE::BSLightingShaderProperty* property, RE::BSGeometry* geometry)
+	// RaceMenu's default iAlphaFlags 4845 blends SrcAlpha / InvSrcAlpha, so alpha 0 leaves the target untouched.
+	// Alpha testing alone proves nothing: at RaceMenu's threshold 0 the engine's test passes alpha 0.
+	bool BlendsAwayZeroAlpha(const RE::NiAlphaProperty* alpha)
 	{
-		if (property->flags.none(RE::BSShaderProperty::EShaderPropertyFlag::kSkinned))
-			return false;
+		using enum RE::NiAlphaProperty::AlphaFunction;
+		return alpha && alpha->GetAlphaBlending() && alpha->GetSrcBlendMode() == kSrcAlpha && alpha->GetDestBlendMode() == kInvSrcAlpha;
+	}
 
-		// Drawn without blending or testing, the transparent texture would still be visible.
-		const auto* alpha = static_cast<RE::NiAlphaProperty*>(geometry->GetGeometryRuntimeData().alphaProperty.get());
-		if (!alpha || !(alpha->GetAlphaBlending() || alpha->GetAlphaTesting()))
-			return false;
+	std::string_view GetDiffusePath(RE::BSLightingShaderProperty* property)
+	{
+		auto* material = static_cast<RE::BSLightingShaderMaterialBase*>(property->material);
+		const char* path = material && material->textureSet ? material->textureSet->GetTexturePath(RE::BSTextureSet::Texture::kDiffuse) : nullptr;
+		return path ? path : "";
+	}
 
-		return HasDefaultOverlayDiffuse(property);
+	// Ordered cheapest first: most lighting geometry fails the flag test before any pointer is followed.
+	// RaceMenu's overlay nifs name the texture "Textures\Actors\...", skee64.ini "textures\actors\...", so case is ignored.
+	bool IsEmptyOverlay(RE::BSLightingShaderProperty* property, RE::BSGeometry* geometry, std::string_view emptyOverlayTexture)
+	{
+		return property->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kSkinned) &&
+		       BlendsAwayZeroAlpha(static_cast<RE::NiAlphaProperty*>(geometry->GetGeometryRuntimeData().alphaProperty.get())) &&
+		       Util::IEquals(GetDiffusePath(property), emptyOverlayTexture);
 	}
 }
 
 void EmptyOverlayCullFix::Install()
 {
+	emptyOverlayTexture = ReadRaceMenuDefaultTexture();
+	logger::info("[Engine Fixes] Empty Overlay Cull Fix skips skinned SrcAlpha/InvSrcAlpha shapes whose diffuse is {}", emptyOverlayTexture);
 	stl::write_vfunc<0x2A, BSLightingShaderProperty_GetRenderPasses>(RE::VTABLE_BSLightingShaderProperty[0]);
 }
 
 RE::BSShaderProperty::RenderPassArray* EmptyOverlayCullFix::BSLightingShaderProperty_GetRenderPasses::thunk(RE::BSLightingShaderProperty* property, RE::BSGeometry* geometry, uint32_t renderMode, RE::BSShaderAccumulator* accumulator)
 {
-	if (geometry && IsEmptyOverlay(property, geometry)) {
+	if (geometry && IsEmptyOverlay(property, geometry, emptyOverlayTexture)) {
+		// Clear returns each pass to the engine's pool; dropping the head would leak them.
 		property->renderPassList.Clear();
 		return &property->renderPassList;
 	}
