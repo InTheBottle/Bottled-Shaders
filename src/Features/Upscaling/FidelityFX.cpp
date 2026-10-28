@@ -401,41 +401,30 @@ void FidelityFX::CreateHostFSRContext()
 		return;
 	}
 
-	float2 screenSize{ (float)globals::game::graphicsState->screenWidth, (float)globals::game::graphicsState->screenHeight };
-	auto renderSize = Util::ConvertToDynamic(screenSize);
+	uint32_t displayWidth = globals::game::graphicsState->screenWidth;
+	uint32_t displayHeight = globals::game::graphicsState->screenHeight;
 
-	uint32_t displayWidth = (uint32_t)screenSize.x;
-	uint32_t displayHeight = (uint32_t)screenSize.y;
-	uint32_t renderWidth = (uint32_t)renderSize.x;
-	uint32_t renderHeight = (uint32_t)renderSize.y;
-
-	FfxFsr3ContextDescription contextDescription;
-	contextDescription.maxRenderSize.width = renderWidth;
-	contextDescription.maxRenderSize.height = renderHeight;
+	FfxFsr3ContextDescription contextDescription{};
+	contextDescription.maxRenderSize.width = displayWidth;
+	contextDescription.maxRenderSize.height = displayHeight;
 	contextDescription.maxUpscaleSize.width = displayWidth;
 	contextDescription.maxUpscaleSize.height = displayHeight;
 	contextDescription.displaySize.width = displayWidth;
 	contextDescription.displaySize.height = displayHeight;
-	contextDescription.flags = FFX_FSR3_ENABLE_UPSCALING_ONLY | FFX_FSR3_ENABLE_AUTO_EXPOSURE;
+	contextDescription.flags = FFX_FSR3_ENABLE_UPSCALING_ONLY | FFX_FSR3_ENABLE_AUTO_EXPOSURE | FFX_FSR3_ENABLE_HIGH_DYNAMIC_RANGE;
 	if (globals::features::reverseZ.IsActive())
 		contextDescription.flags |= FFX_FSR3_ENABLE_DEPTH_INVERTED;
-	if (globals::features::hdrDisplay.loaded) {
-		contextDescription.flags |= FFX_FSR3_ENABLE_HIGH_DYNAMIC_RANGE;
-		contextDescription.backBufferFormat = FFX_SURFACE_FORMAT_R10G10B10A2_UNORM;
-	} else {
-		contextDescription.backBufferFormat = FFX_SURFACE_FORMAT_R8G8B8A8_UNORM;
-	}
+	contextDescription.backBufferFormat = globals::features::hdrDisplay.loaded ? FFX_SURFACE_FORMAT_R10G10B10A2_UNORM : FFX_SURFACE_FORMAT_R8G8B8A8_UNORM;
 	contextDescription.backendInterfaceUpscaling = fsrInterface;
 
 	if (const auto contextResult = ffxFsr3ContextCreate(&fsrContext[0], &contextDescription); contextResult != FFX_OK) {
-		logger::critical("[FidelityFX] Failed to initialize FSR3 context (error {:#x}, render {}x{}, display {}x{})!", static_cast<uint32_t>(contextResult), renderWidth, renderHeight, displayWidth, displayHeight);
+		logger::critical("[FidelityFX] Failed to initialize FSR3 context (error {:#x}, display {}x{})!", static_cast<uint32_t>(contextResult), displayWidth, displayHeight);
 		free(fsrScratchBuffer);
 		fsrScratchBuffer = nullptr;
 		return;
 	}
 	hostFsrContextFailed = false;
-	logger::info("[FidelityFX] Created FSR3 context (Display: {}x{}, Render: {}x{})",
-		displayWidth, displayHeight, renderWidth, renderHeight);
+	logger::info("[FidelityFX] Created FSR3 context (Display: {}x{})", displayWidth, displayHeight);
 }
 
 void FidelityFX::DestroyFSRResources()

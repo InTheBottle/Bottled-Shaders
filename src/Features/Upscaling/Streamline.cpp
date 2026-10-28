@@ -214,9 +214,9 @@ void Streamline::CheckFeatures(IDXGIAdapter* a_adapter)
 		isRTXBelow40series = IsRTXAndBelow40Series(a_adapter);
 
 		if (isRTXBelow40series)
-			logger::info("[Streamline] Older RTX GPU detected, DLSS 4.0 will be used instead of DLSS 4.5");
+			logger::info("[Streamline] Older RTX GPU detected, default presets use DLSS 4 (K) for every mode");
 		else
-			logger::info("[Streamline] Newer RTX GPU detected, DLSS 4.5 will be used instead of DLSS 4.0");
+			logger::info("[Streamline] Newer RTX GPU detected, default presets use DLSS 4 (K) up to Balanced and DLSS 4.5 (M/L) for Performance/Ultra Performance");
 	}
 
 	logger::info("[Streamline] DLSS {} available", featureDLSS ? "is" : "is not");
@@ -477,20 +477,13 @@ void Streamline::SetDLSSOptions(sl::ViewportHandle p_viewport, uint32_t width)
 		dlssOptions.balancedPreset = customPreset.value();
 		dlssOptions.performancePreset = customPreset.value();
 		dlssOptions.ultraPerformancePreset = customPreset.value();
-	} else if (isRTXBelow40series) {
-		dlssOptions.dlaaPreset = sl::DLSSPreset::ePresetJ;
-		dlssOptions.ultraQualityPreset = sl::DLSSPreset::ePresetJ;
-		dlssOptions.qualityPreset = sl::DLSSPreset::ePresetJ;
-		dlssOptions.balancedPreset = sl::DLSSPreset::ePresetJ;
-		dlssOptions.performancePreset = sl::DLSSPreset::ePresetJ;
-		dlssOptions.ultraPerformancePreset = sl::DLSSPreset::ePresetM;
 	} else {
-		dlssOptions.dlaaPreset = sl::DLSSPreset::ePresetJ;
-		dlssOptions.ultraQualityPreset = sl::DLSSPreset::ePresetJ;
-		dlssOptions.qualityPreset = sl::DLSSPreset::ePresetM;
-		dlssOptions.balancedPreset = sl::DLSSPreset::ePresetM;
-		dlssOptions.performancePreset = sl::DLSSPreset::ePresetM;
-		dlssOptions.ultraPerformancePreset = sl::DLSSPreset::ePresetL;
+		dlssOptions.dlaaPreset = sl::DLSSPreset::ePresetK;
+		dlssOptions.ultraQualityPreset = sl::DLSSPreset::ePresetK;
+		dlssOptions.qualityPreset = sl::DLSSPreset::ePresetK;
+		dlssOptions.balancedPreset = sl::DLSSPreset::ePresetK;
+		dlssOptions.performancePreset = isRTXBelow40series ? sl::DLSSPreset::ePresetK : sl::DLSSPreset::ePresetM;
+		dlssOptions.ultraPerformancePreset = isRTXBelow40series ? sl::DLSSPreset::ePresetK : sl::DLSSPreset::ePresetL;
 	}
 
 	dlssOptions.preExposure = 1.0f;

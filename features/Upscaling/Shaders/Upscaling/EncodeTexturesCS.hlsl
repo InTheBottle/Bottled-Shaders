@@ -94,6 +94,9 @@ groupshared float2 TileMotion[DILATE_TILE * DILATE_TILE];
 #endif
 
 	float reactiveMask = taaMask.x * 0.1 + taaMask.y;
+#if defined(FSR)
+	reactiveMask = min(reactiveMask, 0.9);
+#endif
 	ReactiveMask[dispatchID.xy] = reactiveMask;
 
 	TransparencyCompositionMask[dispatchID.xy] = transparencyCompositionMask;
