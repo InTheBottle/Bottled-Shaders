@@ -12,7 +12,7 @@
  *
  * Hooks BSLightingShaderProperty::GetRenderPasses (vtable 0x2A) and returns an empty
  * pass list for skinned shapes with that blend whose diffuse is RaceMenu's
- * sDefaultTexture, read from skee64.ini. The check runs on every build, so a slot is
+ * sDefaultTexture, read from skse.ini as RaceMenu does. The check runs on every build, so a slot is
  * drawn again as soon as RaceMenu assigns it a real texture.
  */
 struct EmptyOverlayCullFix : EngineFix

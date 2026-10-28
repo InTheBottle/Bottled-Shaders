@@ -5,12 +5,13 @@
 
 namespace
 {
-	// RaceMenu's sDefaultTexture when skee64.ini leaves it unset.
+	// RaceMenu's sDefaultTexture when the setting is unset.
 	constexpr std::string_view RaceMenuDefaultTexture = "textures\\actors\\character\\overlays\\default.dds";
 
+	// RaceMenu reads this one setting through SKSE's GetConfigOption, so from skse.ini; the copy in skee64.ini is never read.
 	std::string ReadRaceMenuDefaultTexture()
 	{
-		const auto iniPath = Util::PathHelpers::GetDataPath() / "SKSE" / "Plugins" / "skee64.ini";
+		const auto iniPath = Util::PathHelpers::GetDataPath() / "SKSE" / "skse.ini";
 		std::array<wchar_t, MAX_PATH> value{};
 		GetPrivateProfileStringW(L"Overlays/Data", L"sDefaultTexture", L"", value.data(), static_cast<DWORD>(value.size()), iniPath.c_str());
 		return value[0] != L'\0' ? Util::WStringToString(value.data()) : std::string(RaceMenuDefaultTexture);
@@ -32,7 +33,7 @@ namespace
 	}
 
 	// Ordered cheapest first: most lighting geometry fails the flag test before any pointer is followed.
-	// RaceMenu's overlay nifs name the texture "Textures\Actors\...", skee64.ini "textures\actors\...", so case is ignored.
+	// RaceMenu's overlay nifs name the texture "Textures\Actors\...", its built-in default "textures\actors\...", so case is ignored.
 	bool IsEmptyOverlay(RE::BSLightingShaderProperty* property, RE::BSGeometry* geometry, std::string_view emptyOverlayTexture)
 	{
 		return property->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kSkinned) &&
