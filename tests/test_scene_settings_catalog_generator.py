@@ -1223,7 +1223,7 @@ class SceneSettingsCatalogGeneratorTests(unittest.TestCase):
         ripple_lifetime = self.entries_by_id[
             ("WetnessEffects", "", "RippleLifetime")]
         resolution_mode = self.entries_by_id[
-            ("ScreenSpaceGI", "", "ResolutionMode")]
+            ("SubsurfaceScattering", "", "ScatterMode")]
         fog_density = self.entries_by_id[
             ("ExponentialHeightFog", "", "fogDensity")]
         self.assertEqual(ripple_lifetime["editorSemantic"], "Numeric")
@@ -1287,7 +1287,7 @@ class SceneSettingsCatalogGeneratorTests(unittest.TestCase):
                     self.assertTrue(entry["sourceWidget"])
 
     def test_numeric_metadata_uses_raw_bounds_and_display_scale(self):
-        percentage = self.entries_by_id[("ScreenSpaceGI", "", "GISaturation")]
+        percentage = self.entries_by_id[("GrassOptimizations", "", "MinDensity")]
         angle = self.entries_by_id[("Skylighting", "", "MaxZenith")]
 
         self.assertEqual((percentage["minimum"], percentage["maximum"]), (0.0, 1.0))
@@ -1624,10 +1624,9 @@ class SceneSettingsCatalogGeneratorTests(unittest.TestCase):
 
     def test_choice_exceptions_are_complete(self):
         expected_choices = {
-            ("ScreenSpaceGI", "ResolutionMode"): [0, 1, 2],
             ("SubsurfaceScattering", "SSMode"): [0, 1],
             ("SubsurfaceScattering", "ScatterMode"): [0, 1, 2],
-            ("ImageBasedLighting", "DALCMode"): [0, 1, 2, 3],
+            ("ImageBasedLighting", "DALCMode"): [0, 1, 2],
         }
         for (feature, key), expected_values in expected_choices.items():
             entry = self.entries_by_id[(feature, "", key)]
