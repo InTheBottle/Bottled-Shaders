@@ -257,13 +257,9 @@ namespace SharedData
 		float EnvIBLSaturation;
 		float SkyIBLSaturation;
 		float FogAmount;
-		uint DALCMode;       // 0: Luminance Ratio, 1: Color Ratio, 2: DALC + Sky
+		uint DALCMode;       // 0: Luminance Ratio, 1: Color Ratio, 2: DALC + Sky, 3: DALC + Sky (Directional)
 		uint ENBSkyFalloff;  // Effects 11 owns IBL: darken sky irradiance from below
 		float SkySpecularIBLScale;
-		uint SkylightingAffectsEnv;
-		uint EnableReflectionFallback;
-		float ReflectionFallbackDistance;
-		float pad0;
 	};
 
 	struct ExtendedTranslucencySettings
@@ -428,22 +424,6 @@ namespace SharedData
 	{
 		uint Enabled;
 		uint3 _padding;
-	};
-
-	struct SSGISettings
-	{
-		uint Enabled;
-		uint EnableIL;
-		uint ReplaceAmbient;
-		float AOPower;
-	};
-
-	struct SSRSettings
-	{
-		uint Enabled;
-		float SpecularMult;
-		float SpecCubemapMult;
-		uint pad0;
 	};
 
 	struct ExponentialHeightFogSettings
@@ -681,8 +661,6 @@ namespace SharedData
 		HairBacklightingSettings hairBacklightingSettings;
 		RainRefractionSettings rainRefractionSettings;
 		NightEyeSettings nightEyeSettings;
-		SSGISettings ssgiSettings;
-		SSRSettings ssrSettings;
 	};
 
 	Texture2D<float4> DepthTexture : register(t17);

@@ -159,13 +159,13 @@ namespace ShadowSampling
 		return Color::Ambient(max(0, SharedData::GetAmbient(LightingSampleNormal)));
 	}
 
-	float3 GetAmbientLighting(float3 positionMS = float3(0, 0, 0))
+	float3 GetAmbientLighting()
 	{
 		float3 ambientColor = GetRawAmbientLighting();
 
 #if defined(IBL)
 		if (SharedData::iblSettings.EnableIBL) {
-			ambientColor = ImageBasedLighting::GetDiffuseIBL(ambientColor, ImageBasedLightingNormal, positionMS);
+			ambientColor = ImageBasedLighting::GetDiffuseIBL(ambientColor, ImageBasedLightingNormal);
 		}
 #endif
 
@@ -177,12 +177,12 @@ namespace ShadowSampling
 		return Color::DirectionalLight(SharedData::DirLightColor.xyz);
 	}
 
-	float3 GetSceneLightingColor(float3 positionMS = float3(0, 0, 0))
+	float3 GetSceneLightingColor()
 	{
-		return GetAmbientLighting(positionMS) + GetDirectionalLighting();
+		return GetAmbientLighting() + GetDirectionalLighting();
 	}
 
-	void ExtractLightingFromAmbient(float3 inputColor, float3 ambientColorAmb, out float3 dirColor, out float3 ambientColor)
+	void ExtractLighting(float3 inputColor, float3 ambientColorAmb, out float3 dirColor, out float3 ambientColor)
 	{
 		float3 dirLightColorDir = GetDirectionalLighting();
 
@@ -201,14 +201,9 @@ namespace ShadowSampling
 		ambientColor = ambientColorAmb;
 	}
 
-	void ExtractLighting(float3 inputColor, float3 positionMS, out float3 dirColor, out float3 ambientColor)
-	{
-		ExtractLightingFromAmbient(inputColor, GetAmbientLighting(positionMS), dirColor, ambientColor);
-	}
-
 	void ExtractLighting(float3 inputColor, out float3 dirColor, out float3 ambientColor)
 	{
-		ExtractLightingFromAmbient(inputColor, GetAmbientLighting(), dirColor, ambientColor);
+		ExtractLighting(inputColor, GetAmbientLighting(), dirColor, ambientColor);
 	}
 }
 

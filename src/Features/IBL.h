@@ -56,12 +56,9 @@ public:
 		float EnvIBLSaturation = 1.0f;
 		float SkyIBLSaturation = 1.0f;
 		float FogAmount = 0.0f;
-		uint DALCMode = 2;  // 0: Luminance Ratio, 1: Color Ratio, 2: DALC + Sky
-		uint SkylightingAffectsEnv = 0;
+		uint DALCMode = 2;  // 0: Luminance Ratio, 1: Color Ratio, 2: DALC + Sky, 3: DALC + Sky (Directional)
 		bool DisableInWorldMap = true;
 		bool DisableInLoadingScreen = true;
-		uint EnableReflectionFallback = 1;
-		float ReflectionFallbackDistance = 1024.0f;
 	} settings;
 
 	struct alignas(16) PerFrame
@@ -78,10 +75,6 @@ public:
 		uint DALCMode;
 		uint ENBSkyFalloff;
 		float SkySpecularIBLScale;
-		uint SkylightingAffectsEnv;
-		uint EnableReflectionFallback;
-		float ReflectionFallbackDistance;
-		float pad0;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
 

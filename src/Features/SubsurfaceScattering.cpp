@@ -257,8 +257,7 @@ void SubsurfaceScattering::DrawSSS()
 		context->CSSetConstantBuffers(1, 1, buffer);
 		context->CSSetSamplers(0, 1, &globals::deferred->pointSampler);
 
-		// Consume the same active forward color target that SSGI composites into.
-		auto main = renderer->GetRuntimeData().renderTargets[globals::deferred->forwardRenderTargets[0]];
+		auto main = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
 
 		auto mask = renderer->GetRuntimeData().renderTargets[MASKS];
 		auto albedo = renderer->GetRuntimeData().renderTargets[ALBEDO];
