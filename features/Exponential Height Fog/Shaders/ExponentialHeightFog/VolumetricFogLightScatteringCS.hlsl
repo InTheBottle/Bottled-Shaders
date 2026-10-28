@@ -237,8 +237,9 @@ float3 ComputeSkyLightScattering(float3 positionWS, float3 viewDirection, out fl
 	{
 		float3 envIBL = ImageBasedLighting::GetEnvIBLColor(skyDirection);
 		float3 skyIBL = ImageBasedLighting::GetSkyIBLColor(skyDirection);
-		skyLighting = envIBL + skyIBL * skyVisibility;
-		unoccludedLighting = envIBL + skyIBL;
+		float envVisibility = (!SharedData::InInterior && SharedData::iblSettings.SkylightingAffectsEnv != 0) ? skyVisibility : 1.0;
+		skyLighting = ImageBasedLighting::ApplyIBLReflectionFallback(envIBL * envVisibility + skyIBL * skyVisibility, skyIBL * skyVisibility, positionWS);
+		unoccludedLighting = ImageBasedLighting::ApplyIBLReflectionFallback(envIBL + skyIBL, skyIBL, positionWS);
 	}
 	unoccludedLighting *= SharedData::exponentialHeightFogSettings.volumetricSkyLightingIntensity;
 	return skyLighting * SharedData::exponentialHeightFogSettings.volumetricSkyLightingIntensity;

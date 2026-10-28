@@ -332,6 +332,11 @@ static bool LoadEntryFromJson(const nlohmann::json& item, SceneSettingsManager::
 	}
 	entry.settingKey = item["setting"].get<std::string>();
 	entry.value = item["value"];
+	if (entry.featureShortName == "ScreenSpaceGI" && entry.settingKey == "Thickness" && entry.settingPath.empty() &&
+		entry.value.is_number() && entry.value.get<double>() > 0.2) {
+		logger::info("[SceneSettings] Dropping {} entry ScreenSpaceGI.Thickness={} from the previous Screen Space GI schema", typeName, entry.value.dump());
+		return false;
+	}
 	entry.originalValue = item.value("originalValue", entry.value);
 	entry.serializedTemplate = item.is_object() ? item : json::object();
 	if (auto pausedIt = item.find("paused"); pausedIt != item.end() && !pausedIt->is_boolean()) {

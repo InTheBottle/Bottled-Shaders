@@ -488,7 +488,7 @@ cbuffer PerGeometry : register(b2)
 float3 GetLightingColor(float3 msPosition, float3 worldPosition, float2 screenPosition, inout float shadowVariance)
 {
 	float3 color = DLightColor.xyz * Color::EffectLightingScale;
-	const float3 sceneAmbientColor = ShadowSampling::GetAmbientLighting();
+	const float3 sceneAmbientColor = ShadowSampling::GetAmbientLighting(worldPosition);
 	bool suppressExternalEmittance = SharedData::InInterior && (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::SuppressExternalEmittance);
 	if (suppressExternalEmittance) {
 		color = sceneAmbientColor + ShadowSampling::GetDirectionalLighting();
@@ -506,7 +506,7 @@ float3 GetLightingColor(float3 msPosition, float3 worldPosition, float2 screenPo
 
 	float3 dirColor;
 	float3 ambientColor;
-	ShadowSampling::ExtractLighting(color, sceneAmbientColor, dirColor, ambientColor);
+	ShadowSampling::ExtractLightingFromAmbient(color, sceneAmbientColor, dirColor, ambientColor);
 
 #		if defined(EFFECTS11)
 	if (SharedData::enbSettings.EnableParticle) {
@@ -605,7 +605,7 @@ float3 GetLightingShadow(float3 color, float3 worldPosition, float2 screenPositi
 {
 	float3 dirColor;
 	float3 ambientColor;
-	ShadowSampling::ExtractLighting(color, dirColor, ambientColor);
+	ShadowSampling::ExtractLighting(color, worldPosition, dirColor, ambientColor);
 
 	float shadow = GetViewRayShadow(worldPosition, screenPosition, depth);
 
@@ -870,7 +870,7 @@ PS_OUTPUT main(PS_INPUT input)
 		{
 			float3 volumetricFogTint = BaseColor.xyz;
 			volumetricFogTint /= max(max(max(volumetricFogTint.x, volumetricFogTint.y), volumetricFogTint.z), 1.0);
-			float3 volumetricFogLight = ShadowSampling::GetDirectionalLighting() * volumetricFogShadow + ShadowSampling::GetAmbientLighting();
+			float3 volumetricFogLight = ShadowSampling::GetDirectionalLighting() * volumetricFogShadow + ShadowSampling::GetAmbientLighting(input.WorldPosition.xyz);
 			baseColor.xyz = pow(max(volumetricFogTint * baseTexColor.xyz, 0.0), SharedData::enbSettings.VolumetricFogCurve) * volumetricFogLight * volumetricFogScale * 0.5;
 			lightingInfluence = 0.0;
 		} else {
@@ -973,7 +973,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float3 fogColor = input.FogParam.xyz;
 #		if defined(IBL)
 	if (SharedData::iblSettings.EnableIBL) {
-		fogColor = ImageBasedLighting::GetFogIBLColor(fogColor);
+		fogColor = ImageBasedLighting::GetFogIBLColor(fogColor, input.WorldPosition.xyz);
 	}
 #		endif
 #		if defined(EXP_HEIGHT_FOG)

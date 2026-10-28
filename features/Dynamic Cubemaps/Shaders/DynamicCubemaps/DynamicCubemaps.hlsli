@@ -69,7 +69,7 @@ namespace DynamicCubemaps
 					envSpecular = ColorManagement::SceneToLinear((envSample / max(envLum, 0.001)) * directionalAmbientColorSpecular) * SharedData::iblSettings.DALCAmount;
 					skySpecular = ColorManagement::SceneToLinear(max(0, fullSample - envSample)) * SharedData::iblSettings.SkySpecularIBLScale;
 #			if defined(SKYLIGHTING)
-					envSpecular *= (SharedData::iblSettings.DALCMode == 3) ? skylightingVisibility : 1.0;
+					envSpecular *= (SharedData::iblSettings.SkylightingAffectsEnv != 0) ? skylightingVisibility : 1.0;
 					skySpecular *= skylightingSpecular;
 #			endif
 				} else {

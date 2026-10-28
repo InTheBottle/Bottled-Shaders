@@ -3363,9 +3363,14 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	if defined(IBL)
 	if (SharedData::iblSettings.EnableIBL) {
 		if (!(SharedData::iblSettings.UseStaticIBL && !inWorld && !inReflection)) {
-			directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -ambientNormal);
+			directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -ambientNormal, input.WorldPosition.xyz);
 		}
 	}
+#	endif
+
+#	if defined(DEFERRED)
+	if (SharedData::ssgiSettings.ReplaceAmbient != 0 && !inReflection)
+		directionalAmbientColor = 0;
 #	endif
 
 	directionalAmbientColor += ShadowSampling::GetCloudScatterLighting(cloudScatterColor, cloudScatter, ambientNormal);
@@ -3572,7 +3577,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float fogFactor = input.FogParam.w;
 #		if defined(IBL)
 	if (SharedData::iblSettings.EnableIBL) {
-		fogColor = ImageBasedLighting::GetFogIBLColor(fogColor);
+		fogColor = ImageBasedLighting::GetFogIBLColor(fogColor, input.WorldPosition.xyz);
 	}
 #		endif
 #		if defined(EXP_HEIGHT_FOG)
