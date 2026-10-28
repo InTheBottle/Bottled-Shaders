@@ -205,7 +205,7 @@ const nrd::CommonSettings& NRD::GetCommonSettings()
 	commonSettings.rectSizePrev[1] = hasCommonFrameHistory ? prevRectSize[1] : rectSize[1];
 
 	auto viewMat = globals::game::frameBufferCached.GetCameraView().Transpose();
-	auto projMat = globals::game::frameBufferCached.GetCameraProjUnjittered().Transpose();
+	auto projMat = globals::game::frameBufferCached.GetCameraProj().Transpose();
 
 	float3 cameraWorldPos = float3(globals::game::frameBufferCached.GetCameraPosAdjust());
 	DirectX::XMMATRIX translationMat = DirectX::XMMatrixTranslation(-cameraWorldPos.x, -cameraWorldPos.y, -cameraWorldPos.z);
@@ -235,14 +235,6 @@ const nrd::CommonSettings& NRD::GetCommonSettings()
 	// rectSize and rectSizePrev and should retain history across that transition.
 	if (!hasCommonFrameHistory || gameFrame != lastCommonGameFrame + 1 || resourceSizeChanged)
 		commonSettings.accumulationMode = nrd::AccumulationMode::CLEAR_AND_RESTART;
-
-	const auto frameTime = std::chrono::steady_clock::now();
-	if (hasCommonFrameHistory && gameFrame == lastCommonGameFrame + 1) {
-		const float frameSeconds = std::chrono::duration<float>(frameTime - lastCommonFrameTime).count();
-		if (frameSeconds > 0.0f && frameSeconds < 0.25f)
-			smoothedFps += (1.0f / frameSeconds - smoothedFps) * 0.1f;
-	}
-	lastCommonFrameTime = frameTime;
 	lastCommonGameFrame = gameFrame;
 	hasCommonFrameHistory = true;
 
@@ -260,16 +252,10 @@ const nrd::CommonSettings& NRD::GetCommonSettings()
 
 void NRD::ApplyReblurSettings(nrd::ReblurSettings& out, const REBLURSettings& in, nrd::CheckerboardMode checkerboard) const
 {
-	const float fps = std::clamp(smoothedFps, 30.0f, 240.0f);
-	const auto toFrames = [fps](uint32_t a_framesAt60, uint32_t a_minimum) {
-		if (a_framesAt60 == 0)
-			return 0u;
-		return std::max(nrd::GetMaxAccumulatedFrameNum((float)a_framesAt60 / 60.0f, fps), a_minimum);
-	};
-	out.maxAccumulatedFrameNum = std::min(toFrames(in.MaxAccumulatedFrameNum, 1), nrd::REBLUR_MAX_HISTORY_FRAME_NUM);
-	out.maxFastAccumulatedFrameNum = std::min(toFrames(in.MaxFastAccumulatedFrameNum, 1), out.maxAccumulatedFrameNum);
-	out.maxStabilizedFrameNum = std::min(toFrames(in.MaxStabilizedFrameNum, 1), out.maxAccumulatedFrameNum);
-	out.historyFixFrameNum = out.maxFastAccumulatedFrameNum > 0 ? std::min(toFrames(in.HistoryFixFrameNum, 1), out.maxFastAccumulatedFrameNum - 1) : 0;
+	out.maxAccumulatedFrameNum = std::min((uint32_t)in.MaxAccumulatedFrameNum, nrd::REBLUR_MAX_HISTORY_FRAME_NUM);
+	out.maxFastAccumulatedFrameNum = std::min((uint32_t)in.MaxFastAccumulatedFrameNum, out.maxAccumulatedFrameNum);
+	out.maxStabilizedFrameNum = std::min((uint32_t)in.MaxStabilizedFrameNum, out.maxAccumulatedFrameNum);
+	out.historyFixFrameNum = out.maxFastAccumulatedFrameNum > 0 ? std::min((uint32_t)in.HistoryFixFrameNum, out.maxFastAccumulatedFrameNum - 1) : 0;
 	out.historyFixBasePixelStride = std::max(in.HistoryFixBasePixelStride, 1u);
 	out.historyFixAlternatePixelStride = std::max(in.HistoryFixAlternatePixelStride, 1u);
 	out.fastHistoryClampingSigmaScale = std::clamp(in.FastHistoryClampingSigmaScale, 1.0f, 3.0f);
@@ -295,19 +281,19 @@ bool NRD::DrawReblurSettings(REBLURSettings& s, bool showAdvanced, const char* t
 		ImGui::SeparatorText("Accumulation");
 		{
 			int v = (int)s.MaxAccumulatedFrameNum;
-			if (ImGui::SliderInt("Max Accumulated Frames (at 60 FPS)", &v, 1, (int)nrd::REBLUR_MAX_HISTORY_FRAME_NUM)) {
+			if (ImGui::SliderInt("Max Accumulated Frames", &v, 1, (int)nrd::REBLUR_MAX_HISTORY_FRAME_NUM)) {
 				s.MaxAccumulatedFrameNum = (uint32_t)v;
 				changed = true;
 			}
 
 			v = (int)s.MaxFastAccumulatedFrameNum;
-			if (ImGui::SliderInt("Max Fast Accumulated Frames (at 60 FPS)", &v, 1, (int)s.MaxAccumulatedFrameNum)) {
+			if (ImGui::SliderInt("Max Fast Accumulated Frames", &v, 1, (int)s.MaxAccumulatedFrameNum)) {
 				s.MaxFastAccumulatedFrameNum = (uint32_t)v;
 				changed = true;
 			}
 
 			v = (int)s.MaxStabilizedFrameNum;
-			if (ImGui::SliderInt("Max Stabilized Frames (at 60 FPS)", &v, 0, (int)s.MaxAccumulatedFrameNum)) {
+			if (ImGui::SliderInt("Max Stabilized Frames", &v, 0, (int)s.MaxAccumulatedFrameNum)) {
 				s.MaxStabilizedFrameNum = (uint32_t)v;
 				changed = true;
 			}
@@ -328,7 +314,7 @@ bool NRD::DrawReblurSettings(REBLURSettings& s, bool showAdvanced, const char* t
 			changed |= ImGui::SliderFloat("Min Hit Distance Weight", &s.MinHitDistanceWeight, 0.0001f, 0.2f, "%.4f");
 
 			int v = (int)s.HistoryFixFrameNum;
-			if (ImGui::SliderInt("History Fix Frames (at 60 FPS)", &v, 0, 4)) {
+			if (ImGui::SliderInt("History Fix Frame Num", &v, 0, 4)) {
 				s.HistoryFixFrameNum = (uint32_t)v;
 				changed = true;
 			}

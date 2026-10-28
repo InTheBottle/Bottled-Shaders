@@ -6,8 +6,6 @@
 
 #include <NRDSettings.h>
 
-#include <chrono>
-
 /**
  * NRD: NVIDIA Real-Time Denoisers — core top-level service.
  *
@@ -117,8 +115,6 @@ struct NRD : Feature
 	bool guidesReadyThisFrame = false;
 	bool hasCommonFrameHistory = false;
 	uint32_t lastCommonGameFrame = 0;
-	std::chrono::steady_clock::time_point lastCommonFrameTime{};
-	float smoothedFps = 60.0f;
 	uint16_t prevResourceSize[2] = {};
 	uint16_t prevRectSize[2] = {};
 
