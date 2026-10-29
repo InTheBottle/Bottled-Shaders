@@ -2,6 +2,15 @@ cmake_minimum_required(VERSION 4.2)
 
 set(VCPKG_BUILD_TYPE release CACHE STRING "")
 
+if(
+    NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/AntiLag2-SDK/ffx_antilag2_dx12.h"
+)
+    message(
+        FATAL_ERROR
+        "Anti-Lag 2 SDK submodule is missing. Run: git submodule update --init extern/AntiLag2-SDK"
+    )
+endif()
+
 # devbench bridge — declared before project() so the vcpkg toolchain (loaded at project())
 # sees the manifest-feature selection. The devbench-api dependency lives behind the
 # `devbench-bridge` vcpkg feature, so -DDEVBENCH_BRIDGE=OFF actually drops it (not just the
@@ -173,6 +182,12 @@ target_include_directories(
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE SK_HDR_PNG_COMMUNITY_SHADERS)
+
+target_include_directories(
+    ${PROJECT_NAME}
+    SYSTEM
+    PRIVATE "${CMAKE_SOURCE_DIR}/extern/AntiLag2-SDK"
+)
 
 target_link_libraries(
     ${PROJECT_NAME}

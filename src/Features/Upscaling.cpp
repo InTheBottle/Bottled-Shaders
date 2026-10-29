@@ -205,6 +205,12 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChainUpscaling(
 	return ret;
 }
 
+/** @brief Updates session-enabled Anti-Lag before input without an explicit FPS cap. */
+void Upscaling::OnBeforeInputPoll()
+{
+	dx12SwapChain.UpdateAntiLag2BeforeInput();
+}
+
 void Upscaling::DrawSettings()
 {
 	// Display upscaling options in the UI
@@ -385,6 +391,9 @@ void Upscaling::DrawSettings()
 
 		if (fgLoaded) {
 			ImGui::TextUnformatted(T(TKEY("frame_generation_fsr_active"), "Method: AMD FSR"));
+			ImGui::TextUnformatted(dx12SwapChain.IsAntiLag2Active() ?
+									   T(TKEY("antilag2_active"), "Anti-Lag 2: Active") :
+									   T(TKEY("antilag2_unavailable"), "Anti-Lag 2: Unavailable"));
 			ImGui::Text("%s", T(TKEY("fsr_frame_gen_fixed_multiplier"), "AMD FSR Frame Generation: Fixed 2x"));
 
 			bool flEnabled = settings.frameLimitMode != 0;
@@ -517,6 +526,7 @@ void Upscaling::WriteGameIniSettings()
 	}
 }
 
+/** @brief Loads upscaling settings and validates supported options and FPS limits. */
 void Upscaling::LoadSettings(json& o_json)
 {
 	// NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT fills an absent key with

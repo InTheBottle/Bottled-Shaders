@@ -202,6 +202,9 @@ public:
 	/** @brief Per-frame work executed before Prepass, earliest per-frame hook. */
 	virtual void EarlyPrepass() {}
 
+	/** @brief Runs immediately before the engine polls physical input devices. */
+	virtual void OnBeforeInputPoll() {}
+
 	/**
 	 * @brief Called during disk-cache shader loading to generate additional shader permutations.
 	 *
