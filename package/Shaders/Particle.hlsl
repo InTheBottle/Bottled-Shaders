@@ -481,9 +481,11 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 		[branch] if (SharedData::rainRefractionSettings.Visibility != 1.0)
 		{
-			float3 behindColor = backgroundWidth > 0 ?
-			                         SampleRainBackground(uv, ddx(uv) * FrameBuffer::DynamicResolutionParams1.xy, ddy(uv) * FrameBuffer::DynamicResolutionParams1.xy) :
-			                         ColorManagement::SceneToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(SampSourceTexture, -V, 0).xyz);
+			float3 behindColor;
+			[branch] if (backgroundWidth > 0)
+				behindColor = SampleRainBackground(uv, ddx(uv) * FrameBuffer::DynamicResolutionParams1.xy, ddy(uv) * FrameBuffer::DynamicResolutionParams1.xy);
+			else
+				behindColor = ColorManagement::SceneToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(SampSourceTexture, -V, 0).xyz);
 			raindropColor = max(behindColor + (raindropColor - behindColor) * SharedData::rainRefractionSettings.Visibility, 0.0);
 		}
 

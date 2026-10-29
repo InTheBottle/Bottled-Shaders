@@ -414,7 +414,7 @@
 		float occlusion = 0.0;
 		[unroll] for (uint i = 0; i < 4; i++)
 		{
-			[branch] if (i < tapCount)
+			[branch] if (i < tapCount && occlusion * shadowStrength < 1.0)
 			{
 				float weightsScratch[TERRAIN_LAYER_COUNT] = TERRAIN_LAYER_ZEROS;
 				float shi = TERRAIN_HEIGHT_AT(coords + rayDir * multipliers[i], mipLevel, weightsScratch);

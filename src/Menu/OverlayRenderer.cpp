@@ -335,19 +335,19 @@ void OverlayRenderer::RenderShaderCompilationStatus(const std::function<const ch
 	auto& themeSettings = Menu::GetSingleton()->GetTheme();
 	auto* renderDoc = RenderDoc::GetSingleton();
 	bool renderDocAvailable = renderDoc->IsAvailable();
-	const auto renderDocInformation = renderDoc->GetOverlayWarningMessage();
-
-	auto progressTitle = fmt::format("{}Compiling Shaders: {}",
-		shaderCache->backgroundCompilation ? "Background " : "",
-		shaderCache->GetShaderStatsString(!state->IsDeveloperMode()).c_str());
-	auto percent = (float)compiledShaders / (float)totalShaders;
-	auto progressOverlay = fmt::format("{}/{} ({:2.1f}%)", compiledShaders, totalShaders, 100 * percent);
+	const auto renderDocInformation = renderDocAvailable ? renderDoc->GetOverlayWarningMessage() : std::string();
 
 	uint32_t effectFailed = EffectManager::GetSingleton().IsInitialized() ? EffectManager::GetSingleton().GetFailedEffectCount() : 0;
 
 	bool showProgress = shaderCache->IsCompiling() && (!shaderCache->backgroundCompilation || shaderCache->IsShowBackgroundOverlay());
 
 	if (showProgress) {
+		auto progressTitle = fmt::format("{}Compiling Shaders: {}",
+			shaderCache->backgroundCompilation ? "Background " : "",
+			shaderCache->GetShaderStatsString(!state->IsDeveloperMode()).c_str());
+		auto percent = (float)compiledShaders / (float)totalShaders;
+		auto progressOverlay = fmt::format("{}/{} ({:2.1f}%)", compiledShaders, totalShaders, 100 * percent);
+
 		ImGui::SetNextWindowPos(ImVec2(pos, pos));
 		if (!ImGui::Begin("ShaderCompilationInfo", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings)) {
 			ImGui::End();

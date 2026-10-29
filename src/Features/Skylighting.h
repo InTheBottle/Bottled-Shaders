@@ -114,7 +114,7 @@ public:
 	bool occlusionFresh = false;
 	uint frameCount = 0;
 
-	static constexpr uint OcclusionConvergenceFrames = 16;
+	static constexpr uint OcclusionConvergenceFrames = 64;
 	float3 lastOccCell = { 0, 0, 0 };
 	bool haveLastOccCell = false;
 	uint occlusionConvergedFrames = 0;

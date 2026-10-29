@@ -89,8 +89,8 @@ public:
 	/** @brief Per-frame reset: advances timer, caches menu state, resets descriptors and frame counters. */
 	void Reset();
 
-	/** @brief Selects sphere-normal grass lighting for the next grass draw. */
-	void SetGrassSphereNormal(bool sphereNormal);
+	/** @brief Selects sphere-normal lighting and the TruePBR material for the next grass draw. */
+	void SetGrassFlags(bool sphereNormal, bool pbr);
 	/** @brief One-time post-D3D setup: creates resources, probes GPU caps, initializes features. */
 	void Setup();
 
@@ -389,6 +389,7 @@ public:
 		NightEyeEnemy = 1 << 19,
 		NightEyeAlly = 1 << 20,
 		ProjectedTextureIsSRGB = 1 << 21,
+		GrassPBR = 1 << 22,
 	};
 
 	/** @brief Bitflags describing extra feature-specific properties related to terrain displacement and material models. */

@@ -222,7 +222,13 @@ void IBL::Prepass()
 		globals::profiler->BeginPass("IBL::EnvDiffuseIBL");
 		context->Dispatch(1, 1, 1);
 		globals::profiler->EndPass();
+		envIBLWritten = true;
 	} else {
+		if (envIBLWritten) {
+			const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			context->ClearUnorderedAccessViewFloat(envIBLTexture->uav.get(), zero);
+			envIBLWritten = false;
+		}
 		// Still need to set sampler and shader for sky IBL dispatch below
 		context->CSSetSamplers(0, (uint)samplers.size(), samplers.data());
 		context->CSSetShader(GetDiffuseIBLCS(), nullptr, 0);
@@ -291,10 +297,10 @@ void IBL::SetupResources()
 			.Texture2D = { .MipSlice = 0 }
 		};
 
-		envIBLTexture = new Texture2D(texDesc);
+		envIBLTexture = new Texture2D(texDesc, "IBL::EnvIBL");
 		envIBLTexture->CreateSRV(srvDesc);
 		envIBLTexture->CreateUAV(uavDesc);
-		skyIBLTexture = new Texture2D(texDesc);
+		skyIBLTexture = new Texture2D(texDesc, "IBL::SkyIBL");
 		skyIBLTexture->CreateSRV(srvDesc);
 		skyIBLTexture->CreateUAV(uavDesc);
 	}
@@ -383,10 +389,11 @@ void IBL::ClearShaderCache()
 
 ID3D11ComputeShader* IBL::GetDiffuseIBLCS()
 {
-	std::vector<std::pair<const char*, const char*>> defines;
-	if (globals::features::dynamicCubemaps.loaded)
-		defines.push_back({ "DYNAMIC_CUBEMAPS", nullptr });
-	if (!diffuseIBLCS)
+	if (!diffuseIBLCS) {
+		std::vector<std::pair<const char*, const char*>> defines;
+		if (globals::features::dynamicCubemaps.loaded)
+			defines.push_back({ "DYNAMIC_CUBEMAPS", nullptr });
 		diffuseIBLCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\IBL\\DiffuseIBLCS.hlsl", defines, "cs_5_0"));
+	}
 	return diffuseIBLCS;
 }

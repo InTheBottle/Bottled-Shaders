@@ -261,6 +261,7 @@ public:
 		RE::NiColor directionalAmbientColors[3][2];
 	};
 	void OverrideAmbientLighting(DirectionalAmbientColors& DirectionalAmbientColors);
+	void BlendGradedAmbient(RE::Sky* a_sky, DirectionalAmbientColors& a_graded);
 
 	/**
 	 * @brief Whether Effects11 wants to replace the vanilla tonemap this frame.
@@ -284,6 +285,8 @@ public:
 
 private:
 	bool EnsureScatteringBlendState();
+	float3 GradeSkyColors(std::span<RE::NiColor, RE::TESWeather::ColorTypes::kTotal> a_colors) const;
+	void BlendGradedWeathers(RE::Sky* a_sky, std::span<RE::NiColor, RE::TESWeather::ColorTypes::kTotal> a_graded) const;
 	bool presetActive = false;
 	bool resourcesReady = false;
 	/** @brief Compiles the sun ray shaders and (re)creates their half-res targets; false if anything failed. */

@@ -187,7 +187,7 @@ public:
 	std::vector<RE::NiBound> fireSamples;
 	std::vector<FireCluster> fireClusters;
 	std::vector<std::pair<float, uint32_t>> fireOrder;
-	std::unordered_map<RE::FormID, bool> fireBaseCache;
+	ankerl::unordered_dense::map<RE::FormID, bool> fireBaseCache;
 	float fireScanTimer = FIRE_MELT_SCAN_INTERVAL;
 	bool fireMeltSnap = true;
 	Util::FrameChecker fireMeltFrame;
@@ -302,7 +302,7 @@ public:
 	static bool IsHarvestableFlora(RE::TESObjectREFR* a_ref);
 	bool IsBuilding(RE::TESObjectREFR* a_ref);
 
-	std::unordered_map<RE::FormID, bool> buildingBaseCache;
+	ankerl::unordered_dense::map<RE::FormID, bool> buildingBaseCache;
 
 	struct Hooks
 	{

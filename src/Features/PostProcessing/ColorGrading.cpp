@@ -646,8 +646,6 @@ void ColorGrading::DrawSettings()
 		ImGui::TextDisabled(T(TKEY("output_color_space"), "Output Color Space: %s (auto from HDR Display)"), spaces[outputColorSpace]);
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text(T(TKEY("output_color_space_tooltip"), "Output switches automatically: SDR -> sRGB, HDR -> BT2020."));
-
-		UpdateColorSpaceTransforms(hdrEnabled);
 	}
 
 	if (ImGui::Button(T(TKEY("save_lut_and_output_image"), "Save LUT and Output Image"))) {
@@ -797,7 +795,7 @@ void ColorGrading::UpdateColorSpaceTransforms(bool hdrEnabled)
 
 bool ColorGrading::IsReadyToTonemap() const
 {
-	return IsActive() && !recompileFlag && AllShadersReady({ &colorgradingPS }) && AllShadersReady({ &lutgenCS }) &&
+	return IsActive() && !recompileFlag && AllShadersReady({ settings.skipLUT ? &colorgradingPS : &colorgradingLutPS }) && AllShadersReady({ &lutgenCS }) &&
 	       owner && owner->GetFullscreenVS();
 }
 
@@ -948,7 +946,7 @@ void ColorGrading::SetupResources()
 void ColorGrading::ReleaseActiveShaders()
 {
 	BumpShaderGeneration();
-	const auto shaderPtrs = std::array{ &colorgradingPS };
+	const auto shaderPtrs = std::array{ &colorgradingPS, &colorgradingLutPS };
 	const auto computeShaderPtrs = std::array{ &lutgenCS };
 
 	std::lock_guard lock(shaderMutex);
@@ -995,6 +993,7 @@ void ColorGrading::CompileShaders()
 
 	const std::vector<PixelShaderCompileInfo> rasterInfos = {
 		{ &colorgradingPS, "colorgrading.hlsl", { { "TONEMAP_FUNC", tonemapFuncName } }, "PSColorGrading" },
+		{ &colorgradingLutPS, "colorgrading.hlsl", { { "TONEMAP_FUNC", tonemapFuncName }, { "LUT_GRADING", "" } }, "PSColorGrading" },
 	};
 
 	CompileRasterShadersAsync(L"Data\\Shaders\\PostProcessing\\ColorGrading", {}, rasterInfos);
@@ -1011,7 +1010,8 @@ void ColorGrading::Draw(TextureInfo& inout_tex)
 	if (recompileFlag)
 		ReloadActiveShaders();
 
-	if (!AllShadersReady({ &colorgradingPS }) || !AllShadersReady({ &lutgenCS }))
+	auto& gradingPS = settings.skipLUT ? colorgradingPS : colorgradingLutPS;
+	if (!AllShadersReady({ &gradingPS }) || !AllShadersReady({ &lutgenCS }))
 		return;
 	if (!owner || !owner->GetFullscreenVS())
 		return;
@@ -1026,10 +1026,13 @@ void ColorGrading::Draw(TextureInfo& inout_tex)
 		{ .cinematic = settings.gameCinematicBlend, .tint = settings.gameTintBlend, .fade = settings.gameFadeBlend, .modifiers = settings.gameModifierBlend });
 	auto& hdr = globals::features::hdrDisplay;
 	const bool hdrEnabled = hdr.loaded && hdr.settings.enableHDR;
-	UpdateColorSpaceTransforms(hdrEnabled);
+	const std::array<int, 6> transformKey = { globals::features::linearLighting.IsACEScgActive(), hdrEnabled,
+		settings.processColorSpace, settings.enableTonemap, settings.useOpenDrt, tonemapperType };
+	if (transformKey != colorSpaceTransformKey) {
+		colorSpaceTransformKey = transformKey;
+		UpdateColorSpaceTransforms(hdrEnabled);
 
-	// Always compute XYZ matrices for white balance
-	{
+		// Always compute XYZ matrices for white balance
 		auto& spaces = getAvailableColorSpaces();
 		int wsIdx = std::clamp(settings.processColorSpace, 0, static_cast<int>(spaces.size()) - 1);
 		auto storeMatrix = [](const DirectX::SimpleMath::Matrix& mat, std::array<float3, 3>& out) {
@@ -1132,7 +1135,7 @@ void ColorGrading::Draw(TextureInfo& inout_tex)
 		context->PSSetSamplers(0, 1, psSamplers.data());
 		context->PSSetShaderResources(0, (UINT)(settings.skipLUT ? 1 : 2), srvs.data());
 		pass.SetTargets({ texColor->rtv.get() }, (float)texColor->desc.Width, (float)texColor->desc.Height);
-		pass.SetShaders(owner->GetFullscreenVS(), colorgradingPS.get());
+		pass.SetShaders(owner->GetFullscreenVS(), gradingPS.get());
 		pass.Draw();
 
 		// clean up
@@ -1170,7 +1173,7 @@ void ColorGrading::Draw(TextureInfo& inout_tex)
 		curveReadbackRequested = false;
 
 	// Debug: evaluate color grading pipeline on a neutral ramp for curve preview
-	if (curveReadbackActive && curveNeedsUpdate && texCurveInput && texCurveOutput && colorgradingPS) {
+	if (curveReadbackActive && curveNeedsUpdate && texCurveInput && texCurveOutput && gradingPS) {
 		curveNeedsUpdate = false;
 		// Render the curve with the same PS on the 256x1 ramp input (same CB, same LUT)
 		PostProcessingRaster::RasterPass pass(context);
@@ -1183,7 +1186,7 @@ void ColorGrading::Draw(TextureInfo& inout_tex)
 		context->PSSetSamplers(0, 1, curveSamplers.data());
 		context->PSSetShaderResources(0, (UINT)(settings.skipLUT ? 1 : 2), curveSRVs.data());
 		pass.SetTargets({ texCurveOutput->rtv.get() }, (float)CurveSamples, 1.f);
-		pass.SetShaders(owner->GetFullscreenVS(), colorgradingPS.get());
+		pass.SetShaders(owner->GetFullscreenVS(), gradingPS.get());
 		pass.Draw();
 
 		// Clean up

@@ -354,8 +354,8 @@ struct HiZOcclusion : OverlayFeature
 
 	struct OcclusionTracker
 	{
-		std::unordered_map<RE::BSGeometry*, RE::NiPointer<RE::BSGeometry>> occluded;
-		std::unordered_map<RE::BSGeometry*, uint32_t> counts;
+		ankerl::unordered_dense::map<RE::BSGeometry*, RE::NiPointer<RE::BSGeometry>> occluded;
+		ankerl::unordered_dense::map<RE::BSGeometry*, uint32_t> counts;
 	};
 
 	struct AsyncReadbackState
@@ -389,7 +389,7 @@ struct HiZOcclusion : OverlayFeature
 	// Geometry batch for GPU culling
 	std::vector<RE::NiPointer<RE::BSGeometry>> pendingGeometry;
 	std::vector<uint8_t> pendingPasses;
-	std::unordered_map<RE::BSGeometry*, size_t> pendingGeometryIndex;
+	ankerl::unordered_dense::map<RE::BSGeometry*, size_t> pendingGeometryIndex;
 	std::vector<TestEntry> geometryBounds;
 
 	DirectX::XMFLOAT3 lastEyePosition = {};

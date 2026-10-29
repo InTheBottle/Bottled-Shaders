@@ -91,6 +91,7 @@ namespace Permutation
 		static const uint NightEyeEnemy = (1 << 19);
 		static const uint NightEyeAlly = (1 << 20);
 		static const uint ProjectedTextureIsSRGB = (1 << 21);
+		static const uint GrassPBR = (1 << 22);
 	}
 
 	namespace ExtraFeatureFlags

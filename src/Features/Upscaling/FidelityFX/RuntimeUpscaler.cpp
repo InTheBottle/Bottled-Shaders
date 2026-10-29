@@ -32,7 +32,7 @@ namespace
 	// hand-written BeginPass/BeginPerfEvent pairing used elsewhere in the codebase.
 	struct ScopedRuntimeUpscalerPass
 	{
-		explicit ScopedRuntimeUpscalerPass(const std::string& a_name)
+		explicit ScopedRuntimeUpscalerPass(std::string_view a_name)
 		{
 			if (globals::profiler) {
 				globals::profiler->BeginPass(a_name);
@@ -1533,8 +1533,7 @@ bool FidelityFX::DispatchRuntimeUpscalerSingle(uint32_t a_contextIndex, ID3D11Re
 	if (!commandAllocator || !commandList)
 		return false;
 
-	const std::string dispatchPassName = "Upscaling::RuntimeUpscalerDispatch";
-	CS_GPU_PASS(dispatchPassName);
+	CS_GPU_PASS("Upscaling::RuntimeUpscalerDispatch");
 
 	bool dispatchOk = false;
 	bool commandListSubmitted = false;
@@ -1839,8 +1838,7 @@ bool FidelityFX::UpscaleRegion(uint32_t a_contextIndex, ID3D11Resource* a_color,
 		runtimeRequested ? RuntimeUpscalerFramePath::kHostFsr31Fallback : RuntimeUpscalerFramePath::kHostFsr31;
 	RecordRuntimeUpscalerFramePath(fallbackFramePath);
 
-	const std::string dispatchPassName = "Upscaling::HostFsr3Dispatch";
-	CS_GPU_PASS(dispatchPassName);
+	CS_GPU_PASS("Upscaling::HostFsr3Dispatch");
 
 	FfxFsr3DispatchUpscaleDescription dispatchParameters{};
 	dispatchParameters.commandList = ffxGetCommandListDX11(context);

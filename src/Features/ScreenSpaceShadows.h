@@ -65,6 +65,7 @@ public:
 	ID3D11ComputeShader* raymarchCS = nullptr;
 
 	Texture2D* screenSpaceShadowsTexture = nullptr;
+	bool shadowTextureCleared = false;
 	Texture2D* denoiseTexture = nullptr;
 	ID3D11ComputeShader* denoiseCS[2] = { nullptr, nullptr };
 	bool denoiseCompileFailed = false;

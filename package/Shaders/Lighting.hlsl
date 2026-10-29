@@ -2543,14 +2543,15 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	sh2 skylightingSH = Skylighting::Sample(positionMSSkylight, worldNormal);
 #			endif
 #		else
-	sh2 skylightingSH = inWorld ? Skylighting::Sample(positionMSSkylight, worldNormal
+	sh2 skylightingSH = Skylighting::UNIT_SH;
+	[branch] if (inWorld)
+		skylightingSH = Skylighting::Sample(positionMSSkylight, worldNormal
 #			if defined(SKYLIGHTING_SHADOW_VIS)
-									  ,
-									  skylightingShadowVisibility,
-									  false
+			,
+			skylightingShadowVisibility,
+			false
 #			endif
-									  ) :
-	                              Skylighting::UNIT_SH;
+		);
 #		endif
 #		if defined(SKYLIGHTING_SHADOW_VIS) && !defined(DEFERRED)
 	// Height clamped so shadow visibility stays valid above the volume, unlike the diffuse SH fade
@@ -2684,11 +2685,14 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	}
 #	endif  // SNOW_COVER
 
+	float2 uvOriginal_ddx = ddx(uvOriginal);
+	float2 uvOriginal_ddy = ddy(uvOriginal);
+
 	// Deferred glint precompute (after Snow Cover so it can override glint params); skip when disabled (density<=1.1), matching the BRDF gate in Common/PBR.hlsli.
 #	if defined(GLINT)
 	if (material.GlintLogMicrofacetDensity > 1.1) {
 		float glintNoise = Random::R1Modified(float(SharedData::FrameCount), (Random::pcg2d(uint2(input.Position.xy)) / 4294967296.0).x);
-		Glints::PrecomputeGlints(glintNoise, uvOriginal, ddx(uvOriginal), ddy(uvOriginal), material.GlintScreenSpaceScale, material.GlintCache);
+		Glints::PrecomputeGlints(glintNoise, uvOriginal, uvOriginal_ddx, uvOriginal_ddy, material.GlintScreenSpaceScale, material.GlintCache);
 	}
 #	endif
 
@@ -2988,8 +2992,6 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		endif
 #	endif
 
-	float2 uvOriginal_ddx = ddx(uvOriginal);
-	float2 uvOriginal_ddy = ddy(uvOriginal);
 	EvaluateLighting(dirLightContext, material, tbnTr, uvOriginal, uvOriginal_ddx, uvOriginal_ddy, dirLightOutput);
 	dirLightOutput.transmission *= dirTransmissionContactShadow;
 #	if defined(WETNESS_EFFECTS)
@@ -3403,10 +3405,14 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 #	if defined(WETNESS_EFFECTS)
 #		if defined(DYNAMIC_CUBEMAPS)
-	float3 wetnessReflectance = GetWetnessIndirectLobeWeights(indirectLobeWeights, wetnessNormal, waterRoughnessSpecular, indirectContext);
+	float3 wetnessReflectance = 0.0;
+	[branch] if (waterRoughnessSpecular < 1)
+	{
+		wetnessReflectance = GetWetnessIndirectLobeWeights(indirectLobeWeights, wetnessNormal, waterRoughnessSpecular, indirectContext);
 #			if defined(TRUE_PBR)
-	wetnessReflectance *= SpecularOcclusion(saturate(dot(wetnessNormal, viewDirection)), waterRoughnessSpecular * waterRoughnessSpecular, material.AO);
+		wetnessReflectance *= SpecularOcclusion(saturate(dot(wetnessNormal, viewDirection)), waterRoughnessSpecular * waterRoughnessSpecular, material.AO);
 #			endif
+	}
 #		else
 	float3 wetnessReflectance = 0.0;
 #		endif

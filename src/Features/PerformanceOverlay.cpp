@@ -283,8 +283,6 @@ void PerformanceOverlay::DrawOverlay()
 
 	// Build draw call rows ONCE per frame and reuse
 	auto [mainRows, summaryRows] = this->BuildDrawCallRows();
-	std::vector<DrawCallRow> allRows = mainRows;
-	allRows.insert(allRows.end(), summaryRows.begin(), summaryRows.end());
 
 	// Set window flags - no decoration and only movable when ShowBorder is true
 	ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration;
@@ -404,7 +402,7 @@ void PerformanceOverlay::DrawOverlay()
 	ImGui::SetWindowFontScale(1.0f);  // Reset font scale
 
 	// --- A/B Test Section ---
-	DrawABTestSection(allRows);
+	DrawABTestSection();
 
 	ImGui::End();
 	ImGui::PopStyleVar();    // WindowBorderSize
@@ -470,7 +468,7 @@ void PerformanceOverlay::DrawFPS()
 		ImGui::PopStyleColor();
 
 		// Draw frametime target reference lines
-		if (ImGui::BeginTable("FrametimeTargets", 3, ImGuiTableFlags_SizingStretchSame)) {
+		if (ImGui::BeginTable("PreFGFrametimeTargets", 3, ImGuiTableFlags_SizingStretchSame)) {
 			ImGui::TableNextColumn();
 			ImGui::Text("30 FPS: 33.3 ms");
 
@@ -1139,10 +1137,8 @@ std::vector<ColumnConfig> PerformanceOverlay::BuildABTestResultsTableColumns(con
   * - Display of aggregated A/B test results
   * - Settings difference comparison table
   * - A/B test controls (clear results, show/hide settings diff)
-  *
-  * @param allRows The current draw call rows for data collection
   */
-void PerformanceOverlay::DrawABTestSection(const std::vector<DrawCallRow>& allRows)
+void PerformanceOverlay::DrawABTestSection()
 {
 	auto* menu = Menu::GetSingleton();
 	auto* abTestingManager = ABTestingManager::GetSingleton();
@@ -1177,11 +1173,6 @@ void PerformanceOverlay::DrawABTestSection(const std::vector<DrawCallRow>& allRo
 	}
 	wasAbTestActive = abTestingEnabled;
 	lastUsingTestConfig = currentUsingTestConfig;
-
-	// --- A/B Test Data Collection ---
-	if (abTestingEnabled) {
-		aggregator.OnFrame(allRows);  // Pass both main and summary rows
-	}
 
 	// Display A/B test results if available
 	if (aggregator.HasResults()) {

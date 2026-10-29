@@ -352,12 +352,12 @@ bool State::HandlePostProcessing(RE::RENDER_TARGET a_input, RE::RENDER_TARGET a_
  * shader descriptor tracking, increments and atomically publishes the frame
  * count, and disables reflection and improved snow shaders.
  */
-void State::SetGrassSphereNormal(bool sphereNormal)
+void State::SetGrassFlags(bool sphereNormal, bool pbr)
 {
-	if (sphereNormal)
-		permutationData.ExtraShaderDescriptor |= static_cast<uint32_t>(ExtraShaderDescriptors::GrassSphereNormal);
-	else
-		permutationData.ExtraShaderDescriptor &= ~static_cast<uint32_t>(ExtraShaderDescriptors::GrassSphereNormal);
+	constexpr auto sphereNormalFlag = static_cast<uint32_t>(ExtraShaderDescriptors::GrassSphereNormal);
+	constexpr auto pbrFlag = static_cast<uint32_t>(ExtraShaderDescriptors::GrassPBR);
+	permutationData.ExtraShaderDescriptor = (permutationData.ExtraShaderDescriptor & ~(sphereNormalFlag | pbrFlag)) |
+	                                        (sphereNormal ? sphereNormalFlag : 0) | (pbr ? pbrFlag : 0);
 }
 
 void State::Reset()
@@ -1218,12 +1218,12 @@ void State::SetupResources()
 
 	auto renderer = globals::game::renderer;
 
-	permutationCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc<PermutationCB>());
-	sharedDataCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc<SharedDataCB>());
+	permutationCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc<PermutationCB>(), "State::PermutationCB");
+	sharedDataCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc<SharedDataCB>(), "State::SharedDataCB");
 
 	auto [data, size] = GetFeatureBufferData(false);
 	(void)data;
-	featureDataCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc((uint32_t)size));
+	featureDataCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc((uint32_t)size), "State::FeatureDataCB");
 
 	// Grab main texture to get resolution
 	D3D11_TEXTURE2D_DESC texDesc{};

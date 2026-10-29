@@ -333,7 +333,8 @@ T SettingManager::GetValueInternal(uint32_t id, bool rawValue, float weatherBlen
 			SettingValue currentValue = ResolveWeatherValue(currentWeatherID, id);
 			SettingValue lastValue = ResolveWeatherValue(lastWeatherID, id);
 
-			const float blend = weatherBlendOverride >= 0.0f ? weatherBlendOverride : weatherBlendFactor;
+			const float liveBlend = threadWeatherBlend >= 0.0f ? threadWeatherBlend : weatherBlendFactor;
+			const float blend = weatherBlendOverride >= 0.0f ? weatherBlendOverride : liveBlend;
 			if (rawValue) {
 				return safeGet(blend > 0.5f ? currentValue : lastValue);
 			}

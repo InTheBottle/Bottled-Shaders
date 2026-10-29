@@ -170,8 +170,11 @@ namespace SnowCover
 #	endif
 
 #	if !defined(BASIC_SNOW_COVER)
-	float ApplySnowBase(float3 worldNormal, inout float2 uv, out bool alt, float disp, float3 p, float skylight, float waterDist, float viewDist, float lift)
+	float ApplySnowBase(float3 worldNormal, inout float2 uv, out bool alt, out float2 uvDdx, out float2 uvDdy, float disp, float3 p, float skylight, float waterDist, float viewDist, float lift)
 	{
+		float2 snowUV = SharedData::snowCoverSettings.UVScale * (p.xy / 100 + worldNormal.xy * disp);
+		uvDdx = ddx(snowUV);
+		uvDdy = ddy(snowUV);
 		// the range in which water level affects snow
 		waterDist = smoothstep(-64, 8, -waterDist - disp);
 		// the amount of snow based on weather, TimeSnowing transitions smoothly between -1 in rain and 1 when snowing
@@ -196,7 +199,7 @@ namespace SnowCover
 		float alt_mult = (1 - abs(worldNormal.z - SharedData::snowCoverSettings.peakAltAngle)) + sin(p.z * 0.01 + cos(p.x * p.y * 0.01) * 0.025) * 0.05;
 		alt = alt_mult > main_mult;
 		// apparently LOD landscape color sampler clamps uvs
-		uv = frac(SharedData::snowCoverSettings.UVScale * (p.xy / 100 + worldNormal.xy * disp));
+		uv = frac(snowUV);
 		return min(1, mult);
 	}
 
@@ -204,24 +207,25 @@ namespace SnowCover
 	float ApplySnowPBR(inout MaterialProperties material, inout float3 worldNormal, out float mult, float disp, float3 p, float skylight, float waterDist, float viewDist, float2 uv, float lift = 0)
 	{
 		bool alt;
-		mult = ApplySnowBase(worldNormal, uv, alt, disp, p, skylight, waterDist, viewDist, lift);
+		float2 uvDdx, uvDdy;
+		mult = ApplySnowBase(worldNormal, uv, alt, uvDdx, uvDdy, disp, p, skylight, waterDist, viewDist, lift);
 		if (mult <= 0)
 			return mult;
 		float4 rmaos;
 		if (alt) {
-			rmaos = IceRmaos.Sample(SampColorSampler, uv);
-			float3 albedo = IceAlbedo.Sample(SampColorSampler, uv).rgb;
+			rmaos = IceRmaos.SampleGrad(SampColorSampler, uv, uvDdx, uvDdy);
+			float3 albedo = IceAlbedo.SampleGrad(SampColorSampler, uv, uvDdx, uvDdy).rgb;
 			albedo = Color::Albedo(Color::LinearSRGBToWorking(albedo)) * SharedData::snowCoverSettings.AltTint.rgb;
 			material.BaseColor = lerp(material.BaseColor, albedo, mult * SharedData::snowCoverSettings.AltTint.w);
-			worldNormal = TransformNormal(IceNormal.Sample(SampNormalSampler, uv).rgb);
+			worldNormal = TransformNormal(IceNormal.SampleGrad(SampNormalSampler, uv, uvDdx, uvDdy).rgb);
 			material.F0 = lerp(material.F0, rmaos.w * SharedData::snowCoverSettings.altSpec, mult);
 
 		} else {
-			rmaos = SnowRmaos.Sample(SampColorSampler, uv);
-			float3 albedo = SnowAlbedo.Sample(SampColorSampler, uv).rgb;
+			rmaos = SnowRmaos.SampleGrad(SampColorSampler, uv, uvDdx, uvDdy);
+			float3 albedo = SnowAlbedo.SampleGrad(SampColorSampler, uv, uvDdx, uvDdy).rgb;
 			albedo = Color::Albedo(Color::LinearSRGBToWorking(albedo)) * SharedData::snowCoverSettings.MainTint.rgb;
 			material.BaseColor = lerp(material.BaseColor, albedo, mult * SharedData::snowCoverSettings.MainTint.w);
-			worldNormal = TransformNormal(SnowNormal.Sample(SampNormalSampler, uv).rgb);
+			worldNormal = TransformNormal(SnowNormal.SampleGrad(SampNormalSampler, uv, uvDdx, uvDdy).rgb);
 			material.F0 = lerp(material.F0, rmaos.w * SharedData::snowCoverSettings.mainSpec, mult);
 		}
 		material.Roughness = lerp(material.Roughness, rmaos.x, mult);
@@ -245,27 +249,28 @@ namespace SnowCover
 	float ApplySnow(inout MaterialProperties material, inout float3 worldNormal, float disp, float3 p, float skylight, float waterDist, float viewDist, float2 uv, float lift = 0)
 	{
 		bool alt;
-		float mult = ApplySnowBase(worldNormal, uv, alt, disp, p, skylight, waterDist, viewDist, lift);
+		float2 uvDdx, uvDdy;
+		float mult = ApplySnowBase(worldNormal, uv, alt, uvDdx, uvDdy, disp, p, skylight, waterDist, viewDist, lift);
 		if (mult <= 0.0)
 			return 0;
 		float4 rmaos;
 		if (alt) {
-			float3 albedo = IceAlbedo.Sample(SampColorSampler, uv).rgb;
+			float3 albedo = IceAlbedo.SampleGrad(SampColorSampler, uv, uvDdx, uvDdy).rgb;
 			albedo = Color::Albedo(ColorManagement::DiffuseToWorking(TransferFunctions::LinearToGamma22(albedo))) * SharedData::snowCoverSettings.AltTint.rgb * Color::PBRLightingScale;
-			rmaos = IceRmaos.Sample(SampColorSampler, uv);
+			rmaos = IceRmaos.SampleGrad(SampColorSampler, uv, uvDdx, uvDdy);
 			material.Roughness = lerp(material.Roughness, rmaos.x, mult);
 			material.Shininess = lerp(material.Shininess, 25 * 500 * SharedData::snowCoverSettings.altSpec * rmaos.w, mult);
-			worldNormal = TransformNormal(IceNormal.Sample(SampNormalSampler, uv).rgb);
+			worldNormal = TransformNormal(IceNormal.SampleGrad(SampNormalSampler, uv, uvDdx, uvDdy).rgb);
 			material.BaseColor = lerp(material.BaseColor, rmaos.z * albedo, mult * SharedData::snowCoverSettings.AltTint.w);
 			material.SpecularColor = lerp(material.SpecularColor, rmaos.y * albedo + float3(1, 1, 1) * (1 - rmaos.y), mult);
 			material.F0 = lerp(material.F0, rmaos.w * SharedData::snowCoverSettings.altSpec, mult);
 		} else {
-			float3 albedo = SnowAlbedo.Sample(SampColorSampler, uv).rgb;
+			float3 albedo = SnowAlbedo.SampleGrad(SampColorSampler, uv, uvDdx, uvDdy).rgb;
 			albedo = Color::Albedo(ColorManagement::DiffuseToWorking(TransferFunctions::LinearToGamma22(albedo))) * SharedData::snowCoverSettings.MainTint.rgb * Color::PBRLightingScale;
-			rmaos = SnowRmaos.Sample(SampColorSampler, uv);
+			rmaos = SnowRmaos.SampleGrad(SampColorSampler, uv, uvDdx, uvDdy);
 			material.Roughness = lerp(material.Roughness, rmaos.x, mult);
 			material.Shininess = lerp(material.Shininess, 25 * 500 * SharedData::snowCoverSettings.mainSpec * rmaos.w, mult);
-			worldNormal = TransformNormal(SnowNormal.Sample(SampNormalSampler, uv).rgb);
+			worldNormal = TransformNormal(SnowNormal.SampleGrad(SampNormalSampler, uv, uvDdx, uvDdy).rgb);
 			material.BaseColor = lerp(material.BaseColor, rmaos.z * albedo, mult * SharedData::snowCoverSettings.MainTint.w);
 			material.SpecularColor = lerp(material.SpecularColor, rmaos.y * albedo + float3(1, 1, 1) * (1 - rmaos.y), mult);
 			material.F0 = lerp(material.F0, rmaos.w * SharedData::snowCoverSettings.mainSpec, mult);

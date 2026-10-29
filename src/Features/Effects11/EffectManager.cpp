@@ -445,6 +445,7 @@ bool EffectManager::ExecuteEffects(RE::BSGraphics::RenderTargetData& a_input, RE
 	// Effects sample kMAIN as TextureOriginal, so mirror any other input into it
 	auto& textureOriginal = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
 	const bool sameTexture = a_input.texture && a_input.texture == textureOriginal.texture;
+	bool colorCorrected = false;
 	if (&a_input != &textureOriginal && !sameTexture && a_input.SRV && textureOriginal.RTV) {
 		const bool haveTextures = a_input.texture && textureOriginal.texture;
 		D3D11_TEXTURE2D_DESC srcDesc{}, dstDesc{};
@@ -456,7 +457,13 @@ bool EffectManager::ExecuteEffects(RE::BSGraphics::RenderTargetData& a_input, RE
 		                          srcDesc.MipLevels == dstDesc.MipLevels && srcDesc.ArraySize == dstDesc.ArraySize &&
 		                          srcDesc.SampleDesc.Count == dstDesc.SampleDesc.Count && srcDesc.SampleDesc.Quality == dstDesc.SampleDesc.Quality;
 		if (haveTextures && layoutsMatch) {
-			context->CopyResource(textureOriginal.texture, a_input.texture);
+			if (srcDesc.MipLevels == 1 && srcDesc.ArraySize == 1) {
+				globals::profiler->BeginPass("Effects11::ColorCorrection");
+				colorCorrected = ApplyColorCorrection(textureOriginal.UAV, a_input.SRV);
+				globals::profiler->EndPass();
+			}
+			if (!colorCorrected)
+				context->CopyResource(textureOriginal.texture, a_input.texture);
 		} else {
 			CopyTexture(a_input.SRV, textureOriginal.RTV, false);
 			ID3D11RenderTargetView* nullRTV = nullptr;
@@ -476,16 +483,19 @@ bool EffectManager::ExecuteEffects(RE::BSGraphics::RenderTargetData& a_input, RE
 	context->IASetInputLayout(inputLayout.get());
 	context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
-	globals::profiler->BeginPass("Effects11::ColorCorrection");
-	ApplyColorCorrection(textureOriginal.UAV);
-	globals::profiler->EndPass();
+	if (!colorCorrected) {
+		globals::profiler->BeginPass("Effects11::ColorCorrection");
+		ApplyColorCorrection(textureOriginal.UAV);
+		globals::profiler->EndPass();
+	}
 
 	auto& textureManager = TextureManager::GetSingleton();
 
 	ExecuteEffect(enbDepthOfField, ids.useDepthOfField);
 
-	if (WillEffectRun(enbBloom, ids.useBloom) || WillEffectRun(enbLens, ids.useLens) || WillEffectRun(enbAdaptation, ids.useAdaptation))
-		textureManager.UpdateDownsampledTexture(textureOriginal.SRV);
+	const bool adaptationWillRun = WillEffectRun(enbAdaptation, ids.useAdaptation);
+	if (WillEffectRun(enbBloom, ids.useBloom) || WillEffectRun(enbLens, ids.useLens) || adaptationWillRun)
+		textureManager.UpdateDownsampledTexture(textureOriginal.SRV, adaptationWillRun);
 
 	ExecuteEffect(enbBloom, ids.useBloom);
 	ExecuteEffect(enbLens, ids.useLens);
@@ -550,6 +560,7 @@ void EffectManager::CreateStandardDepthShader()
 		logger::error("[EFFECTS11] Failed to create standard depth compute shader");
 		return;
 	}
+	Util::SetResourceName(standardDepthComputeShader.get(), "EffectManager::StandardDepthCS");
 }
 
 ID3D11ShaderResourceView* EffectManager::GetEffectDepthSRV()
@@ -641,6 +652,7 @@ void EffectManager::CreateQuadGeometry()
 	initData.pSysMem = vertices;
 
 	DX::ThrowIfFailed(globals::d3d::device->CreateBuffer(&bufferDesc, &initData, quadVertexBuffer.put()));
+	Util::SetResourceName(quadVertexBuffer.get(), "EffectManager::QuadVertexBuffer");
 
 	// Create input layout for ENB post-processing
 	D3D11_INPUT_ELEMENT_DESC inputElementDescs[] = {
@@ -671,6 +683,7 @@ void EffectManager::CreateQuadGeometry()
 	if (FAILED(hr)) {
 		logger::error("[EFFECTS11] Failed to create shared input layout for ENB effects");
 	}
+	Util::SetResourceName(inputLayout.get(), "EffectManager::InputLayout");
 }
 
 void EffectManager::CreateRenderStates()
@@ -689,6 +702,7 @@ void EffectManager::CreateRenderStates()
 	rastDesc.AntialiasedLineEnable = FALSE;
 
 	DX::ThrowIfFailed(globals::d3d::device->CreateRasterizerState(&rastDesc, rasterizerState.put()));
+	Util::SetResourceName(rasterizerState.get(), "EffectManager::RasterizerState");
 
 	// Blend state for standard rendering (no blending)
 	D3D11_BLEND_DESC blendDesc = {};
@@ -698,6 +712,7 @@ void EffectManager::CreateRenderStates()
 	blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
 
 	DX::ThrowIfFailed(globals::d3d::device->CreateBlendState(&blendDesc, blendState.put()));
+	Util::SetResourceName(blendState.get(), "EffectManager::BlendState");
 }
 
 void EffectManager::CreateCopyShaders()
@@ -722,6 +737,7 @@ void EffectManager::CreateCopyShaders()
 		logger::error("[EFFECTS11] Failed to create copy vertex shader");
 		return;
 	}
+	Util::SetResourceName(copyVertexShader.get(), "EffectManager::CopyVS");
 
 	auto pixelShaderSource = LoadShaderFile("Data\\Shaders\\Effects11\\CopyPS.hlsl");
 	if (pixelShaderSource.empty())
@@ -744,6 +760,7 @@ void EffectManager::CreateCopyShaders()
 		logger::error("[EFFECTS11] Failed to create copy pixel shader");
 		return;
 	}
+	Util::SetResourceName(copyPixelShader.get(), "EffectManager::CopyPS");
 
 	D3D11_BUFFER_DESC cbDesc{};
 	cbDesc.ByteWidth = 16;
@@ -751,6 +768,7 @@ void EffectManager::CreateCopyShaders()
 	cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 	globals::d3d::device->CreateBuffer(&cbDesc, nullptr, ditherConstantBuffer.put());
+	Util::SetResourceName(ditherConstantBuffer.get(), "EffectManager::DitherCB");
 
 	logger::info("[EFFECTS11] Created texture copy shaders successfully");
 }
@@ -777,6 +795,16 @@ void EffectManager::CreateColorCorrectionShader()
 		logger::error("[EFFECTS11] Failed to create color correction compute shader");
 		return;
 	}
+	Util::SetResourceName(colorCorrectionComputeShader.get(), "EffectManager::ColorCorrectionCS");
+
+	static constexpr D3D_SHADER_MACRO copySourceDefines[] = { { "COPY_SOURCE", "1" }, { nullptr, nullptr } };
+	winrt::com_ptr<ID3DBlob> copyBlob, copyErrorBlob;
+	if (SUCCEEDED(D3DCompile(computeShaderSource.data(), computeShaderSource.size(), "ColorCorrectionCS.hlsl", copySourceDefines, nullptr,
+			"main", "cs_5_0", 0, 0, copyBlob.put(), copyErrorBlob.put())) &&
+		SUCCEEDED(globals::d3d::device->CreateComputeShader(copyBlob->GetBufferPointer(), copyBlob->GetBufferSize(), nullptr, colorCorrectionCopyComputeShader.put())))
+		Util::SetResourceName(colorCorrectionCopyComputeShader.get(), "EffectManager::ColorCorrectionCopyCS");
+	else
+		logger::warn("[EFFECTS11] Failed to create the copying color correction compute shader; the input is copied before color correction");
 
 	// Create constant buffer
 	D3D11_BUFFER_DESC cbDesc = {};
@@ -790,6 +818,7 @@ void EffectManager::CreateColorCorrectionShader()
 		logger::error("[EFFECTS11] Failed to create color correction constant buffer");
 		return;
 	}
+	Util::SetResourceName(colorCorrectionConstantBuffer.get(), "EffectManager::ColorCorrectionCB");
 
 	logger::info("[EFFECTS11] Created color correction compute shader successfully");
 }
@@ -1053,7 +1082,10 @@ void EffectManager::UpdateCommonVariablesForEffect(Effect& effect)
 	if (!effect.GetEffect())
 		return;
 
-	effect.SetShaderResourceVariable("TextureDepth", GetEffectDepthSRV());
+	auto* depthVariable = effect.GetCachedVariable("TextureDepth");
+	auto* depthResource = depthVariable ? depthVariable->AsShaderResource() : nullptr;
+	if (depthResource && depthResource->IsValid())
+		depthResource->SetResource(GetEffectDepthSRV());
 
 	static const std::string renderTargets[] = {
 		"RenderTargetRGBA32", "RenderTargetRGBA64", "RenderTargetRGBA64F",
@@ -1177,11 +1209,46 @@ bool EffectManager::CopyTexture(ID3D11ShaderResourceView* a_source, ID3D11Render
 	return true;
 }
 
-void EffectManager::ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV)
+bool EffectManager::ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV, ID3D11ShaderResourceView* a_source)
 {
-	if (!textureUAV || !colorCorrectionComputeShader || !colorCorrectionConstantBuffer) {
-		logger::warn("[EFFECTS11] Invalid parameters or shaders not initialized for color correction");
-		return;
+	auto* computeShader = a_source ? colorCorrectionCopyComputeShader.get() : colorCorrectionComputeShader.get();
+	if (!textureUAV || !computeShader || !colorCorrectionConstantBuffer) {
+		if (!a_source)
+			logger::warn("[EFFECTS11] Invalid parameters or shaders not initialized for color correction");
+		return false;
+	}
+
+	// Get texture dimensions for dispatch
+	winrt::com_ptr<ID3D11Resource> resource;
+	textureUAV->GetResource(resource.put());
+	winrt::com_ptr<ID3D11Texture2D> texture;
+	if (!resource || !resource.try_as(texture) || !texture) {
+		logger::error("[EFFECTS11] Failed to get Texture2D from UAV in ApplyColorCorrection");
+		return false;
+	}
+	D3D11_TEXTURE2D_DESC texDesc;
+	texture->GetDesc(&texDesc);
+
+	auto context = globals::d3d::context;
+
+	ID3D11ShaderResourceView* nullSRV = nullptr;
+	if (a_source) {
+		D3D11_SHADER_RESOURCE_VIEW_DESC sourceDesc{};
+		a_source->GetDesc(&sourceDesc);
+		D3D11_UNORDERED_ACCESS_VIEW_DESC destinationDesc{};
+		textureUAV->GetDesc(&destinationDesc);
+		if (sourceDesc.Format != destinationDesc.Format || sourceDesc.ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2D || sourceDesc.Texture2D.MostDetailedMip != 0 ||
+			destinationDesc.ViewDimension != D3D11_UAV_DIMENSION_TEXTURE2D || destinationDesc.Texture2D.MipSlice != 0)
+			return false;
+
+		context->OMSetRenderTargets(0, nullptr, nullptr);
+		context->CSSetShaderResources(0, 1, &a_source);
+		winrt::com_ptr<ID3D11ShaderResourceView> boundSource;
+		context->CSGetShaderResources(0, 1, boundSource.put());
+		if (boundSource.get() != a_source) {
+			context->CSSetShaderResources(0, 1, &nullSRV);
+			return false;
+		}
 	}
 
 	auto& settingManager = SettingManager::GetSingleton();
@@ -1189,14 +1256,14 @@ void EffectManager::ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV)
 	auto brightness = settingManager.GetValue<float>(ids.brightness);
 	auto gammaCurve = settingManager.GetValue<float>(ids.gammaCurve);
 
-	auto context = globals::d3d::context;
-
 	// Update constant buffer with current settings
 	D3D11_MAPPED_SUBRESOURCE mapped;
 	HRESULT hr = context->Map(colorCorrectionConstantBuffer.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
 	if (FAILED(hr)) {
 		logger::warn("[EFFECTS11] Failed to map color correction constant buffer");
-		return;
+		if (a_source)
+			context->CSSetShaderResources(0, 1, &nullSRV);
+		return false;
 	}
 	{
 		struct ColorCorrectionCB
@@ -1214,26 +1281,15 @@ void EffectManager::ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV)
 	}
 
 	// Set compute shader and resources
-	context->CSSetShader(colorCorrectionComputeShader.get(), nullptr, 0);
+	context->CSSetShader(computeShader, nullptr, 0);
 	ID3D11Buffer* bufferArray[] = { colorCorrectionConstantBuffer.get() };
 	context->CSSetConstantBuffers(0, 1, bufferArray);
 	context->CSSetUnorderedAccessViews(0, 1, &textureUAV, nullptr);
 
-	// Get texture dimensions for dispatch
-	winrt::com_ptr<ID3D11Resource> resource;
-	textureUAV->GetResource(resource.put());
-	winrt::com_ptr<ID3D11Texture2D> texture;
-	if (!resource || !resource.try_as(texture) || !texture) {
-		logger::error("[EFFECTS11] Failed to get Texture2D from UAV in ApplyColorCorrection");
-	} else {
-		D3D11_TEXTURE2D_DESC texDesc;
-		texture->GetDesc(&texDesc);
-
-		// Dispatch compute shader (8x8 thread groups)
-		UINT dispatchX = (texDesc.Width + 7) / 8;
-		UINT dispatchY = (texDesc.Height + 7) / 8;
-		context->Dispatch(dispatchX, dispatchY, 1);
-	}
+	// Dispatch compute shader (8x8 thread groups)
+	UINT dispatchX = (texDesc.Width + 7) / 8;
+	UINT dispatchY = (texDesc.Height + 7) / 8;
+	context->Dispatch(dispatchX, dispatchY, 1);
 
 	// Clear bindings
 	ID3D11UnorderedAccessView* nullUAV = nullptr;
@@ -1241,6 +1297,9 @@ void EffectManager::ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV)
 	context->CSSetShader(nullptr, nullptr, 0);
 	context->CSSetConstantBuffers(0, 1, &nullCB);
 	context->CSSetUnorderedAccessViews(0, 1, &nullUAV, nullptr);
+	if (a_source)
+		context->CSSetShaderResources(0, 1, &nullSRV);
+	return true;
 }
 
 void EffectManager::ReloadShaders()
@@ -1250,6 +1309,7 @@ void EffectManager::ReloadShaders()
 	copyPixelShader = nullptr;
 	ditherConstantBuffer = nullptr;
 	colorCorrectionComputeShader = nullptr;
+	colorCorrectionCopyComputeShader = nullptr;
 	colorCorrectionConstantBuffer = nullptr;
 	standardDepthComputeShader = nullptr;
 	CreateCopyShaders();

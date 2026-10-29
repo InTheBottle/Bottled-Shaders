@@ -312,6 +312,8 @@
 				float4 blocked = max(0.0, h - rayHeight - ParallaxShadowBias) * (1.0 - t);
 				blocked = valid ? blocked : 0.0;
 				occlusion = max(occlusion, max(max(blocked.x, blocked.y), max(blocked.z, blocked.w)));
+				if (occlusion * ShadowIntensity * 4.0 >= 1.0)
+					break;
 			}
 			shadow = 1.0 - saturate(occlusion * ShadowIntensity * 4.0) * horizon;
 		}

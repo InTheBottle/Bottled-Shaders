@@ -41,7 +41,6 @@ bool LightIntersectsCluster(float3 position, float radiusSquared, ClusterAABB cl
 		return;
 
 	uint visibleLightCount = 0;
-	uint visibleLightIndices[MAX_CLUSTER_LIGHTS];
 
 	uint clusterIndex = dispatchThreadId.x +
 	                    dispatchThreadId.y * ClusterSize.x +
@@ -49,23 +48,30 @@ bool LightIntersectsCluster(float3 position, float radiusSquared, ClusterAABB cl
 
 	ClusterAABB cluster = clusters[clusterIndex];
 
-	for (uint i = 0; i < LightCount; i++) {
+	for (uint i = 0; i < LightCount && visibleLightCount < MAX_CLUSTER_LIGHTS; i++) {
 		float4 lightVS = sharedLightsVS[i];
 
 		[branch] if (LightIntersectsCluster(lightVS.xyz, lightVS.w, cluster))
-		{
-			visibleLightIndices[visibleLightCount] = i;
 			visibleLightCount++;
-			if (visibleLightCount >= MAX_CLUSTER_LIGHTS)
-				break;
-		}
 	}
 
 	uint offset = 0;
 	InterlockedAdd(lightIndexCounter[0], visibleLightCount, offset);
 
-	for (uint j = 0; j < visibleLightCount; j++) {
-		lightIndexList[offset + j] = visibleLightIndices[j];
+	// The list holds an average budget per cluster; clamp to what remains.
+	uint capacity, stride;
+	lightIndexList.GetDimensions(capacity, stride);
+	visibleLightCount = min(visibleLightCount, capacity - min(offset, capacity));
+
+	uint writtenLightCount = 0;
+	for (uint j = 0; j < LightCount && writtenLightCount < visibleLightCount; j++) {
+		float4 lightVS = sharedLightsVS[j];
+
+		[branch] if (LightIntersectsCluster(lightVS.xyz, lightVS.w, cluster))
+		{
+			lightIndexList[offset + writtenLightCount] = j;
+			writtenLightCount++;
+		}
 	}
 
 	LightGrid output = {

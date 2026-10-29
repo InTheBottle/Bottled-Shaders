@@ -84,6 +84,45 @@ namespace SIE
 		}
 	};
 
+	class SharedBlob final : public ID3DBlob
+	{
+	public:
+		explicit SharedBlob(ID3DBlob& a_source) :
+			bytes(static_cast<const uint8_t*>(a_source.GetBufferPointer()),
+				static_cast<const uint8_t*>(a_source.GetBufferPointer()) + a_source.GetBufferSize())
+		{}
+
+		HRESULT STDMETHODCALLTYPE QueryInterface(REFIID a_riid, void** a_object) override
+		{
+			if (!a_object)
+				return E_POINTER;
+			if (a_riid == __uuidof(IUnknown) || a_riid == __uuidof(ID3DBlob)) {
+				*a_object = static_cast<ID3DBlob*>(this);
+				AddRef();
+				return S_OK;
+			}
+			*a_object = nullptr;
+			return E_NOINTERFACE;
+		}
+
+		ULONG STDMETHODCALLTYPE AddRef() override { return ++refCount; }
+
+		ULONG STDMETHODCALLTYPE Release() override
+		{
+			const ULONG count = --refCount;
+			if (count == 0)
+				delete this;
+			return count;
+		}
+
+		LPVOID STDMETHODCALLTYPE GetBufferPointer() override { return bytes.data(); }
+		SIZE_T STDMETHODCALLTYPE GetBufferSize() override { return bytes.size(); }
+
+	private:
+		std::atomic<ULONG> refCount{ 1 };
+		std::vector<uint8_t> bytes;
+	};
+
 	namespace SShaderCache
 	{
 		static void GetShaderDefines(const RE::BSShader&, uint32_t, D3D_SHADER_MACRO*);
@@ -2266,12 +2305,16 @@ namespace SIE
 	bool ShaderCache::AddCompletedShader(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor, winrt::com_ptr<ID3DBlob> a_blob, bool fromDisk, std::wstring diskPath)
 	{
 		auto key = SIE::SShaderCache::GetShaderString(shaderClass, shader, descriptor, true);
-		auto keyWithDescriptor = SIE::SShaderCache::GetShaderString(shaderClass, shader, descriptor, false);
 		auto status = a_blob ? ShaderCompilationTask::Status::Completed : ShaderCompilationTask::Status::Failed;
-		logger::debug("Adding {} shader to map: {}", magic_enum::enum_name(status), keyWithDescriptor);
+		if (spdlog::should_log(spdlog::level::debug))
+			logger::debug("Adding {} shader to map: {}", magic_enum::enum_name(status), SIE::SShaderCache::GetShaderString(shaderClass, shader, descriptor, false));
+		// The map's blob is shared across threads; the caller's d3dcompiler blob stays with the caller.
+		winrt::com_ptr<ID3DBlob> shared;
+		if (a_blob)
+			shared.attach(new SharedBlob(*a_blob));
 		{
 			std::unique_lock lockM{ mapMutex };
-			shaderMap.insert_or_assign(key, ShaderCacheResult{ a_blob, status, system_clock::now(), fromDisk, std::move(diskPath) });
+			shaderMap.insert_or_assign(key, ShaderCacheResult{ std::move(shared), status, system_clock::now(), fromDisk, std::move(diskPath) });
 		}
 		mapCV.notify_all();  // wake threads waiting on a Pending→Completed/Failed transition
 		const std::wstring path = SIE::SShaderCache::GetShaderPath(
@@ -3410,7 +3453,7 @@ namespace SIE
 		uintmax_t sourceBytes = 0;
 		{
 			// GetString() format: "fxpFilename:ShaderClass:defines" — filename is before the first colon.
-			const auto taskStr = task.GetString();
+			const auto& taskStr = taskKey;
 			const auto sep = taskStr.find(':');
 			if (sep != std::string::npos) {
 				const auto shaderName = taskStr.substr(0, sep);
@@ -3465,7 +3508,12 @@ namespace SIE
 	void ShaderCompilationTask::Perform() const
 	{
 		ZoneScoped;
-		ZoneText(GetString().c_str(), GetString().size());
+#ifdef TRACY_ENABLE
+		if (TracyIsConnected) {
+			const auto taskString = GetString();
+			ZoneText(taskString.c_str(), taskString.size());
+		}
+#endif
 
 		if (shaderClass == ShaderClass::Vertex) {
 			ShaderCache::Instance().MakeAndAddVertexShader(shader, descriptor);
@@ -3704,7 +3752,7 @@ namespace SIE
 	{
 		auto& cache = ShaderCache::Instance();
 		auto key = task.GetString();
-		auto shaderBlob = cache.GetCompletedShader(task);
+		auto shaderBlob = cache.GetCompletedShader(key);
 
 		bool shouldLogCompletion = false;
 		double completionTimeMs = 0.0;

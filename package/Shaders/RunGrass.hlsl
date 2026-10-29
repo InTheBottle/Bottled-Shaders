@@ -789,11 +789,14 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float skylightingShadowVisibility = 1.0;
 #			endif
 
+	// TruePBR textures have no complex atlas but share this depth pass, and can pass the corner-texel test by chance.
+	const bool pbr = (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::GrassPBR) != 0;
 #			ifdef GRASS_OPTIMIZATIONS
-	bool complex = input.IsComplex > 0.5;
-	[branch] if (input.IsComplex < 0.0)
+	bool complex = !pbr && input.IsComplex > 0.5;
+	[branch] if (!pbr && input.IsComplex < 0.0)
 #			else
-	bool complex;
+	bool complex = false;
+	[branch] if (!pbr)
 #			endif
 	{
 		float x, y;
@@ -840,9 +843,13 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #				ifdef GRASS_OPTIMIZATIONS
 	// Keep the atlas selection above independent of the distant-detail cutoff.
 	const bool complexDetail = complex && input.IsFar <= 0.5;
-	float4 specColor = complexDetail ? TexBaseSampler.SampleBias(SampBaseSampler, float2(input.TexCoord.x, 0.5 + input.TexCoord.y * 0.5), SharedData::MipBias) : 1;
+	float4 specColor = 1;
+	[branch] if (complexDetail)
+		specColor = TexBaseSampler.SampleBias(SampBaseSampler, float2(input.TexCoord.x, 0.5 + input.TexCoord.y * 0.5), SharedData::MipBias);
 #				else
-	float4 specColor = complex ? TexBaseSampler.SampleBias(SampBaseSampler, float2(input.TexCoord.x, 0.5 + input.TexCoord.y * 0.5), SharedData::MipBias) : 1;
+	float4 specColor = 1;
+	[branch] if (complex)
+		specColor = TexBaseSampler.SampleBias(SampBaseSampler, float2(input.TexCoord.x, 0.5 + input.TexCoord.y * 0.5), SharedData::MipBias);
 #				endif
 
 	psout.MotionVectors = MotionBlur::GetSSMotionVector(float4(input.WorldPosition, 1), float4(input.PreviousWorldPosition, 1));

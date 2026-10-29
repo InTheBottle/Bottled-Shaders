@@ -82,6 +82,7 @@ public:
 
 	// Color correction compute shader resources
 	winrt::com_ptr<ID3D11ComputeShader> colorCorrectionComputeShader;
+	winrt::com_ptr<ID3D11ComputeShader> colorCorrectionCopyComputeShader;
 	winrt::com_ptr<ID3D11Buffer> colorCorrectionConstantBuffer;
 
 	// Standard-Z depth copy handed to .fx files when the scene depth is reversed
@@ -165,7 +166,7 @@ public:
 	bool CopyTexture(ID3D11ShaderResourceView* source, ID3D11RenderTargetView* destination, bool dither = true);
 
 	// Color correction using compute shader
-	void ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV);
+	bool ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV, ID3D11ShaderResourceView* a_source = nullptr);
 
 	void ReloadShaders();
 

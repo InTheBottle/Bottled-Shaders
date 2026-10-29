@@ -1604,7 +1604,7 @@ void HiZOcclusion::ExecuteVisibilityTests()
 		stats.copyTimeMs = static_cast<float>(std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(copyEnd - copyStart).count());
 
 		// Store geometry snapshot WITH this buffer so results match when read back
-		readbackState.geometrySnapshots[writeIdx] = std::move(pendingGeometrySnapshot);
+		readbackState.geometrySnapshots[writeIdx].swap(pendingGeometrySnapshot);
 		pendingGeometrySnapshot.clear();
 		readbackState.geometryCount[writeIdx] = numGeometry;
 		readbackState.cameraForward[writeIdx] = currentCameraForward;
