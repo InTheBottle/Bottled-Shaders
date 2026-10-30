@@ -226,7 +226,7 @@ namespace Util
 		}
 	}
 
-	static ID3D11DeviceChild* CompileShaderObject(const wchar_t* FilePath, const std::vector<std::pair<const char*, const char*>>& Defines, const char* ProgramType, const char* Program, winrt::com_ptr<ID3DBlob>* a_blob)
+	ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const std::vector<std::pair<const char*, const char*>>& Defines, const char* ProgramType, const char* Program)
 	{
 		auto device = globals::d3d::device;
 
@@ -326,8 +326,6 @@ namespace Util
 				if (SUCCEEDED(CreateShaderObject(device, ProgramType, cachedBlob.get(), &shader))) {
 					Util::SetResourceName(shader, "%s:%s", str.c_str(), Program);
 					logger::debug("Loaded {} from {}", str, Util::WStringToString(diskEntry->GetPath()));
-					if (a_blob)
-						a_blob->copy_from(cachedBlob.get());
 					return shader;
 				}
 				logger::warn("Discarding cached shader {} rejected by the device", Util::WStringToString(diskEntry->GetPath()));
@@ -349,22 +347,7 @@ namespace Util
 		ID3D11DeviceChild* shader = nullptr;
 		DX::ThrowIfFailed(CreateShaderObject(device, ProgramType, shaderBlob.get(), &shader));
 		Util::SetResourceName(shader, "%s:%s", str.c_str(), Program);
-		if (a_blob)
-			*a_blob = shaderBlob;
 		return shader;
-	}
-
-	ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const std::vector<std::pair<const char*, const char*>>& Defines, const char* ProgramType, const char* Program)
-	{
-		return CompileShaderObject(FilePath, Defines, ProgramType, Program, nullptr);
-	}
-
-	winrt::com_ptr<ID3DBlob> CompileShaderBlob(const wchar_t* FilePath, const std::vector<std::pair<const char*, const char*>>& Defines, const char* ProgramType, const char* Program)
-	{
-		winrt::com_ptr<ID3DBlob> blob;
-		winrt::com_ptr<ID3D11DeviceChild> shader;
-		shader.attach(CompileShaderObject(FilePath, Defines, ProgramType, Program, &blob));
-		return shader ? blob : nullptr;
 	}
 
 	// RAII wrapper for D3D mapped resources

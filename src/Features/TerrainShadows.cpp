@@ -8,7 +8,6 @@
 #include <pystring/pystring.h>
 
 #include "I18n/I18n.h"
-#include "LODShadows.h"
 #include "State.h"
 #include "Util.h"
 
@@ -345,9 +344,6 @@ bool TerrainShadows::IsHeightMapReady()
 
 TerrainShadows::PerFrame TerrainShadows::GetCommonBufferData()
 {
-	replacedByLODShadows = globals::features::lodShadows.ReplacesTerrainShadows();
-	if (replacedByLODShadows)
-		return {};
 	bool isHeightmapReady = IsHeightMapReady();
 
 	PerFrame data = {
@@ -612,16 +608,6 @@ void TerrainShadows::ReflectionsPrepass()
 
 void TerrainShadows::EarlyPrepass()
 {
-	if (globals::features::lodShadows.ReplacesTerrainShadows()) {
-		if (replacedByLODShadows && texShadowHeight) {
-			ID3D11ShaderResourceView* nullView = nullptr;
-			globals::d3d::context->PSSetShaderResources(60, 1, &nullView);
-			globals::d3d::context->CSSetShaderResources(60, 1, &nullView);
-			texShadowHeight.reset();
-			needPrecompute = cachedHeightmap != nullptr;
-		}
-		return;
-	}
 	LoadHeightmap();
 
 	const auto requestedRefreshGeneration = Util::GetCompletedCelestialTransitionGeneration();

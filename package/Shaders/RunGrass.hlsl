@@ -595,7 +595,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float3 cloudScatterColor = dirLightColor;
 	float cloudScatter = 0.0;
 	if (!SharedData::InInterior)
-		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, cloudScatter, true);
+		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, cloudScatter);
 #				if defined(WATER_EFFECTS)
 	dirLightColor *= WaterEffects::ComputeCaustics(SharedData::GetWaterData(input.WorldPosition.xyz), input.WorldPosition.xyz);
 #				endif
@@ -617,9 +617,8 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #					else
 	if (!SharedData::InInterior)
 #					endif
-		dirDetailedShadow *= lerp(1.0, ScreenSpaceShadows::GetThinSurfaceScreenSpaceShadow(input.HPosition.xyz, screenUV, screenNoise,
-										dot(faceNormal, SharedData::DirLightDirection.xyz)),
-			ShadowSampling::GetNativeContactWeight(input.WorldPosition.xyz));
+		dirDetailedShadow *= ScreenSpaceShadows::GetThinSurfaceScreenSpaceShadow(input.HPosition.xyz, screenUV, screenNoise,
+			dot(faceNormal, SharedData::DirLightDirection.xyz));
 #				endif  // SCREEN_SPACE_SHADOWS
 
 #				if defined(SNOW_COVER)
@@ -919,7 +918,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 	// Apply world shadow (terrain shadows, cloud shadows) directly to light color
 	if (!SharedData::InInterior)
-		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, cloudScatter, true);
+		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, cloudScatter);
 #				if defined(WATER_EFFECTS)
 	dirLightColor *= WaterEffects::ComputeCaustics(SharedData::GetWaterData(input.WorldPosition.xyz), input.WorldPosition.xyz);
 #				endif
@@ -934,9 +933,8 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #					else
 	if (!SharedData::InInterior)
 #					endif
-		dirDetailedShadow *= lerp(1.0, ScreenSpaceShadows::GetThinSurfaceScreenSpaceShadow(input.HPosition.xyz, screenUV, screenNoise,
-										dot(faceNormal, SharedData::DirLightDirection.xyz)),
-			ShadowSampling::GetNativeContactWeight(input.WorldPosition.xyz));
+		dirDetailedShadow *= ScreenSpaceShadows::GetThinSurfaceScreenSpaceShadow(input.HPosition.xyz, screenUV, screenNoise,
+			dot(faceNormal, SharedData::DirLightDirection.xyz));
 #				endif  // SCREEN_SPACE_SHADOWS
 
 	float3 diffuseColor = 0;
@@ -1199,7 +1197,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 	// Apply world shadow (terrain shadows, cloud shadows) directly to light color
 	if (!SharedData::InInterior)
-		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, cloudScatter, true);
+		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, cloudScatter);
 #			if defined(WATER_EFFECTS)
 	dirLightColor *= WaterEffects::ComputeCaustics(SharedData::GetWaterData(input.WorldPosition.xyz), input.WorldPosition.xyz);
 #			endif
@@ -1215,7 +1213,7 @@ PS_OUTPUT main(PS_INPUT input)
 #				else
 	if (!SharedData::InInterior)
 #				endif
-		dirDetailedShadow *= lerp(1.0, ScreenSpaceShadows::GetScreenSpaceShadow(input.HPosition.xyz, screenUV, screenNoise), ShadowSampling::GetNativeContactWeight(input.WorldPosition.xyz));
+		dirDetailedShadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.HPosition.xyz, screenUV, screenNoise);
 #			endif  // SCREEN_SPACE_SHADOWS
 
 	float3 diffuseColor = dirLightColor * dirDetailedShadow * input.DirLightAngle;

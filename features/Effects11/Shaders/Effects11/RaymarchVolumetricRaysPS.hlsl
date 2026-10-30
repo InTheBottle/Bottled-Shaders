@@ -5,7 +5,6 @@
 #define LinearSampler defaultSampler
 SamplerState defaultSampler : register(s0);
 
-#define LOD_SHADOWS_COMPARISON_SAMPLER
 #include "Common/ShadowSampling.hlsli"
 
 // Half-res target dimensions; the blur and apply passes share this layout.
@@ -47,7 +46,15 @@ float GetVolumetricRaysScattering(float3 positionMS, float noise, float3 cameraO
 	{
 		float3 samplePos = rayDirection * ((float(i) + noise) * rcpSampleCount * rayLength);
 
-		float shadow = ShadowSampling::GetWorldShadow(samplePos, cameraOffset);
+		float shadow = 1.0;
+
+#if defined(TERRAIN_SHADOWS)
+		shadow = TerrainShadows::GetTerrainShadow(samplePos + cameraOffset, LinearSampler);
+#endif
+
+#if defined(CLOUD_SHADOWS)
+		shadow *= CloudShadows::GetCloudShadowMult(samplePos, LinearSampler);
+#endif
 
 		float alongSun = dot(samplePos, sunDirection);
 		float offsetSq = max(dot(samplePos, samplePos) - alongSun * alongSun, 0.0);

@@ -2831,7 +2831,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 	// Apply world shadow (terrain shadows, cloud shadows) directly to light color
 	if (inWorld || inReflection)
-		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, cloudScatter, true);
+		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, cloudScatter);
 
 	float dirLightAngle = dot(worldNormal.xyz, DirLightDirection.xyz);
 
@@ -2858,11 +2858,6 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 	float dirDetailedShadow = 1.0;
 	float dirTransmissionContactShadow = 1.0;
-#	if defined(LOD)
-	float nativeContactWeight = ShadowSampling::HasDistantShadows() ? 0.0 : 1.0;
-#	else
-	float nativeContactWeight = ShadowSampling::GetNativeContactWeight(input.WorldPosition.xyz);
-#	endif
 
 	if ((Permutation::PixelShaderDescriptor & Permutation::LightingFlags::DefShadow) && (Permutation::PixelShaderDescriptor & Permutation::LightingFlags::ShadowDir)) {
 		dirDetailedShadow *= shadowColor.x;
@@ -2882,13 +2877,13 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		if defined(TRUE_PBR)
 		if (thinSurfaceNormals) {
 			float faceLightAngle = dot(thinSurfaceFaceNormal, DirLightDirection);
-			dirDetailedShadow *= lerp(1.0, ScreenSpaceShadows::GetThinSurfaceScreenSpaceShadow(input.Position.xyz, screenUV, screenNoise, faceLightAngle), nativeContactWeight);
-			float2 screenSpaceShadows = lerp(1.0, ScreenSpaceShadows::GetScreenSpaceShadows(input.Position.xyz, screenUV, screenNoise), nativeContactWeight);
+			dirDetailedShadow *= ScreenSpaceShadows::GetThinSurfaceScreenSpaceShadow(input.Position.xyz, screenUV, screenNoise, faceLightAngle);
+			float2 screenSpaceShadows = ScreenSpaceShadows::GetScreenSpaceShadows(input.Position.xyz, screenUV, screenNoise);
 			dirTransmissionContactShadow = faceLightAngle >= 0.0 ? screenSpaceShadows.x : screenSpaceShadows.y;
 		} else
 #		endif
 		{
-			float2 screenSpaceShadows = lerp(1.0, ScreenSpaceShadows::GetScreenSpaceShadows(input.Position.xyz, screenUV, screenNoise), nativeContactWeight);
+			float2 screenSpaceShadows = ScreenSpaceShadows::GetScreenSpaceShadows(input.Position.xyz, screenUV, screenNoise);
 #		if defined(SKINNED) || defined(SKIN) || defined(HAIR)
 			screenSpaceShadows.x = lerp(1.0, screenSpaceShadows.x, saturate(4.0 * dirLightAngle));
 #		endif

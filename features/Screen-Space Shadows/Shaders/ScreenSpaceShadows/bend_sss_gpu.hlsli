@@ -42,7 +42,6 @@
 // Wherever possible, it is highly recommended to have these values be compile-time constants
 struct DispatchParameters
 {
-	float ContactMaxDistance;
 	// Visual configuration:
 	// These values will require manual tuning.
 	// All shadow computation is performed in non-linear depth space (not in world space), so tuned value choices will depend on scene depth distribution (as determined by the Projection Matrix setup).
@@ -90,7 +89,6 @@ struct DispatchParameters
 	// Set sensible starting tuning values
 	void SetDefaults()
 	{
-		ContactMaxDistance = 0.0;
 		SurfaceThickness = 0.005;
 		BilinearThreshold = 0.02;
 		ShadowContrast = 4;
@@ -310,9 +308,6 @@ void WriteScreenSpaceShadow(DispatchParameters inParameters, int3 inGroupID, int
 	half start_depth = sampling_depth[0];
 
 	if (start_depth == 0.0 || start_depth == 1.0)
-		return;
-
-	if (inParameters.ContactMaxDistance > 0.0 && SharedData::GetScreenDepth(start_depth) >= inParameters.ContactMaxDistance)
 		return;
 
 	// lerp away from far depth by a tiny fraction?

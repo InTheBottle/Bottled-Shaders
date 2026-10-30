@@ -21,7 +21,6 @@
 #include "Features/ExponentialHeightFog.h"
 #include "Features/HDRDisplay.h"
 #include "Features/InteriorSun.h"
-#include "Features/LODShadows.h"
 #include "Features/PerformanceOverlay.h"
 #include "Features/PostProcessing.h"
 #include "Features/RainRefraction.h"
@@ -194,11 +193,6 @@ void State::Draw()
 		if (globals::features::rainRefraction.loaded) {
 			ZoneScopedN("RainRefraction::ParticleShaderHacks");
 			globals::features::rainRefraction.ParticleShaderHacks();
-		}
-
-		if (globals::features::lodShadows.loaded) {
-			ZoneScopedN("LODShadows::OnDraw");
-			globals::features::lodShadows.OnDraw();
 		}
 
 		if (terrainHelper.loaded) {

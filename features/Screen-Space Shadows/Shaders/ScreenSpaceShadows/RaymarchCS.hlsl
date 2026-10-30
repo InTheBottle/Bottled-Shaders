@@ -33,11 +33,6 @@ cbuffer PerFrame : register(b1)
 	float SurfaceThickness;
 	float BilinearThreshold;
 	float ShadowContrast;
-	uint SettingsEnable;
-	uint4 SettingsPad;
-	float2 NativeEndSplitDistances;
-	uint LimitToNativeShadows;
-	uint RangePadding;
 };
 
 [numthreads(WAVE_SIZE, 1, 1)] void main(
@@ -58,7 +53,6 @@ cbuffer PerFrame : register(b1)
 	parameters.SurfaceThickness = SurfaceThickness;
 	parameters.BilinearThreshold = BilinearThreshold;
 	parameters.ShadowContrast = ShadowContrast;
-	parameters.ContactMaxDistance = LimitToNativeShadows ? NativeEndSplitDistances.y : 0.0;
 
 	parameters.DynamicRes = DynamicRes;
 

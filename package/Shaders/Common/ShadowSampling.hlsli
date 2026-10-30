@@ -14,10 +14,6 @@
 #	include "CloudShadows/CloudShadows.hlsli"
 #endif
 
-#if defined(LOD_SHADOWS)
-#	include "LODShadows/LODShadows.hlsli"
-#endif
-
 #if defined(IBL)
 #	include "IBL/IBL.hlsli"
 #elif defined(SKYLIGHTING)
@@ -51,7 +47,7 @@ namespace ShadowSampling
 		return SharedData::HasDirectionalShadows;
 	}
 
-	float GetTerrainCloudShadow(float3 positionWS, float3 offset, out float cloudScatter)
+	float GetWorldShadow(float3 positionWS, float3 offset, out float cloudScatter)
 	{
 		cloudScatter = 0.0;
 
@@ -60,10 +56,7 @@ namespace ShadowSampling
 
 		float worldShadow = 1.0;
 #if defined(TERRAIN_SHADOWS)
-#	if defined(LOD_SHADOWS)
-		[branch] if (!LODShadows::ReplacesTerrainShadows())
-#	endif
-			worldShadow = TerrainShadows::GetTerrainShadow(positionWS + offset, LinearSampler);
+		worldShadow = TerrainShadows::GetTerrainShadow(positionWS + offset, LinearSampler);
 #endif
 
 #if defined(CLOUD_SHADOWS)
@@ -73,60 +66,6 @@ namespace ShadowSampling
 #endif
 
 		return worldShadow;
-	}
-
-	float GetTerrainCloudShadow(float3 positionWS, float3 offset)
-	{
-		float cloudScatter;
-		return GetTerrainCloudShadow(positionWS, offset, cloudScatter);
-	}
-
-	bool HasDistantShadows()
-	{
-#if defined(LOD_SHADOWS)
-		return !SharedData::InInterior && !SharedData::HideSky && !SharedData::InMapMenu && LODShadows::ReplacesTerrainShadows();
-#else
-		return false;
-#endif
-	}
-
-	float GetDistantShadow(float3 positionWS, bool surface)
-	{
-		float shadow = 1.0;
-#if defined(LOD_SHADOWS)
-		[branch] if (HasDistantShadows())
-		{
-			float coverage;
-			shadow = LODShadows::GetShadow(positionWS, LinearSampler, surface, coverage);
-		}
-#endif
-		return shadow;
-	}
-
-	float GetNativeContactWeight(float3 positionWS)
-	{
-		float weight = 1.0;
-#if defined(LOD_SHADOWS)
-		[branch] if (HasDistantShadows())
-		{
-			float endDistance = LODShadows::GetNativeShadowDistance();
-			float depth = mul(FrameBuffer::CameraView, float4(positionWS, 1)).z;
-			weight = endDistance > 0.0 ? 1.0 - smoothstep(endDistance * LODShadows::NativeFadeStartFraction, endDistance, depth) : 0.0;
-		}
-#endif
-		return weight;
-	}
-
-	float GetWorldShadow(float3 positionWS, float3 offset, out float cloudScatter, bool surface = false, bool sampleDistantShadow = true)
-	{
-		float shadow = GetTerrainCloudShadow(positionWS, offset, cloudScatter);
-		[branch] if (sampleDistantShadow)
-		{
-			float distantShadow = GetDistantShadow(positionWS + offset, surface);
-			shadow *= distantShadow;
-			cloudScatter *= distantShadow;
-		}
-		return shadow;
 	}
 
 	float GetWorldShadow(float3 positionWS, float3 offset)

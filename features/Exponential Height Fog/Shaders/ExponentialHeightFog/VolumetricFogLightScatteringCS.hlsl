@@ -16,9 +16,6 @@ RWTexture3D<float4> LightScattering : register(u0);
 #if defined(CLOUD_SHADOWS)
 #	include "CloudShadows/CloudShadows.hlsli"
 #endif
-#if defined(LOD_SHADOWS)
-#	include "LODShadows/LODShadows.hlsli"
-#endif
 #if defined(LIGHT_LIMIT_FIX)
 #	include "LightLimitFix/LightLimitFix.hlsli"
 
@@ -210,17 +207,7 @@ float SampleDirectionalWorldShadow(float3 positionWS)
 
 	float worldShadow = 1.0f;
 #if defined(TERRAIN_SHADOWS)
-#	if defined(LOD_SHADOWS)
-	[branch] if (!LODShadows::ReplacesTerrainShadows())
-#	endif
-		worldShadow *= TerrainShadows::GetTerrainShadow(positionWS + FrameBuffer::CameraPosAdjust.xyz, LinearSampler);
-#endif
-#if defined(LOD_SHADOWS)
-	[branch] if (LODShadows::ReplacesTerrainShadows())
-	{
-		float coverage;
-		worldShadow *= LODShadows::GetShadow(positionWS + FrameBuffer::CameraPosAdjust.xyz, LinearSampler, false, coverage);
-	}
+	worldShadow *= TerrainShadows::GetTerrainShadow(positionWS + FrameBuffer::CameraPosAdjust.xyz, LinearSampler);
 #endif
 #if defined(CLOUD_SHADOWS)
 	worldShadow *= CloudShadows::GetCloudShadowMult(positionWS, LinearSampler);

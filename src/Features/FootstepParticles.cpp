@@ -5,7 +5,6 @@
 #include "Features/Effects11.h"
 #include "Features/ExponentialHeightFog.h"
 #include "Features/IBL.h"
-#include "Features/LODShadows.h"
 #include "Features/LightLimitFix.h"
 #include "Features/Skylighting.h"
 #include "Features/SnowCover.h"
@@ -453,8 +452,6 @@ ID3D11PixelShader* FootstepParticles::GetParticlePS()
 			defines.push_back({ "LIGHT_LIMIT_FIX", nullptr });
 		if (globals::features::terrainShadows.loaded)
 			defines.push_back({ "TERRAIN_SHADOWS", nullptr });
-		if (globals::features::lodShadows.loaded)
-			defines.push_back({ "LOD_SHADOWS", nullptr });
 		if (globals::features::cloudShadows.loaded)
 			defines.push_back({ "CLOUD_SHADOWS", nullptr });
 		particlePS.attach(static_cast<ID3D11PixelShader*>(Util::CompileShader(L"Data\\Shaders\\FootstepParticles\\FootstepParticlePS.hlsl", defines, "ps_5_0")));
