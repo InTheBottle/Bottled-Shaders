@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
 #include <cstdlib>
 #include <directx/d3dx12.h>
 #include <format>
@@ -72,6 +73,8 @@ namespace
 {
 	constexpr uint32_t kAmdVendorId = 0x1002u;
 	constexpr uint32_t kNvidiaVendorId = 0x10DEu;
+	constexpr uint32_t kMaxUpscalerMajorMinor = 0x3FFu;
+	constexpr uint32_t kMaxUpscalerPatch = 0xFFFu;
 
 	enum class D3D11IdleFenceResult : uint8_t
 	{
@@ -292,6 +295,27 @@ namespace
 		return label;
 	}
 
+	uint32_t RuntimeProviderVersion(const std::string& a_name)
+	{
+		for (size_t start = 0; start < a_name.size(); ++start) {
+			const char* cursor = a_name.data() + start;
+			const char* end = a_name.data() + a_name.size();
+			std::array<uint32_t, 3> parts{};
+			bool valid = true;
+			for (size_t i = 0; i < parts.size(); ++i) {
+				const auto result = std::from_chars(cursor, end, parts[i]);
+				if (result.ec != std::errc{} || (i < parts.size() - 1 && (result.ptr == end || *result.ptr != '.'))) {
+					valid = false;
+					break;
+				}
+				cursor = result.ptr + (i < parts.size() - 1 ? 1 : 0);
+			}
+			if (valid && parts[0] <= kMaxUpscalerMajorMinor && parts[1] <= kMaxUpscalerMajorMinor && parts[2] <= kMaxUpscalerPatch)
+				return FFX_UPSCALER_MAKE_VERSION(parts[0], parts[1], parts[2]);
+		}
+		return 0;
+	}
+
 	bool RuntimeProviderNameMatchesVersion(const std::string& a_providerName, uint32_t a_version)
 	{
 		return !a_providerName.empty() &&
@@ -306,8 +330,9 @@ namespace
 
 	bool RuntimeProviderMatchesVersion(uint64_t a_providerId, const std::string& a_providerName, uint32_t a_version)
 	{
+		const uint32_t providerVersion = RuntimeProviderVersion(a_providerName);
 		return RuntimeProviderIdMatchesVersion(a_providerId, a_version) ||
-		       RuntimeProviderNameMatchesVersion(a_providerName, a_version);
+		       ((providerVersion >> 22) == (a_version >> 22) && providerVersion >= a_version);
 	}
 
 	std::string RuntimeProviderDisplayName(uint64_t a_providerId, const std::string& a_providerName)
