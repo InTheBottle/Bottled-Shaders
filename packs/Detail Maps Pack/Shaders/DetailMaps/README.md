@@ -10,7 +10,6 @@ Requires Bottled Shaders with Detail Maps enabled. Without this pack the feature
 | -------- | --------------------------------------------------------------- |
 | `Sets/`  | The detail textures. Each `.dds` is a set named after its file. |
 | `Rules/` | JSON files that pick a set for each texture path.               |
-| `Tools/` | The script that built the textures, and its settings.           |
 
 Everything installs to `Data/Shaders/DetailMaps/`.
 
@@ -43,21 +42,13 @@ A set is not a normal color texture. Its four channels hold albedo, normal and r
 
 To add a set, drop a `.dds` into `Sets/` and use its file name in a rule. Give it a name unique to your mod, such as `mymod_cobble.dds`, so it can't overwrite a set from another mod.
 
-Editing a set that ships in this pack changes every rule that uses it. To change one texture family, add a new set and a rule for it instead.
-
-## Rebuilding the sets
-
-`Tools/make_detail_maps.py` downloads materials from [ambientCG](https://ambientcg.com), filters them down to fine detail and writes the finished DDS files. It needs Python 3 with `numpy` and `Pillow`, plus `texconv.exe` from [DirectXTex](https://github.com/microsoft/DirectXTex).
-
-Run it from the `Tools` folder:
+To convert a finished PNG, use `texconv.exe` from [DirectXTex](https://github.com/microsoft/DirectXTex):
 
 ```pwsh
-python make_detail_maps.py --texconv <path to texconv.exe> --out ../Sets
+texconv -f BC7_UNORM -m 0 -sepalpha -o Sets mymod_cobble.png
 ```
 
--   Add `--only stone metal` to rebuild only those sets.
--   Add `--preview sheet.png` to write a contact sheet of the results.
--   Add an entry to `sets.json` to build a set from any other ambientCG material.
+Editing a set that ships in this pack changes every rule that uses it. To change one texture family, add a new set and a rule for it instead.
 
 ## Using these in your mod
 
