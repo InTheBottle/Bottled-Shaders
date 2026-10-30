@@ -12,6 +12,7 @@
 #include "Deferred.h"
 #include "Globals.h"
 #include "IBL.h"
+#include "LODShadows.h"
 #include "PostProcessing.h"
 #include "PostProcessingMode.h"
 #include "Presets/UnifiedPresetCatalog.h"
@@ -1103,6 +1104,8 @@ void Effects11::DrawVolumetricRays()
 			defines.push_back({ "CLOUD_SHADOWS", nullptr });
 		if (globals::features::terrainShadows.loaded)
 			defines.push_back({ "TERRAIN_SHADOWS", nullptr });
+		if (globals::features::lodShadows.loaded)
+			defines.push_back({ "LOD_SHADOWS", nullptr });
 
 		raymarchVolumetricRaysPS = static_cast<ID3D11PixelShader*>(Util::CompileShader(L"Data\\Shaders\\Effects11\\RaymarchVolumetricRaysPS.hlsl", defines, "ps_5_0"));
 		if (!raymarchVolumetricRaysPS)
@@ -1193,8 +1196,15 @@ void Effects11::DrawVolumetricRays()
 		context->PSSetShader(raymarchVolumetricRaysPS, nullptr, 0);
 		context->PSSetSamplers(0, 1, &sampler);
 		context->PSSetConstantBuffers(1, 1, &vlDataCB);
+		winrt::com_ptr<ID3D11SamplerState> savedShadowSampler;
+		context->PSGetSamplers(LODShadows::kComparisonSamplerSlot, 1, savedShadowSampler.put());
+		auto* shadowSampler = globals::features::lodShadows.GetComparisonSampler();
+		context->PSSetSamplers(LODShadows::kComparisonSamplerSlot, 1, &shadowSampler);
 
 		context->Draw(4, 0);
+
+		shadowSampler = savedShadowSampler.get();
+		context->PSSetSamplers(LODShadows::kComparisonSamplerSlot, 1, &shadowSampler);
 
 		ID3D11RenderTargetView* nullRTVs[2] = { nullptr, nullptr };
 		context->OMSetRenderTargets(2, nullRTVs, nullptr);

@@ -34,6 +34,7 @@ public:
 	} settings;
 
 	bool needPrecompute = false;
+	bool replacedByLODShadows = false;
 	uint shadowUpdateIdx = 0;
 	std::uint32_t handledTimeJumpRefreshGeneration = 0;
 

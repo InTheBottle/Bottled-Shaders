@@ -5,6 +5,7 @@
 #include "Features/CloudShadows.h"
 #include "Features/DynamicCubemaps.h"
 #include "Features/IBL.h"
+#include "Features/LODShadows.h"
 #include "Features/LightLimitFix.h"
 #include "Features/LinearLighting.h"
 #include "Features/Skylighting.h"
@@ -780,6 +781,9 @@ ID3D11ComputeShader* ExponentialHeightFog::GetLightScatteringCS()
 		if (globals::features::terrainShadows.loaded) {
 			defines.emplace_back("TERRAIN_SHADOWS", "");
 		}
+		if (globals::features::lodShadows.loaded) {
+			defines.emplace_back("LOD_SHADOWS", "");
+		}
 		if (globals::features::cloudShadows.loaded) {
 			defines.emplace_back("CLOUD_SHADOWS", "");
 		}
@@ -798,6 +802,9 @@ ID3D11ComputeShader* ExponentialHeightFog::GetFarLightScatteringCS()
 		}
 		if (globals::features::terrainShadows.loaded) {
 			defines.emplace_back("TERRAIN_SHADOWS", "");
+		}
+		if (globals::features::lodShadows.loaded) {
+			defines.emplace_back("LOD_SHADOWS", "");
 		}
 		if (globals::features::cloudShadows.loaded) {
 			defines.emplace_back("CLOUD_SHADOWS", "");

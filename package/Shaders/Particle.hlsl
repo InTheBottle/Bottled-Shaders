@@ -285,6 +285,7 @@ cbuffer PerGeometry : register(b2)
 };
 
 #	define LinearSampler SampSourceTexture
+#	define LOD_SHADOWS_COMPARISON_SAMPLER
 #	include "Common/Permutation.hlsli"
 #	include "Common/ShadowSampling.hlsli"
 

@@ -2,6 +2,7 @@
 
 #include <DirectXTex.h>
 
+#include "Features/LODShadows.h"
 #include "Features/ReverseZ.h"
 #include "Features/TerrainBlending.h"
 #include "I18n/I18n.h"
@@ -337,6 +338,17 @@ void ScreenSpaceShadows::DrawShadows()
 
 	auto buffer = raymarchCB->CB();
 	context->CSSetConstantBuffers(1, 1, &buffer);
+	auto* sharedDataBuffer = globals::state->sharedDataCB->CB();
+	context->CSSetConstantBuffers(5, 1, &sharedDataBuffer);
+
+	float2 nativeEndSplitDistances{};
+	const bool limitToNativeShadows = globals::features::lodShadows.ReplacesTerrainShadows();
+	if (limitToNativeShadows) {
+		if (const auto* shadowLight = accumulator->GetRuntimeData().activeShadowSceneNode->GetRuntimeData().sunShadowDirLight) {
+			const auto& shadowData = shadowLight->GetShadowDirectionalLightRuntimeData();
+			nativeEndSplitDistances = float2{ shadowData.endSplitDistances[0], shadowData.endSplitDistances[1] };
+		}
+	}
 
 	auto viewport = globals::game::graphicsState;
 
@@ -380,6 +392,8 @@ void ScreenSpaceShadows::DrawShadows()
 				data.InvDepthTextureSize[1] = invTexSizeY;
 
 				data.settings = bendSettings;
+				data.nativeEndSplitDistances = nativeEndSplitDistances;
+				data.limitToNativeShadows = limitToNativeShadows;
 
 				raymarchCB->Update(data);
 			}

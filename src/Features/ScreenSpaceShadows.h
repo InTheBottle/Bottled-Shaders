@@ -56,8 +56,12 @@ public:
 		float2 DynamicRes;
 
 		BendSettings settings;
+		float2 nativeEndSplitDistances{};
+		uint32_t limitToNativeShadows = 0;
+		uint32_t padding = 0;
 	};
 	STATIC_ASSERT_ALIGNAS_16(RaymarchCB);
+	static_assert(sizeof(RaymarchCB) == 96);
 
 	ID3D11SamplerState* pointBorderSampler = nullptr;
 

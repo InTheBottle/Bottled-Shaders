@@ -587,10 +587,22 @@ float GetViewRayShadow(float3 worldPosition, float2 screenPosition, float depth)
 
 	if (inWorld && !SharedData::InInterior) {
 		shadow = 0.0;
-		for (uint i = 0; i < sampleCount; i++) {
+#		if defined(LOD_SHADOWS)
+		LODShadows::RayProjection lodRay = LODShadows::PrepareRay(startPosition + FrameBuffer::CameraPosAdjust.xyz,
+			endPosition + FrameBuffer::CameraPosAdjust.xyz, ShadowSampling::HasDistantShadows());
+		[branch] if (lodRay.mode != LODShadows::RayOccluded)
+#		endif
+			for (uint i = 0; i < sampleCount; i++)
+		{
 			float t = (float(i) + noise) * rcpSampleCount;
 			float3 samplePositionWS = lerp(startPosition, endPosition, t);
+#		if defined(LOD_SHADOWS)
+			float visibility = LODShadows::SampleRay(lodRay, t, samplePositionWS + FrameBuffer::CameraPosAdjust.xyz, LinearSampler);
+			[branch] if (visibility > 0.0)
+				shadow += ShadowSampling::GetTerrainCloudShadow(samplePositionWS, FrameBuffer::CameraPosAdjust.xyz) * visibility;
+#		else
 			shadow += ShadowSampling::GetWorldShadow(samplePositionWS, FrameBuffer::CameraPosAdjust.xyz);
+#		endif
 		}
 		shadow *= rcpSampleCount;
 	}

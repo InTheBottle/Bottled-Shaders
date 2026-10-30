@@ -112,6 +112,9 @@ namespace Util
 	 */
 	ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const std::vector<std::pair<const char*, const char*>>& Defines, const char* ProgramType, const char* Program = "main");
 
+	/** @brief Compiles like CompileShader and returns the bytecode, or nullptr on failure. */
+	winrt::com_ptr<ID3DBlob> CompileShaderBlob(const wchar_t* FilePath, const std::vector<std::pair<const char*, const char*>>& Defines, const char* ProgramType, const char* Program = "main");
+
 	/**
 	 * @brief Allow previously failed CompileShader requests to compile again.
 	 */
