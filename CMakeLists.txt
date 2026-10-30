@@ -1196,6 +1196,8 @@ find_program(
 )
 # mx5 keeps the AIO well under Discord's 100 MB upload limit; mx1 is ~30 MB larger.
 set(SEVENZ_AIO_ARGS a -t7z -mx5 -mmt=on)
+set(AIO_ARCHIVE_NAME "BottledShaders_AIO")
+set(PACK_PATHS "${CMAKE_SOURCE_DIR}/packs/Detail Maps Pack")
 
 # Zip base CommunityShaders and all addons as their own zip in dist folder
 if(ZIP_TO_DIST)
@@ -1252,7 +1254,7 @@ if(ZIP_TO_DIST)
         WORKING_DIRECTORY ${ZIP_DIR}
     )
 
-    foreach(FEATURE_PATH ${FEATURE_PATHS})
+    foreach(FEATURE_PATH ${FEATURE_PATHS} ${PACK_PATHS})
         if(EXISTS "${FEATURE_PATH}/CORE")
             continue()
         endif()
@@ -1297,9 +1299,9 @@ if(AIO_ZIP_TO_DIST)
     # keeps the UTC timestamp as before, but the command writes a stable
     # stamp file that CMake can track as OUTPUT.
     if(SEVENZ_EXECUTABLE)
-        set(TARGET_AIO_ZIP "${PROJECT_NAME}_AIO-${UTC_NOW}.7z")
+        set(TARGET_AIO_ZIP "${AIO_ARCHIVE_NAME}-${UTC_NOW}.7z")
     else()
-        set(TARGET_AIO_ZIP "${PROJECT_NAME}_AIO-${UTC_NOW}.zip")
+        set(TARGET_AIO_ZIP "${AIO_ARCHIVE_NAME}-${UTC_NOW}.zip")
     endif()
     set(AIO_ARCHIVE "${CMAKE_SOURCE_DIR}/dist/${TARGET_AIO_ZIP}")
     set(AIO_ZIP_STAMP "${CMAKE_CURRENT_BINARY_DIR}/aio_package.stamp")
@@ -1424,6 +1426,31 @@ foreach(FEATURE_PATH ${FEATURE_PATHS})
     add_custom_target("Package-${FEATURE}" DEPENDS ${FEATURE_PACKAGE})
 endforeach()
 
+# Pack packages
+foreach(PACK_PATH ${PACK_PATHS})
+    get_filename_component(PACK ${PACK_PATH} NAME)
+    file(GLOB_RECURSE PACK_SOURCES "${PACK_PATH}/*")
+    set(PACK_PACKAGE "${DIST_PATH}/${PACK}-${UTC_NOW}.zip")
+
+    feature_package_commands(
+        PACK_PACKAGE_COMMANDS
+        "${PACK}"
+        "${PACK_PATH}"
+        "${CMAKE_CURRENT_BINARY_DIR}/feature_package/${PACK}"
+        "${PACK_PACKAGE}"
+        cfv
+        zip
+    )
+    add_custom_command(
+        OUTPUT ${PACK_PACKAGE} ${PACK_PACKAGE_COMMANDS}
+        DEPENDS ${PACK_SOURCES}
+        COMMENT "Creating ${PACK} zip package"
+    )
+
+    string(REPLACE " " "" PACK ${PACK})
+    add_custom_target("Package-${PACK}" DEPENDS ${PACK_PACKAGE})
+endforeach()
+
 # AIO Folder target
 # When the incremental AIO system (PREPARE_AIO) is active, reuse it instead
 # of running a full cmake --install (which does REMOVE_RECURSE + full copy).
@@ -1444,9 +1471,9 @@ endif()
 
 # Manual AIO package target
 if(SEVENZ_EXECUTABLE)
-    set(AIO_PACKAGE "${DIST_PATH}/${PROJECT_NAME}_AIO-${UTC_NOW}.7z")
+    set(AIO_PACKAGE "${DIST_PATH}/${AIO_ARCHIVE_NAME}-${UTC_NOW}.7z")
 else()
-    set(AIO_PACKAGE "${DIST_PATH}/${PROJECT_NAME}_AIO-${UTC_NOW}.zip")
+    set(AIO_PACKAGE "${DIST_PATH}/${AIO_ARCHIVE_NAME}-${UTC_NOW}.zip")
 endif()
 if(TARGET PREPARE_AIO)
     if(SEVENZ_EXECUTABLE)
@@ -1520,6 +1547,7 @@ message("  Build cmake targets:")
 message("    - Package-Core: Core package")
 message("    - Package-AIO-Manual: AIO package (manual)")
 message("    - Package-<Feature>: Individual feature packages")
+message("    - Package-DetailMapsPack: Detail Maps Pack (not in the AIO)")
 message("  Or use cmake --install for custom deployment:")
 message("    cmake --install ./build/ALL --prefix <TARGET_DIR>")
 message("Try switching to build preset 'Dev' for faster iteration time")

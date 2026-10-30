@@ -53,6 +53,7 @@ harness instead: capture one frame, swap just that shader, diff against the ship
 -   A feature is a `Feature` subclass (`src/Feature.h`) in `src/Features/<Name>.cpp/h`, with shaders in `features/<Name>/Shaders/` and a versioned `features/<Name>/Shaders/Features/<Name>.ini`. A `CORE` marker file in `features/<Name>/` bundles it with the main mod.
 -   Features reach each other through `globals::features` (`src/Globals.h`).
 -   New features: start from `docs/new-feature-template/`; `NewFeatureReadme.md` there lists the required registration edits. GPU-heavy features need a user toggle.
+-   `packs/<Name>/` is a standalone data mod laid out like `Data/`, with its own Nexus page. It is listed in `PACK_PATHS` in `CMakeLists.txt`, zips to `dist/` (`ZIP_TO_DIST` or `Package-<Name>`) and never goes in the AIO. `packs/Detail Maps Pack` holds the sets and rules that the Detail Maps feature loads.
 -   Changing a feature's settings structure requires a version bump in its `.ini`.
 
 ## SE/AE runtime targeting (CommonLibSSE-NG)

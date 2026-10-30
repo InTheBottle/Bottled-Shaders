@@ -78,6 +78,7 @@ private:
 		int32_t rule = -1;
 	};
 
+	bool HasContent() const { return !sets.empty() && !rules.empty(); }
 	void Reload();
 	void LoadSets();
 	void LoadRules();

@@ -190,6 +190,9 @@ void DetailMaps::SaveSettings(json& o_json)
 
 void DetailMaps::DrawSettings()
 {
+	if (!HasContent())
+		Util::Text::WrappedWarning("%s", T(TKEY("pack_missing"), "No detail sets or rules found. Install the Detail Maps Pack."));
+
 	ImGui::Checkbox(T(TKEY("enabled"), "Enabled"), &settings.Enabled);
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::TextWrapped("%s", T(TKEY("enabled_tooltip"), "Adds detail to textures matched by the rules. The detail shaders compile at startup while this is on."));
@@ -367,12 +370,12 @@ int32_t DetailMaps::FindRule(RE::BSRenderPass* a_pass)
 
 bool DetailMaps::ShouldPrecompile(uint32_t a_descriptor) const
 {
-	return loaded && settings.Enabled && IsDetailDescriptor(a_descriptor, false);
+	return loaded && settings.Enabled && HasContent() && IsDetailDescriptor(a_descriptor, false);
 }
 
 bool DetailMaps::IsEligible(uint32_t a_descriptor) const
 {
-	return loaded && settings.Enabled && perDrawCB && !sets.empty() && !rules.empty() && IsDetailDescriptor(a_descriptor, IsFirstPersonPass());
+	return loaded && settings.Enabled && perDrawCB && HasContent() && IsDetailDescriptor(a_descriptor, IsFirstPersonPass());
 }
 
 bool DetailMaps::BindPass(RE::BSRenderPass* a_pass)

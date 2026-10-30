@@ -42,7 +42,7 @@ SKSE plugin providing advanced DirectX 11 graphics modifications for Skyrim SE/A
 -   `PREPARE_AIO`, `prepare_shaders`, `COPY_SHADERS`, `AIO_ZIP_PACKAGE`
 -   `FORMAT_CODE`, `generate_shader_configs`
 
-For full details about manual packaging targets (Package-Core, Package-AIO-Manual, Package-<Feature>, AIO) and example workflows, see the "Build Instructions" section in `README.md` to avoid duplication.
+For full details about manual packaging targets (Package-Core, Package-AIO-Manual, Package-<Feature>, Package-DetailMapsPack, AIO) and example workflows, see the "Build Instructions" section in `README.md` to avoid duplication.
 
 AI-based training, scraping, and other automated or human reuse do not waive the licence terms that apply to Community Shaders code. Copying, modifying, incorporating, or distributing protected code without complying with [GPL-3.0](COPYING.txt) and any applicable terms in [EXCEPTIONS.md](EXCEPTIONS.md) is not authorised by this project and is STRICTLY PROHIBITED.
 

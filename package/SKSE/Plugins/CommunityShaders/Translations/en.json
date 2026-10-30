@@ -844,6 +844,7 @@
     "feature.detail_maps.key_feature_3": "Fades out with distance and costs nothing on other draws",
     "feature.detail_maps.name": "Detail Maps",
     "feature.detail_maps.normal_strength": "Bump Strength",
+    "feature.detail_maps.pack_missing": "No detail sets or rules found. Install the Detail Maps Pack.",
     "feature.detail_maps.pass_count": "Detail draws last frame",
     "feature.detail_maps.reload": "Reload Rules and Sets",
     "feature.detail_maps.reload_tooltip": "Rereads Data\\Shaders\\DetailMaps\\Rules\\*.json and Data\\Shaders\\DetailMaps\\Sets\\*.dds.",
