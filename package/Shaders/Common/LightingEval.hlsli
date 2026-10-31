@@ -223,9 +223,9 @@ void GetIndirectLobeWeights(out IndirectLobeWeights lobeWeights, IndirectContext
 }
 
 #if defined(WETNESS_EFFECTS)
-void EvaluateWetnessLighting(float3 wetnessNormal, DirectContext context, float roughness, inout DirectLightingOutput lightingOutput)
+void EvaluateWetnessLighting(float3 wetnessNormal, DirectContext context, float roughness, float filmRoughness, inout DirectLightingOutput lightingOutput)
 {
-	const float wetnessStrength = saturate(1 - roughness);
+	const float wetnessStrength = saturate(1 - filmRoughness);
 #	if defined(TRUE_PBR)
 	const float3 lightColor = context.coatLightColor;
 #	else

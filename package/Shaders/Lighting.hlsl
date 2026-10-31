@@ -2805,6 +2805,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	// sharply without this floor.
 	static const float wetnessMinPuddleRoughness = 0.05;
 	waterRoughnessSpecular = max(saturate(1.0 - wetnessGlossinessSpecular), wetnessMinPuddleRoughness);
+	float wetnessFilmRoughness = waterRoughnessSpecular;
 
 	float3 wetnessNormalDdx = ddx_coarse(wetnessNormal);
 	float3 wetnessNormalDdy = ddy_coarse(wetnessNormal);
@@ -2996,7 +2997,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	dirLightOutput.transmission *= dirTransmissionContactShadow;
 #	if defined(WETNESS_EFFECTS)
 	if (waterRoughnessSpecular < 1)
-		EvaluateWetnessLighting(wetnessNormal, dirLightContext, waterRoughnessSpecular, dirLightOutput);
+		EvaluateWetnessLighting(wetnessNormal, dirLightContext, waterRoughnessSpecular, wetnessFilmRoughness, dirLightOutput);
 #	endif
 
 	lightsDiffuseColor += dirLightOutput.diffuse;
@@ -3061,7 +3062,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		EvaluateLighting(pointLightContext, material, tbnTr, uvOriginal, uvOriginal_ddx, uvOriginal_ddy, pointLightOutput);
 #			if defined(WETNESS_EFFECTS)
 		if (waterRoughnessSpecular < 1)
-			EvaluateWetnessLighting(wetnessNormal, pointLightContext, waterRoughnessSpecular, pointLightOutput);
+			EvaluateWetnessLighting(wetnessNormal, pointLightContext, waterRoughnessSpecular, wetnessFilmRoughness, pointLightOutput);
 #			endif
 		lightsDiffuseColor += pointLightOutput.diffuse;
 		lightsSpecularColor += pointLightOutput.specular;
@@ -3222,7 +3223,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		EvaluateLighting(pointLightContext, material, tbnTr, uvOriginal, uvOriginal_ddx, uvOriginal_ddy, pointLightOutput);
 #			if defined(WETNESS_EFFECTS)
 		if (waterRoughnessSpecular < 1)
-			EvaluateWetnessLighting(wetnessNormal, pointLightContext, waterRoughnessSpecular, pointLightOutput);
+			EvaluateWetnessLighting(wetnessNormal, pointLightContext, waterRoughnessSpecular, wetnessFilmRoughness, pointLightOutput);
 #			endif
 
 		lightsDiffuseColor += pointLightOutput.diffuse;
@@ -3408,7 +3409,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float3 wetnessReflectance = 0.0;
 	[branch] if (waterRoughnessSpecular < 1)
 	{
-		wetnessReflectance = GetWetnessIndirectLobeWeights(indirectLobeWeights, wetnessNormal, waterRoughnessSpecular, indirectContext);
+		wetnessReflectance = GetWetnessIndirectLobeWeights(indirectLobeWeights, wetnessNormal, wetnessFilmRoughness, indirectContext);
 #			if defined(TRUE_PBR)
 		wetnessReflectance *= SpecularOcclusion(saturate(dot(wetnessNormal, viewDirection)), waterRoughnessSpecular * waterRoughnessSpecular, material.AO);
 #			endif
