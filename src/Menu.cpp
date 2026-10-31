@@ -1123,11 +1123,19 @@ void Menu::ProcessInputEventQueue()
 {
 	std::unique_lock<std::shared_mutex> mutex(_inputEventMutex);
 	ImGuiIO& io = ImGui::GetIO();
+	bool toggleKeyRebound = false;
 	for (auto& event : _keyEventQueue) {
 		if (event.eventType == RE::INPUT_EVENT_TYPE::kChar) {
 			if (!Util::Input::IsRejectedByNumericTextEntry(event.keyCode))
 				io.AddInputCharacter(event.keyCode);
 			continue;
+		}
+		if (event.device != RE::INPUT_DEVICE::kKeyboard && event.IsDown()) {
+			const auto rebind = toggleKeyRebind.load();
+			if (rebind == ToggleKeyRebind::kWaitingForPress || rebind == ToggleKeyRebind::kKeyPressed) {
+				settingToggleKey = false;
+				toggleKeyRebind = ToggleKeyRebind::kOff;
+			}
 		}
 		if (event.device == RE::INPUT_DEVICE::kMouse) {
 			logger::trace("Detect mouse scan code {} value {} pressed: {}", event.keyCode, event.value, event.IsPressed());
@@ -1151,6 +1159,11 @@ void Menu::ProcessInputEventQueue()
 			logger::trace("Detected key code {} ({})", event.keyCode, key);
 			if (key == event.keyCode)
 				key = MapVirtualKeyEx(event.keyCode, MAPVK_VSC_TO_VK_EX, GetKeyboardLayout(0));
+
+			if (event.IsDown()) {
+				auto waiting = ToggleKeyRebind::kWaitingForPress;
+				toggleKeyRebind.compare_exchange_strong(waiting, ToggleKeyRebind::kKeyPressed);
+			}
 
 			const bool wasCapturingHotkey = IsCapturingHotkeyInput();
 
@@ -1249,10 +1262,17 @@ void Menu::ProcessInputEventQueue()
 				bool handled = false;
 				for (auto& h : hotkeyActions) {
 					if (*(h.settingFlag)) {
+						const auto rebind = toggleKeyRebind.load();
+						if (rebind != ToggleKeyRebind::kOff && rebind != ToggleKeyRebind::kKeyPressed) {
+							handled = true;
+							break;
+						}
+
 						// During first-time setup, don't capture Enter or Escape as hotkeys;
 						// they cancel capture instead
-						if (SetupRenderer::ShouldShowFirstTimeSetup() && (key == VK_RETURN || key == VK_ESCAPE)) {
+						if ((SetupRenderer::ShouldShowFirstTimeSetup() || rebind != ToggleKeyRebind::kOff) && (key == VK_RETURN || key == VK_ESCAPE)) {
 							*(h.settingFlag) = false;  // Cancel hotkey capture mode
+							toggleKeyRebind = ToggleKeyRebind::kOff;
 							handled = true;
 							break;
 						}
@@ -1285,6 +1305,7 @@ void Menu::ProcessInputEventQueue()
 
 						h.action(combo);
 						unsavedChanges = true;
+						toggleKeyRebound = toggleKeyRebind.exchange(ToggleKeyRebind::kOff) != ToggleKeyRebind::kOff;
 						handled = true;
 						break;
 					}
@@ -1372,6 +1393,29 @@ void Menu::ProcessInputEventQueue()
 		io.AddMouseWheelEvent(0.0f, wheelY);
 
 	_keyEventQueue.clear();
+	mutex.unlock();
+
+	auto starting = ToggleKeyRebind::kStarting;
+	if (toggleKeyRebind.compare_exchange_strong(starting, ToggleKeyRebind::kWaitingForPress))
+		settingToggleKey = true;
+
+	auto cancelling = ToggleKeyRebind::kCancelling;
+	if (toggleKeyRebind.compare_exchange_strong(cancelling, ToggleKeyRebind::kOff))
+		settingToggleKey = false;
+
+	if (toggleKeyRebound)
+		globals::state->Save();
+
+	if (openRequested && !(GetAsyncKeyState(VK_LBUTTON) & Constants::KEY_PRESSED_MASK)) {
+		openRequested = false;
+		if (!SetupRenderer::ShouldShowFirstTimeSetup() && !EditorWindow::GetSingleton()->open) {
+			IsEnabled = true;
+			suppressNextEscape = false;
+			io.ClearEventsQueue();
+			io.ClearInputKeys();
+			io.ClearInputMouse();
+		}
+	}
 }
 
 void Menu::RecordDirectInputWheelDelta(std::int32_t delta)
@@ -1441,6 +1485,33 @@ bool Menu::ShouldSwallowInput()
 	auto editorWindow = EditorWindow::GetSingleton();
 	return IsEnabled || SetupRenderer::ShouldShowFirstTimeSetup() || (editorWindow && editorWindow->open) ||
 	       Effects11Editor::GetSingleton().IsOpen();
+}
+
+void Menu::RequestOpen()
+{
+	openRequested = true;
+}
+
+void Menu::BeginToggleKeyRebind()
+{
+	toggleKeyRebind = ToggleKeyRebind::kStarting;
+}
+
+void Menu::CancelToggleKeyRebind()
+{
+	if (toggleKeyRebind != ToggleKeyRebind::kOff)
+		toggleKeyRebind = ToggleKeyRebind::kCancelling;
+}
+
+bool Menu::IsRebindingToggleKey() const
+{
+	return toggleKeyRebind != ToggleKeyRebind::kOff;
+}
+
+std::string Menu::GetToggleKeyName() const
+{
+	std::shared_lock lock(_inputEventMutex);
+	return Util::Input::KeyIdToString(settings.ToggleKey);
 }
 
 void Menu::SyncVanityCamera()

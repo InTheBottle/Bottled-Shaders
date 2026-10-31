@@ -747,6 +747,16 @@ struct BSInputDeviceManager_PollInputDevices
 			}
 		}
 
+		if (a_events && menu->IsRebindingToggleKey()) {
+			for (auto it = *a_events; it; it = it->next) {
+				if (it->GetDevice() == RE::INPUT_DEVICES::INPUT_DEVICE::kKeyboard) {
+					constexpr RE::InputEvent* const dummy[] = { nullptr };
+					func(a_dispatcher, dummy);
+					return;
+				}
+			}
+		}
+
 		if (blockedDevice && menu->ShouldSwallowInput()) {  //the menu is open, eat all keypresses
 			// During active flying preview, let input reach the game for movement/camera
 			if (menu->IsPreviewFlying()) {
