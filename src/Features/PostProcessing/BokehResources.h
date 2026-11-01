@@ -33,6 +33,7 @@ struct BokehResources
 	std::array<float, MAX_SHAPES> shapeSampleRadiusScales = {};
 	std::array<float, MAX_SHAPES> shapeSampleMaxRadii = {};
 	int numLoadedShapes = NUM_BUILTIN_SHAPES;
+	bool shapesLoaded = false;
 
 	const std::filesystem::path bokehShapesPath = "Data\\Shaders\\PostProcessing\\DoF\\bokehshapes";
 	std::array<std::string, NUM_BUILTIN_SHAPES> builtinShapeFiles = {
@@ -49,6 +50,8 @@ struct BokehResources
 	winrt::com_ptr<ID3D11SamplerState> bokehSampler = nullptr;
 
 	void Setup();
+	void EnsureShapes();
+	void ReleaseShapes();
 	bool LoadCustomShape(const std::string& filePath, int slotIndex);
 	ID3D11ShaderResourceView* GetShapeSRV(int shapeIndex) const;
 	ID3D11Buffer* GetShapeSampleCB(int shapeIndex) const;

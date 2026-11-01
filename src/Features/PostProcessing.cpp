@@ -467,61 +467,14 @@ void PostProcessing::RestoreDefaultSettings()
 void PostProcessing::ClearShaderCache()
 {
 	for (auto& pipe : pipeline) {
-		if (pipe)
+		if (pipe && pipe->resourcesReady)
 			pipe->ClearShaderCache();
 	}
 }
 
 void PostProcessing::SetupResources()
 {
-	{
-		auto renderer = globals::game::renderer;
-		auto gameTexMain = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
-		auto gameTexMainCopy = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN_COPY];
-
-		D3D11_TEXTURE2D_DESC texDesc;
-		D3D11_TEXTURE2D_DESC texMainDesc;
-		D3D11_TEXTURE2D_DESC texMainCopyDesc;
-		gameTexMain.texture->GetDesc(&texMainDesc);
-		gameTexMainCopy.texture->GetDesc(&texMainCopyDesc);
-		texDesc = texMainDesc;
-
-		texDesc.MipLevels = 1;
-		texDesc.BindFlags = D3D11_BIND_RENDER_TARGET;
-		texDesc.MiscFlags = 0;
-
-		D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {
-			.Format = texDesc.Format,
-			.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D,
-			.Texture2D = { .MipSlice = 0 }
-		};
-
-		texCopyMain = eastl::make_unique<Texture2D>(texDesc, "PostProcessing::MainCopy");
-		texCopyMain->CreateRTV(rtvDesc);
-
-		if (texMainCopyDesc.Format != texMainDesc.Format) {
-			texDesc = texMainCopyDesc;
-			rtvDesc.Format = texDesc.Format;
-			texDesc.MipLevels = 1;
-			texDesc.BindFlags = D3D11_BIND_RENDER_TARGET;
-			texDesc.MiscFlags = 0;
-
-			texCopyMainCopy = eastl::make_unique<Texture2D>(texDesc, "PostProcessing::MainCopyConversion");
-			texCopyMainCopy->CreateRTV(rtvDesc);
-		} else {
-			texCopyMainCopy = nullptr;
-		}
-	}
-
-	{
-		auto desc = texCopyMain->desc;
-		desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
-		texInput = std::make_unique<Texture2D>(desc, "PostProcessing::LinearInput");
-		texInput->CreateSRV({ .Format = desc.Format, .ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D, .Texture2D = { .MostDetailedMip = 0, .MipLevels = 1 } });
-		texInput->CreateRTV({ .Format = desc.Format, .ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D, .Texture2D = { .MipSlice = 0 } });
-		copyCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc<CopyCB>(), "PostProcessing::CopyConstants");
-	}
+	copyCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc<CopyCB>(), "PostProcessing::CopyConstants");
 
 	if (auto rawPtr = reinterpret_cast<ID3D11VertexShader*>(Util::CompileShader(L"Data\\Shaders\\PostProcessing\\fullscreen.hlsli", {}, "vs_5_0", "FullscreenTriangleVS")))
 		fullscreenVS.attach(rawPtr);
@@ -533,10 +486,8 @@ void PostProcessing::SetupResources()
 	BuildPipeline();
 
 	for (auto& pipe : pipeline) {
-		if (pipe) {
+		if (pipe)
 			pipe->owner = this;
-			pipe->SetupResources();
-		}
 	}
 
 	bokehResources.Setup();
@@ -545,6 +496,63 @@ void PostProcessing::SetupResources()
 
 	ProcessSettings(pendingSettings);
 	pendingSettings = {};
+
+	SyncPassResources();
+}
+
+void PostProcessing::SyncPassResources()
+{
+	for (auto& pipe : pipeline) {
+		if (pipe && pipe->IsAutoEnabled())
+			pipe->UpdateAutoEnabled();
+	}
+
+	for (auto& pipe : pipeline) {
+		if (!pipe)
+			continue;
+		if (!bypass && pipe->IsActive())
+			pipe->EnsureResources();
+		else
+			pipe->FreeResources();
+	}
+
+	const bool linear = globals::features::linearLighting.IsLinearLightingActive();
+	if (bypass || linear)
+		texInput.reset();
+	if (bypass && !linear) {
+		texCopyMain.reset();
+		texCopyMainCopy.reset();
+	}
+}
+
+Texture2D* PostProcessing::GetConvertTexture(const D3D11_TEXTURE2D_DESC& a_target)
+{
+	auto& slot = !texCopyMain || texCopyMain->desc.Format == a_target.Format ? texCopyMain : texCopyMainCopy;
+	if (!slot) {
+		auto desc = a_target;
+		desc.MipLevels = 1;
+		desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+		desc.MiscFlags = 0;
+		slot = eastl::make_unique<Texture2D>(desc, &slot == &texCopyMain ? "PostProcessing::MainCopy" : "PostProcessing::MainCopyConversion");
+		slot->CreateRTV({ .Format = desc.Format, .ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D, .Texture2D = { .MipSlice = 0 } });
+	}
+	return slot.get();
+}
+
+void PostProcessing::EnsureLinearInput()
+{
+	if (texInput)
+		return;
+
+	D3D11_TEXTURE2D_DESC desc;
+	globals::game::renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN].texture->GetDesc(&desc);
+	desc.MipLevels = 1;
+	desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+	desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+	desc.MiscFlags = 0;
+	texInput = std::make_unique<Texture2D>(desc, "PostProcessing::LinearInput");
+	texInput->CreateSRV({ .Format = desc.Format, .ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D, .Texture2D = { .MostDetailedMip = 0, .MipLevels = 1 } });
+	texInput->CreateRTV({ .Format = desc.Format, .ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D, .Texture2D = { .MipSlice = 0 } });
 }
 
 void PostProcessing::Reset()
@@ -560,7 +568,6 @@ void PostProcessing::Reset()
 
 void PostProcessing::CopyToRenderTarget(
 	RE::BSGraphics::RenderTargetData& targetRT,
-	Texture2D* convertTex,
 	ID3D11Texture2D* srcTex,
 	ID3D11ShaderResourceView* srcSRV, const CopyCB& conversion)
 {
@@ -581,8 +588,10 @@ void PostProcessing::CopyToRenderTarget(
 		return;
 	}
 
-	if (!copyPS || !fullscreenVS || !convertTex || !convertTex->rtv || !convertTex->resource)
+	if (!copyPS || !fullscreenVS)
 		return;
+
+	auto* convertTex = GetConvertTexture(targetDesc);
 
 	{
 		PostProcessingRaster::RasterPass pass(context);
@@ -610,6 +619,7 @@ void PostProcessing::BeginLinearProcessing(PostProcessFeature::TextureInfo& text
 	auto& ll = globals::features::linearLighting;
 	if (ll.IsLinearLightingActive())
 		return;
+	EnsureLinearInput();
 	auto* context = globals::d3d::context;
 	PostProcessingRaster::RasterPass pass(context);
 	copyCB->Update(CopyCB{ .gamma = Util::ColorSpace::GAME_GAMMA });
@@ -657,11 +667,7 @@ void PostProcessing::DrawBeforeUpscaling()
 
 	state->BeginPerfEvent("[Post Processing] Pre-Upscale");
 
-	// update auto-enabled features
-	for (auto& pipe : pipeline) {
-		if (pipe && pipe->IsAutoEnabled())
-			pipe->UpdateAutoEnabled();
-	}
+	SyncPassResources();
 
 	// go through each fx
 	for (auto& pipe : pipeline) {
@@ -677,7 +683,7 @@ void PostProcessing::DrawBeforeUpscaling()
 	}
 
 	if (processing)
-		CopyToRenderTarget(gameTexMain, texCopyMain.get(), lastTexColor.tex, lastTexColor.srv,
+		CopyToRenderTarget(gameTexMain, lastTexColor.tex, lastTexColor.srv,
 			CopyCB{ .gamma = globals::features::linearLighting.IsLinearLightingActive() ? 1.f : Util::ColorSpace::GAME_GAMMA_INV });
 
 	state->EndPerfEvent();
@@ -717,11 +723,7 @@ void PostProcessing::PreProcess(RE::RENDER_TARGET a_input)
 	BeginLinearProcessing(lastTexColor);
 	auto gameTexMainAlt = useMainCopy ? gameTexMainRT : gameTexMainCopyRT;
 
-	// update auto-enabled features
-	for (auto& pipe : pipeline) {
-		if (pipe && pipe->IsAutoEnabled())
-			pipe->UpdateAutoEnabled();
-	}
+	SyncPassResources();
 
 	// go through each fx
 	bool colorGraded = false;
@@ -740,9 +742,6 @@ void PostProcessing::PreProcess(RE::RENDER_TARGET a_input)
 		}
 	}
 
-	Texture2D* mainConvertTex = texCopyMain.get();
-	Texture2D* mainCopyConvertTex = texCopyMainCopy ? texCopyMainCopy.get() : texCopyMain.get();
-
 	const bool sceneOutput = globals::state->GetTonemapOwner() != State::TonemapOwner::kPostProcessing;
 	const auto sceneGamut = ll.IsACEScgActive() ? Gamut::ACEScg : Gamut::Rec709;
 	const auto displayGamut = globals::features::hdrDisplay.loaded && globals::features::hdrDisplay.settings.enableHDR ? Gamut::Rec2020 : Gamut::Rec709;
@@ -751,8 +750,8 @@ void PostProcessing::PreProcess(RE::RENDER_TARGET a_input)
 		.outputGamut = sceneOutput ? sceneGamut : displayGamut,
 		.gamma = sceneOutput && !linear ? Util::ColorSpace::GAME_GAMMA_INV : 1.f
 	};
-	CopyToRenderTarget(gameTexMain, useMainCopy ? mainCopyConvertTex : mainConvertTex, lastTexColor.tex, lastTexColor.srv, conversion);
-	CopyToRenderTarget(gameTexMainAlt, useMainCopy ? mainConvertTex : mainCopyConvertTex, gameTexMain.texture, gameTexMain.SRV, CopyCB{});
+	CopyToRenderTarget(gameTexMain, lastTexColor.tex, lastTexColor.srv, conversion);
+	CopyToRenderTarget(gameTexMainAlt, gameTexMain.texture, gameTexMain.SRV, CopyCB{});
 
 	isrefraction = false;
 }
@@ -842,7 +841,9 @@ void PostProcessing::Prepass()
 		UpdateVanillaEffects(globals::state->GetTonemapOwner() == State::TonemapOwner::kPostProcessing);
 	}
 
-	if (auto* lut = GetPipelineFeature<::LUT>(FeaturePipelineIndex::LUT))
+	SyncPassResources();
+
+	if (auto* lut = GetPipelineFeature<::LUT>(FeaturePipelineIndex::LUT); lut && lut->resourcesReady)
 		lut->UpdateTexture();
 
 	{

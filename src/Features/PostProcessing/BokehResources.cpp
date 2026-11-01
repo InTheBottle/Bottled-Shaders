@@ -19,22 +19,6 @@ void BokehResources::Setup()
 {
 	auto device = globals::d3d::device;
 
-	logger::debug("BokehResources: Loading built-in bokeh shapes...");
-	for (int i = 0; i < NUM_BUILTIN_SHAPES; i++) {
-		auto shapePath = bokehShapesPath / builtinShapeFiles[i];
-		LoadTextureFromFile(shapePath, i);
-	}
-	numLoadedShapes = NUM_BUILTIN_SHAPES;
-
-	// Load any previously saved custom shapes
-	for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
-		if (!customShapePaths[i].empty()) {
-			LoadTextureFromFile(std::filesystem::path(customShapePaths[i]), NUM_BUILTIN_SHAPES + i);
-			if (texBokehShapes[NUM_BUILTIN_SHAPES + i])
-				numLoadedShapes = std::max(numLoadedShapes, NUM_BUILTIN_SHAPES + i + 1);
-		}
-	}
-
 	logger::debug("BokehResources: Creating sampler...");
 	{
 		D3D11_SAMPLER_DESC samplerDesc = {
@@ -50,6 +34,38 @@ void BokehResources::Setup()
 		DX::ThrowIfFailed(device->CreateSamplerState(&samplerDesc, bokehSampler.put()));
 		Util::SetResourceName(bokehSampler.get(), "BokehResources::Sampler");
 	}
+}
+
+void BokehResources::EnsureShapes()
+{
+	if (shapesLoaded)
+		return;
+	shapesLoaded = true;
+
+	logger::debug("BokehResources: Loading built-in bokeh shapes...");
+	for (int i = 0; i < NUM_BUILTIN_SHAPES; i++) {
+		auto shapePath = bokehShapesPath / builtinShapeFiles[i];
+		LoadTextureFromFile(shapePath, i);
+	}
+	numLoadedShapes = NUM_BUILTIN_SHAPES;
+
+	// Load any previously saved custom shapes
+	for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+		if (!customShapePaths[i].empty()) {
+			LoadTextureFromFile(std::filesystem::path(customShapePaths[i]), NUM_BUILTIN_SHAPES + i);
+			if (texBokehShapes[NUM_BUILTIN_SHAPES + i])
+				numLoadedShapes = std::max(numLoadedShapes, NUM_BUILTIN_SHAPES + i + 1);
+		}
+	}
+}
+
+void BokehResources::ReleaseShapes()
+{
+	for (auto& tex : texBokehShapes)
+		tex.reset();
+	for (auto& buffer : shapeSampleBuffers)
+		buffer.reset();
+	shapesLoaded = false;
 }
 
 bool BokehResources::LoadTextureFromFile(const std::filesystem::path& path, int index)

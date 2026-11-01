@@ -87,6 +87,7 @@ public:
 	ConstantBuffer* shadowMaskFilterCB = nullptr;
 	ID3D11ComputeShader* shadowMaskFilterCS = nullptr;
 	Texture2D* filteredShadowMaskTexture = nullptr;
+	bool filteredShadowMaskUnsupported = false;
 	uint32_t shadowMaskFrame = UINT32_MAX;
 	bool shadowMaskFilterCompileFailed = false;
 
@@ -100,6 +101,7 @@ public:
 	ID3D11ComputeShader* GetShadowMaskFilterCS();
 
 	/** @brief Applies a depth-aware blur to the engine shadow mask in place. */
+	void EnsureFilteredShadowMask();
 	void FilterShadowMask();
 
 	/** @brief Creates the raymarch constant buffer, point border sampler, and shadow output texture. */

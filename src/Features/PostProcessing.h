@@ -132,6 +132,7 @@ struct PostProcessing : Feature
 	void PreProcess(RE::RENDER_TARGET a_input);
 	void DrawBeforeUpscaling();
 	void ClearBorderMotionVectorsForFrameGen();
+	void SyncPassResources();
 	void DrawFeature(PostProcessFeature& feature, PostProcessFeature::TextureInfo& lastTexColor);
 
 	enum class Gamut : uint
@@ -153,19 +154,19 @@ struct PostProcessing : Feature
 	 *        format via the copyPS fullscreen pass when the formats differ.
 	 *
 	 * Same-format, same-space copies use CopySubresourceRegion; otherwise the
-	 * source is rendered into convertTex first and then copied.
+	 * source is rendered into an intermediate texture first and then copied.
 	 *
 	 * @param targetRT  Game render target receiving the image.
-	 * @param convertTex  Intermediate texture for format conversion (needs an RTV).
 	 * @param srcTex  Texture holding the pipeline output.
 	 * @param srcSRV  SRV of srcTex, sampled by the conversion pass.
 	 */
 	void CopyToRenderTarget(
 		RE::BSGraphics::RenderTargetData& targetRT,
-		Texture2D* convertTex,
 		ID3D11Texture2D* srcTex,
 		ID3D11ShaderResourceView* srcSRV, const CopyCB& conversion);
 	void BeginLinearProcessing(PostProcessFeature::TextureInfo& texture);
+	Texture2D* GetConvertTexture(const D3D11_TEXTURE2D_DESC& a_target);
+	void EnsureLinearInput();
 
 	/////////////////////////////////////////////////////////////////////////////////
 

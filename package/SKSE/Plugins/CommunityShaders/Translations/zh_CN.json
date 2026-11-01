@@ -1972,7 +1972,6 @@
     "feature.post_processing.lens_flare.aperture_rotation": "光圈旋转",
     "feature.post_processing.lens_flare.blur_iterations": "模糊迭代次数",
     "feature.post_processing.lens_flare.buffer_blur_temp": "模糊临时纹理（四分之一分辨率）",
-    "feature.post_processing.lens_flare.buffer_fft_result": "FFT 卷积结果",
     "feature.post_processing.lens_flare.buffer_ghost_halo": "鬼影 + 光晕（半分辨率）",
     "feature.post_processing.lens_flare.buffer_threshold": "阈值（半分辨率）",
     "feature.post_processing.lens_flare.color": "颜色",

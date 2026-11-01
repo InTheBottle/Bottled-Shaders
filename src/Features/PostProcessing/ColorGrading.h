@@ -163,6 +163,7 @@ struct ColorGrading : public PostProcessFeature
 	winrt::com_ptr<ID3D11SamplerState> linearSampler = nullptr;
 
 	virtual void SetupResources() override;
+	virtual void ReleaseResources() override;
 	virtual void ClearShaderCache() override;
 	/** @brief Drop in-memory PS/CS and recompile for the current tonemapper; keeps disk cache. */
 	void ReloadActiveShaders();

@@ -32,6 +32,7 @@ struct Vignette : public PostProcessFeature
 	winrt::com_ptr<ID3D11PixelShader> vignettePS = nullptr;
 
 	virtual void SetupResources() override;
+	virtual void ReleaseResources() override;
 	virtual void ClearShaderCache() override;
 	void CompileRasterShaders();
 

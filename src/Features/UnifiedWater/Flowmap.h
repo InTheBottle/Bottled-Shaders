@@ -30,13 +30,13 @@ public:
 	 * @param useMips Whether to generate mipmaps for the flowmap texture.
 	 * @return True if the flowmap was successfully loaded or generated.
 	 */
-	bool LoadOrGenerateFlowmap(bool useMips = true);
+	bool LoadOrGenerateFlowmap(bool useMips = false);
 	/**
 	 * @brief Deletes existing flowmap files, regenerates the flowmap, and loads it.
 	 * @param useMips Whether to generate mipmaps for the flowmap texture.
 	 * @return True if the flowmap was successfully regenerated and loaded.
 	 */
-	bool RegenerateAndLoadFlowmap(bool useMips = true);
+	bool RegenerateAndLoadFlowmap(bool useMips = false);
 
 private:
 	RE::NiPointer<RE::NiSourceTexture> flowmapTex = nullptr;

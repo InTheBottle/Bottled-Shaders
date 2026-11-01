@@ -271,6 +271,15 @@ void HistogramAutoExposure::SetupResources()
 	CompileComputeShaders();
 }
 
+void HistogramAutoExposure::ReleaseResources()
+{
+	histogramSB.reset();
+	adaptationSB.reset();
+	histogramStagingBuffer = nullptr;
+	adaptationStagingBuffer = nullptr;
+	resetAdaptation = true;
+}
+
 void HistogramAutoExposure::ClearShaderCache()
 {
 	resetAdaptation = true;

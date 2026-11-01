@@ -95,6 +95,7 @@ struct LocalExposure : public PostProcessFeature
 	winrt::com_ptr<ID3D11ComputeShader> gridCS = nullptr;
 
 	virtual void SetupResources() override;
+	virtual void ReleaseResources() override;
 	virtual void ClearShaderCache() override;
 	void CompileComputeShaders();
 

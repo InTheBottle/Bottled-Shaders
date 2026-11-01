@@ -130,6 +130,8 @@ struct DoF : public PostProcessFeature
 	winrt::com_ptr<ID3D11SamplerState> linearSampler = nullptr;
 
 	virtual void SetupResources() override;
+	virtual void ReleaseResources() override;
+	void UpdatePostSmoothTextures(bool a_needed);
 	virtual void ClearShaderCache() override;
 	void CompileComputeShaders();
 

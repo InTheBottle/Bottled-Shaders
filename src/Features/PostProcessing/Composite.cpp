@@ -63,6 +63,11 @@ void Composite::SetupResources()
 	CompileRasterShaders();
 }
 
+void Composite::ReleaseResources()
+{
+	texOutput.reset();
+}
+
 void Composite::ClearShaderCache()
 {
 	BumpShaderGeneration();

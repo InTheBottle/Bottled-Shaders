@@ -109,6 +109,7 @@ public:
 	virtual void GameLoaded() override;
 	/** @brief Loads the heightmap DDS for the current worldspace if not already cached. */
 	void LoadHeightmap();
+	void ReleaseHeightmap();
 	/** @brief Creates the shadow height texture after a new heightmap is loaded. */
 	void Precompute();
 	/**

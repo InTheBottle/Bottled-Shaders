@@ -116,6 +116,26 @@ struct PostProcessFeature : public std::enable_shared_from_this<PostProcessFeatu
 
 	virtual inline void SetupResources() = 0;
 	virtual void ClearShaderCache() = 0;
+	virtual void ReleaseResources() = 0;
+
+	bool resourcesReady = false;
+
+	void EnsureResources()
+	{
+		if (!resourcesReady) {
+			SetupResources();
+			resourcesReady = true;
+		}
+	}
+
+	void FreeResources()
+	{
+		if (resourcesReady) {
+			ReleaseResources();
+			resourcesReady = false;
+		}
+	}
+
 	virtual void RestoreDefaultSettings() = 0;
 
 	virtual void LoadSettings(json& o_json) = 0;

@@ -268,6 +268,15 @@ void LUT::ReadTexture(std::string requestedPath)
 	}
 }
 
+void LUT::ReleaseResources()
+{
+	texOutput.reset();
+	texLUT2D.reset();
+	texLUT3D.reset();
+	LutType = -1;
+	attemptedPath.clear();
+}
+
 void LUT::ClearShaderCache()
 {
 	BumpShaderGeneration();

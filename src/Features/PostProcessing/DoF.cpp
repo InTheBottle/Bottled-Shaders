@@ -350,14 +350,6 @@ void DoF::SetupResources()
 		texOutput->CreateSRV(srvDesc);
 		texOutput->CreateUAV(uavDesc);
 
-		texPostSmooth = eastl::make_unique<Texture2D>(texDesc, "DoF::PostSmooth");
-		texPostSmooth->CreateSRV(srvDesc);
-		texPostSmooth->CreateUAV(uavDesc);
-
-		texPostSmooth2 = eastl::make_unique<Texture2D>(texDesc, "DoF::PostSmooth2");
-		texPostSmooth2->CreateSRV(srvDesc);
-		texPostSmooth2->CreateUAV(uavDesc);
-
 		D3D11_TEXTURE2D_DESC texDescHalf = texDesc;
 		texDescHalf.Width = std::max(1u, texDescHalf.Width / 2u);
 		texDescHalf.Height = std::max(1u, texDescHalf.Height / 2u);
@@ -468,6 +460,61 @@ void DoF::SetupResources()
 	}
 
 	CompileComputeShaders();
+}
+
+void DoF::UpdatePostSmoothTextures(bool a_needed)
+{
+	if (!a_needed) {
+		texPostSmooth.reset();
+		texPostSmooth2.reset();
+		return;
+	}
+	if (texPostSmooth)
+		return;
+
+	const auto& texDesc = texOutput->desc;
+	D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
+		.Format = texDesc.Format,
+		.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+		.Texture2D = { .MostDetailedMip = 0, .MipLevels = 1 }
+	};
+	D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {
+		.Format = texDesc.Format,
+		.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D,
+		.Texture2D = { .MipSlice = 0 }
+	};
+
+	texPostSmooth = eastl::make_unique<Texture2D>(texDesc, "DoF::PostSmooth");
+	texPostSmooth->CreateSRV(srvDesc);
+	texPostSmooth->CreateUAV(uavDesc);
+
+	texPostSmooth2 = eastl::make_unique<Texture2D>(texDesc, "DoF::PostSmooth2");
+	texPostSmooth2->CreateSRV(srvDesc);
+	texPostSmooth2->CreateUAV(uavDesc);
+}
+
+void DoF::ReleaseResources()
+{
+	texOutput.reset();
+	texPreBlurred.reset();
+	texFarBlurred.reset();
+	texNearBlurred.reset();
+	texBlurredFiltered.reset();
+	texPostSmooth.reset();
+	texPostSmooth2.reset();
+	texFocus.reset();
+	texPreFocus.reset();
+	texCoC.reset();
+	texCoCHalf.reset();
+	texCoCTile.reset();
+	texCoCTileTmp.reset();
+	texCoCTileDilated.reset();
+	for (auto& tex : texGatherColor)
+		tex.reset();
+	for (auto& tex : texGatherCoC)
+		tex.reset();
+	if (owner)
+		owner->bokehResources.ReleaseShapes();
 }
 
 void DoF::ClearShaderCache()
@@ -644,6 +691,7 @@ void DoF::Draw(TextureInfo& inout_tex)
 		&GatherPostfilterCS, &CombinerCS });
 	if (!coreReady || (needPostSmoothing && !AllShadersReady({ &PostSmoothing1CS, &PostSmoothing2AndFocusingCS })))
 		return;
+	UpdatePostSmoothTextures(needPostSmoothing);
 	state->BeginPerfEvent("Depth of Field");
 
 	const uint halfResX = std::max(1u, (uint)res.x / 2);
@@ -658,6 +706,7 @@ void DoF::Draw(TextureInfo& inout_tex)
 	ID3D11ShaderResourceView* customShapeSRV = nullptr;
 	ID3D11Buffer* customShapeSampleCB = nullptr;
 	if (owner && requestedBokehMode == 1) {
+		owner->bokehResources.EnsureShapes();
 		customShapeIndex = std::clamp(renderSettings.HighlightShape - 1, 0, std::max(owner->bokehResources.GetTotalShapeCount() - 1, 0));
 		customShapeSRV = owner->bokehResources.GetShapeSRV(customShapeIndex);
 		customShapeSampleCB = owner->bokehResources.GetShapeSampleCB(customShapeIndex);

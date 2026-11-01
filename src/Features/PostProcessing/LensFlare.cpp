@@ -238,9 +238,6 @@ void LensFlare::DrawSettings()
 		BUFFER_VIEWER_NODE_TITLE(texThreshold, T("feature.post_processing.lens_flare.buffer_threshold", "Threshold (half-res)"), debugRescale);
 		BUFFER_VIEWER_NODE_TITLE(texGhostHalo, T("feature.post_processing.lens_flare.buffer_ghost_halo", "Ghost + Halo (half-res)"), debugRescale);
 		BUFFER_VIEWER_NODE_TITLE(texBlurTemp, T("feature.post_processing.lens_flare.buffer_blur_temp", "Blur Temp (quarter-res)"), debugRescale);
-		if (settings.GhostModeInt >= (int)GhostMode::Quality) {
-			BUFFER_VIEWER_NODE_TITLE(texFFTResult, T("feature.post_processing.lens_flare.buffer_fft_result", "FFT Convolution Result"), debugRescale);
-		}
 	}
 }
 
@@ -395,20 +392,23 @@ void LensFlare::CreateFFTTextures(uint resolution)
 	texSceneFFT->CreateSRV(srvDesc);
 	texSceneFFT->CreateUAV(uavDesc);
 
-	// FFT result (RGBA16F at FFT resolution)
-	texDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-	srvDesc.Format = texDesc.Format;
-	uavDesc.Format = texDesc.Format;
-
-	texFFTResult = eastl::make_unique<Texture2D>(texDesc, "LensFlare::FFTResult");
-	texFFTResult->CreateSRV(srvDesc);
-	texFFTResult->CreateUAV(uavDesc);
-
-	auto context = globals::d3d::context;
-	const FLOAT clearColor[4] = { 0.f, 0.f, 0.f, 0.f };
-	context->ClearUnorderedAccessViewFloat(texFFTResult->uav.get(), clearColor);
-
 	logger::debug("LensFlare: FFT textures created at {}x{}", resolution, resolution);
+}
+
+void LensFlare::ReleaseResources()
+{
+	outputReady = false;
+	texThreshold.reset();
+	texGhostHalo.reset();
+	texBlurTemp.reset();
+	for (auto& tex : texFFT)
+		tex.reset();
+	texSceneFFT.reset();
+	for (auto& cache : bokehFFTCache) {
+		cache.texture.reset();
+		cache.valid = false;
+	}
+	bokehFFTDirty = true;
 }
 
 void LensFlare::ClearShaderCache()

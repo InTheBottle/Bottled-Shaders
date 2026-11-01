@@ -506,6 +506,22 @@ void PhysicalGlare::SetupResources()
 	CompileComputeShaders();
 }
 
+void PhysicalGlare::ReleaseResources()
+{
+	outputReady = false;
+	for (auto& channel : texFFT) {
+		for (auto& tex : channel)
+			tex.reset();
+	}
+	for (auto& tex : texPSF_FFT)
+		tex.reset();
+	texApertureBase.reset();
+	texGlarePacked.reset();
+	texOutput.reset();
+	psfDirty = true;
+	apertureDirty = true;
+}
+
 void PhysicalGlare::ClearShaderCache()
 {
 	outputReady = false;
