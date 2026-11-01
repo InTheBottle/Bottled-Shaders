@@ -719,9 +719,8 @@ void Widget::DrawWidgetHeader(const char* searchId, bool showApply, bool showSav
 
 		auto iconButton = [&](const char* suffix, Icons::GlyphRef glyph, const char* tooltip, auto callback) {
 			ImGui::SameLine();
-			if (Icons::Button(std::format("{}{}", searchId ? searchId : "", suffix).c_str(), glyph))
+			if (Util::IconButton(std::format("{}{}", searchId ? searchId : "", suffix).c_str(), glyph, tooltip))
 				callback();
-			Util::AddTooltip(tooltip);
 		};
 
 		// Apply button

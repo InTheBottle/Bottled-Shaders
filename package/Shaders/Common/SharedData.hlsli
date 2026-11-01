@@ -624,6 +624,23 @@ namespace SharedData
 		float2 pad0;
 	};
 
+	struct ProceduralNightSkySettings
+	{
+		uint enabled;
+		float starIntensity;
+		float starTwinkle;
+		float radianceLimit;
+
+		float3 auroraLowColor;
+		float auroraIntensity;
+
+		float3 auroraHighColor;
+		float auroraSpeed;
+
+		float auroraLighting;
+		float3 pad0;
+	};
+
 	struct NightEyeSettings
 	{
 		float4 Eye;
@@ -662,6 +679,7 @@ namespace SharedData
 		HairBacklightingSettings hairBacklightingSettings;
 		RainRefractionSettings rainRefractionSettings;
 		NightEyeSettings nightEyeSettings;
+		ProceduralNightSkySettings proceduralNightSkySettings;
 	};
 
 	Texture2D<float4> DepthTexture : register(t17);

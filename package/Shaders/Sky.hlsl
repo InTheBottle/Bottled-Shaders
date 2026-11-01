@@ -42,6 +42,10 @@ struct VS_OUTPUT
 	float TexCoord2: TEXCOORD2;
 #endif
 
+#if defined(HORIZFADE) && defined(PROCEDURAL_NIGHT_SKY)
+	float3 StarDirection: TEXCOORD7;
+#endif
+
 #if defined(TEX) || defined(DITHER) || defined(HORIZFADE)
 	float4 Color: COLOR0;
 #endif
@@ -121,6 +125,9 @@ VS_OUTPUT main(VS_INPUT input)
 	vsout.TexCoord2.x = saturate((1.0 / 17.0) * eyeHeightDelta);
 	vsout.Color.xyz = ColorManagement::SRGBToWorking(BlendColor[0].xyz) * VParams;
 	vsout.Color.w = BlendColor[0].w;
+#		if defined(PROCEDURAL_NIGHT_SKY)
+	vsout.StarDirection = input.Position.xyz;
+#		endif
 
 #	else  // MOONMASK HORIZFADE
 
@@ -224,6 +231,10 @@ cbuffer AlphaTestRefCB : register(b11)
 
 #	if defined(PROCEDURAL_SUN)
 #		include "ProceduralSun/ProceduralSun.hlsli"
+#	endif
+
+#	if defined(PROCEDURAL_NIGHT_SKY) && (defined(HORIZFADE) || (defined(DITHER) && !defined(TEX)))
+#		include "ProceduralNightSky/ProceduralNightSky.hlsli"
 #	endif
 
 #	if defined(EXP_HEIGHT_FOG)
@@ -393,6 +404,13 @@ PS_OUTPUT main(PS_INPUT input)
 #				endif
 	psout.Color.xyz = skyGradientColor + skyScale;
 
+#				if defined(PROCEDURAL_NIGHT_SKY)
+	float3 auroraView = normalize(input.WorldPosition.xyz);
+	bool proceduralAuroraActive = SharedData::proceduralNightSkySettings.auroraIntensity > 0.0 && auroraView.z > 0.0 && (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection);
+	[branch] if (proceduralAuroraActive)
+		psout.Color.xyz += ProceduralNightSky::EvaluateAurora(auroraView, Random::InterleavedGradientNoise(input.Position.xy, SharedData::FrameCount));
+#				endif
+
 #				if defined(EFFECTS11)
 	[branch] if (SharedData::enbSettings.Enable && SharedData::enbSettings.FixBlackCrush) {
 		float3 additiveDither = max(psout.Color.xyz + noiseGrad * 0.1, 0.0);
@@ -420,6 +438,20 @@ PS_OUTPUT main(PS_INPUT input)
 #			endif
 	psout.Color.xyz = float3(1.5, 1.5, 1.5) * (input.Color.xyz * baseColor.xyz + skyScale);
 	psout.Color.w = input.TexCoord2.x * (baseColor.w * input.Color.w);
+#			if defined(PROCEDURAL_NIGHT_SKY)
+	float3 starDirection = normalize(input.StarDirection);
+	float starPixelAngle = length(fwidth(starDirection));
+	bool proceduralNightSkyActive = SharedData::proceduralNightSkySettings.enabled && (Permutation::ExtraShaderDescriptor & (Permutation::ExtraFlags::InWorld | Permutation::ExtraFlags::InReflection));
+	[branch] if (proceduralNightSkyActive)
+	{
+		float3 starTint = 1.5 * input.Color.xyz * input.Color.w;
+#				if defined(EFFECTS11)
+		if (SharedData::enbSettings.Enable)
+			starTint *= SharedData::enbSettings.StarsIntensity;
+#				endif
+		psout.Color = ProceduralNightSky::Shade(starDirection, starPixelAngle, starTint, input.TexCoord2.x);
+	}
+#			endif
 #		else
 
 	psout.Color.w = input.Color.w * baseColor.w;
@@ -512,6 +544,9 @@ PS_OUTPUT main(PS_INPUT input)
 	bool linearizeAlpha = !Permutation::RenderToUI || inReflection;
 #			if defined(PROCEDURAL_SUN) && defined(TEX) && defined(DEFERRED) && !defined(DITHER) && !defined(OCCLUSION)
 	linearizeAlpha = linearizeAlpha && !proceduralSunActive;
+#			endif
+#			if defined(PROCEDURAL_NIGHT_SKY) && defined(HORIZFADE)
+	linearizeAlpha = linearizeAlpha && !proceduralNightSkyActive;
 #			endif
 	if (linearizeAlpha) {
 		psout.Color.w = pow(saturate(psout.Color.w), TransferFunctions::GAME_GAMMA);

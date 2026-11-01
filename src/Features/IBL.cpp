@@ -2,6 +2,7 @@
 
 #include "Deferred.h"
 #include "DynamicCubemaps.h"
+#include "ProceduralNightSky.h"
 #include "Shadercache.h"
 #include "State.h"
 
@@ -241,11 +242,23 @@ void IBL::Prepass()
 		srvs.at(0) = reflections.SRV;
 		uavs.at(0) = skyIBLTexture->uav.get();
 
+		auto* auroraCS = globals::features::proceduralNightSky.HasAuroraLight() ? GetAuroraIBLCS() : nullptr;
+		if (auroraCS) {
+			ID3D11Buffer* sharedBuffers[2] = { globals::state->sharedDataCB->CB(), globals::state->featureDataCB->CB() };
+			context->CSSetConstantBuffers(5, 2, sharedBuffers);
+			context->CSSetShader(auroraCS, nullptr, 0);
+		}
+
 		context->CSSetShaderResources(0, (uint)srvs.size(), srvs.data());
 		context->CSSetUnorderedAccessViews(0, (uint)uavs.size(), uavs.data(), nullptr);
 		globals::profiler->BeginPass("IBL::SkyDiffuseIBL");
 		context->Dispatch(1, 1, 1);
 		globals::profiler->EndPass();
+
+		if (auroraCS) {
+			ID3D11Buffer* noBuffers[2]{ nullptr, nullptr };
+			context->CSSetConstantBuffers(5, 2, noBuffers);
+		}
 	}
 
 	// Reset
@@ -270,6 +283,7 @@ void IBL::Prepass()
 void IBL::SetupResources()
 {
 	GetDiffuseIBLCS();
+	GetAuroraIBLCS();
 
 	{
 		D3D11_TEXTURE2D_DESC texDesc{
@@ -385,6 +399,9 @@ void IBL::ClearShaderCache()
 	if (diffuseIBLCS)
 		diffuseIBLCS->Release();
 	diffuseIBLCS = nullptr;
+	if (auroraIBLCS)
+		auroraIBLCS->Release();
+	auroraIBLCS = nullptr;
 }
 
 ID3D11ComputeShader* IBL::GetDiffuseIBLCS()
@@ -396,4 +413,15 @@ ID3D11ComputeShader* IBL::GetDiffuseIBLCS()
 		diffuseIBLCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\IBL\\DiffuseIBLCS.hlsl", defines, "cs_5_0"));
 	}
 	return diffuseIBLCS;
+}
+
+ID3D11ComputeShader* IBL::GetAuroraIBLCS()
+{
+	if (!auroraIBLCS && globals::features::proceduralNightSky.loaded) {
+		std::vector<std::pair<const char*, const char*>> defines = { { "AURORA_SKY_LIGHT", nullptr } };
+		if (globals::features::dynamicCubemaps.loaded)
+			defines.push_back({ "DYNAMIC_CUBEMAPS", nullptr });
+		auroraIBLCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\IBL\\DiffuseIBLCS.hlsl", defines, "cs_5_0"));
+	}
+	return auroraIBLCS;
 }

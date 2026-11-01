@@ -32,6 +32,8 @@
 #include "Features/NightEye.h"
 #include "Features/PerformanceOverlay.h"
 #include "Features/PostProcessing.h"
+#include "Features/ProceduralLightning.h"
+#include "Features/ProceduralNightSky.h"
 #include "Features/RainRefraction.h"
 #include "Features/ScreenSpaceGI.h"
 #include "Features/ScreenSpaceShadows.h"
@@ -255,6 +257,8 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::skin,
 		&globals::features::snowCover,
 		&globals::features::footstepParticles,
+		&globals::features::proceduralLightning,
+		&globals::features::proceduralNightSky,
 		&globals::features::hairBacklighting,
 		&globals::features::nightEye,
 		&globals::features::furShells,

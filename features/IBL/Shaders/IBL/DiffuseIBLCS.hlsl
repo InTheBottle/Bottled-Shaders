@@ -3,6 +3,11 @@
 #include "Common/SharedData.hlsli"
 #include "Common/Spherical Harmonics/SphericalHarmonics.hlsli"
 
+#if defined(AURORA_SKY_LIGHT)
+#	include "Common/ColorManagement.hlsli"
+#	include "ProceduralNightSky/ProceduralNightSky.hlsli"
+#endif
+
 TextureCube<float4> EnvTexture : register(t0);
 RWTexture2D<sh2> IBLTexture : register(u0);
 
@@ -35,6 +40,10 @@ groupshared sh2 sharedB[TOTAL_SAMPLES];
 
 	// Sample cubemap with optimized direction
 	float3 color = EnvTexture.SampleLevel(LinearSampler, -rayDir, 0).xyz;
+#if defined(AURORA_SKY_LIGHT)
+	if (rayDir.z < 0.0)
+		color += ProceduralNightSky::EvaluateAurora(-rayDir, 0.5) * SharedData::proceduralNightSkySettings.auroraLighting;
+#endif
 
 	// Compute spherical harmonics basis for this direction
 	sh2 sh = SphericalHarmonics::Evaluate(rayDir);

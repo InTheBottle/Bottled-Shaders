@@ -508,8 +508,9 @@ namespace Util::Anim
 		void DrawSnapshot(const ImDrawList& src, float alpha)
 		{
 			ImDrawList* dst = ImGui::GetForegroundDrawList();
+			const ImTextureData* atlasTexture = ImGui::GetIO().Fonts->TexData;
 			for (const ImDrawCmd& cmd : src.CmdBuffer) {
-				if (cmd.UserCallback || cmd.ElemCount == 0 || cmd.ElemCount > 60000)
+				if (cmd.UserCallback || cmd.ElemCount == 0 || cmd.ElemCount > 60000 || (cmd.TexRef._TexData && cmd.TexRef._TexData != atlasTexture))
 					continue;
 				dst->PushClipRect(ImVec2(cmd.ClipRect.x, cmd.ClipRect.y), ImVec2(cmd.ClipRect.z, cmd.ClipRect.w), false);
 				dst->PushTexture(cmd.TexRef);

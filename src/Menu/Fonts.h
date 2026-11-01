@@ -77,6 +77,9 @@ namespace MenuFonts
 	 */
 	bool BeginTabItemWithFont(const char* label, FontRole role, ImGuiTabItemFlags flags = ImGuiTabItemFlags_None);
 
+	/** @brief Ends a tab item opened via BeginTabItemWithFont / BeginPillTabItem / BeginTabItem. */
+	void EndTabItem();
+
 	/**
 	 * @brief Loads catalog fonts into the current ImGui atlas for selector previews.
 	 *

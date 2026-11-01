@@ -29,6 +29,7 @@ public:
 	Texture2D* skyIBLTexture = nullptr;
 	bool envIBLWritten = true;
 	ID3D11ComputeShader* diffuseIBLCS = nullptr;
+	ID3D11ComputeShader* auroraIBLCS = nullptr;
 
 	virtual void RestoreDefaultSettings() override;
 	/** @brief Draws the ImGui settings UI for IBL intensity, saturation, DALC, and fog options. */
@@ -90,4 +91,6 @@ public:
 	bool IsManagedByENB() const;
 	/** @brief Returns the diffuse IBL spherical harmonics compute shader, compiling it on first use. */
 	ID3D11ComputeShader* GetDiffuseIBLCS();
+	/** @brief Returns the sky IBL variant that adds the procedural aurora, compiling it on first use; null without Procedural Night Sky. */
+	ID3D11ComputeShader* GetAuroraIBLCS();
 };

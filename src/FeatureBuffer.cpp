@@ -18,6 +18,7 @@
 #include "Features/LinearLighting.h"
 #include "Features/NightEye.h"
 #include "Features/PostProcessing.h"
+#include "Features/ProceduralNightSky.h"
 #include "Features/ProceduralSun.h"
 #include "Features/RainRefraction.h"
 #include "Features/Skin.h"
@@ -79,5 +80,6 @@ std::pair<unsigned char*, size_t> GetFeatureBufferData(bool a_inWorld)
 		globals::features::horizonFix.GetCommonBufferData(),
 		globals::features::hairBacklighting.settings,
 		globals::features::rainRefraction.GetCommonBufferData(),
-		globals::features::nightEye.GetCommonBufferData());
+		globals::features::nightEye.GetCommonBufferData(),
+		globals::features::proceduralNightSky.GetCommonBufferData());
 }

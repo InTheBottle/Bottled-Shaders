@@ -173,6 +173,14 @@ namespace MenuFonts
 		return ImGui::BeginTabItem(label, nullptr, flags);
 	}
 
+	void EndTabItem()
+	{
+		if (Util::IsInsidePillTabBar())
+			Util::EndPillTabItem();
+		else
+			ImGui::EndTabItem();
+	}
+
 	namespace
 	{
 		std::unordered_map<std::string, ImFont*> g_previewFontsByFile;

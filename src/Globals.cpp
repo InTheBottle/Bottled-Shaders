@@ -31,6 +31,8 @@
 #include "Features/NightEye.h"
 #include "Features/PerformanceOverlay.h"
 #include "Features/PostProcessing.h"
+#include "Features/ProceduralLightning.h"
+#include "Features/ProceduralNightSky.h"
 #include "Features/ProceduralSun.h"
 #include "Features/RainRefraction.h"
 #include "Features/RemoteControl.h"
@@ -121,6 +123,8 @@ namespace globals
 		Skin skin{};
 		SnowCover snowCover{};
 		FootstepParticles footstepParticles{};
+		ProceduralLightning proceduralLightning{};
+		ProceduralNightSky proceduralNightSky{};
 		HairBacklighting hairBacklighting{};
 		NightEye nightEye{};
 		FurShells furShells{};
