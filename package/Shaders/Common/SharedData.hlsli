@@ -162,7 +162,7 @@ namespace SharedData
 		float RippleRadius;
 		float RippleBreadth;
 		float RippleLifetimeRcp;
-		float pad0;
+		float TopDownVisibility;
 	};
 
 	struct SkylightingSettings

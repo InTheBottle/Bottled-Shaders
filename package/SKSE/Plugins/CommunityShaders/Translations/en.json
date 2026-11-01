@@ -3661,6 +3661,8 @@
     "feature.wetness_effects.skin_wetness_tooltip": "How wet character skin and hair get during rain.",
     "feature.wetness_effects.splashes": "Splashes",
     "feature.wetness_effects.strength": "Strength",
+    "feature.wetness_effects.top_down_visibility": "Top-Down Visibility",
+    "feature.wetness_effects.top_down_visibility_tooltip": "Darkens standing water and shows ripple rings when looking straight down.\nSet to 0 for reflection-only ripples and the original darkening.",
     "feature.wetness_effects.vanilla_ripples_tooltip_0": "Enables default ripples (e.g., Ripples01).",
     "feature.wetness_effects.vanilla_ripples_tooltip_1": "Disabling may not take effect until the next weather change.",
     "feature.wetness_effects.weather_transition_speed": "Weather transition speed",

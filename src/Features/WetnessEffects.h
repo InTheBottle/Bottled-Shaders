@@ -64,6 +64,7 @@ public:
 		float RippleRadius = 1.f;
 		float RippleBreadth = .5f;
 		float RippleLifetime = .5f;
+		float TopDownVisibility = 1.0f;
 	};
 
 	struct alignas(16) PerFrame
@@ -74,7 +75,6 @@ public:
 		float Wetness;
 		float PuddleWetness;
 		Settings settings;
-		uint pad0;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
 

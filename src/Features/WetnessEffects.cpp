@@ -38,7 +38,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	RippleStrength,
 	RippleRadius,
 	RippleBreadth,
-	RippleLifetime)
+	RippleLifetime,
+	TopDownVisibility)
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	WetnessEffects::DebugSettings,
@@ -476,6 +477,11 @@ void WetnessEffects::DrawSettings()
 			DetectCurrentPreset();
 
 		ImGui::SliderFloat(T(TKEY("shore_wetness"), "Shore Wetness"), &settings.MaxShoreWetness, 0.0f, 1.0f);
+
+		ImGui::SliderFloat(T(TKEY("top_down_visibility"), "Top-Down Visibility"), &settings.TopDownVisibility, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("top_down_visibility_tooltip"), "Darkens standing water and shows ripple rings when looking straight down.\nSet to 0 for reflection-only ripples and the original darkening."));
+		}
 		ImGui::TreePop();
 	}
 
