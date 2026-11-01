@@ -42,7 +42,7 @@ Texture2D<float4> srcPrevY : register(t5);             // maybe half-res
 Texture2D<float2> srcPrevCoCg : register(t6);          // maybe half-res
 Texture2D<float4> srcPrevGISpecular : register(t7);    // maybe half-res
 Texture2D<float2> srcNormal : register(t8);
-Texture2D<float> srcPrevAo : register(t9);  // maybe half-res
+Texture2D<unorm float> srcPrevAo : register(t9);  // maybe half-res
 
 RWTexture2D<unorm float> outAo : register(u0);
 RWTexture2D<float4> outY : register(u1);
@@ -114,7 +114,7 @@ void CalculateGI(
 
 	// Use screen-space position for noise indexing.
 	uint2 noiseCoord = uint2(normalizedScreenPos * OUT_FRAME_DIM);
-	const float2 localNoise = SpatioTemporalNoise(noiseCoord, FrameIndex);
+	const float2 localNoise = SpatioTemporalNoise(noiseCoord, SharedData::FrameCount);
 	const float noiseSlice = localNoise.x;
 	const float noiseStep = localNoise.y;
 

@@ -40,6 +40,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	disableVanillaFog,
 	fogInscatteringColor,
 	originalFogColorAmount,
+	originalFogColorOverride,
 	volumetricFogEnabled,
 	volumetricGridPixelSize,
 	volumetricGridSizeZ,
@@ -177,6 +178,7 @@ ExponentialHeightFog::Settings ExponentialHeightFog::GetCommonBufferData() const
 	auto& linearLighting = globals::features::linearLighting;
 	linearLighting.SRGBToWorking(&data.inscatteringTint.x);
 	linearLighting.SRGBToWorking(&data.fogInscatteringColor.x);
+	linearLighting.SRGBToWorking(&data.originalFogColorOverride.x);
 	linearLighting.SRGBToWorking(&data.volumetricFogAlbedo.x);
 	linearLighting.SRGBToWorking(&data.volumetricFogEmissive.x);
 	data.vanillaFogDensity = 0.0f;
@@ -291,6 +293,12 @@ void ExponentialHeightFog::DrawHeightFogSettings()
 	ImGui::ColorEdit4(T(TKEY("fog_inscattering_color"), "Fog Inscattering Color"), (float*)&settings.fogInscatteringColor);
 	ImGui::BeginDisabled(settings.useVanillaFogSettings != 0);
 	ImGui::SliderFloat(T(TKEY("original_fog_color_amount"), "Original Fog Color Amount"), &settings.originalFogColorAmount, 0.0f, 1.0f, "%.2f");
+	ImGui::ColorEdit4(T(TKEY("original_fog_color_override"), "Original Fog Color Override"), (float*)&settings.originalFogColorOverride);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("original_fog_color_override_tooltip"),
+							  "Replaces the weather's fog colour used by Original Fog Color Amount.\n"
+							  "Alpha blends from the weather colour (0) to this colour (1)."));
+	}
 	ImGui::EndDisabled();
 	ImGui::BeginDisabled(settings.useVanillaFogSettings != 0 && settings.fogLightingInfluence <= 0.0f);
 	ImGui::SliderFloat(T(TKEY("dir_inscattering_mul"), "Directional Light Inscattering Multiplier"), &settings.directionalInscatteringMultiplier, 0.0f, 10.0f, "%.2f");
@@ -947,6 +955,7 @@ void ExponentialHeightFog::Prepass()
 		totalFarPlane);
 	const bool farGridEnabled = nearEndDepth + 1.0 < totalFarPlane;
 
+	// From 8-pixel cells up, one thread group per cell reduces the cell's depth footprint in parallel.
 	const bool nearGroupReduce = std::clamp(settings.volumetricGridPixelSize, 4u, 64u) >= 8;
 	const bool farGroupReduce = std::clamp(settings.volumetricFarGridPixelSize, 4u, 64u) >= 8;
 	auto* conservativeDepthShader = GetConservativeDepthCS(nearGroupReduce);

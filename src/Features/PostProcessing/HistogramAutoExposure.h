@@ -84,9 +84,9 @@ struct HistogramAutoExposure : public PostProcessFeature
 	bool resetAdaptation = true;
 	bool hasMeasuredAdaptation = false;
 	bool histogramReadbackRequested = false;
-	int histogramReadbackRequestFrame = -1;
-	int exposureReadbackRequestFrame = -1;
-	int adaptationReadbackFrame = -1;
+	int64_t histogramReadbackRequestFrame = -1;
+	int64_t exposureReadbackRequestFrame = -1;
+	int64_t adaptationReadbackFrame = -1;
 
 	struct ExposureParameters
 	{

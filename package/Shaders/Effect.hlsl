@@ -769,7 +769,8 @@ PS_OUTPUT main(PS_INPUT input)
 #	endif
 
 #	if defined(EFFECTS11) && defined(IS_VOLUMETRIC_FOG)
-	const bool isEnbVolumetricFog = SharedData::enbSettings.Enable && !(Permutation::VertexShaderDescriptor & Permutation::EffectFlags::SkyObject) && (Permutation::PixelShaderDescriptor & Permutation::EffectFlags::GrayscaleToAlpha) && !(Permutation::PixelShaderDescriptor & Permutation::EffectFlags::GrayscaleToColor);
+	const bool isEnbVolumetricFog = SharedData::enbSettings.Enable && !(Permutation::VertexShaderDescriptor & Permutation::EffectFlags::SkyObject) &&
+	                                (Permutation::PixelShaderDescriptor & Permutation::EffectFlags::GrayscaleToAlpha) && !(Permutation::PixelShaderDescriptor & Permutation::EffectFlags::GrayscaleToColor);
 #	endif
 
 	float4 baseTexColor = float4(1, 1, 1, 1);
@@ -892,6 +893,7 @@ PS_OUTPUT main(PS_INPUT input)
 	}
 #	endif
 
+	// Light only pixels that survive the alpha test.
 #	if defined(LIGHTING)
 	propertyColor = GetLightingColor(input.MSPosition.xyz, input.WorldPosition.xyz, input.Position.xy, shadowVariance);
 

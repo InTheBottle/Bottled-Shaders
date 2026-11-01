@@ -610,6 +610,30 @@ Effect::TechniqueSequenceResult Effect::ExecuteTechniqueSequence(const std::stri
 	return { wroteChain, targetInOutput, targetInTemp };
 }
 
+void Effect::ExecuteTechniquesOnto(const std::string& a_baseTechniqueName, ID3D11ShaderResourceView* a_input, ID3D11RenderTargetView* a_target, ID3D11BlendState* a_blendState)
+{
+	if (!IsCompiled() || !effect)
+		return;
+
+	auto sequenceIt = techniques.find(a_baseTechniqueName);
+	if (sequenceIt == techniques.end())
+		return;
+
+	SetShaderResourceVariable("TextureColor", a_input);
+
+	auto context = globals::d3d::context;
+	uint32_t passOffset = 0;
+	for (auto& techniqueInfo : sequenceIt->second) {
+		if (!techniqueInfo.technique || !IsTechniqueEnabled(techniqueInfo))
+			continue;
+
+		const bool ownTarget = !techniqueInfo.renderTargetName.empty();
+		context->OMSetBlendState(ownTarget ? nullptr : a_blendState, nullptr, 0xFFFFFFFF);
+		RenderPasses(techniqueInfo.technique.get(), ownTarget ? GetRenderTargetView(techniqueInfo.renderTargetName, a_target) : a_target, passOffset);
+		passOffset += techniqueInfo.passCount;
+	}
+}
+
 bool Effect::ExecuteTechnique(const std::string& techniqueName, TextureManager::Texture& output)
 {
 	if (!IsCompiled() || !effect)
@@ -1278,10 +1302,6 @@ void Effect::RenderPasses(ID3DX11EffectTechnique* technique, ID3D11RenderTargetV
 
 	if (outputWidth == 0 || outputHeight == 0)
 		return;
-
-	float aspect = static_cast<float>(outputWidth) / static_cast<float>(outputHeight);
-	float screenSize[4] = { static_cast<float>(outputWidth), 1.0f / outputWidth, aspect, 1.0f / aspect };
-	SetVectorVariable("ScreenSize", screenSize, sizeof(screenSize));
 
 	D3D11_VIEWPORT viewport = {};
 	viewport.Width = static_cast<float>(outputWidth);

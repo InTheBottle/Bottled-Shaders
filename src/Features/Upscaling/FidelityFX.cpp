@@ -411,6 +411,7 @@ void FidelityFX::CreateHostFSRContext()
 	contextDescription.maxUpscaleSize.height = displayHeight;
 	contextDescription.displaySize.width = displayWidth;
 	contextDescription.displaySize.height = displayHeight;
+	// FSR upscales kMAIN before the tonemap, so its input is HDR radiance whatever the display mode
 	contextDescription.flags = FFX_FSR3_ENABLE_UPSCALING_ONLY | FFX_FSR3_ENABLE_AUTO_EXPOSURE | FFX_FSR3_ENABLE_HIGH_DYNAMIC_RANGE;
 	if (globals::features::reverseZ.IsActive())
 		contextDescription.flags |= FFX_FSR3_ENABLE_DEPTH_INVERTED;

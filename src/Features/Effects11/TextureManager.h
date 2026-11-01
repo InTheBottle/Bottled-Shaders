@@ -39,6 +39,7 @@ public:
 	void UpdateDownsampledTexture(ID3D11ShaderResourceView* source, bool a_generateMips);
 	ID3D11ShaderResourceView* GetDownsampleTexture() const;
 	ID3D11ShaderResourceView* GetDownsampleTextureBlurry() const;
+	ID3D11SamplerState* GetLinearSampler() const { return linearSampler.get(); }
 
 	// Frame-based state access
 	uint32_t GetTextureSwap() const { return textureSwap; }

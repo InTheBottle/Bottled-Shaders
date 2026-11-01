@@ -233,7 +233,7 @@ RainRefraction::PerFrame RainRefraction::GetCommonBufferData()
 		data.MotionStretch = settingManager.GetInterpolatedTimeOfDayValue("MotionStretch", "RAIN");
 		data.MotionTransparency = settingManager.GetInterpolatedTimeOfDayValue("MotionTransparency", "RAIN");
 		data.ScreenRefraction = true;
-		data.RefractionFactor = std::clamp(settingManager.GetValue<float>(EffectManager::GetSingleton().ids.rainRefractionFactor), 0.0f, kMaxRefractionFactor);
+		data.RefractionFactor = std::clamp(std::abs(settingManager.GetValue<float>(EffectManager::GetSingleton().ids.rainRefractionFactor)), 0.0f, kMaxRefractionFactor);
 		data.MotionBluriness = std::clamp(settingManager.GetInterpolatedTimeOfDayValue("MotionBluriness", "RAIN"), 0.0f, kMaxRefractionBlur);
 		data.Brightness = std::max(settingManager.GetInterpolatedTimeOfDayValue("Brightness", "RAIN"), 0.0f);
 	}

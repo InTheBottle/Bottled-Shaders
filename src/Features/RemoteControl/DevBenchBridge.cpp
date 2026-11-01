@@ -18,6 +18,7 @@
 #	include "Features/RemoteControl/NvPerf.h"
 #	include "Features/RenderDoc.h"
 #	include "Features/ScreenshotFeature.h"
+#	include "Features/Upscaling.h"
 #	include "Globals.h"
 #	include "Profiler.h"
 #	include "CSEditor/SceneManager/SceneSettingsManager.h"
@@ -35,6 +36,7 @@
 #	include <functional>
 #	include <future>
 #	include <memory>
+#	include <mutex>
 #	include <optional>
 #	include <stdexcept>
 #	include <unordered_set>
@@ -72,14 +74,28 @@ namespace
 	 * caught and converted to standardized JSON error objects to prevent C++ exceptions from
 	 * crossing the DLL boundary.
 	 *
+	 * @param a_tool Registered tool name, recorded as the last request for the Developer Tools panel.
 	 * @param a_build Function that builds a JSON response from parsed request arguments.
 	 * @param a_argsJson JSON-formatted request arguments as a string; null or empty string
 	 *                   defaults to an empty JSON object.
 	 * @param a_sink Opaque destination handle passed to the write callback.
 	 * @param a_write Callback function invoked exactly once to write the serialized JSON response.
 	 */
-	void RunHandler(json (*a_build)(const json&), const char* a_argsJson, void* a_sink, DevBenchAPI::WriteFn a_write)
+	std::mutex g_lastRequestMutex;
+	std::optional<DevBenchBridge::Request> g_lastRequest;
+
+	// Exception text can hold ANSI-code-page bytes; a strict dump would throw past the C ABI.
+	std::string DumpForDevBench(const json& a_json)
 	{
+		return a_json.dump(-1, ' ', false, json::error_handler_t::replace);
+	}
+
+	void RunHandler(const char* a_tool, json (*a_build)(const json&), const char* a_argsJson, void* a_sink, DevBenchAPI::WriteFn a_write)
+	{
+		{
+			std::scoped_lock lock(g_lastRequestMutex);
+			g_lastRequest = DevBenchBridge::Request{ a_tool, std::filesystem::file_time_type::clock::now() };
+		}
 		json out;
 		try {
 			json args = json::object();
@@ -93,7 +109,7 @@ namespace
 		} catch (...) {
 			out = json{ { "error", "unknown handler error" } };
 		}
-		const std::string dumped = out.dump();
+		const std::string dumped = DumpForDevBench(out);
 		a_write(a_sink, dumped.c_str());
 	}
 
@@ -261,8 +277,9 @@ namespace
 				if (target->loaded && !applied)
 					g_toggledOffFeatures.insert(target);
 				target->loaded = applied;
+				globals::shaderCache->ResetActiveShaderTracking();
 				if (auto* dvb = DevBenchAPI::GetDevBenchInterface001()) {
-					const std::string payload = json{ { "shortName", shortName }, { "enabled", applied } }.dump();
+					const std::string payload = DumpForDevBench(json{ { "shortName", shortName }, { "enabled", applied } });
 					dvb->EmitEvent("communityshaders.feature.changed", payload.c_str());
 				}
 			});
@@ -341,7 +358,7 @@ namespace
 	 */
 	void FeatureToolHandler(void*, const char* a_argsJson, void* a_sink, DevBenchAPI::WriteFn a_write)
 	{
-		RunHandler(&BuildFeatureResult, a_argsJson, a_sink, a_write);
+		RunHandler("communityshaders.feature", &BuildFeatureResult, a_argsJson, a_sink, a_write);
 	}
 
 	/**
@@ -395,7 +412,16 @@ namespace
 					entry["gpuHistory"] = hist;
 					passes.push_back(entry);
 				}
+				const auto frame = profiler->GetFrameStats();
 				return json{
+					{ "frame", {
+								   { "ms", frame.lastMs },
+								   { "avgMs", frame.avgMs },
+								   { "p95Ms", frame.p95Ms },
+								   { "p99Ms", frame.p99Ms },
+								   { "samples", frame.count },
+								   { "frameGeneration", globals::features::upscaling.IsFrameGenerationActive() },
+							   } },
 					{ "totalGpuMs", profiler->GetTotalTimeMs() },
 					{ "totalCpuMs", profiler->GetCpuTotalTimeMs() },
 					{ "frame_count", EnqueuedFrame() },
@@ -427,7 +453,7 @@ namespace
 	 */
 	void InspectToolHandler(void*, const char* a_argsJson, void* a_sink, DevBenchAPI::WriteFn a_write)
 	{
-		RunHandler(&BuildInspectResult, a_argsJson, a_sink, a_write);
+		RunHandler("communityshaders.inspect", &BuildInspectResult, a_argsJson, a_sink, a_write);
 	}
 
 	/**
@@ -481,7 +507,7 @@ namespace
 	 */
 	void ShadercacheToolHandler(void*, const char* a_argsJson, void* a_sink, DevBenchAPI::WriteFn a_write)
 	{
-		RunHandler(&BuildShadercacheResult, a_argsJson, a_sink, a_write);
+		RunHandler("communityshaders.shadercache", &BuildShadercacheResult, a_argsJson, a_sink, a_write);
 	}
 
 	/**
@@ -544,7 +570,7 @@ namespace
 	 */
 	void CaptureToolHandler(void*, const char* a_argsJson, void* a_sink, DevBenchAPI::WriteFn a_write)
 	{
-		RunHandler(&BuildCaptureResult, a_argsJson, a_sink, a_write);
+		RunHandler("communityshaders.capture", &BuildCaptureResult, a_argsJson, a_sink, a_write);
 	}
 
 	// ---- nvperf: status / metrics / capture / cancel / result ---------------------------
@@ -703,7 +729,7 @@ namespace
 
 	void NvPerfToolHandler(void*, const char* a_argsJson, void* a_sink, DevBenchAPI::WriteFn a_write)
 	{
-		RunHandler(&BuildNvPerfResult, a_argsJson, a_sink, a_write);
+		RunHandler("communityshaders.nvperf", &BuildNvPerfResult, a_argsJson, a_sink, a_write);
 	}
 
 	/**
@@ -794,7 +820,7 @@ namespace
 	 */
 	void SettingsToolHandler(void*, const char* a_argsJson, void* a_sink, DevBenchAPI::WriteFn a_write)
 	{
-		RunHandler(&BuildSettingsResult, a_argsJson, a_sink, a_write);
+		RunHandler("communityshaders.settings", &BuildSettingsResult, a_argsJson, a_sink, a_write);
 	}
 }
 
@@ -825,7 +851,7 @@ namespace DevBenchBridge
 		dvb->RegisterTool("communityshaders.feature", featureDesc, &FeatureToolHandler, nullptr);
 
 		static constexpr const char* inspectDesc =
-			R"({"description":"Read non-feature Community Shaders engine state. Kind-dispatched; response is a JSON object. kind=state -> {plugin,frame_count}. kind=shadercache -> {compiling,completedTasks,totalTasks,failedTasks,currentFailedCount,frame_count}. kind=profiler -> {totalGpuMs,totalCpuMs,frame_count,passes:[{name,gpuMs,gpuAvgMs,gpuP95Ms,gpuP99Ms,cpuMs,cpuAvgMs,gpuHistory:[...]}]}; optional filter param to match pass names.","readOnly":true,"inputSchema":{"type":"object","properties":{"kind":{"type":"string","enum":["state","shadercache","profiler"]},"filter":{"type":"string"}},"required":["kind"]}})";
+			R"({"description":"Read non-feature Community Shaders engine state. Kind-dispatched; response is a JSON object. kind=state -> {plugin,frame_count}. kind=shadercache -> {compiling,completedTasks,totalTasks,failedTasks,currentFailedCount,frame_count}. kind=profiler -> {frame:{ms,avgMs,p95Ms,p99Ms,samples,frameGeneration} (engine-frame wall clock; presents run ~2x when frameGeneration),totalGpuMs,totalCpuMs,frame_count,passes:[{name,gpuMs,gpuAvgMs,gpuP95Ms,gpuP99Ms,cpuMs,cpuAvgMs,gpuHistory:[...]}]}; optional filter param to match pass names.","readOnly":true,"inputSchema":{"type":"object","properties":{"kind":{"type":"string","enum":["state","shadercache","profiler"]},"filter":{"type":"string"}},"required":["kind"]}})";
 		dvb->RegisterTool("communityshaders.inspect", inspectDesc, &InspectToolHandler, nullptr);
 
 		static constexpr const char* shadercacheDesc =
@@ -841,7 +867,7 @@ namespace DevBenchBridge
 		dvb->RegisterTool("communityshaders.nvperf", nvperfDesc, &NvPerfToolHandler, nullptr);
 		NvPerf::SetCompletionCallback([](const NvPerf::CaptureResult& a_result) {
 			if (auto* host = DevBenchAPI::GetDevBenchInterface001()) {
-				const std::string payload = json{ { "captureId", a_result.id }, { "success", a_result.success }, { "error", a_result.error } }.dump();
+				const std::string payload = DumpForDevBench(json{ { "captureId", a_result.id }, { "success", a_result.success }, { "error", a_result.error } });
 				host->EmitEvent("communityshaders.nvperf.completed", payload.c_str());
 			}
 		});
@@ -849,6 +875,12 @@ namespace DevBenchBridge
 		static constexpr const char* settingsDesc =
 			R"({"description":"Save, load, or reset the GLOBAL Community Shaders user configuration (Data/SKSE/Plugins/CommunityShaders/*.json). Action-dispatched, all fire-and-forget on the main thread. save: persist current settings (State::Save). load: re-read settings from disk and apply (State::Load). reset: restore every feature to its defaults then persist. Use after communityshaders.feature set/reset to make changes durable, or to roll an A/B session back to the saved baseline.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["save","load","reset"]}},"required":["action"]}})";
 		dvb->RegisterTool("communityshaders.settings", settingsDesc, &SettingsToolHandler, nullptr);
+	}
+
+	std::optional<Request> GetLastRequest()
+	{
+		std::scoped_lock lock(g_lastRequestMutex);
+		return g_lastRequest;
 	}
 }
 
@@ -864,6 +896,8 @@ namespace DevBenchBridge
  * If DevBench is unavailable, no action is taken.
  */
 	void Install() {}  // inert until built with DEVBENCH_BRIDGE_ENABLED
+
+	std::optional<Request> GetLastRequest() { return std::nullopt; }
 }
 
 #endif

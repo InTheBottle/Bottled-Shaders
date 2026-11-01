@@ -304,11 +304,6 @@ bool Feature::ToggleAtBootSetting()
 	return state->IsFeatureDisabled(featureName);  // Return the new state
 }
 
-std::string Feature::GetDisplayCategory() const
-{
-	return TranslateCategory(GetCategory());
-}
-
 std::string Feature::TranslateCategory(std::string_view category)
 {
 	if (category == FeatureCategories::kCharacters)
@@ -349,12 +344,6 @@ std::string Feature::GetReleaseStageTag(ReleaseStage stage)
 	default:
 		return {};
 	}
-}
-
-ImVec4 Feature::GetReleaseStageColor(ReleaseStage stage)
-{
-	const auto& statusPalette = globals::menu->GetTheme().StatusPalette;
-	return stage == ReleaseStage::Alpha ? statusPalette.Error : statusPalette.Warning;
 }
 
 void Feature::DrawUnloadedUI()

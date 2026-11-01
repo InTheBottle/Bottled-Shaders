@@ -1,20 +1,56 @@
 [
-	{
-		"file": "enbeffect.fx",
-		"patches": [
-			{
-				"find": "lerp( TOD(a), a##_Interior, EInteriorFactor )",
-				"replace": "(EInteriorFactor ? a##_Interior : TOD(a))"
-			}
-		]
-	},
-	{
-		"file": "enbUI_Bloom.fxh",
-		"patches": [
-			{
-				"find": "TO_STRING(|- TODIE - In Black).",
-				"replace": "TO_STRING(|- TODIE - In Black)"
-			}
-		]
-	}
+    {
+        "file": "enbeffect.fx",
+        "patches": [
+            {
+                "find": "lerp( TOD(a), a##_Interior, EInteriorFactor )",
+                "replace": "(EInteriorFactor ? a##_Interior : TOD(a))"
+            }
+        ]
+    },
+    {
+        "file": "enbUI_Bloom.fxh",
+        "patches": [
+            {
+                "find": "TO_STRING(|- TODIE - In Black).",
+                "replace": "TO_STRING(|- TODIE - In Black)"
+            }
+        ]
+    },
+    {
+        "file": "enbUI_Primer.fxh",
+        "patches": [
+            {
+                "find": "#endif //_UI_PRIMER_\r\n//------------------------------------------------//\r\n//for enb extender //\r\n//------------------------------------------------//\r\n",
+                "replace": "//\r\n//------------------------------------------------//\r\n//for enb extender //\r\n//------------------------------------------------//\r\n"
+            }
+        ]
+    },
+    {
+        "file": "enbUI_Effect.fxh",
+        "patches": [
+            {
+                "find": "#elif EBM_ENABLE == 2                                                                                           string UIGroup = \"Mixing.Bloom\";  ",
+                "replace": "#elif EBM_ENABLE == 2"
+            }
+        ]
+    },
+    {
+        "file": "enbUI_PrePass.fxh",
+        "patches": [
+            {
+                "find": "#ifndef DISABLE_AURORA_WEATHERSEPARATION                               string UIGroup = \"SUN_RAY.DSRS\"; ",
+                "replace": "#ifndef DISABLE_AURORA_WEATHERSEPARATION"
+            }
+        ]
+    },
+    {
+        "file": "enbUI_Custom_Lut.fxh",
+        "patches": [
+            {
+                "find": "#elif SHADERGROUP == 2",
+                "replace": ""
+            }
+        ]
+    }
 ]

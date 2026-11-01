@@ -106,6 +106,7 @@ public:
 		float distanceHazeMaxOpacity = 0.0f;
 		float distanceHazeStartDistance = 15000.0f;
 		float distanceHazeFadeDistance = 60000.0f;
+		float4 originalFogColorOverride = { 1.0f, 1.0f, 1.0f, 0.0f };  // rgb = replaces the weather fog colour, a = blend amount
 	} settings;
 	STATIC_ASSERT_ALIGNAS_16(Settings);
 	static_assert(offsetof(Settings, volumetricFogNoiseVelocity) == 224);
@@ -113,7 +114,8 @@ public:
 	static_assert(offsetof(Settings, vanillaFogNearColor) == 272);
 	static_assert(offsetof(Settings, fogLightingInfluence) == 304);
 	static_assert(offsetof(Settings, distanceHazeMaxOpacity) == 308);
-	static_assert(sizeof(Settings) == 320);
+	static_assert(offsetof(Settings, originalFogColorOverride) == 320);
+	static_assert(sizeof(Settings) == 336);
 
 	Settings GetCommonBufferData() const;
 

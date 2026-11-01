@@ -40,6 +40,10 @@
             }
         ],
         "UseSimplePalette": false,
+        "ShowActionIcons": true,
+        "UseMonochromeIcons": true,
+        "ShowFooter": true,
+        "CenterHeader": true,
         "TooltipHoverDelay": 0.5,
         "BackgroundBlurEnabled": true,
         "Palette": {
@@ -105,6 +109,21 @@
             "LogSliderDeadzone": 4.0,
             "MouseCursorScale": 1.0,
             "TableAngledHeadersAngle": 0.611
+        },
+        "UseCustomCursor": true,
+        "Cursor": {
+            "Scale": 1.0,
+            "Types": {
+                "Arrow": { "HotspotX": 3.0, "HotspotY": 2.2 },
+                "TextInput": { "HotspotX": 12.0, "HotspotY": 12.0 },
+                "ResizeAll": { "HotspotX": 12.0, "HotspotY": 12.0 },
+                "ResizeNS": { "HotspotX": 12.0, "HotspotY": 12.0 },
+                "ResizeEW": { "HotspotX": 12.0, "HotspotY": 12.0 },
+                "ResizeNESW": { "HotspotX": 12.0, "HotspotY": 12.0 },
+                "ResizeNWSE": { "HotspotX": 12.0, "HotspotY": 12.0 },
+                "Hand": { "HotspotX": 10.6, "HotspotY": 2.2 },
+                "NotAllowed": { "HotspotX": 12.0, "HotspotY": 12.0 }
+            }
         },
         "Colors": {
             "Text": [0.92, 0.92, 0.94, 1.0],

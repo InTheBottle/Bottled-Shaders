@@ -12,8 +12,8 @@ cbuffer SunMaskParams : register(b0)
 
 struct PS_INPUT
 {
-	float4 pos : SV_POSITION;
-	float2 txcoord0 : TEXCOORD0;
+	float4 pos: SV_POSITION;
+	float2 txcoord0: TEXCOORD0;
 };
 
 float4 main(PS_INPUT input) : SV_Target

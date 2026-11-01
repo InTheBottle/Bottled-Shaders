@@ -225,6 +225,7 @@ void TerrainHelper::BSLightingShader_SetupMaterial(RE::BSLightingShaderMaterialB
 		return;
 	}
 
+	// Read the slots in place under the shared lock: copying them would add and release a reference per texture on every draw.
 	const std::shared_lock lock(extendedSlotsMutex);
 
 	const auto it = extendedSlots.find(material->hashKey);

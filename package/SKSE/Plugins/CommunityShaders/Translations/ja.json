@@ -1,6 +1,5 @@
 {
-    "_meta": {
-    },
+    "_meta": {},
     "cs_editor.add_new_marker": "新しいマーカーを追加する",
     "cs_editor.ambient_color": "アンビエントカラー",
     "cs_editor.apply": "適用",

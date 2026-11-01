@@ -1,5 +1,7 @@
 #include "Menu.h"
+#include "Menu/FeatureUndo.h"
 #include "Menu/FontAtlasState.h"
+#include "Utils/Notifications.h"
 
 #ifndef DIRECTINPUT_VERSION
 #	define DIRECTINPUT_VERSION 0x0800
@@ -35,6 +37,7 @@
 #include "Menu/Fonts.h"
 #include "Menu/SetupRenderer.h"
 #include "Menu/MenuHeaderRenderer.h"
+#include "Menu/MenuShortcuts.h"
 #include "Menu/OverlayRenderer.h"
 #include "Menu/PresetsPageRenderer.h"
 #include "Menu/SettingsTabRenderer.h"
@@ -44,7 +47,9 @@
 #include "State.h"
 #include "Util.h"
 #include "Utils/UI.h"
+#include "Utils/UIHooks.h"
 
+#include "CSEditor/Browser/BrowserWidgets.h"
 #include "CSEditor/EditorWindow.h"
 #include "CSEditor/SceneManager/SceneSettingsManager.h"
 #include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
@@ -164,12 +169,14 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	GlobalScale,
 	FontRoles,
 	UseSimplePalette,
+	ShowFooter,
 	TooltipHoverDelay,
 	BackgroundBlurEnabled,
 	MenuFadeEnabled,
 	UseCustomCursor,
 	Cursor,
 	ScrollbarOpacity,
+	Surfaces,
 	Palette,
 	StatusPalette,
 	FeatureHeading,
@@ -188,6 +195,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	FirstTimeSetupCompleted,
 	SkipClearCacheConfirmation,
 	AutoHideFeatureList,
+	ReduceUIAnimations,
+	AnimationSpeed,
 	FeatureListSort,
 	SkipConstraintWarning,
 	RequireShiftToDock,
@@ -196,6 +205,25 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	SelectedThemePreset)
 
 bool IsEnabled = false;
+
+namespace
+{
+	/**
+	 * @brief FeatureUndo's target for a feature, plus the bookkeeping DrawFeatureBody does after a settings
+	 * rewrite. Its restore already marks the settings changed and drops the cached baseline-edits answer;
+	 * the scene layer's cached apply document must also take the restored values before anything replays it.
+	 */
+	UndoHistory::Target MakeMenuFeatureUndoTarget(Feature* feature)
+	{
+		auto target = FeatureUndo::MakeTarget(feature);
+		target.restore = [restore = std::move(target.restore), feature](const UndoHistory::Snapshot& snapshot) {
+			restore(snapshot);
+			globals::sceneSettingsManager->CaptureExternalFeatureChanges(feature, true);
+			globals::menu->MarkFeatureEdited(feature);
+		};
+		return target;
+	}
+}
 
 namespace
 {
@@ -216,6 +244,12 @@ namespace
 		{ "Hand", ImGuiMouseCursor_Hand },
 		{ "NotAllowed", ImGuiMouseCursor_NotAllowed },
 	};
+}
+
+void Menu::ThemeFromJson(const json& themeJson, ThemeSettings& theme)
+{
+	theme = themeJson.get<ThemeSettings>();
+	PaletteFromJson(themeJson, theme.FullPalette);
 }
 
 void Menu::CursorFromJson(const json& cursorJson, ThemeSettings::CursorSettings& cursor)
@@ -434,6 +468,11 @@ void Menu::Load(json& o_json)
 	loadComboList(o_json, "Effects11ToggleKey", settings.Effects11ToggleKey);
 	loadComboList(o_json, "Effects11EditorKey", settings.Effects11EditorKey);
 
+	// Feature list filters; bits from a newer or hand-edited config that no chip uses are dropped
+	settings.FeatureListFilter = 0;
+	if (const auto it = o_json.find("FeatureListFilter"); it != o_json.end() && it->is_number_integer() && it->get<std::int64_t>() >= 0)
+		settings.FeatureListFilter = static_cast<std::uint32_t>(it->get<std::int64_t>() & FeatureListFilter::kKnown);
+
 	// Legacy support: If old config has Theme data and no SelectedThemePreset, load it
 	if (o_json.contains("Theme") && o_json["Theme"].is_object() && settings.SelectedThemePreset.empty()) {
 		bool hasFontRoles = o_json["Theme"].contains("FontRoles");
@@ -503,6 +542,8 @@ void Menu::Save(json& o_json)
 	InputCombo::ComboList::to_json(o_json["ScreenshotKey"], settings.ScreenshotKey);
 	InputCombo::ComboList::to_json(o_json["Effects11ToggleKey"], settings.Effects11ToggleKey);
 	InputCombo::ComboList::to_json(o_json["Effects11EditorKey"], settings.Effects11EditorKey);
+
+	o_json["FeatureListFilter"] = settings.FeatureListFilter;
 }
 
 void Menu::LoadTheme(json& o_json)
@@ -750,6 +791,7 @@ void Menu::Init()
 	// Detours must land before any feature draws, and this is the first guaranteed render-thread
 	// point; Install logs its own failure and leaves the interceptor inert.
 	SceneWidgetInterceptor::Install();
+	Util::UIHooks::Install();
 
 	initialized = true;
 }
@@ -773,6 +815,9 @@ void Menu::DrawSettings()
 		OnFocusChanged();
 		focusChanged = false;
 	}
+
+	// Outside the feature body and its baseline interceptor scope, before anything reads the settings this frame
+	ApplyPendingUndo();
 
 	// Apply theme styling with universal contrast enhancement
 	ThemeManager::SetupImGuiStyle(*this);
@@ -799,32 +844,39 @@ void Menu::DrawSettings()
 	// Use ### to keep a stable window ID regardless of the title text, preserving docking state
 	auto title = std::format("{}###CommunityShaders", displayTitle);
 
-	// Determine window flags based on docking state
-	ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar;
-	// Check if this will be docked (we need to peek at the docking state)
+	// The title bar only shows while docked; the window cannot be asked before it begins, so last frame's state stands in
 	static bool wasDocked = false;
-	bool willBeDocked = wasDocked;  // Use previous frame's state as approximation
-
-	// Only hide title bar when not docked
-	if (!willBeDocked) {
+	ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar;
+	if (!wasDocked)
 		windowFlags |= ImGuiWindowFlags_NoTitleBar;
-	}
 
 	Util::BeginWithRoundedClose(title.c_str(), &IsEnabled, windowFlags);
 	{
-		// Update docking state tracking
-		bool isDocked = ImGui::IsWindowDocked();
+		const bool isDocked = ImGui::IsWindowDocked();
 		wasDocked = isDocked;
 
-		HandleMenuShortcuts();
+		// Before anything draws, so a shortcut's request reaches the header and feature list this frame.
+		DispatchShortcuts();
+
 		MenuHeaderRenderer::RenderHeader(isDocked);
 		Util::DrawRecacheBanner();
+
+		const float footerHeight = settings.Theme.ShowFooter ? MenuHeaderRenderer::GetStatusBarHeight() : 0.0f;
 
 		// Static storage for menu state - must persist across frames
 		static size_t selectedMenu = 0;
 		static std::map<std::string, bool> categoryExpansionStates;
 
-		// Render feature list using extracted component
+		shownFeature = nullptr;
+		FeatureListRenderer::Hooks listHooks{
+			.featureStep = std::exchange(pendingFeatureStep, 0),
+			.onFeatureShown = [this](Feature* feat) {
+				shownFeature = feat;
+				// Watched before the header, so its Restore / Use Baselines clicks and the body's edits are both seen
+				if (feat->loaded && feat->UsesMainSettings() && !globals::state->IsFeatureDisabled(feat->GetShortName()))
+					undoHistory.Watch(MakeMenuFeatureUndoTarget(feat)); },
+			.runFeatureCommand = [this](Feature* feat, const std::function<void()>& command) { undoHistory.Change(MakeMenuFeatureUndoTarget(feat), command); },
+		};
 		FeatureListRenderer::RenderFeatureList(
 			selectedMenu,
 			featureSearch,
@@ -833,14 +885,22 @@ void Menu::DrawSettings()
 			categoryExpansionStates,
 			[&]() { DrawGeneralSettings(); },
 			[&]() { DrawAdvancedSettings(); },
-			MenuHeaderRenderer::GetStatusBarHeight());
+			footerHeight,
+			listHooks);
 
-		MenuHeaderRenderer::RenderStatusBar();
+		if (settings.Theme.ShowFooter)
+			MenuHeaderRenderer::RenderStatusBar();
 
-		// Draw global popups (needs to be called once per frame)
+		// Global popups, once per frame
 		Util::DrawClearShaderCacheConfirmation();
+		Util::DrawRestoreSavedSettingsConfirmation();
 	}
 	ImGui::End();
+
+	// After every watched feature has drawn; records the change an interaction that ended this frame made
+	undoHistory.EndFrame();
+	// The overlay also hosts the toasts; Draw() only draws once per frame
+	Util::Notifications::Draw();
 
 	popupOpenLastFrame = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
 }
@@ -864,18 +924,6 @@ void Menu::ApplyWindowLayout()
 	const float width = std::clamp(viewport->WorkSize.x * ThemeManager::Constants::SIDE_PANEL_WIDTH_RATIO, minWidth, maxWidth);
 	ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + margin, viewport->WorkPos.y + margin), layoutCond);
 	ImGui::SetNextWindowSize(ImVec2(width, viewport->WorkSize.y - margin * 2.0f), layoutCond);
-}
-
-void Menu::HandleMenuShortcuts()
-{
-	if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
-		return;
-	if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
-		SaveSettings();
-		Util::NotifyButtonFlash(T("menu.save_settings", "Save Settings"));
-	}
-	if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_F))
-		focusFeatureSearch = true;
 }
 
 void Menu::SaveSettings()
@@ -952,6 +1000,64 @@ void Menu::SetSidePanelLayout(bool enabled)
 	ImGui::MarkIniSettingsDirty();
 }
 
+void Menu::MarkFeatureEdited(Feature* feature)
+{
+	const auto shortName = feature->GetShortName();
+	unsavedFeatures.insert(shortName);
+	pendingDiffFeature = shortName;
+}
+
+void Menu::ApplyPendingUndo()
+{
+	const auto request = std::exchange(pendingUndo, UndoRequest::None);
+	if (request == UndoRequest::None)
+		return;
+
+	const bool undo = request == UndoRequest::Undo;
+	auto* i18n = I18n::GetSingleton();
+	if (const auto label = undo ? undoHistory.Undo() : undoHistory.Redo()) {
+		const auto message = undo ? i18n->Format("menu.shortcuts.undid", { { "name", *label } }, "Undid: {name}") :
+		                            i18n->Format("menu.shortcuts.redid", { { "name", *label } }, "Redid: {name}");
+		Util::Notifications::Show(message, Util::Colors::GetInfo(), ThemeManager::Constants::UNDO_TOAST_SECONDS);
+	} else {
+		Util::Notifications::ShowOnce(undo ? T("menu.shortcuts.nothing_to_undo", "Nothing to undo") : T("menu.shortcuts.nothing_to_redo", "Nothing to redo"),
+			settings.Theme.StatusPalette.Disable, ThemeManager::Constants::UNDO_TOAST_SECONDS);
+	}
+}
+
+MenuShortcuts::Actions Menu::MakeShortcutActions()
+{
+	return {
+		.save = [this] {
+			SaveSettings();
+			Util::NotifyButtonFlash(T("menu.save_settings", "Save Settings")); },
+		.undo = [this] { pendingUndo = UndoRequest::Undo; },
+		.redo = [this] { pendingUndo = UndoRequest::Redo; },
+		.focusSearch = [this] { focusFeatureSearch = true; },
+		.stepFeature = [this](int step) { pendingFeatureStep = step; },
+		.canTogglePin = [this] { return shownFeature && shownFeature->loaded && shownFeature->GetCategory() != FeatureCategories::kUtility; },
+		.togglePin = [this] { FeatureListRenderer::ToggleFavorite(shownFeature); },
+		.openPage = [this](std::string_view pageId) { SelectFeatureMenu(std::string(pageId)); },
+		.canOpenEditor = [] { return EditorWindow::CanBeOpen(); },
+		.openEditor = [] { CSEditor::OpenEditorWindow(); },
+	};
+}
+
+void Menu::DispatchShortcuts()
+{
+	if (shortcuts.empty())
+		shortcuts = MenuShortcuts::BuildTable(MakeShortcutActions());
+
+	// The CS Editor has its own Ctrl+Z / Ctrl+S, a focused text field owns its keys, a hotkey capture
+	// records the next chord as a binding, and a modal (confirmation) must be answered first.
+	const auto* editorWindow = EditorWindow::GetSingleton();
+	const bool allowed = IsEnabled && !ImGui::GetIO().WantTextInput && !IsCapturingHotkeyInput() &&
+	                     !(editorWindow && editorWindow->open) && !ImGui::GetTopMostPopupModal() &&
+	                     !SetupRenderer::ShouldShowFirstTimeSetup();
+	if (allowed)
+		MenuShortcuts::Dispatch(shortcuts);
+}
+
 /**
  * @brief Renders the General settings tab content
  *
@@ -994,38 +1100,61 @@ void Menu::DrawAdvancedSettings()
 
 void Menu::DrawDisableAtBootSettings()
 {
-	auto state = globals::state;
-	auto& disabledFeatures = state->GetDisabledFeatures();
+	auto& disabledFeatures = globals::state->GetDisabledFeatures();
 
-	ImGui::Text("%s",
+	ImGui::TextWrapped("%s",
 		T("menu.disable_at_boot_desc",
 			"Select features to disable at boot. "
 			"This is the same as deleting a feature.ini file. "
 			"Restart will be required to reenable."));
+	ImGui::PushStyleColor(ImGuiCol_Text, settings.Theme.StatusPalette.RestartNeeded);
+	ImGui::TextWrapped("%s", T("menu.settings.disable_at_boot_restart", "Changes here take effect the next time the game starts."));
+	ImGui::PopStyleColor();
 
 	ImGui::Spacing();
 
-	if (ImGui::CollapsingHeader(T("menu.features", "Features"), ImGuiTreeNodeFlags_DefaultOpen)) {
-		// Prepare a sorted list of feature pointers
-		auto featureList = Feature::GetFeatureList();
-		std::sort(featureList.begin(), featureList.end(), [](Feature* a, Feature* b) {
-			return a->GetShortName() < b->GetShortName();
-		});
+	const char* disabledOnlyLabel = T("menu.settings.disabled_only", "Disabled only");
+	const float chipWidth = BrowserUI::MeasureChip(disabledOnlyLabel, false);
+	const float searchWidth = std::max(ImGui::GetFrameHeight() * ThemeManager::Constants::DISABLE_AT_BOOT_MIN_SEARCH_FRAMES, ImGui::GetContentRegionAvail().x - chipWidth - ImGui::GetStyle().ItemSpacing.x);
+	Util::SearchField("##DisableAtBootSearch", disableAtBootSearch, T("ui.search", "Search..."), searchWidth, false);
+	BrowserUI::SameLineIfFits(chipWidth);
+	if (BrowserUI::FilterChip("##DisabledOnly", { disabledOnlyLabel }, disableAtBootDisabledOnly))
+		disableAtBootDisabledOnly = !disableAtBootDisabledOnly;
 
-		// Display sorted features
-		for (auto* feature : featureList) {
-			if (feature->IsHiddenUnreleased())
-				continue;
+	ImGui::Spacing();
 
-			const std::string featureName = feature->GetShortName();
-			bool isDisabled = disabledFeatures.contains(featureName) && disabledFeatures[featureName];
-
-			if (ImGui::Checkbox(featureName.c_str(), &isDisabled)) {
-				// Update the disabledFeatures map based on user interaction
-				disabledFeatures[featureName] = isDisabled;
-			}
-		}
+	// Label by the (translated) display name the feature list shows; the short name keys the setting and the widget ID
+	const std::string query(disableAtBootSearch.data());
+	std::vector<std::pair<std::string, std::string>> entries;  // display name, short name
+	for (auto* feature : Feature::GetFeatureList()) {
+		if (feature->IsHiddenUnreleased() || !Util::FeatureMatchesSearch(feature, query))
+			continue;
+		const std::string shortName(feature->GetShortName());
+		if (disableAtBootDisabledOnly && !(disabledFeatures.contains(shortName) && disabledFeatures[shortName]))
+			continue;
+		entries.emplace_back(feature->GetDisplayName(), shortName);
 	}
+	std::ranges::sort(entries);
+
+	if (entries.empty())
+		ImGui::TextDisabled("%s", T("menu.settings.disable_at_boot_no_match", "No features match."));
+
+	// As many columns as the widest name allows, filled row by row
+	const ImGuiStyle& style = ImGui::GetStyle();
+	float widestName = 0.0f;
+	for (const auto& entry : entries)
+		widestName = std::max(widestName, ImGui::CalcTextSize(entry.first.c_str()).x);
+	const float columnWidth = ImGui::GetFrameHeight() + style.ItemInnerSpacing.x + widestName + style.ItemSpacing.x;
+	const int columns = std::clamp(static_cast<int>(ImGui::GetContentRegionAvail().x / columnWidth), 1, std::max(1, static_cast<int>(entries.size())));
+	if (entries.empty() || !ImGui::BeginTable("##DisableAtBoot", columns, ImGuiTableFlags_SizingStretchSame))
+		return;
+	for (const auto& [displayName, shortName] : entries) {
+		ImGui::TableNextColumn();
+		bool isDisabled = disabledFeatures.contains(shortName) && disabledFeatures[shortName];
+		if (ImGui::Checkbox(std::format("{}##{}", displayName, shortName).c_str(), &isDisabled))
+			disabledFeatures[shortName] = isDisabled;
+	}
+	ImGui::EndTable();
 }
 
 /**
@@ -1049,17 +1178,13 @@ void Menu::DrawOverlay()
 		atlas.pendingFontReload = true;
 	}
 
-	// Process deferred font reload BEFORE any ImGui operations
-	// This is the safest place to do font atlas modifications
+	// Deferred font reload, before any ImGui operation: the safest place to modify the font atlas.
+	// The flag stays set on failure, so it retries next frame.
 	if (MenuFonts::GetAtlasState().pendingFontReload && canReload) {
-		// Call ReloadFont first - only clear flag if it succeeds
-		if (ThemeManager::ReloadFont(*this, MenuFonts::GetAtlasState().cachedFontSize)) {
-			// Reload completed successfully
+		if (ThemeManager::ReloadFont(*this, MenuFonts::GetAtlasState().cachedFontSize))
 			MenuFonts::GetAtlasState().pendingFontReload = false;
-		} else {
-			// Reload failed - keep flag true to retry next frame
+		else
 			logger::warn("Menu::DrawOverlay() - Font reload failed, will retry next frame");
-		}
 	}
 
 	if (pendingCursorReload && canReload) {
@@ -1086,18 +1211,7 @@ void Menu::DrawOverlay()
 		ThemeManager::ResolveFontSize(*this));
 }
 
-/**
- * @brief Processes queued input events
- *
- * This method handles the logic of routing input events to appropriate handlers:
- * - Keyboard and mouse events are processed directly for ImGui integration
- * - Includes key state normalization and stuck key detection/correction
- *
- * The method maintains thread safety through mutex protection of the input event queue.
- *
- * @note This method contains Menu-specific logic and state management that makes it
- *       inappropriate for extraction to a utility class.
- */
+/** @brief The CS Editor key derived from the menu key: Shift plus its base key; empty when the menu key already uses Shift or has no base key. */
 static std::vector<InputCombo> DeriveCSEditorKey(const std::vector<InputCombo>& menuKey)
 {
 	bool hasShift = false;
@@ -1119,6 +1233,18 @@ static std::vector<InputCombo> DeriveCSEditorKey(const std::vector<InputCombo>& 
 	return { InputCombo::Keyboard(VK_SHIFT), InputCombo::Keyboard(baseKey) };
 }
 
+/**
+ * @brief Processes queued input events
+ *
+ * This method handles the logic of routing input events to appropriate handlers:
+ * - Keyboard and mouse events are processed directly for ImGui integration
+ * - Includes key state normalization and stuck key detection/correction
+ *
+ * The method maintains thread safety through mutex protection of the input event queue.
+ *
+ * @note This method contains Menu-specific logic and state management that makes it
+ *       inappropriate for extraction to a utility class.
+ */
 void Menu::ProcessInputEventQueue()
 {
 	std::unique_lock<std::shared_mutex> mutex(_inputEventMutex);
@@ -1340,11 +1466,10 @@ void Menu::ProcessInputEventQueue()
 						if (effects11Editor.ShouldHandleEscapeKey())
 							effects11Editor.Close();
 					} else if (IsEnabled && (!editorWindow || !editorWindow->open)) {
+						const bool escapeClaimed = TakeConsumedEscape();
 						if (suppressNextEscape)
 							suppressNextEscape = false;
-						else if (editorWindow && editorWindow->suppressNextEditorEscape)
-							editorWindow->suppressNextEditorEscape = false;
-						else
+						else if (!escapeClaimed)
 							IsEnabled = false;
 					}
 				}
@@ -1441,9 +1566,8 @@ void Menu::OnFocusChanged()
 {
 	// Solves the alt+tab stuck issue, but disables tab after tabbing back in.
 	if (const auto& inputMgr = RE::BSInputDeviceManager::GetSingleton()) {
-		if (const auto& device = inputMgr->GetKeyboard()) {
+		if (const auto& device = inputMgr->GetKeyboard())
 			device->ClearInputState();
-		}
 	}
 	// Allows tab to work again after alt+tabbing back in.
 	ImGui::GetIO().ClearInputKeys();
@@ -1451,23 +1575,20 @@ void Menu::OnFocusChanged()
 
 void Menu::ProcessInputEvents(RE::InputEvent* const* a_events)
 {
+	// Only button, char and thumbstick events matter
 	for (auto it = *a_events; it; it = it->next) {
-		// Accept button, char, and thumbstick events
-		if (it->GetEventType() != RE::INPUT_EVENT_TYPE::kButton &&
-			it->GetEventType() != RE::INPUT_EVENT_TYPE::kChar &&
-
-			it->GetEventType() != RE::INPUT_EVENT_TYPE::kThumbstick
-
-			)  // we do not care about non button/char/thumbstick events
-			continue;
-
-		if (it->GetEventType() == RE::INPUT_EVENT_TYPE::kButton) {
+		switch (it->GetEventType()) {
+		case RE::INPUT_EVENT_TYPE::kButton:
 			addToEventQueue(KeyEvent(static_cast<RE::ButtonEvent*>(it)));
-		} else if (it->GetEventType() == RE::INPUT_EVENT_TYPE::kChar) {
+			break;
+		case RE::INPUT_EVENT_TYPE::kChar:
 			addToEventQueue(KeyEvent(static_cast<CharEvent*>(it)));
-
-		} else if (it->GetEventType() == RE::INPUT_EVENT_TYPE::kThumbstick) {
+			break;
+		case RE::INPUT_EVENT_TYPE::kThumbstick:
 			addToEventQueue(KeyEvent(static_cast<RE::ThumbstickEvent*>(it)));
+			break;
+		default:
+			break;
 		}
 	}
 }
@@ -1556,15 +1677,8 @@ void Menu::SelectFeatureMenu(const std::string& featureName)
  */
 void Menu::DrawWeatherDetailsWindow()
 {
-	if (!globals::features::csEditor.WeatherDetailsWindow.Enabled) {
+	auto& csEditor = globals::features::csEditor;
+	if (!csEditor.WeatherDetailsWindow.Enabled || !csEditor.loaded)
 		return;
-	}
-	if (!globals::features::csEditor.loaded) {
-		return;
-	}
-
-	// Use Weather core feature for all window management and rendering
-	auto& weather = globals::features::csEditor;
-	bool* p_open = &globals::features::csEditor.WeatherDetailsWindow.Enabled;
-	weather.RenderWeatherDetailsWindow(p_open, !globals::features::performanceOverlay.settings.ShowWeatherPicker);
+	csEditor.RenderWeatherDetailsWindow(&csEditor.WeatherDetailsWindow.Enabled, !globals::features::performanceOverlay.settings.ShowWeatherPicker);
 }

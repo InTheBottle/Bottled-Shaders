@@ -10,6 +10,7 @@ public:
 	virtual void Execute() override;
 	virtual void UpdateEffectVariables() override;
 
+	/** @brief Releases the sun mask shader so it recompiles on the next frame it is needed. */
 	void ClearShaderCache();
 
 	TextureManager::Texture textureCurrent;
@@ -28,7 +29,12 @@ private:
 		float4 MaskParams;
 	};
 
+	/** @brief Compiles the sun mask shader and creates its constant buffer and sampler on first use. */
 	bool EnsureSunMaskResources();
+	/**
+	 * @brief Replaces the procedural sun disc with the surrounding sky in the image adaptation measures.
+	 * @return The masked image, or a_source when masking is off or unavailable.
+	 */
 	ID3D11ShaderResourceView* MaskProceduralSun(ID3D11ShaderResourceView* a_source);
 
 	ID3D11PixelShader* sunMaskPS = nullptr;

@@ -175,6 +175,10 @@ public:
 	bool IsWeatherSystemEnabled() const;
 	void SetWeatherBlendFactors(uint32_t currentWeatherID, uint32_t lastWeatherID, float blendFactor);
 
+	/**
+	 * @brief Pins weather-aware reads on this thread to a fixed blend between the last (0) and current (1)
+	 * weather for its lifetime, so a weather's colours can be graded with that weather's own preset values.
+	 */
 	class ScopedWeatherBlend
 	{
 	public:

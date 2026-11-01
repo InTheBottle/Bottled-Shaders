@@ -4,8 +4,8 @@
 #include <filesystem>
 #include <winrt/base.h>
 
-#include "Profiler.h"
 #include "../TextureManager.h"
+#include "Profiler.h"
 
 class Effect
 {
@@ -256,6 +256,8 @@ public:
 
 	// Execute a technique sequence with ping-pong rendering
 	TechniqueSequenceResult ExecuteTechniqueSequence(const std::string& a_baseTechniqueName, ID3D11ShaderResourceView* a_input, TextureManager::Texture& a_output, TextureManager::Texture& a_temp);
+
+	void ExecuteTechniquesOnto(const std::string& a_baseTechniqueName, ID3D11ShaderResourceView* a_input, ID3D11RenderTargetView* a_target, ID3D11BlendState* a_blendState);
 
 	// Execute a single technique
 	bool ExecuteTechnique(const std::string& techniqueName, TextureManager::Texture& output);

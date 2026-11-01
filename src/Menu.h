@@ -1,12 +1,17 @@
 
 #pragma once
+#include "CSEditor/UndoHistory.h"
 #include "Feature.h"
 #include "Menu/FontAtlasState.h"
+#include "Menu/MenuShortcuts.h"
 #include "Menu/ThemeManager.h"
 #include "Utils/Input.h"
 #include "Utils/Serialize.h"
+#include "Utils/UISurface.h"
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <dxgi1_4.h>
 #include <nlohmann/json.hpp>
@@ -16,6 +21,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 #include <winrt/base.h>
 
@@ -173,6 +179,29 @@ public:
 	/** @brief Returns true if the free camera preview is in flying mode */
 	bool IsPreviewFlying();
 	/**
+	 * @brief Claims the Escape press ImGui reports this frame for a widget, such as a search field
+	 * clearing its text or a popup closing, so the same press does not also close the CS Editor or
+	 * this menu when the key is released.
+	 */
+	void ConsumeEscape() { escapeConsumed = true; }
+	/** @brief Drops the main menu's undo history, so reloaded saved settings cannot be undone into stale edits. */
+	void ClearUndoHistory() { undoHistory.Forget(""); }
+	/** @brief Registers a target in the main menu's undo history (Ctrl+Z / Ctrl+Y) for the frame its UI is drawn; call before drawing it. */
+	void WatchUndoTarget(UndoHistory::Target target) { undoHistory.Watch(std::move(target)); }
+	/** @brief Queues an undo of the newest change, applied before the next frame draws, as Ctrl+Z does. */
+	void RequestUndo() { pendingUndo = UndoRequest::Undo; }
+	/** @brief Queues a redo of the newest undone change, as Ctrl+Y does. */
+	void RequestRedo() { pendingUndo = UndoRequest::Redo; }
+	/** @brief Whether the main menu's history has a change to undo. */
+	bool CanUndo() const { return undoHistory.CanUndo(); }
+	/** @brief Whether the main menu's history has an undone change to redo. */
+	bool CanRedo() const { return undoHistory.CanRedo(); }
+	/**
+	 * @brief Reads and clears the claim made by ConsumeEscape().
+	 * @return True when a widget claimed the Escape press being released.
+	 */
+	bool TakeConsumedEscape() { return std::exchange(escapeConsumed, false); }
+	/**
 	 * @brief Builds a deterministic string signature from current font configuration.
 	 * @param baseFontSize The base pixel size before per-role scaling.
 	 * @return A signature string used to detect when fonts need reloading.
@@ -242,10 +271,11 @@ public:
 		}();
 
 		bool UseSimplePalette = false;      // DEPRECATED: No longer affects behavior. UI now shows both Simple and Advanced controls.
+		bool ShowFooter = true;             // whether to show the status bar at the bottom of the window
 		float TooltipHoverDelay = 0.5f;     // tooltip hover delay in seconds
 		bool BackgroundBlurEnabled = true;  // enable background blur effect
 		bool MenuFadeEnabled = true;        // fade the menu and its blur in and out when it is toggled
-		bool UseCustomCursor = false;       // use theme cursor images instead of default ImGui cursors
+		bool UseCustomCursor = true;        // use theme cursor images instead of default ImGui cursors (each bundled theme ships a set)
 		struct CursorImageSettings
 		{
 			std::string File;
@@ -268,6 +298,7 @@ public:
 			float ThumbHovered = 0.75f;  // Thumb when hovered
 			float ThumbActive = 0.9f;    // Thumb when being dragged
 		} ScrollbarOpacity;
+		Util::Surface::Settings Surfaces;  // per-role look of the menu's flat surfaces (Home cards, toasts, palette, nav)
 		struct PaletteColors
 		{
 			ImVec4 Background{ 0.04f, 0.04f, 0.05f, 0.88f };
@@ -393,6 +424,11 @@ public:
 	static void PaletteToJson(json& themeJson, const std::array<ImVec4, ImGuiCol_COUNT>& palette);
 	/** @brief Deserializes palette from named color map or legacy positional array */
 	static void PaletteFromJson(const json& themeJson, std::array<ImVec4, ImGuiCol_COUNT>& palette);
+	/**
+	 * @brief Reads a theme file's "Theme" object into theme settings, palette included, without applying it.
+	 * @throws nlohmann::json::exception when the object does not fit.
+	 */
+	static void ThemeFromJson(const json& themeJson, ThemeSettings& theme);
 
 	/** @brief Serializes cursor settings to JSON using named cursor type keys */
 	static void CursorToJson(json& cursorJson, const ThemeSettings::CursorSettings& cursorSettings);
@@ -422,15 +458,28 @@ public:
 		bool FirstTimeSetupCompleted = false;                                                                                // Track if first-time setup has been completed
 		bool SkipClearCacheConfirmation = false;                                                                             // Skip confirmation dialog when clearing shader cache
 		bool AutoHideFeatureList = false;                                                                                    // Auto-hide left feature list panel, show on hover
+		float AnimationSpeed = 1.0f;                                                                                         // Menu animation speed multiplier (Util::Anim::Speed clamps it to the supported range)
+		bool ReduceUIAnimations = false;                                                                                     // Snap menu animations (hover fades, slides, expanding search) instead of easing
+		std::uint32_t FeatureListFilter = 0;                                                                                 // Feature list filters (FeatureListFilter bits); read in Load, unknown bits dropped
 		FeatureSortMode FeatureListSort = FeatureSortMode::Category;                                                         // Feature list order in the left menu column
 		bool SkipConstraintWarning = false;                                                                                  // Skip popup when a setting change creates new constraints
 		bool RequireShiftToDock = true;                                                                                      // Require holding Shift to dock windows
 		bool UseResolutionFont = true;                                                                                       // When true, runtime font size scales with screen resolution; when persisted to theme files, FontSize is zeroed for backward compatibility
 		ThemeSettings Theme;
-		std::string SelectedThemePreset = "";  // Currently selected theme preset (empty = custom/user theme)
+		std::string SelectedThemePreset = "";     // Currently selected theme preset (empty = custom/user theme)
+		std::string LastSettingsSection;       // Settings section the Go To index asks for (SettingsSectionIds)
 	};
 	/** @brief Gets the current theme settings */
 	const ThemeSettings& GetTheme() const { return settings.Theme; }
+
+	/** @brief Feature title scale from the theme, defaulted when malformed and clamped to the UI slider range. */
+	float GetFeatureTitleScale() const
+	{
+		float scale = settings.Theme.FeatureHeading.FeatureTitleScale;
+		if (!std::isfinite(scale))
+			scale = ThemeManager::Constants::DEFAULT_FEATURE_TITLE_SCALE;
+		return std::clamp(scale, ThemeManager::Constants::SETTINGS_TITLE_SCALE_MIN, ThemeManager::Constants::SETTINGS_TITLE_SCALE_MAX);
+	}
 	/** @brief Gets the mutable menu settings */
 	Settings& GetSettings() { return settings; }
 	/** @brief Gets the menu settings */
@@ -445,7 +494,8 @@ public:
 	ImFont* GetFont(FontRole role) const { return MenuFonts::GetAtlasState().GetFont(static_cast<size_t>(role)); }
 
 	/** @brief Queues a feature to be selected in the left panel on the next frame.
-	 *  @param featureName Feature short name, or a built-in page's display name such as Presets. */
+	 *  @param featureName Feature short name, or a built-in page ID from MenuPageIds (FeatureListRenderer.h) such as
+	 *  "Presets". A page's display name still works as a fallback. */
 	void SelectFeatureMenu(const std::string& featureName);
 
 	bool HasUnsavedChanges() const;
@@ -463,6 +513,12 @@ public:
 
 	bool IsSidePanelLayout() const { return sidePanelLayout; }
 	void SetSidePanelLayout(bool enabled);
+
+	/** @brief Marks a feature's settings as edited from outside its page, so the unsaved check re-diffs it. */
+	void MarkFeatureEdited(Feature* feature);
+
+	/** @brief The menu's keyboard shortcut table; empty until the first frame is drawn. */
+	const std::vector<MenuShortcuts::Shortcut>& GetShortcuts() const { return shortcuts; }
 
 	bool overlayVisible = false;
 
@@ -513,8 +569,6 @@ public:
 		[[nodiscard]] constexpr bool IsPressed() const noexcept { return value > 0.0F; }
 		[[nodiscard]] constexpr bool IsRepeating() const noexcept { return heldDownSecs > 0.0F; }
 		[[nodiscard]] constexpr bool IsDown() const noexcept { return IsPressed() && (heldDownSecs == 0.0F); }
-		[[nodiscard]] constexpr bool IsHeld() const noexcept { return IsPressed() && IsRepeating(); }
-		[[nodiscard]] constexpr bool IsUp() const noexcept { return (value == 0.0F) && IsRepeating(); }
 	};
 
 private:
@@ -541,6 +595,21 @@ private:
 	std::atomic<bool> unsavedResetPending = false;
 	bool suppressNextEscape = false;
 	bool popupOpenLastFrame = false;
+	int pendingFeatureStep = 0;           // Ctrl+PgUp / Ctrl+PgDn request, applied by the feature list this frame
+	Feature* shownFeature = nullptr;      // Feature whose page the right column drew; read by shortcuts the frame after
+
+	// Keyboard shortcuts, built on the first DrawSettings and dispatched once per frame
+	std::vector<MenuShortcuts::Shortcut> shortcuts;
+
+	// Undo / redo of feature settings edited in this menu; a separate history from the CS Editor's
+	enum class UndoRequest : std::uint8_t
+	{
+		None,
+		Undo,
+		Redo
+	};
+	UndoHistory undoHistory;
+	UndoRequest pendingUndo = UndoRequest::None;  // Set by Ctrl+Z / Ctrl+Y, applied at the start of the next DrawSettings
 
 	// Input event handling
 	std::vector<KeyEvent> _keyEventQueue;
@@ -562,6 +631,15 @@ private:
 	};
 	std::atomic<ToggleKeyRebind> toggleKeyRebind = ToggleKeyRebind::kOff;
 	std::atomic<bool> openRequested = false;
+	// Escape closes the menu or editor on key-up in ProcessInputEventQueue, which runs before
+	// ImGui::NewFrame. The key-down reached ImGui through an earlier frame's queue, so widgets see
+	// IsKeyPressed(Escape) and call ConsumeEscape() at least one frame before the release is
+	// handled; the claim waits here until that release reads it with TakeConsumedEscape().
+	bool escapeConsumed = false;
+
+	// Settings page: Disable at Boot list filter
+	std::string disableAtBootSearch;
+	bool disableAtBootDisabledOnly = false;
 
 	// Skyrim AFK vanity camera: delayed spin while idle. Held off while any CS UI is open.
 	bool vanityCameraDisabled = false;
@@ -573,7 +651,12 @@ private:
 	void DrawAdvancedSettings();
 	void DrawDisableAtBootSettings();
 	void ApplyWindowLayout();
-	void HandleMenuShortcuts();
+	/** @brief Applies a queued undo or redo before anything draws, and reports it with a toast. */
+	void ApplyPendingUndo();
+	/** @brief Binds the shortcut table's actions to this menu's state. */
+	MenuShortcuts::Actions MakeShortcutActions();
+	/** @brief Runs pressed shortcuts unless typing, capturing a hotkey, a modal or the CS Editor should have the keys. */
+	void DispatchShortcuts();
 
 	void addToEventQueue(KeyEvent e);
 	void ProcessInputEventQueue();

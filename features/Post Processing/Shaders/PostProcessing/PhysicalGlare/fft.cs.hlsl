@@ -106,7 +106,11 @@ float2 Twiddle(uint k, uint N)
 	GroupMemoryBarrierWithGroupSync();
 
 #if defined(ROW_PASS) && defined(FORWARD)
-	[branch] if (gs_nonzero == 0)
+	// An all-zero row transforms to zero. Sync after reading the flag so the early-out stays
+	// uniform for the barriers below.
+	const bool emptyRow = gs_nonzero == 0;
+	GroupMemoryBarrierWithGroupSync();
+	[branch] if (emptyRow)
 	{
 		RWTexOutput[uint2(threadIdx, groupId.x)] = 0.0f.xx;
 		RWTexOutput[uint2(threadIdx + FFT_SIZE / 2, groupId.x)] = 0.0f.xx;

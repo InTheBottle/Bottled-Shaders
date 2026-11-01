@@ -70,7 +70,7 @@ void Skylighting::DrawSettings()
 
 	ImGui::Separator();
 
-	if (ImGui::Button(T(TKEY("rebuild"), "Rebuild Skylighting")))
+	if (Util::Button(T(TKEY("rebuild"), "Rebuild Skylighting")))
 		ResetSkylighting();
 
 	if (auto _tt = Util::HoverTooltipWrapper())
@@ -444,8 +444,8 @@ RE::BSShaderProperty::RenderPassArray* Skylighting::BSLightingShaderProperty_Get
 	}
 
 	const bool validOccluder = property->flags.any(kZBufferWrite) &&
-		property->flags.none(kRefraction, kTempRefraction, kLODLandscape, kEyeReflect, kDecal, kDynamicDecal) &&
-		(skylighting.inOcclusion || property->flags.none(kMultiTextureLandscape, kNoLODLandBlend));
+	                           property->flags.none(kRefraction, kTempRefraction, kLODLandscape, kEyeReflect, kDecal, kDynamicDecal) &&
+	                           (skylighting.inOcclusion || property->flags.none(kMultiTextureLandscape, kNoLODLandBlend));
 	float minOccluderRadius = skylighting.inOcclusion ? skylighting.settings.OcclusionMinRadius : kEngineMinOccluderRadius;
 	if (skylighting.inOcclusion && skylighting.settings.OcclusionDistanceCulling > 0.f) {
 		const float distance = geometry->worldBound.center.GetDistance(skylighting.occlusionEyePosition);

@@ -10,6 +10,7 @@
 #include "Globals.h"
 #include "Menu.h"
 #include "State.h"
+#include "Utils/Game.h"
 
 #include "PresetManager.h"
 #include "SettingManager.h"
@@ -35,7 +36,7 @@ EffectManager& EffectManager::GetSingleton()
 uint32_t EffectManager::GetFailedEffectCount() const
 {
 	uint32_t count = 0;
-	const Effect* allEffects[] = { &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbEffect, &enbEffectPostPass };
+	const Effect* allEffects[] = { &enbEffectPrePass, &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbSunSprite, &enbEffect, &enbUnderwater, &enbEffectPostPass };
 	for (const auto* effect : allEffects)
 		if (effect->IsFilePresent() && !effect->GetErrors().empty())
 			count++;
@@ -45,7 +46,7 @@ uint32_t EffectManager::GetFailedEffectCount() const
 std::vector<std::string> EffectManager::GetAllErrors() const
 {
 	std::vector<std::string> result;
-	const Effect* allEffects[] = { &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbEffect, &enbEffectPostPass };
+	const Effect* allEffects[] = { &enbEffectPrePass, &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbSunSprite, &enbEffect, &enbUnderwater, &enbEffectPostPass };
 	for (const auto* effect : allEffects)
 		if (effect->IsFilePresent() && !effect->GetErrors().empty())
 			for (const auto& err : effect->GetErrors())
@@ -122,15 +123,18 @@ void EffectManager::Apply()
 	if (auto& rainRefraction = globals::features::rainRefraction; rainRefraction.loaded)
 		rainRefraction.LoadPresetRaindrops(PresetManager::GetSingleton().GetENBSeriesPath());
 
+	enbEffectPrePass.Apply();
 	enbDepthOfField.Apply();
 	enbBloom.Apply();
 	enbLens.Apply();
 	enbAdaptation.Apply();
+	enbSunSprite.Apply();
 	enbEffect.Apply();
+	enbUnderwater.Apply();
 	enbEffectPostPass.Apply();
 
 #ifdef ENABLE_ENB_EXTENDER
-	EffectBase* allEffects[] = { &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbEffect, &enbEffectPostPass };
+	EffectBase* allEffects[] = { &enbEffectPrePass, &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbSunSprite, &enbEffect, &enbUnderwater, &enbEffectPostPass };
 	for (auto* effect : allEffects) {
 		if (effect->IsCompiled())
 			effect->LoadWeatherData();
@@ -142,7 +146,7 @@ void EffectManager::Apply()
 
 void EffectManager::Load()
 {
-	EffectBase* allEffects[] = { &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbEffect, &enbEffectPostPass };
+	EffectBase* allEffects[] = { &enbEffectPrePass, &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbSunSprite, &enbEffect, &enbUnderwater, &enbEffectPostPass };
 	for (auto* effect : allEffects) {
 		effect->Load();
 #ifdef ENABLE_ENB_EXTENDER
@@ -155,11 +159,14 @@ void EffectManager::Load()
 
 void EffectManager::Save()
 {
+	enbEffectPrePass.Save();
 	enbDepthOfField.Save();
 	enbBloom.Save();
 	enbLens.Save();
 	enbAdaptation.Save();
+	enbSunSprite.Save();
 	enbEffect.Save();
+	enbUnderwater.Save();
 	enbEffectPostPass.Save();
 }
 
@@ -174,6 +181,9 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterBoolSetting("EnableBloom", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableLens", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnablePostPassShader", "EFFECT", false, false);
+	settingManager.RegisterBoolSetting("EnablePrepass", "EFFECT", false, false);
+	settingManager.RegisterBoolSetting("EnableSunGlare", "EFFECT", false, false);
+	settingManager.RegisterBoolSetting("EnableUnderwaterShader", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableCloudShadows", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableCloudsScattering", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableImageBasedLighting", "EFFECT", false, false);
@@ -209,7 +219,7 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterTimeOfDaySetting("WavesAmplitude", "WATER", 1.0f, 0.0f, 10.0f, 0.01f, true);
 	settingManager.RegisterFloatSetting("Muddiness", "WATER", 1.0f, 0.0f, 1.0f, 0.01f, false);
 	settingManager.RegisterFloatSetting("SunLightingMultiplier", "WATER", 1.0f, 0.0f, 1.0f, 0.01f, false);
-	settingManager.RegisterFloatSetting("SunSpecularMultiplier", "WATER", 1.0f, 0.0f, 1.0f, 0.01f, false);
+	settingManager.RegisterFloatSetting("SunSpecularMultiplier", "WATER", 1.0f, 0.0f, 4.0f, 0.01f, false);
 	settingManager.RegisterFloatSetting("FresnelMin", "WATER", 1.0f, 0.0f, 1.0f, 0.01f, false);
 	settingManager.RegisterFloatSetting("FresnelMax", "WATER", 1.0f, 0.0f, 1.0f, 0.01f, false);
 	settingManager.RegisterFloatSetting("FresnelMultiplier", "WATER", 1.0f, 0.0f, 4.0f, 0.01f, false);
@@ -310,7 +320,7 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterBoolSetting("EnableLighting", "VOLUMETRICFOG", false, false);
 	settingManager.RegisterBoolSetting("EnableShadows", "VOLUMETRICFOG", true, false);
 	settingManager.RegisterTimeOfDaySetting("Intensity", "VOLUMETRICFOG", 1.0f, 0.0f, 30000.0f, 0.01f, true);
-	settingManager.RegisterTimeOfDaySetting("Curve", "VOLUMETRICFOG", 1.0f, 1.0f, 2.5f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("Curve", "VOLUMETRICFOG", 1.0f, 0.1f, 8.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("ShadowAmount", "VOLUMETRICFOG", 0.5f, 0.0f, 0.8f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("Opacity", "VOLUMETRICFOG", 1.0f, 0.0f, 1.0f, 0.01f, true);
 	settingManager.RegisterColorTimeOfDaySetting("ColorFilter", "VOLUMETRICFOG", { 1.0f, 1.0f, 1.0f }, true);
@@ -320,7 +330,7 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterTimeOfDaySetting("GlowIntensity", "SUNGLARE", 1.0f, 0.0f, 1000.0f, 0.01f, true);
 
 	settingManager.RegisterTimeOfDaySetting("Intensity", "PARTICLE", 1.0f, 0.0f, 30000.0f, 0.01f, true);
-	settingManager.RegisterTimeOfDaySetting("LightingInfluence", "PARTICLE", 0.5f, 0.0f, 10.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("LightingInfluence", "PARTICLE", 0.5f, 0.0f, 30.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("AmbientInfluence", "PARTICLE", 0.5f, 0.0f, 10.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("PointLightingInfluence", "PARTICLE", 1.0f, 0.0f, 10.0f, 0.01f, true);
 
@@ -330,7 +340,7 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterBoolSetting("Enable", "RAIN", true, false);
 	settingManager.RegisterTimeOfDaySetting("MotionStretch", "RAIN", 0.28f, 0.0f, 1.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("MotionTransparency", "RAIN", 0.1f, 0.0f, 1.0f, 0.01f, true);
-	settingManager.RegisterFloatSetting("RefractionFactor", "RAIN", 1.0f, 0.0f, 2.0f, 0.01f, false);
+	settingManager.RegisterFloatSetting("RefractionFactor", "RAIN", 1.0f, -2.0f, 2.0f, 0.01f, false);
 	settingManager.RegisterTimeOfDaySetting("MotionBluriness", "RAIN", 0.0f, 0.0f, 1.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("Brightness", "RAIN", 1.0f, 0.0f, 10.0f, 0.01f, true);
 
@@ -386,6 +396,9 @@ void EffectManager::RegisterSettings()
 	ids.useLens = settingManager.GetSettingID("EnableLens", "EFFECT");
 	ids.useAdaptation = settingManager.GetSettingID("EnableAdaptation", "EFFECT");
 	ids.usePostPass = settingManager.GetSettingID("EnablePostPassShader", "EFFECT");
+	ids.usePrepass = settingManager.GetSettingID("EnablePrepass", "EFFECT");
+	ids.useSunGlare = settingManager.GetSettingID("EnableSunGlare", "EFFECT");
+	ids.useUnderwater = settingManager.GetSettingID("EnableUnderwaterShader", "EFFECT");
 	ids.useDepthOfField = settingManager.GetSettingID("EnableDepthOfField", "EFFECT");
 
 	ids.enableMultipleWeathers = settingManager.GetSettingID("EnableMultipleWeathers", "WEATHER");
@@ -491,6 +504,7 @@ bool EffectManager::ExecuteEffects(RE::BSGraphics::RenderTargetData& a_input, RE
 
 	auto& textureManager = TextureManager::GetSingleton();
 
+	ExecuteEffect(enbEffectPrePass, ids.usePrepass);
 	ExecuteEffect(enbDepthOfField, ids.useDepthOfField);
 
 	const bool adaptationWillRun = WillEffectRun(enbAdaptation, ids.useAdaptation);
@@ -500,7 +514,10 @@ bool EffectManager::ExecuteEffects(RE::BSGraphics::RenderTargetData& a_input, RE
 	ExecuteEffect(enbBloom, ids.useBloom);
 	ExecuteEffect(enbLens, ids.useLens);
 	ExecuteEffect(enbAdaptation, ids.useAdaptation);
+	ExecuteEffect(enbSunSprite, ids.useSunGlare);
 	ExecuteEffect(enbEffect);
+	if (ENBUnderwater::IsCameraUnderwater())
+		ExecuteEffect(enbUnderwater, ids.useUnderwater);
 	ExecuteEffect(enbEffectPostPass, ids.usePostPass);
 
 	textureManager.IncrementTextureSwap();
@@ -898,7 +915,7 @@ void EffectManager::UpdateCommonData()
 		// Initialize and set factors
 		float factors[static_cast<int>(TimeOfDayFactorIndex::Count)] = { 0.0f };
 
-		if (!commonData.eInteriorFactor) {
+		{
 			// Calculate transition points
 			const float dawnStart = sunriseTime - dawnDuration;
 			const float dawnMid = sunriseTime - (dawnDuration * 0.5f);
@@ -975,12 +992,17 @@ void EffectManager::UpdateCommonData()
 			factors[static_cast<int>(TimeOfDayFactorIndex::Day)] = powDay;
 
 			// Assign to output arrays
-			commonData.timeOfDay1[static_cast<int>(TimeOfDay1Index::Dawn)] = factors[static_cast<int>(TimeOfDayFactorIndex::Dawn)];
-			commonData.timeOfDay1[static_cast<int>(TimeOfDay1Index::Sunrise)] = factors[static_cast<int>(TimeOfDayFactorIndex::Sunrise)];
-			commonData.timeOfDay1[static_cast<int>(TimeOfDay1Index::Day)] = factors[static_cast<int>(TimeOfDayFactorIndex::Day)];
-			commonData.timeOfDay1[static_cast<int>(TimeOfDay1Index::Sunset)] = factors[static_cast<int>(TimeOfDayFactorIndex::Sunset)];
-			commonData.timeOfDay2[static_cast<int>(TimeOfDay2Index::Dusk)] = factors[static_cast<int>(TimeOfDayFactorIndex::Dusk)];
-			commonData.timeOfDay2[static_cast<int>(TimeOfDay2Index::Night)] = factors[static_cast<int>(TimeOfDayFactorIndex::Night)];
+			commonData.fxTimeOfDay1[static_cast<int>(TimeOfDay1Index::Dawn)] = factors[static_cast<int>(TimeOfDayFactorIndex::Dawn)];
+			commonData.fxTimeOfDay1[static_cast<int>(TimeOfDay1Index::Sunrise)] = factors[static_cast<int>(TimeOfDayFactorIndex::Sunrise)];
+			commonData.fxTimeOfDay1[static_cast<int>(TimeOfDay1Index::Day)] = factors[static_cast<int>(TimeOfDayFactorIndex::Day)];
+			commonData.fxTimeOfDay1[static_cast<int>(TimeOfDay1Index::Sunset)] = factors[static_cast<int>(TimeOfDayFactorIndex::Sunset)];
+			commonData.fxTimeOfDay2[static_cast<int>(TimeOfDay2Index::Dusk)] = factors[static_cast<int>(TimeOfDayFactorIndex::Dusk)];
+			commonData.fxTimeOfDay2[static_cast<int>(TimeOfDay2Index::Night)] = factors[static_cast<int>(TimeOfDayFactorIndex::Night)];
+
+			if (!commonData.eInteriorFactor) {
+				std::copy(std::begin(commonData.fxTimeOfDay1), std::end(commonData.fxTimeOfDay1), std::begin(commonData.timeOfDay1));
+				std::copy(std::begin(commonData.fxTimeOfDay2), std::end(commonData.fxTimeOfDay2), std::begin(commonData.timeOfDay2));
+			}
 		}
 
 		// Calculate distance to night time (handling 24h wraparound)
@@ -1005,6 +1027,8 @@ void EffectManager::UpdateCommonData()
 
 		commonData.timeOfDay2[static_cast<int>(TimeOfDay2Index::InteriorDay)] = commonData.eInteriorFactor * commonData.eNightDayFactor;
 		commonData.timeOfDay2[static_cast<int>(TimeOfDay2Index::InteriorNight)] = commonData.eInteriorFactor * (1.0f - commonData.eNightDayFactor);
+		commonData.fxTimeOfDay2[static_cast<int>(TimeOfDay2Index::InteriorDay)] = commonData.timeOfDay2[static_cast<int>(TimeOfDay2Index::InteriorDay)];
+		commonData.fxTimeOfDay2[static_cast<int>(TimeOfDay2Index::InteriorNight)] = commonData.timeOfDay2[static_cast<int>(TimeOfDay2Index::InteriorNight)];
 	}
 
 	if (auto camera = RE::PlayerCamera::GetSingleton())
@@ -1100,11 +1124,17 @@ void EffectManager::UpdateCommonVariablesForEffect(Effect& effect)
 			effect.SetShaderResourceVariable(targetName, texture->srv.get());
 	}
 
+	const float screenWidth = static_cast<float>(globals::game::graphicsState->screenWidth);
+	const float screenHeight = static_cast<float>(globals::game::graphicsState->screenHeight);
+	const float screenAspect = screenWidth / screenHeight;
+	const float screenSize[4] = { screenWidth, 1.0f / screenWidth, screenAspect, 1.0f / screenAspect };
+	effect.SetVectorVariable("ScreenSize", screenSize, sizeof(screenSize));
+
 	effect.SetVectorVariable("Timer", commonData.timer, sizeof(commonData.timer));
 	effect.SetVectorVariable("Weather", commonData.enbWeather, sizeof(commonData.enbWeather));
 	effect.SetVectorVariable("WeatherAndTime", commonData.enbWeather, sizeof(commonData.enbWeather));
-	effect.SetVectorVariable("TimeOfDay1", commonData.timeOfDay1, sizeof(commonData.timeOfDay1));
-	effect.SetVectorVariable("TimeOfDay2", commonData.timeOfDay2, sizeof(commonData.timeOfDay2));
+	effect.SetVectorVariable("TimeOfDay1", commonData.fxTimeOfDay1, sizeof(commonData.fxTimeOfDay1));
+	effect.SetVectorVariable("TimeOfDay2", commonData.fxTimeOfDay2, sizeof(commonData.fxTimeOfDay2));
 	effect.SetVectorVariable("ENightDayFactor", &commonData.eNightDayFactor, sizeof(commonData.eNightDayFactor));
 	effect.SetVectorVariable("EInteriorFactor", &commonData.eInteriorFactor, sizeof(commonData.eInteriorFactor));
 	effect.SetVectorVariable("FieldOfView", &commonData.fieldOfView, sizeof(commonData.fieldOfView));
@@ -1207,6 +1237,28 @@ bool EffectManager::CopyTexture(ID3D11ShaderResourceView* a_source, ID3D11Render
 	ID3D11ShaderResourceView* nullSRV = nullptr;
 	context->PSSetShaderResources(0, 1, &nullSRV);
 	return true;
+}
+
+void EffectManager::CopyToMain(TextureManager::Texture& a_result)
+{
+	auto& textureMain = globals::game::renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
+	if (!a_result.texture || !textureMain.texture)
+		return;
+
+	auto context = globals::d3d::context;
+	D3D11_TEXTURE2D_DESC srcDesc{}, dstDesc{};
+	a_result.texture->GetDesc(&srcDesc);
+	textureMain.texture->GetDesc(&dstDesc);
+	const bool layoutsMatch = srcDesc.Format == dstDesc.Format && srcDesc.Width == dstDesc.Width && srcDesc.Height == dstDesc.Height &&
+	                          srcDesc.MipLevels == dstDesc.MipLevels && srcDesc.ArraySize == dstDesc.ArraySize &&
+	                          srcDesc.SampleDesc.Count == dstDesc.SampleDesc.Count && srcDesc.SampleDesc.Quality == dstDesc.SampleDesc.Quality;
+	if (layoutsMatch) {
+		context->CopyResource(textureMain.texture, a_result.texture.get());
+	} else if (a_result.srv && textureMain.RTV) {
+		CopyTexture(a_result.srv.get(), textureMain.RTV, false);
+		ID3D11RenderTargetView* nullRTV = nullptr;
+		context->OMSetRenderTargets(1, &nullRTV, nullptr);
+	}
 }
 
 bool EffectManager::ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV, ID3D11ShaderResourceView* a_source)

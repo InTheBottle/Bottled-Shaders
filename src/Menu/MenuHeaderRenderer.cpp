@@ -186,7 +186,7 @@ void MenuHeaderRenderer::RenderHeader(bool isDocked)
 
 	place(IconLabelButtonWidth(revertLabel), style.ItemSpacing.x);
 	if (Util::Icons::Button(revertLabel, Util::Icons::Kind::Reload))
-		globals::state->Load();
+		Util::RequestRestoreSavedSettingsConfirmation();
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::Text("%s", T("menu.revert_settings_tooltip", "Discard unsaved changes and reload your saved settings."));
 
@@ -255,7 +255,7 @@ void MenuHeaderRenderer::RenderStatusBar()
 		const auto text = i18n->Format("menu.status.shaders_failed", { { "count", std::to_string(failed) } }, "{count} failed");
 		Util::Text::Error("%s", text.c_str());
 		ImGui::SameLine();
-		if (ImGui::Button(shaderCache->IsHideErrors() ? T("menu.status.show_error", "Show Error") : T("menu.status.hide_error", "Hide Error")))
+		if (Util::Button(shaderCache->IsHideErrors() ? T("menu.status.show_error", "Show Error") : T("menu.status.hide_error", "Hide Error")))
 			shaderCache->ToggleErrorMessages();
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T("menu.toggle_error_message_tooltip",

@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <format>
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -11,6 +12,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "CSEditor/Browser/BrowserWidgets.h"
+#include "CSEditor/EditorWindow.h"
 #include "CSEditor/SceneManager/FeatureOverwritesPanel.h"
 #include "CSEditor/SceneManager/SceneSettingsManager.h"
 #include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
@@ -21,26 +24,28 @@
 #include "Fonts.h"
 #include "Globals.h"
 #include "I18n/I18n.h"
+#include "IconsTabler.h"
 #include "Menu.h"
 #include "Menu/AdvancedSettingsRenderer.h"
 #include "Menu/PresetsPageRenderer.h"
 #include "Menu/ProfilingRenderer.h"
+#include "Menu/SettingReveal.h"
 #include "Menu/ThemeManager.h"
 #include "State.h"
 #include "Util.h"
+#include "Utils/SettingsCatalog.h"
 #include "Utils/UI.h"
+#include "Utils/UIAnim.h"
 #include "Utils/VectorIcons.h"
 
 namespace
 {
 	constexpr size_t CORE_MENU_COUNT = 4;
 
-	const char* CSEditorMenuName() { return T("menu.features.cs_editor", "CS Editor"); }
-
-	bool IsCoreMenu(const std::string& menuName)
+	bool IsCoreMenu(std::string_view menuId)
 	{
-		return menuName == T("menu.features.presets", "Presets") || menuName == T("menu.features.general", "General") ||
-		       menuName == T("menu.features.advanced", "Advanced") || menuName == CSEditorMenuName();
+		return menuId == MenuPageIds::kPresets || menuId == MenuPageIds::kGeneral ||
+		       menuId == MenuPageIds::kAdvanced || menuId == MenuPageIds::kCSEditor;
 	}
 
 	constexpr std::string_view kNoSettingsSectionKey = "No Settings";
@@ -56,78 +61,84 @@ namespace
 		}
 	}
 
-	// Color for the [ALPHA]/[BETA] stage marker. Alpha (less stable) reads as an error,
-	// Beta as a warning.
-	ImVec4 StageTagColor(Feature::ReleaseStage stage)
+	/**
+	 * @brief Clears a feature's edits through the menu's undo hook, so it shows what defaults and Baseline packs set.
+	 * The scene layer's cached apply document takes the restored values too, or the next scene apply would replay the old ones.
+	 */
+	void RestoreFeatureDefaults(const FeatureListRenderer::Hooks& hooks, Feature* feat)
 	{
-		const auto& statusPalette = globals::menu->GetTheme().StatusPalette;
-		return stage == Feature::ReleaseStage::Alpha ? statusPalette.Error : statusPalette.Warning;
+		const auto restore = [feat] {
+			if (feat->UsesMainSettings())
+				globals::state->RestoreFeatureLayers(feat);
+			else
+				feat->RestoreDefaultSettings();
+			globals::sceneSettingsManager->CaptureExternalFeatureChanges(feat, true);
+		};
+		if (hooks.runFeatureCommand)
+			hooks.runFeatureCommand(feat, restore);
+		else
+			restore();
+		globals::menu->MarkFeatureEdited(feat);
 	}
+
+	/// State of the auto-hide navigation (Menu::Settings::AutoHideFeatureList): whether it is meant to be shown,
+	/// how far it has slid in, and the timers that keep it from flickering.
+	struct AutoHideDrawer
+	{
+		bool open = false;
+		float progress = 0.0f;     ///< 0 = hidden, 1 = fully shown
+		double hoverSince = -1.0;  ///< When the cursor reached the edge zone; -1 while it is not there
+		double leaveSince = -1.0;  ///< When the cursor left the shown list; -1 while it is there
+		bool keepOpen = false;     ///< Last frame, something in the list was active or a popup was open
+	};
+	AutoHideDrawer g_drawer;
+
+	const FeatureListRenderer::Hooks* g_activeHooks = nullptr;
+
+	/** @brief The feature list's sort modes as menu items. */
+	void DrawSortModeItems()
+	{
+		using enum Menu::FeatureSortMode;
+		auto& sort = globals::menu->GetSettings().FeatureListSort;
+		if (ImGui::MenuItem(T("menu.features.sort_by_category", "By Category"), nullptr, sort == Category))
+			sort = Category;
+		if (ImGui::MenuItem(T("menu.features.sort_alphabetically", "Alphabetical"), nullptr, sort == Alphabetical))
+			sort = Alphabetical;
+	}
+
+	/// Set when a shortcut moved the selection, so the list scrolls the newly selected row into view.
+	bool g_scrollToSelection = false;
 
 	/**
-	 * @brief Determines if the left feature panel should be visible based on auto-hide settings and mouse position
-	 * @return true if panel should be visible, false if it should be hidden
+	 * @brief Moves the selection to the nearest feature entry in a direction, skipping category headers,
+	 * labels and built-in pages. Nothing changes when there is no feature that way.
+	 * @param direction -1 for the previous feature, +1 for the next.
+	 * @return True when the selection moved.
 	 */
-	bool ShouldShowLeftPanel()
+	bool StepFeatureSelection(const std::vector<FeatureListRenderer::MenuFuncInfo>& menuList, size_t& selectedMenu, int direction)
 	{
-		bool autoHideEnabled = globals::menu->GetSettings().AutoHideFeatureList;
-		static bool leftPanelVisible = true;
-		static float hoverStartTime = 0.0f;
-		static bool wasHovering = false;
-
-		if (!autoHideEnabled) {
-			leftPanelVisible = true;
-			return true;
+		const auto count = static_cast<std::ptrdiff_t>(menuList.size());
+		auto index = selectedMenu < menuList.size() ? static_cast<std::ptrdiff_t>(selectedMenu) : (direction > 0 ? -1 : count);
+		for (index += direction; index >= 0 && index < count; index += direction) {
+			if (std::holds_alternative<Feature*>(menuList[static_cast<size_t>(index)])) {
+				selectedMenu = static_cast<size_t>(index);
+				return true;
+			}
 		}
-
-		// Get mouse position and window bounds
-		ImVec2 mousePos = ImGui::GetMousePos();
-		ImVec2 windowPos = ImGui::GetWindowPos();
-		ImVec2 windowSize = ImGui::GetWindowSize();
-		float currentTime = static_cast<float>(ImGui::GetTime());
-
-		// Use constants for auto-hide behavior
-		const float activationZoneWidth = ThemeManager::Constants::AUTOHIDE_ACTIVATION_ZONE_WIDTH;
-		const float expandDelay = ThemeManager::Constants::AUTOHIDE_EXPAND_DELAY;
-		const float panelWidth = windowSize.x * ThemeManager::Constants::AUTOHIDE_PANEL_WIDTH_RATIO;
-
-		// Calculate relative X position
-		const float relativeX = mousePos.x - windowPos.x;
-
-		// For activation: only check if mouse is at left edge (allow any Y position for easier triggering)
-		// Prevent negative X from triggering, but don't restrict Y-axis for activation
-		bool mouseInActivationZone = relativeX >= 0.0f && relativeX < activationZoneWidth;
-
-		// For staying visible: check both X and Y to ensure mouse is actually over the panel area
-		const bool mouseOverPanelX = relativeX >= 0.0f && relativeX < panelWidth;
-		const bool mouseOverPanelY = mousePos.y >= windowPos.y && mousePos.y <= (windowPos.y + windowSize.y);
-		bool mouseOverPanel = leftPanelVisible && mouseOverPanelX && mouseOverPanelY;
-
-		// Track hover start time
-		if (mouseInActivationZone && !wasHovering) {
-			hoverStartTime = currentTime;
-			wasHovering = true;
-		} else if (!mouseInActivationZone) {
-			wasHovering = false;
-		}
-
-		// Expand only after delay has elapsed
-		bool shouldExpand = mouseInActivationZone && (currentTime - hoverStartTime >= expandDelay);
-
-		// Update visibility: expand with delay, or stay visible while mouse is over panel
-		if (shouldExpand || mouseOverPanel) {
-			leftPanelVisible = true;
-		} else if (!mouseOverPanel && !mouseInActivationZone) {
-			leftPanelVisible = false;
-		}
-
-		return leftPanelVisible;
+		return false;
 	}
 
-	void SeparatorTextWithFont(const char* text, Menu::FontRole role)
+	/** @brief Badge label of a pre-release stage; null for release features. */
+	const char* GetStageBadgeLabel(Feature::ReleaseStage stage)
 	{
-		MenuFonts::FontRoleGuard guard(role);
-		ImGui::SeparatorText(text);
+		switch (stage) {
+		case Feature::ReleaseStage::Alpha:
+			return T("menu.features.badge_alpha", "Alpha");
+		case Feature::ReleaseStage::Beta:
+			return T("menu.features.badge_beta", "Beta");
+		default:
+			return nullptr;
+		}
 	}
 
 	struct TitleMetrics
@@ -136,69 +147,54 @@ namespace
 		float height = 0.0f;
 	};
 
-	TitleMetrics DrawPageTitle(const std::string& title, const std::string& version, const std::string& stageTag = "", ImVec4 stageColor = {})
+	TitleMetrics DrawPageTitle(const std::string& title, const std::string& version, Feature::ReleaseStage stage = Feature::ReleaseStage::Release)
 	{
-		auto& themeSettings = globals::menu->GetTheme();
-		auto& palette = themeSettings.Palette;
-		auto& featureHeading = themeSettings.FeatureHeading;
+		const ImVec4 textColor = globals::menu->GetTheme().Palette.Text;
+		const float titleScale = globals::menu->GetFeatureTitleScale();
 
-		// Sanitize and clamp to UI slider range to prevent malformed theme JSON from destabilizing layout
-		float titleScale = featureHeading.FeatureTitleScale;
-		if (!std::isfinite(titleScale)) {
-			titleScale = ThemeManager::Constants::DEFAULT_FEATURE_TITLE_SCALE;
-		}
-		titleScale = std::clamp(titleScale, 1.0f, 3.0f);
-
-		ImVec2 startPos = ImGui::GetCursorScreenPos();
-
-		ImVec2 titleSize;
-		{
-			MenuFonts::FontRoleGuard titleGuard(Menu::FontRole::Title);
-			titleSize = ImGui::CalcTextSize(title.c_str());
-			titleSize.x *= titleScale;
-			titleSize.y *= titleScale;
-
+		// Size and draw text in a font role at the title scale
+		const auto scaledSize = [titleScale](Menu::FontRole role, const char* text) {
+			MenuFonts::FontRoleGuard guard(role);
+			const ImVec2 size = ImGui::CalcTextSize(text);
+			return ImVec2(size.x * titleScale, size.y * titleScale);
+		};
+		const auto drawScaled = [titleScale](Menu::FontRole role, const ImVec4& color, const char* text) {
+			MenuFonts::FontRoleGuard guard(role);
 			ImGui::SetWindowFontScale(titleScale);
-			ImGui::TextUnformatted(title.c_str());
+			ImGui::TextColored(color, "%s", text);
 			ImGui::SetWindowFontScale(1.0f);
-		}
-
-		float annotationX = startPos.x + titleSize.x + ImGui::GetStyle().ItemSpacing.x;
-		float rightEdge = startPos.x + titleSize.x;
-
-		auto drawAnnotation = [&](const std::string& text, const ImVec4& color) {
-			ImVec2 size;
-			{
-				MenuFonts::FontRoleGuard bodyGuard(Menu::FontRole::Body);
-				size = ImGui::CalcTextSize(text.c_str());
-				size.x *= titleScale;
-				size.y *= titleScale;
-			}
-
-			ImGui::SetCursorScreenPos(ImVec2(annotationX, startPos.y + titleSize.y - size.y));
-			{
-				MenuFonts::FontRoleGuard bodyGuard(Menu::FontRole::Body);
-				ImGui::SetWindowFontScale(titleScale);
-				ImGui::TextColored(color, "%s", text.c_str());
-				ImGui::SetWindowFontScale(1.0f);
-			}
-
-			rightEdge = annotationX + size.x;
-			annotationX += size.x + ImGui::GetStyle().ItemSpacing.x;
 		};
 
-		if (!stageTag.empty())
-			drawAnnotation(stageTag, stageColor);
+		const ImVec2 startPos = ImGui::GetCursorScreenPos();
+		const float itemSpacingX = ImGui::GetStyle().ItemSpacing.x;
+		const ImVec2 titleSize = scaledSize(Menu::FontRole::Title, title.c_str());
+		drawScaled(Menu::FontRole::Title, ImGui::GetStyleColorVec4(ImGuiCol_Text), title.c_str());
 
-		if (!version.empty()) {
-			std::string formattedVersion = version;
-			std::replace(formattedVersion.begin(), formattedVersion.end(), '-', '.');
-			ImVec4 versionColor = palette.Text;
-			versionColor.w *= ThemeManager::Constants::VERSION_TEXT_OPACITY;
-			drawAnnotation("v" + formattedVersion, versionColor);
+		float annotationX = startPos.x + titleSize.x + itemSpacingX;
+		float rightEdge = startPos.x + titleSize.x;
+
+		const bool hasStageBadge = stage != Feature::ReleaseStage::Release;
+		if (hasStageBadge) {
+			// Centred on the version's line
+			const float lineHeight = scaledSize(Menu::FontRole::Body, title.c_str()).y;
+			ImGui::SetCursorScreenPos(ImVec2(annotationX, startPos.y + titleSize.y - lineHeight));
+			ImGui::SetWindowFontScale(titleScale);
+			FeatureListRenderer::DrawStageBadge(stage, lineHeight);
+			ImGui::SetWindowFontScale(1.0f);
+			rightEdge = annotationX + ImGui::GetItemRectSize().x;
+			annotationX = rightEdge + itemSpacingX;
 		}
 
-		if (!stageTag.empty() || !version.empty())
+		if (!version.empty()) {
+			std::string formattedVersion = "v" + version;
+			std::ranges::replace(formattedVersion, '-', '.');
+			const ImVec2 versionSize = scaledSize(Menu::FontRole::Body, formattedVersion.c_str());
+			ImGui::SetCursorScreenPos(ImVec2(annotationX, startPos.y + titleSize.y - versionSize.y));
+			drawScaled(Menu::FontRole::Body, Util::Anim::ScaleAlpha(textColor, ThemeManager::Constants::VERSION_TEXT_OPACITY), formattedVersion.c_str());
+			rightEdge = annotationX + versionSize.x;
+		}
+
+		if (hasStageBadge || !version.empty())
 			ImGui::SetCursorScreenPos(ImVec2(startPos.x, startPos.y + titleSize.y + ImGui::GetStyle().ItemSpacing.y * 0.25f));
 
 		return { rightEdge - startPos.x, titleSize.y };
@@ -209,9 +205,7 @@ namespace
 		if (description.empty())
 			return;
 		MenuFonts::FontRoleGuard subtextGuard(Menu::FontRole::Subtext);
-		ImVec4 descColor = globals::menu->GetTheme().Palette.Text;
-		descColor.w *= 0.7f;
-		ImGui::PushStyleColor(ImGuiCol_Text, descColor);
+		ImGui::PushStyleColor(ImGuiCol_Text, Util::Anim::ScaleAlpha(globals::menu->GetTheme().Palette.Text, ThemeManager::Constants::FEATURE_DESCRIPTION_OPACITY));
 		ImGui::TextWrapped("%s", description.c_str());
 		ImGui::PopStyleColor();
 	}
@@ -248,16 +242,16 @@ namespace
 		return "F:" + shortName;
 	}
 
-	std::string BuiltInEntryKey(const std::string& menuName)
+	std::string BuiltInEntryKey(std::string_view pageId)
 	{
-		return "B:" + menuName;
+		return "B:" + std::string(pageId);
 	}
 
 	/** @brief Stable identity for a menu entry; empty for headers and labels, which are not selectable. */
 	std::string EntryKey(const FeatureListRenderer::MenuFuncInfo& entry)
 	{
 		if (const auto* menu = std::get_if<FeatureListRenderer::BuiltInMenu>(&entry))
-			return BuiltInEntryKey(menu->name);
+			return BuiltInEntryKey(menu->id);
 		if (const auto* feat = std::get_if<Feature*>(&entry))
 			return FeatureEntryKey((*feat)->GetShortName());
 		if (const auto* pinned = std::get_if<FeatureListRenderer::PinnedFeature>(&entry))
@@ -467,6 +461,94 @@ std::string FeatureListRenderer::TranslateCategory(std::string_view category)
 	return Feature::TranslateCategory(category);
 }
 
+float FeatureListRenderer::MeasureStageBadge(Feature::ReleaseStage stage)
+{
+	const char* label = GetStageBadgeLabel(stage);
+	if (!label)
+		return 0.0f;
+	MenuFonts::FontRoleGuard badgeFont(Menu::FontRole::Subtext);
+	return Util::MeasureBadgeWidth(label);
+}
+
+void FeatureListRenderer::DrawStageBadge(Feature::ReleaseStage stage, float rowHeight)
+{
+	const char* label = GetStageBadgeLabel(stage);
+	if (!label)
+		return;
+	const auto& statusPalette = globals::menu->GetTheme().StatusPalette;
+	MenuFonts::FontRoleGuard badgeFont(Menu::FontRole::Subtext);
+	Util::Badge(label, stage == Feature::ReleaseStage::Alpha ? statusPalette.Error : statusPalette.Warning, rowHeight);
+}
+
+std::uint32_t FeatureListRenderer::GetFilterBits(Feature* feat)
+{
+	auto* sceneManager = globals::sceneSettingsManager;
+	const auto shortName = feat->GetShortName();
+	std::uint32_t bits = 0;
+	if (feat->loaded && globals::menu->IsFeaturePinned(shortName))
+		bits |= FeatureListFilter::kFavorites;
+	if (globals::state->HasUserEdits(feat))
+		bits |= FeatureListFilter::kModified;
+	if (sceneManager && sceneManager->HasAnySceneEntriesForFeature(shortName))
+		bits |= FeatureListFilter::kScene;
+	if (feat->GetReleaseStage() != Feature::ReleaseStage::Release)
+		bits |= FeatureListFilter::kPreRelease;
+	if (!feat->loaded)
+		bits |= FeatureListFilter::kUnloaded;
+	return bits;
+}
+
+bool FeatureListRenderer::PassesFilter(std::uint32_t bits, std::uint32_t filter)
+{
+	constexpr std::uint32_t kAttributes = FeatureListFilter::kKnown & ~FeatureListFilter::kUnloaded;
+	const std::uint32_t required = filter & kAttributes;
+	return (bits & required) == required;
+}
+
+void FeatureListRenderer::RenderSortPopup(const char* popupId)
+{
+	if (!ImGui::BeginPopup(popupId))
+		return;
+
+	ImGui::SeparatorText(T("menu.settings.feature_list_order", "Feature List Order"));
+	DrawSortModeItems();
+
+	ImGui::SeparatorText(T("menu.features.filter_section", "Filter"));
+	auto& filter = globals::menu->GetSettings().FeatureListFilter;
+	struct Item
+	{
+		std::uint32_t bit;
+		const char* label;
+		const char* tooltip;
+	};
+	const Item items[] = {
+		{ FeatureListFilter::kFavorites, T("menu.features.filter_label_favorites", "Pinned"), T("menu.features.filter_favorites", "Pinned features") },
+		{ FeatureListFilter::kModified, T("menu.features.filter_label_modified", "Modified"), T("menu.features.filter_modified", "Modified: settings differ from defaults and your Baseline presets") },
+		{ FeatureListFilter::kScene, T("menu.features.filter_label_scene", "Scene"), T("menu.features.filter_scene", "Scene: has Scene Manager settings") },
+		{ FeatureListFilter::kPreRelease, T("menu.features.filter_label_pre_release", "Pre-release"), T("menu.features.filter_pre_release", "Pre-release: alpha and beta features") },
+		{ FeatureListFilter::kUnloaded, T("menu.features.filter_label_unloaded", "Unloaded"), T("menu.features.filter_unloaded", "Unloaded: missing, failed, or disabled at boot. Only these are listed while it is on") },
+	};
+	// Filters combine, so toggling one leaves the popup open
+	ImGui::PushItemFlag(ImGuiItemFlags_AutoClosePopups, false);
+	for (const auto& item : items) {
+		if (ImGui::MenuItem(item.label, nullptr, (filter & item.bit) != 0))
+			filter ^= item.bit;
+		Util::AddTooltip(item.tooltip);
+	}
+	ImGui::PopItemFlag();
+
+	ImGui::Separator();
+	if (ImGui::MenuItem(T("menu.features.clear_filter_chips", "Clear filters"), nullptr, false, (filter & FeatureListFilter::kKnown) != 0))
+		filter = 0;
+	ImGui::EndPopup();
+}
+
+void FeatureListRenderer::ToggleFavorite(Feature* feat)
+{
+	const auto featureName = feat->GetShortName();
+	globals::menu->SetFeaturePinned(featureName, !globals::menu->IsFeaturePinned(featureName));
+}
+
 void FeatureListRenderer::DrawFeatureBody(Feature* feat)
 {
 	assert(feat && feat->loaded);
@@ -479,7 +561,9 @@ void FeatureListRenderer::DrawFeatureBody(Feature* feat)
 		// ImGui raises this flag for any value edit; set only inside the call, it means this feature changed.
 		// Buttons that rewrite settings (a reset, a preset) raise no flag, so a finished click is checked instead.
 		const bool editedBefore = WasItemEditedThisFrame();
+		SettingReveal::BeginFeatureBody(feat);
 		feat->DrawSettings();
+		SettingReveal::EndFeatureBody();
 		if (feat->UsesMainSettings()) {
 			auto* state = globals::state;
 			const bool edited = !editedBefore && WasItemEditedThisFrame();
@@ -499,12 +583,11 @@ void FeatureListRenderer::DrawFeatureBody(Feature* feat)
 
 	DetectReactiveConstraints();
 
-	const float cursorEpsilon = 0.1f;
-	bool cursorMoved = (std::abs(cursorPosAfter.x - cursorPosBefore.x) > cursorEpsilon ||
-						std::abs(cursorPosAfter.y - cursorPosBefore.y) > cursorEpsilon);
-	if (!cursorMoved) {
-		ImGui::TextColored(globals::menu->GetSettings().Theme.StatusPalette.Disable, "%s", T("menu.features.no_settings_available", "There are no settings available for this feature."));
-	}
+	constexpr float cursorEpsilon = 0.1f;
+	const bool cursorMoved = std::abs(cursorPosAfter.x - cursorPosBefore.x) > cursorEpsilon ||
+	                         std::abs(cursorPosAfter.y - cursorPosBefore.y) > cursorEpsilon;
+	if (!cursorMoved)
+		BrowserUI::EmptyState(T("menu.features.no_settings_available", "There are no settings available for this feature."));
 }
 
 void FeatureListRenderer::RenderFeatureList(
@@ -515,8 +598,10 @@ void FeatureListRenderer::RenderFeatureList(
 	std::map<std::string, bool>& categoryExpansionStates,
 	const std::function<void()>& drawGeneralSettings,
 	const std::function<void()>& drawAdvancedSettings,
-	float reservedBottomHeight)
+	float reservedBottomHeight,
+	Hooks& hooks)
 {
+	g_activeHooks = &hooks;
 	ImGui::BeginChild("Menus Table", ImVec2(0, -reservedBottomHeight), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
 	if (!pendingFeatureSelection.empty()) {
@@ -530,30 +615,32 @@ void FeatureListRenderer::RenderFeatureList(
 
 	HandlePendingFeatureSelection(pendingFeatureSelection, menuList, selectedMenu);
 
-	const bool narrow = ImGui::GetContentRegionAvail().x < ImGui::GetFontSize() * ThemeManager::Constants::NARROW_LAYOUT_WIDTH_EM;
-	if (narrow) {
-		RenderNavigatorBar(menuList, selectedMenu, featureSearch, focusSearch, categoryExpansionStates);
-		RenderRightColumn(menuList, selectedMenu, pendingFeatureSelection);
-	} else {
-		const bool leftPanelVisible = ShouldShowLeftPanel();
-		if (!leftPanelVisible)
-			focusSearch = false;
-		if (ImGui::BeginTable("Menus Table", leftPanelVisible ? 2 : 1, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable)) {
-			if (leftPanelVisible) {
-				ImGui::TableSetupColumn("##ListOfMenus", 0, ThemeManager::Constants::FEATURE_LIST_WIDTH_WEIGHT);
-				ImGui::TableSetupColumn("##MenuConfig", 0, ThemeManager::Constants::FEATURE_PAGE_WIDTH_WEIGHT);
-				ImGui::TableNextColumn();
-				RenderNavigation(menuList, selectedMenu, featureSearch, focusSearch, categoryExpansionStates, false);
-			} else {
-				ImGui::TableSetupColumn("##MenuConfig", 0, 1);
-			}
-			ImGui::TableNextColumn();
-			RenderRightColumn(menuList, selectedMenu, pendingFeatureSelection);
-			ImGui::EndTable();
-		}
+	if (hooks.featureStep != 0) {
+		g_scrollToSelection = StepFeatureSelection(menuList, selectedMenu, hooks.featureStep > 0 ? 1 : -1);
+		if (g_scrollToSelection)
+			g_selectedEntryKey = EntryKey(menuList[selectedMenu]);
+		hooks.featureStep = 0;
 	}
 
+	const bool narrow = ImGui::GetContentRegionAvail().x < ImGui::GetFontSize() * ThemeManager::Constants::NARROW_LAYOUT_WIDTH_EM;
+	if (narrow) {
+		RenderNavigatorBar(menuList, selectedMenu, featureSearch, focusSearch, categoryExpansionStates, hooks);
+		RenderRightColumn(menuList, selectedMenu, pendingFeatureSelection, hooks);
+	} else if (globals::menu->GetSettings().AutoHideFeatureList) {
+		RenderAutoHidePane(menuList, selectedMenu, featureSearch, focusSearch, pendingFeatureSelection, categoryExpansionStates, hooks);
+	} else if (ImGui::BeginTable("Menus Table", 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable)) {
+		ImGui::TableSetupColumn("##ListOfMenus", 0, ThemeManager::Constants::FEATURE_LIST_WIDTH_WEIGHT);
+		ImGui::TableSetupColumn("##MenuConfig", 0, ThemeManager::Constants::FEATURE_PAGE_WIDTH_WEIGHT);
+		ImGui::TableNextColumn();
+		RenderNavigation(menuList, selectedMenu, featureSearch, focusSearch, categoryExpansionStates, false, hooks);
+		ImGui::TableNextColumn();
+		RenderRightColumn(menuList, selectedMenu, pendingFeatureSelection, hooks);
+		ImGui::EndTable();
+	}
+	g_scrollToSelection = false;  // a hidden list drops the request rather than scrolling later
+
 	ImGui::EndChild();
+	g_activeHooks = nullptr;
 }
 
 std::vector<FeatureListRenderer::MenuFuncInfo> FeatureListRenderer::BuildMenuList(
@@ -576,10 +663,10 @@ std::vector<FeatureListRenderer::MenuFuncInfo> FeatureListRenderer::BuildMenuLis
 	}
 
 	auto menuList = std::vector<MenuFuncInfo>{
-		BuiltInMenu{ T("menu.features.presets", "Presets"), []() { PresetsPageRenderer::Render(); } },
-		BuiltInMenu{ T("menu.features.general", "General"), drawGeneralSettings, T("menu.features.general_description", "Shader compilation, keybindings, language and the look of this menu.") },
-		BuiltInMenu{ T("menu.features.advanced", "Advanced"), drawAdvancedSettings, T("menu.features.advanced_description", "Developer tools, logging, profiling and utility features.") },
-		BuiltInMenu{ CSEditorMenuName(), []() {} }
+		BuiltInMenu{ MenuPageIds::kPresets, T("menu.features.presets", "Presets"), []() { PresetsPageRenderer::Render(); } },
+		BuiltInMenu{ MenuPageIds::kGeneral, T("menu.features.general", "General"), drawGeneralSettings, T("menu.features.general_description", "Shader compilation, keybindings, language and the look of this menu.") },
+		BuiltInMenu{ MenuPageIds::kAdvanced, T("menu.features.advanced", "Advanced"), drawAdvancedSettings, T("menu.features.advanced_description", "Developer tools, logging, profiling and utility features.") },
+		BuiltInMenu{ MenuPageIds::kCSEditor, T("menu.features.cs_editor", "CS Editor"), []() {} }
 	};  // NOTE: The menu list is rebuilt every frame, so category expansion states
 	// persist correctly. This is acceptable since the list is small and built
 	// infrequently, but could be optimized if performance becomes an issue.
@@ -606,13 +693,16 @@ std::vector<FeatureListRenderer::MenuFuncInfo> FeatureListRenderer::BuildMenuLis
 	// rendered as sub-tabs of the Advanced page instead of as their own list category.
 	std::map<std::string, std::vector<Feature*>, std::less<>> categorizedFeatures;
 	std::vector<Feature*> settingsFreeFeatures;
+	const bool alphabetical = globals::menu->GetSettings().FeatureListSort == Menu::FeatureSortMode::Alphabetical;
 	for (Feature* feat : sortedFeatureList) {
 		if (!feat->IsInMenu() || !feat->loaded || feat->GetCategory() == FeatureCategories::kUtility)
 			continue;
-		if (feat->HasSettings())
-			categorizedFeatures[std::string(feat->GetCategory())].push_back(feat);
-		else
+		if (!feat->HasSettings())
 			settingsFreeFeatures.push_back(feat);
+		else if (alphabetical)  // already in display-name order
+			menuList.push_back(feat);
+		else
+			categorizedFeatures[std::string(feat->GetCategory())].push_back(feat);
 	}
 
 	auto appendSection = [&](const std::string& key, std::string label, const std::vector<Feature*>& features, bool expandedByDefault) {
@@ -652,7 +742,7 @@ std::vector<FeatureListRenderer::MenuFuncInfo> FeatureListRenderer::BuildMenuLis
 	}
 	// Add top section for feature issues (rejected features, obsolete info, etc.)
 	if (FeatureIssues::HasFeatureIssues()) {
-		menuList.insert(menuList.begin(), BuiltInMenu{ T("menu.features.feature_issues", "Feature Issues"), []() {
+		menuList.insert(menuList.begin(), BuiltInMenu{ MenuPageIds::kIssues, T("menu.features.feature_issues", "Feature Issues"), []() {
 														  FeatureIssues::DrawFeatureIssuesUI();
 													  } });
 	}
@@ -681,7 +771,7 @@ void FeatureListRenderer::ResolveSelectionFromKey(
 	// The selected entry is gone: its category was collapsed, or the search filtered it out.
 	// Falling back to General is deterministic; keeping the stale index would render whichever
 	// unrelated entry has shifted into that slot.
-	const std::string generalKey = BuiltInEntryKey(T("menu.features.general", "General"));
+	const std::string generalKey = BuiltInEntryKey(MenuPageIds::kGeneral);
 	for (size_t i = 0; i < menuList.size(); ++i) {
 		if (EntryKey(menuList[i]) == generalKey) {
 			selectedMenu = i;
@@ -701,6 +791,11 @@ void FeatureListRenderer::HandlePendingFeatureSelection(
 	if (pendingFeatureSelection.empty())
 		return;
 
+	if (pendingFeatureSelection == MenuPageIds::kHome || pendingFeatureSelection == MenuPageIds::kSettings)
+		pendingFeatureSelection = std::string(MenuPageIds::kGeneral);
+	else if (pendingFeatureSelection == MenuPageIds::kProfiling)
+		pendingFeatureSelection = std::string(MenuPageIds::kAdvanced);
+
 	for (size_t i = 0; i < menuList.size(); ++i) {
 		if (std::holds_alternative<Feature*>(menuList[i])) {
 			Feature* feature = std::get<Feature*>(menuList[i]);
@@ -714,9 +809,9 @@ void FeatureListRenderer::HandlePendingFeatureSelection(
 		}
 	}
 
-	// Built-in pages such as Presets are addressed by their display name.
+	// Built-in pages are addressed by their canonical ID, or by their display name for callers that pass a label.
 	for (size_t i = 0; i < menuList.size(); ++i) {
-		if (const auto* page = std::get_if<BuiltInMenu>(&menuList[i]); page && page->name == pendingFeatureSelection && page->name != CSEditorMenuName()) {
+		if (const auto* page = std::get_if<BuiltInMenu>(&menuList[i]); page && page->id != MenuPageIds::kCSEditor && (page->id == pendingFeatureSelection || page->name == pendingFeatureSelection)) {
 			selectedMenu = i;
 			g_selectedEntryKey = EntryKey(menuList[i]);
 			logger::info("Navigated to {} page", pendingFeatureSelection);
@@ -727,9 +822,8 @@ void FeatureListRenderer::HandlePendingFeatureSelection(
 
 	// Utility features are not list entries; they live as sub-tabs of the Advanced page.
 	if (IsUtilityFeature(pendingFeatureSelection)) {
-		const std::string advancedName = T("menu.features.advanced", "Advanced");
 		for (size_t i = 0; i < menuList.size(); ++i) {
-			if (std::holds_alternative<BuiltInMenu>(menuList[i]) && std::get<BuiltInMenu>(menuList[i]).name == advancedName) {
+			if (std::holds_alternative<BuiltInMenu>(menuList[i]) && std::get<BuiltInMenu>(menuList[i]).id == MenuPageIds::kAdvanced) {
 				selectedMenu = i;
 				g_selectedEntryKey = EntryKey(menuList[i]);
 				AdvancedSettingsRenderer::RequestUtilityTab(pendingFeatureSelection);
@@ -774,7 +868,8 @@ void FeatureListRenderer::RenderFeaturePage(Feature* feat)
 	// The Advanced page owns no pending-selection state, so navigation requests raised from a
 	// utility page are routed back through the Menu, which re-enters HandlePendingFeatureSelection.
 	static std::string pendingSelection;
-	DrawMenuVisitor visitor{ pendingSelection };
+	static const Hooks noHooks;
+	DrawMenuVisitor visitor{ pendingSelection, g_activeHooks ? *g_activeHooks : noHooks };
 	visitor(feat);
 	if (!pendingSelection.empty()) {
 		globals::menu->SelectFeatureMenu(pendingSelection);
@@ -788,7 +883,8 @@ bool FeatureListRenderer::RenderNavigation(
 	std::string& featureSearch,
 	bool& focusSearch,
 	std::map<std::string, bool>& categoryExpansionStates,
-	bool inPopup)
+	bool inPopup,
+	const Hooks& hooks)
 {
 	bool selectionMade = false;
 
@@ -819,7 +915,7 @@ bool FeatureListRenderer::RenderNavigation(
 
 	auto isCoreEntry = [](const MenuFuncInfo& entry) {
 		const auto* menu = std::get_if<BuiltInMenu>(&entry);
-		return menu && IsCoreMenu(menu->name);
+		return menu && IsCoreMenu(menu->id);
 	};
 
 	if (ImGui::BeginChild("##FeatureNavList", ImVec2(0.0f, -footerHeight), ImGuiChildFlags_NavFlattened)) {
@@ -828,7 +924,7 @@ bool FeatureListRenderer::RenderNavigation(
 			if (isCoreEntry(menuList[i]))
 				continue;
 			anyFeature = anyFeature || std::holds_alternative<Feature*>(menuList[i]);
-			std::visit(ListMenuVisitor{ i, selectedMenu, categoryExpansionStates, currentKey, selectOnNav, selectionMade }, menuList[i]);
+			std::visit(ListMenuVisitor{ i, selectedMenu, categoryExpansionStates, currentKey, selectOnNav, selectionMade, hooks }, menuList[i]);
 		}
 
 		if (!featureSearch.empty() && !anyFeature) {
@@ -844,7 +940,7 @@ bool FeatureListRenderer::RenderNavigation(
 	ImGui::Separator();
 	for (size_t i = 0; i < menuList.size(); i++) {
 		if (isCoreEntry(menuList[i]))
-			std::visit(ListMenuVisitor{ i, selectedMenu, categoryExpansionStates, currentKey, selectOnNav, selectionMade }, menuList[i]);
+			std::visit(ListMenuVisitor{ i, selectedMenu, categoryExpansionStates, currentKey, selectOnNav, selectionMade, hooks }, menuList[i]);
 	}
 
 	return selectionMade;
@@ -855,7 +951,8 @@ void FeatureListRenderer::RenderNavigatorBar(
 	size_t& selectedMenu,
 	std::string& featureSearch,
 	bool& focusSearch,
-	std::map<std::string, bool>& categoryExpansionStates)
+	std::map<std::string, bool>& categoryExpansionStates,
+	const Hooks& hooks)
 {
 	constexpr const char* kPopupId = "##FeatureNavigator";
 	static bool navigatorOpenLastFrame = false;
@@ -886,7 +983,7 @@ void FeatureListRenderer::RenderNavigatorBar(
 	ImGui::SetNextWindowPos(ImVec2(barStart.x, barBottom + ImGui::GetStyle().ItemSpacing.y));
 	ImGui::SetNextWindowSize(ImVec2(barWidth, ImGui::GetWindowHeight() * ThemeManager::Constants::NAVIGATOR_POPUP_HEIGHT_RATIO));
 	if (ImGui::BeginPopupEx(popupId, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize)) {
-		if (RenderNavigation(menuList, selectedMenu, featureSearch, focusSearch, categoryExpansionStates, true))
+		if (RenderNavigation(menuList, selectedMenu, featureSearch, focusSearch, categoryExpansionStates, true, hooks))
 			ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 	}
@@ -896,15 +993,96 @@ void FeatureListRenderer::RenderNavigatorBar(
 	ImGui::Spacing();
 }
 
+void FeatureListRenderer::RenderAutoHidePane(
+	const std::vector<MenuFuncInfo>& menuList,
+	size_t& selectedMenu,
+	std::string& featureSearch,
+	bool& focusSearch,
+	std::string& pendingFeatureSelection,
+	std::map<std::string, bool>& categoryExpansionStates,
+	const Hooks& hooks)
+{
+	using Constants = ThemeManager::Constants;
+	const float scale = Util::GetUIScale();
+	const ImVec2 areaMin = ImGui::GetCursorScreenPos();
+	const ImVec2 avail = ImGui::GetContentRegionAvail();
+	const float drawerWidth = std::max(avail.x * Constants::AUTOHIDE_PANEL_WIDTH_RATIO, Constants::AUTOHIDE_PANEL_MIN_WIDTH * scale);
+
+	// The page takes the full width, so it never reflows while the list slides over its left edge. It keeps the
+	// gutter a table cell would give it, which is also where the grip sits.
+	const float gutter = ImGui::GetStyle().CellPadding.x;
+	ImGui::Indent(gutter);
+	RenderRightColumn(menuList, selectedMenu, pendingFeatureSelection, hooks);
+	ImGui::Unindent(gutter);
+
+	auto& drawer = g_drawer;
+	const double now = ImGui::GetTime();
+	const ImVec2 mouse = ImGui::GetIO().MousePos;
+	const bool inY = ImGui::IsMousePosValid(&mouse) && mouse.y >= areaMin.y && mouse.y <= areaMin.y + avail.y;
+	const bool inEdge = inY && mouse.x >= areaMin.x - Constants::AUTOHIDE_EDGE_SLOP * scale && mouse.x < areaMin.x + Constants::AUTOHIDE_ACTIVATION_ZONE_WIDTH * scale;
+	const bool inDrawer = inY && mouse.x >= areaMin.x && mouse.x < areaMin.x + drawerWidth;
+
+	if (focusSearch)
+		drawer.open = true;
+
+	if (!drawer.open) {
+		// Opens after the cursor has rested on the edge for a moment, so passing by does not flash the list
+		if (!inEdge)
+			drawer.hoverSince = -1.0;
+		else if (drawer.hoverSince < 0.0)
+			drawer.hoverSince = now;
+		else if (now - drawer.hoverSince >= Constants::AUTOHIDE_OPEN_DELAY)
+			drawer.open = true;
+	} else if (inDrawer || drawer.keepOpen) {
+		drawer.leaveSince = -1.0;
+	} else if (drawer.leaveSince < 0.0) {
+		drawer.leaveSince = now;
+	} else if (now - drawer.leaveSince >= Constants::AUTOHIDE_CLOSE_DELAY) {
+		drawer.open = false;
+		drawer.leaveSince = drawer.hoverSince = -1.0;
+	}
+
+	// Exponential smoothing: frame-rate independent, fast at first and settling softly
+	const float target = drawer.open ? 1.0f : 0.0f;
+	drawer.progress = Util::Anim::Smooth(drawer.progress, target, Constants::AUTOHIDE_ANIM_SPEED);
+
+	if (drawer.progress <= 0.0f) {
+		// A thin grip on the edge hints that the list is there
+		const float grip = Constants::AUTOHIDE_GRIP_WIDTH * scale;
+		ImVec4 gripColor = Util::Colors::GetSecondary();
+		gripColor.w *= Constants::AUTOHIDE_GRIP_ALPHA;
+		ImGui::GetWindowDrawList()->AddRectFilled(areaMin, ImVec2(areaMin.x + grip, areaMin.y + avail.y), ImGui::GetColorU32(gripColor));
+		drawer.keepOpen = false;
+		if (!drawer.open)
+			focusSearch = false;
+		return;
+	}
+
+	ImGui::SetCursorScreenPos(ImVec2(areaMin.x - drawerWidth * (1.0f - drawer.progress), areaMin.y));
+	ImVec4 background = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+	background.w = 1.0f;
+	ImGui::PushStyleColor(ImGuiCol_ChildBg, background);
+	if (ImGui::BeginChild("##FeatureListDrawer", ImVec2(drawerWidth, avail.y), ImGuiChildFlags_Borders)) {
+		RenderNavigation(menuList, selectedMenu, featureSearch, focusSearch, categoryExpansionStates, false, hooks);
+		// An active field or an open popup holds the list open even with the cursor elsewhere
+		drawer.keepOpen = ImGui::IsAnyItemActive() || ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+	}
+	ImGui::EndChild();
+	ImGui::PopStyleColor();
+}
+
 void FeatureListRenderer::RenderRightColumn(
 	const std::vector<MenuFuncInfo>& menuList,
 	size_t selectedMenu,
-	std::string& pendingFeatureSelection)
+	std::string& pendingFeatureSelection,
+	const Hooks& hooks)
 {
 	if (selectedMenu < menuList.size()) {
-		std::visit(DrawMenuVisitor{ pendingFeatureSelection }, menuList[selectedMenu]);
+		// A newly opened page fades in; the key is the page itself, so the rebuilt list does not restart it
+		Util::Anim::PageFade fade(ImGui::GetID(EntryKey(menuList[selectedMenu]).c_str()));
+		std::visit(DrawMenuVisitor{ pendingFeatureSelection, hooks }, menuList[selectedMenu]);
 	} else {
-		ImGui::TextDisabled("%s", T("menu.features.select_item_left", "Please select an item on the left."));
+		BrowserUI::EmptyState(T("menu.features.select_item_left", "Please select an item on the left."));
 	}
 }
 
@@ -919,17 +1097,27 @@ void FeatureListRenderer::ListMenuVisitor::operator()(const BuiltInMenu& menu)
 {
 	MenuFonts::FontRoleGuard fontGuard(Menu::FontRole::Subheading);
 
-	const std::string key = BuiltInEntryKey(menu.name);
+	const std::string key = BuiltInEntryKey(menu.id);
 	// Use error color for Feature Issues menu item
-	const bool isFeatureIssues = (menu.name == T("menu.features.feature_issues", "Feature Issues"));
+	const bool isFeatureIssues = menu.id == MenuPageIds::kIssues;
 	if (isFeatureIssues)
 		ImGui::PushStyleColor(ImGuiCol_Text, globals::menu->GetSettings().Theme.StatusPalette.Error);
 
-	if (menu.name == CSEditorMenuName()) {
+	// The row's content clears the selected row's accent bar; the highlight still spans the whole row
+	ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(ImGui::GetStyle().FramePadding.x, ThemeManager::Constants::ANIM_SELECTED_BAR_WIDTH * Util::GetUIScale()));
+	const std::string label = std::format("{} ###{}", menu.name, menu.id);
+	if (menu.id == MenuPageIds::kCSEditor) {
 		// Launcher entry: opens the editor without leaving the current page.
-		if (ImGui::Selectable(fmt::format(" {} ", menu.name).c_str(), false))
-			CSEditor::OpenEditorWindow();
-	} else if (ImGui::Selectable(fmt::format(" {} ", menu.name).c_str(), key == currentKey, NavigationSelectableFlags(selectOnNav))) {
+		const bool canOpenEditor = EditorWindow::CanBeOpen();
+		if (Util::Selectable(label.c_str(), false)) {
+			if (canOpenEditor)
+				CSEditor::OpenEditorWindow();
+			else  // Without a save, says why
+				EditorWindow::GetSingleton()->WarnOpeningBlocked();
+		}
+		Util::HoverTip(canOpenEditor ? T("menu.features.cs_editor_tooltip", "Opens the CS Editor window") :
+		                               T("menu.features.cs_editor_needs_save", "Load a save to open the CS Editor"));
+	} else if (Util::Selectable(label.c_str(), key == currentKey, NavigationSelectableFlags(selectOnNav))) {
 		Select(key);
 	}
 
@@ -992,8 +1180,11 @@ void FeatureListRenderer::ListMenuVisitor::DrawFeatureRow(Feature* feat, bool in
 	ImGui::PushID(featureName.c_str());
 
 	const bool isUtility = feat->GetCategory() == FeatureCategories::kUtility;
+	// The row's content clears the selected row's accent bar; the highlight still spans the whole row
+	ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(ImGui::GetStyle().FramePadding.x, ThemeManager::Constants::ANIM_SELECTED_BAR_WIDTH * Util::GetUIScale()));
 	ImGui::PushStyleColor(ImGuiCol_Text, textColor);
-	if (ImGui::Selectable(fmt::format(" {} ", feat->GetDisplayName()).c_str(), key == currentKey, NavigationSelectableFlags(selectOnNav && !isUtility))) {
+	// The ID comes from the short name, so it survives a language change.
+	if (Util::Selectable(std::format("{} ###Row", feat->GetDisplayName()).c_str(), key == currentKey, NavigationSelectableFlags(selectOnNav && !isUtility))) {
 		if (isUtility) {
 			globals::menu->SelectFeatureMenu(featureName);
 			selectionMade = true;
@@ -1002,18 +1193,15 @@ void FeatureListRenderer::ListMenuVisitor::DrawFeatureRow(Feature* feat, bool in
 		}
 	}
 	ImGui::PopStyleColor();
+	if (g_scrollToSelection && key == currentKey && !ImGui::IsItemVisible())
+		ImGui::SetScrollHereY();
+	const float rowHeight = ImGui::GetItemRectSize().y;
+	RenderRowContextMenu(feat);
 
-	if (isLoaded && !isUtility && ImGui::BeginPopupContextItem("##FeatureRowMenu")) {
-		const bool pinned = globals::menu->IsFeaturePinned(featureName);
-		if (ImGui::MenuItem(pinned ? T("menu.features.unpin", "Unpin") : T("menu.features.pin", "Pin to Top")))
-			globals::menu->SetFeaturePinned(featureName, !pinned);
-		ImGui::EndPopup();
-	}
-
-	// Display the stage marker behind the name, regardless of loaded state
+	// The stage badge sits right after the name, regardless of loaded state
 	if (const auto stage = feat->GetReleaseStage(); stage != Feature::ReleaseStage::Release) {
 		ImGui::SameLine();
-		ImGui::TextColored(StageTagColor(stage), "%s", Feature::GetReleaseStageTag(stage).c_str());
+		DrawStageBadge(stage, rowHeight);
 	}
 
 	// A feature only authored for other scenes still gets a hollow dot, so its settings stay discoverable.
@@ -1054,6 +1242,46 @@ void FeatureListRenderer::ListMenuVisitor::DrawFeatureRow(Feature* feat, bool in
 	ImGui::PopID();
 }
 
+void FeatureListRenderer::ListMenuVisitor::RenderRowContextMenu(Feature* feat) const
+{
+	if (!ImGui::BeginPopupContextItem("##FeatureRowMenu"))
+		return;
+
+	{
+		// Scoped so the font pops before EndPopup closes the popup
+		MenuFonts::FontRoleGuard menuFont(Menu::FontRole::Body);
+		auto* state = globals::state;
+		const auto featureName = feat->GetShortName();
+		const bool isLoaded = feat->loaded;
+		const bool isDisabled = state->IsFeatureDisabled(featureName);
+
+		const bool canPin = isLoaded && feat->GetCategory() != FeatureCategories::kUtility;
+		if (ImGui::MenuItem(globals::menu->IsFeaturePinned(featureName) ? T("menu.features.unpin", "Unpin") : T("menu.features.pin", "Pin to Top"), nullptr, false, canPin))
+			ToggleFavorite(feat);
+		if (!canPin)
+			Util::AddTooltip(T("menu.features.pin_needs_loaded", "Only loaded features can be pinned"), Util::kTooltipWhenDisabled);
+
+		const bool canRestore = isLoaded && !isDisabled && feat->HasSettings();
+		if (ImGui::MenuItem(T("menu.features.restore_defaults", "Restore Defaults"), nullptr, false, canRestore && (!feat->UsesMainSettings() || state->HasUserEdits(feat))))
+			RestoreFeatureDefaults(hooks, feat);
+		Util::AddTooltip(canRestore ? T("menu.features.restore_defaults_tooltip", "Restore defaults: clears your edits to this feature, back to what defaults and your Baseline presets set.\nRevert undoes this until you save.") :
+		                              T("menu.features.restore_unavailable", "Only loaded features with settings can be restored"),
+			Util::kTooltipWhenDisabled);
+
+		if (ImGui::MenuItem(T("menu.features.load_at_boot", "Load at Boot"), nullptr, !isDisabled)) {
+			const bool disabled = feat->ToggleAtBootSetting();
+			globals::menu->MarkFeatureEdited(feat);
+			logger::info("{}: {} at boot.", featureName, disabled ? "Disabled" : "Enabled");
+		}
+		Util::AddTooltip(T("menu.features.load_at_boot_tooltip", "Whether the game loads this feature at startup. Takes effect after a restart."));
+
+		ImGui::Separator();
+		if (ImGui::MenuItem(T("menu.features.copy_name", "Copy Name")))
+			ImGui::SetClipboardText(feat->GetDisplayName().c_str());
+	}
+	ImGui::EndPopup();
+}
+
 void FeatureListRenderer::DrawMenuVisitor::operator()(const BuiltInMenu& menu)
 {
 	const bool editedBefore = WasItemEditedThisFrame();
@@ -1079,7 +1307,7 @@ void FeatureListRenderer::DrawMenuVisitor::operator()(const std::string&)
 void FeatureListRenderer::DrawMenuVisitor::operator()(const CategoryHeader&)
 {
 	// Category headers are not selectable in the right panel
-	ImGui::TextDisabled("%s", T("menu.features.select_feature_left", "Please select a feature from the left."));
+	BrowserUI::EmptyState(T("menu.features.select_feature_left", "Please select a feature from the left."));
 }
 
 void FeatureListRenderer::DrawMenuVisitor::operator()(const PinnedFeature& pinned)
@@ -1093,6 +1321,9 @@ void FeatureListRenderer::DrawMenuVisitor::operator()(Feature* feat)
 	bool isDisabled = globals::state->IsFeatureDisabled(featureName);
 	bool isLoaded = feat->loaded;
 	bool hasFailedMessage = !feat->failedLoadedMessage.empty();
+
+	if (hooks.onFeatureShown)
+		hooks.onFeatureShown(feat);
 
 	globals::menu->BeginFeatureEditTracking(feat);
 	const bool editedBefore = WasItemEditedThisFrame();
@@ -1111,6 +1342,58 @@ void FeatureListRenderer::DrawMenuVisitor::operator()(Feature* feat)
 	globals::menu->IgnoreSettingEditsThisFrame();
 	// Render reactive constraint warning outside the child window so it can appear as a top-level popup
 	DrawConstraintWarningDialog(pendingFeatureSelection);
+}
+
+namespace
+{
+	/** @brief Table of a feature's edited settings with their current and base values, for the Modified chip's tooltip. */
+	void RenderUserEditsList(Feature* feat)
+	{
+		const auto edits = globals::state->GetUserEdits(feat);
+		const auto* base = globals::state->GetFeatureBase(feat->GetName());
+		const auto rows = Util::Settings::GetExportSettings(feat->GetShortName(), edits);
+		if (rows.empty() || !ImGui::BeginTable("##UserEdits", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg))
+			return;
+		ImGui::TableSetupColumn(T("menu.features.modified_list_setting", "Setting"));
+		ImGui::TableSetupColumn(T("menu.features.modified_list_value", "Value"));
+		ImGui::TableSetupColumn(T("menu.features.modified_list_default", "Default"));
+		ImGui::TableHeadersRow();
+		for (const auto& row : rows) {
+			const nlohmann::json::json_pointer pointer(row.path);
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+			ImGui::TextUnformatted(row.label.c_str());
+			ImGui::TableNextColumn();
+			ImGui::TextUnformatted(Util::Settings::FormatValue(edits.at(pointer)).c_str());
+			ImGui::TableNextColumn();
+			if (base && base->contains(pointer))
+				ImGui::TextDisabled("%s", Util::Settings::FormatValue(base->at(pointer)).c_str());
+		}
+		ImGui::EndTable();
+	}
+}
+
+void FeatureListRenderer::DrawMenuVisitor::RunFeatureCommand(Feature* feat, const std::function<void()>& command) const
+{
+	if (hooks.runFeatureCommand)
+		hooks.runFeatureCommand(feat, command);
+	else
+		command();
+}
+
+void FeatureListRenderer::DrawMenuVisitor::RenderDisabledAtBootNotice(Feature* feat)
+{
+	BrowserUI::EmptyState(T("menu.features.settings_hidden_disabled", "Feature settings are hidden because this feature is disabled at boot."),
+		T("menu.features.enable_at_boot_hint", "Load it at boot to use it the next time the game starts."));
+	ImGui::Spacing();
+	const char* label = T("menu.features.enable_at_boot", "Enable at Boot");
+	const float width = ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+	ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (ImGui::GetContentRegionAvail().x - width) * 0.5f));
+	if (Util::Button(label)) {
+		const bool disabled = feat->ToggleAtBootSetting();
+		globals::menu->MarkFeatureEdited(feat);
+		logger::info("{}: {} at boot.", feat->GetShortName(), disabled ? "Disabled" : "Enabled");
+	}
 }
 
 void FeatureListRenderer::DrawMenuVisitor::RenderFeatureHeader(Feature* feat, bool isDisabled, bool isLoaded)
@@ -1175,8 +1458,8 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureHeader(Feature* feat, bo
 
 		if (canUseBaselines) {
 			nextItem(baselinesButtonWidth);
-			if (ImGui::Button(baselinesButtonText, { baselinesButtonWidth, 0 })) {
-				globals::state->ClearFeatureEditsUnderBaselines(feat);
+			if (Util::Button(baselinesButtonText, { baselinesButtonWidth, 0 })) {
+				RunFeatureCommand(feat, [feat] { globals::state->ClearFeatureEditsUnderBaselines(feat); });
 				featureChanged = true;
 			}
 			if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -1189,11 +1472,7 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureHeader(Feature* feat, bo
 		if (canRestoreDefaults) {
 			nextItem(restoreButtonWidth);
 			if (Util::Icons::Button(restoreButtonText, Util::Icons::Kind::Reload, { restoreButtonWidth, 0 })) {
-				// Clears the user's edits, so the feature shows what defaults and Baseline packs set.
-				if (feat->UsesMainSettings())
-					globals::state->RestoreFeatureLayers(feat);
-				else
-					feat->RestoreDefaultSettings();
+				RestoreFeatureDefaults(hooks, feat);
 				featureChanged = true;
 			}
 			if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -1247,11 +1526,40 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureHeader(Feature* feat, bo
 	auto [description, keyFeatures] = feat->GetFeatureSummary();
 	(void)keyFeatures;  // Not used for subtitle display
 
-	const auto stage = feat->GetReleaseStage();
-	const auto title = DrawPageTitle(feat->GetDisplayName(), isLoaded ? feat->version : "", Feature::GetReleaseStageTag(stage), StageTagColor(stage));
+	const auto title = DrawPageTitle(feat->GetDisplayName(), isLoaded ? feat->version : "", feat->GetReleaseStage());
 	const ImVec2 cursorAfterTitle = ImGui::GetCursorScreenPos();
 
-	const bool actionsInline = title.width + style.ItemSpacing.x * 2.0f + actionsWidth <= availableWidth;
+	// Quiet marker while the feature differs from its defaults; clicking restores them
+	float titleWidth = title.width;
+	if (canRestoreDefaults && feat->UsesMainSettings() && globals::state->HasUserEdits(feat)) {
+		const char* modifiedLabel = T("menu.features.modified_chip", "Modified");
+		const ImVec4 secondary = Util::Colors::GetSecondary();
+		float chipWidth = 0.0f;
+		bool restore = false;
+		{
+			MenuFonts::FontRoleGuard subtext(Menu::FontRole::Subtext);
+			chipWidth = BrowserUI::MeasureChip(modifiedLabel, true);
+			ImGui::SetCursorScreenPos(ImVec2(titleStartPos.x + title.width + style.ItemSpacing.x, titleStartPos.y + title.height - frameHeight));
+			ImGui::PushStyleColor(ImGuiCol_Text, secondary);
+			restore = BrowserUI::Chip("##FeatureModified", modifiedLabel, Icons::TI(ICON_TI_PENCIL), &secondary);
+			ImGui::PopStyleColor();
+		}
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::TextUnformatted(T("menu.features.modified_chip_tooltip", "Differs from the defaults and your Baseline presets. Click to restore defaults."));
+			if (ImGui::GetIO().KeyShift)
+				RenderUserEditsList(feat);
+			else
+				ImGui::TextDisabled("%s", T("menu.features.modified_chip_shift_hint", "Hold Shift to list the edited settings."));
+		}
+		if (restore) {
+			RestoreFeatureDefaults(hooks, feat);
+			featureChanged = true;
+		}
+		titleWidth += style.ItemSpacing.x + chipWidth;
+		ImGui::SetCursorScreenPos(cursorAfterTitle);
+	}
+
+	const bool actionsInline = titleWidth + style.ItemSpacing.x * 2.0f + actionsWidth <= availableWidth;
 	if (actionsInline) {
 		ImGui::SetCursorScreenPos(ImVec2(titleStartPos.x + availableWidth - actionsWidth, titleStartPos.y + (title.height - frameHeight) * 0.5f));
 		drawActions();
@@ -1277,9 +1585,7 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureSettings(Feature* feat, 
 	auto& themeSettings = globals::menu->GetSettings().Theme;
 
 	if (isDisabled) {
-		ImGui::TextColored(themeSettings.StatusPalette.Disable, "%s", T("menu.features.settings_hidden_disabled", "Feature settings are hidden because this feature is disabled at boot."));
-		ImGui::Spacing();
-		ImGui::Text("%s", T("menu.features.enable_to_access_config", "Turn on Load at Boot above and restart the game to change its settings."));
+		RenderDisabledAtBootNotice(feat);
 	} else {
 		if (isLoaded) {
 			DrawFeatureBody(feat);
@@ -1300,12 +1606,9 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureSettings(Feature* feat, 
 					auto featureModLink = feat->GetFeatureModLink();
 					const auto downloadText = std::vformat(
 						T("menu.features.download_link", "Click here to download this feature ({})"), std::make_format_args(featureModLink));
-					if (ImGui::Selectable(downloadText.c_str())) {
-						ShellExecuteA(NULL, "open", featureModLink.c_str(), NULL, NULL, SW_SHOWNORMAL);
-					}
-					if (auto _tt = Util::HoverTooltipWrapper()) {
-						ImGui::Text("%s", T("menu.features.download_tooltip", "Download the feature from the mod page."));
-					}
+					if (Util::Selectable(downloadText.c_str()))
+						ShellExecuteA(nullptr, "open", featureModLink.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+					Util::HoverTip(T("menu.features.download_tooltip", "Download the feature from the mod page."));
 				}
 			}
 		}
@@ -1313,28 +1616,22 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureSettings(Feature* feat, 
 
 	if (hasFailedMessage && feat->DrawFailLoadMessage() && !FeatureIssues::IsObsoleteFeature(feat->GetShortName())) {
 		ImGui::Spacing();
-		SeparatorTextWithFont(T("menu.features.error_header", "Error"), Menu::FontRole::Subheading);
+		Util::SeparatorTextWithFont(T("menu.features.error_header", "Error"), Menu::FontRole::Subheading);
 		ImGui::TextColored(themeSettings.StatusPalette.Error, "%s", feat->failedLoadedMessage.c_str());
 	}
 }
 
 void FeatureListRenderer::DrawConstraintWarningDialog(std::string& pendingFeatureSelection)
 {
-	if (!g_reactiveWarningShow) {
+	if (!g_reactiveWarningShow)
 		return;
-	}
 
 	constexpr const char* popupId = "###SettingChangeWarning";
 	const std::string popupTitle = fmt::format("{}{}", T("menu.features.setting_change_warning_title", "Setting Change Warning"), popupId);
 
-	// OpenPopup is idempotent while the popup is already open, so calling it
-	// every frame while the flag is set is safe and ensures we don't miss the
-	// one-frame window where ImGui expects it.
+	// Idempotent while the popup is open, so it is safe to call every frame while the flag is set
 	ImGui::OpenPopup(popupId);
-
-	// Center the popup (ImGuiCond_Always matches the Clear Cache dialog pattern)
-	ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-	ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+	ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 
 	if (Util::BeginPopupModalWithRoundedClose(popupTitle.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 		ImGui::TextWrapped("%s", T("menu.features.settings_adjusted_warning", "Some of your settings have been automatically adjusted due to feature incompatibilities."));
@@ -1342,7 +1639,8 @@ void FeatureListRenderer::DrawConstraintWarningDialog(std::string& pendingFeatur
 		ImGui::Separator();
 		ImGui::Spacing();
 
-		bool navigated = false;
+		std::string navigationTarget;  // Set on a link click so the table and popup still end cleanly.
+
 		// Table columns: Impacted Feature | Setting | Constrained By | Forced To
 		if (ImGui::BeginTable("##ReactiveConstraintTable", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
 			ImGui::TableSetupColumn(T("menu.features.col_impacted_feature", "Impacted Feature"), ImGuiTableColumnFlags_WidthStretch);
@@ -1355,53 +1653,39 @@ void FeatureListRenderer::DrawConstraintWarningDialog(std::string& pendingFeatur
 			for (const auto& [settingId, result] : g_reactiveWarningConstraints) {
 				ImGui::TableNextRow();
 
-				// --- Column 0: Impacted Feature (clickable -> navigate to that feature) ---
+				// Impacted feature: click to navigate to it
 				ImGui::TableSetColumnIndex(0);
-				{
-					// Look up the display name of the target feature from its short name
-					std::string targetDisplayName = settingId.featureShortName;
-					for (auto* f : Feature::GetFeatureList()) {
-						if (f->GetShortName() == settingId.featureShortName) {
-							targetDisplayName = f->GetDisplayName();
-							break;
-						}
-					}
-					if (ImGui::Selectable(fmt::format("{}##imp{}", targetDisplayName, rowIndex).c_str())) {
-						pendingFeatureSelection = settingId.featureShortName;
-						navigated = true;
-						break;
-					}
-					if (auto _tt = Util::HoverTooltipWrapper()) {
-						ImGui::Text(T("menu.features.click_to_navigate", "Click to navigate to %s"), targetDisplayName.c_str());
-					}
+				auto* target = Feature::FindFeatureByShortName(settingId.featureShortName);
+				const std::string targetDisplayName = target ? target->GetDisplayName() : settingId.featureShortName;
+				if (Util::Selectable(fmt::format("{}##imp{}", targetDisplayName, rowIndex).c_str())) {
+					navigationTarget = settingId.featureShortName;
+					break;
 				}
+				if (auto _tt = Util::HoverTooltipWrapper())
+					ImGui::Text(T("menu.features.click_to_navigate", "Click to navigate to %s"), targetDisplayName.c_str());
 
-				// --- Column 1: Setting name ---
 				ImGui::TableSetColumnIndex(1);
 				ImGui::Text("%s", settingId.settingPath.c_str());
 
-				// --- Column 2: Constrained By (source features, clickable) ---
+				// Constraining features: click the first to navigate to it
 				ImGui::TableSetColumnIndex(2);
 				if (!result.sources.empty()) {
-					if (ImGui::Selectable(fmt::format("{}##src{}", result.sources[0].featureName, rowIndex).c_str())) {
-						pendingFeatureSelection = result.sources[0].featureShortName;
-						navigated = true;
+					if (Util::Selectable(fmt::format("{}##src{}", result.sources[0].featureName, rowIndex).c_str())) {
+						navigationTarget = result.sources[0].featureShortName;
 						break;
 					}
 					if (auto _tt = Util::HoverTooltipWrapper()) {
 						ImGui::Text(T("menu.features.click_to_navigate", "Click to navigate to %s"), result.sources[0].featureName.c_str());
 						if (result.sources.size() > 1) {
 							ImGui::Separator();
-							for (size_t i = 1; i < result.sources.size(); ++i) {
+							for (size_t i = 1; i < result.sources.size(); ++i)
 								ImGui::Text(T("menu.features.also_feature", "Also: %s"), result.sources[i].featureName.c_str());
-							}
 						}
 						ImGui::Separator();
 						ImGui::Text("%s", result.sources[0].reason.c_str());
 					}
 				}
 
-				// --- Column 3: Forced value ---
 				ImGui::TableSetColumnIndex(3);
 				ImGui::Text("%s", FeatureConstraints::FormatConstraintValue(result.forcedValue).c_str());
 
@@ -1414,10 +1698,12 @@ void FeatureListRenderer::DrawConstraintWarningDialog(std::string& pendingFeatur
 		const bool escapePressed = !ImGui::GetIO().WantTextInput && ImGui::IsWindowFocused() && ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 		if (escapePressed)
 			Util::NotifyEscapeHandledByPopup();
-		if (navigated || escapePressed) {
-			ImGui::CloseCurrentPopup();
+		if (!navigationTarget.empty() || escapePressed) {
+			if (!navigationTarget.empty())
+				pendingFeatureSelection = navigationTarget;
 			g_reactiveWarningShow = false;
 			g_reactiveWarningConstraints.clear();
+			ImGui::CloseCurrentPopup();
 			ImGui::EndPopup();
 			return;
 		}
@@ -1434,24 +1720,18 @@ void FeatureListRenderer::DrawConstraintWarningDialog(std::string& pendingFeatur
 
 		ImGui::Spacing();
 
-		// "Don't show again" checkbox -- same pattern as Clear Cache dialog
 		ImGui::Checkbox(T("menu.features.dont_show_warning", "Don't show this warning again"), &g_dontShowAgainCheckbox);
 
 		ImGui::Spacing();
 
-		// Centered OK button
 		constexpr float buttonWidth = ThemeManager::Constants::POPUP_BUTTON_WIDTH;
-		const float windowWidth = ImGui::GetWindowWidth();
-		const float offset = (windowWidth - buttonWidth) * 0.5f;
+		const float offset = (ImGui::GetWindowWidth() - buttonWidth) * 0.5f;
 		if (offset > 0)
 			ImGui::SetCursorPosX(offset);
 
-		if (ImGui::Button(T("menu.features.ok_button", "OK"), ImVec2(buttonWidth, 0))) {
-			if (g_dontShowAgainCheckbox) {
-				if (auto* menu = globals::menu) {
-					menu->GetSettings().SkipConstraintWarning = true;
-				}
-			}
+		if (Util::Button(T("menu.features.ok_button", "OK"), ImVec2(buttonWidth, 0))) {
+			if (g_dontShowAgainCheckbox)
+				globals::menu->GetSettings().SkipConstraintWarning = true;
 			g_reactiveWarningShow = false;
 			g_reactiveWarningConstraints.clear();
 			ImGui::CloseCurrentPopup();
@@ -1459,7 +1739,7 @@ void FeatureListRenderer::DrawConstraintWarningDialog(std::string& pendingFeatur
 
 		ImGui::EndPopup();
 	} else {
-		// Popup was closed externally (e.g. clicked outside), reset state
+		// Closed from outside (e.g. a click away): drop the pending warning
 		g_reactiveWarningShow = false;
 		g_reactiveWarningConstraints.clear();
 	}

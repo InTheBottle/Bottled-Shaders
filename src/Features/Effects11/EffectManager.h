@@ -5,7 +5,10 @@
 #include "Effects/ENBDepthOfField.h"
 #include "Effects/ENBEffect.h"
 #include "Effects/ENBEffectPostPass.h"
+#include "Effects/ENBEffectPrePass.h"
 #include "Effects/ENBLens.h"
+#include "Effects/ENBSunSprite.h"
+#include "Effects/ENBUnderwater.h"
 #include "Buffer.h"
 #include "Profiler.h"
 
@@ -59,11 +62,14 @@ public:
 	void UpdateCommonVariablesForEffect(Effect& effect);
 
 public:
+	ENBEffectPrePass enbEffectPrePass;
 	ENBDepthOfField enbDepthOfField;
 	ENBBloom enbBloom;
 	ENBLens enbLens;
 	ENBAdaptation enbAdaptation;
+	ENBSunSprite enbSunSprite;
 	ENBEffect enbEffect;
+	ENBUnderwater enbUnderwater;
 	ENBEffectPostPass enbEffectPostPass;
 
 	// Common resources shared across effects
@@ -108,6 +114,8 @@ public:
 		float enbWeather[4];
 		float timeOfDay1[4];
 		float timeOfDay2[4];
+		float fxTimeOfDay1[4];
+		float fxTimeOfDay2[4];
 		float eNightDayFactor;
 		float eInteriorFactor;
 		float fieldOfView;
@@ -129,6 +137,9 @@ public:
 		uint32_t useAdaptation = 0xFFFFFFFF;
 		uint32_t useDepthOfField = 0xFFFFFFFF;
 		uint32_t usePostPass = 0xFFFFFFFF;
+		uint32_t usePrepass = 0xFFFFFFFF;
+		uint32_t useSunGlare = 0xFFFFFFFF;
+		uint32_t useUnderwater = 0xFFFFFFFF;
 
 		uint32_t enableMultipleWeathers = 0xFFFFFFFF;
 		uint32_t enableLocationWeather = 0xFFFFFFFF;
@@ -164,6 +175,8 @@ public:
 
 	// Texture copy using pixel shader
 	bool CopyTexture(ID3D11ShaderResourceView* source, ID3D11RenderTargetView* destination, bool dither = true);
+
+	void CopyToMain(TextureManager::Texture& a_result);
 
 	// Color correction using compute shader
 	bool ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV, ID3D11ShaderResourceView* a_source = nullptr);

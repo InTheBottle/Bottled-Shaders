@@ -131,5 +131,4 @@ public:
 	void DrawShadows();
 
 	virtual void RestoreDefaultSettings() override;
-
 };

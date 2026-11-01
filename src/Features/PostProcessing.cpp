@@ -2,9 +2,9 @@
 
 #include "CSEditor/EditorWindow.h"
 #include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
+#include "Features/CSEditor.h"
 #include "IconsTabler.h"
 #include "Menu/Icons/helpers/IconFonts.h"
-#include "Menu/PresetsPageRenderer.h"
 #include "imgui_stdlib.h"
 
 #include "Menu.h"
@@ -79,22 +79,15 @@ void PostProcessing::DrawSettings()
 	static int pipelinePageNum = 0;
 	static int pipelineFeatIdx = 0;
 
-	// Presets live on the Presets page like every other pack; a scene replica of this page edits a
-	// scene layer rather than the base settings a preset sets, so it leaves the row out.
-	if (!SceneWidgetInterceptor::IsArmed()) {
-		PresetsPageRenderer::DrawOpenButton("##PostProcessingOpenPresets",
-			T("feature.post_processing.open_presets_tooltip",
-				"Apply Post Processing presets on the Presets page. To save your current settings as one, use "
-				"Export Preset in the CS Editor with Post Processing ticked."));
-
-		// Inside the CS Editor (its Base Settings window draws this page too) the editor is already open.
-		if (const auto* editor = EditorWindow::GetSingleton(); !editor || !editor->open)
-			PresetsPageRenderer::DrawOpenCSEditorButton("##PostProcessingOpenCSEditor");
-
-		ImGui::Separator();
+	// A scene replica of this page edits a scene layer, and inside the CS Editor (its Base Settings window draws this
+	// page too) the editor is already open, so the button is left out there.
+	PostProcessingMode::SelectorAction openEditor;
+	if (const auto* editor = EditorWindow::GetSingleton(); !SceneWidgetInterceptor::IsArmed() && (!editor || !editor->open)) {
+		openEditor.label = T("menu.home.open_cs_editor", "Open CS Editor");
+		openEditor.tooltip = T("menu.presets.open_cs_editor_tooltip", "Open the CS Editor for weather, lighting, and scene editing.");
+		openEditor.onClick = [] { CSEditor::OpenEditorWindow(); };
 	}
-
-	PostProcessingMode::DrawSelector();
+	PostProcessingMode::DrawSelector(openEditor.label ? &openEditor : nullptr);
 
 	ImGui::Separator();
 
@@ -112,7 +105,7 @@ void PostProcessing::DrawSettings()
 			ImGui::Text("%s", T("feature.post_processing.cinematic_camera.description",
 								  "Controls lens, focus, exposure and FOV. Exposure processing runs automatically while the camera is active; other effects must be enabled separately."));
 		ImGui::SameLine();
-		if (Icons::LabeledButton("##CinematicCameraSettings", Icons::TI(ICON_TI_MENU_2),
+		if (Util::LabeledButton("##CinematicCameraSettings", Icons::TI(ICON_TI_MENU_2),
 				T("feature.post_processing.cinematic_camera.settings", "Settings")))
 			pipelinePageNum = 2;
 
@@ -162,7 +155,7 @@ void PostProcessing::DrawSettings()
 				if (!drawForcedEnabled("##Enabled", *feat))
 					ImGui::Checkbox("##Enabled", &feat->enabled);
 				ImGui::SameLine();
-				if (Icons::Button("##Bars", Icons::TI(ICON_TI_MENU_2))) {
+				if (Util::LabeledButton("##Bars", Icons::TI(ICON_TI_MENU_2))) {
 					pipelineFeatIdx = i;
 					pipelinePageNum = 1;
 				}
@@ -176,7 +169,7 @@ void PostProcessing::DrawSettings()
 			}
 		}
 	} else if (pipelinePageNum == 1) {
-		if (Icons::LabeledButton("##BackToPipeline", Icons::TI(ICON_TI_ARROW_LEFT),
+		if (Util::LabeledButton("##BackToPipeline", Icons::TI(ICON_TI_ARROW_LEFT),
 				T("feature.post_processing.back_to_pipeline", "Back to Pipeline"))) {
 			pipelinePageNum = 0;
 		}
@@ -192,7 +185,7 @@ void PostProcessing::DrawSettings()
 				ImGui::TextWrapped("%s", description.c_str());
 
 				ImGui::Spacing();
-				if (Icons::LabeledButton("##RecompileShaders", Icons::TI(ICON_TI_REFRESH),
+				if (Util::LabeledButton("##RecompileShaders", Icons::TI(ICON_TI_REFRESH),
 						T("feature.post_processing.recompile_shaders", "Recompile Shaders"))) {
 					feat->ClearShaderCache();
 				}
@@ -220,7 +213,7 @@ void PostProcessing::DrawSettings()
 			pipelinePageNum = 0;
 		}
 	} else if (pipelinePageNum == 2) {
-		if (Icons::LabeledButton("##BackToPipeline", Icons::TI(ICON_TI_ARROW_LEFT),
+		if (Util::LabeledButton("##BackToPipeline", Icons::TI(ICON_TI_ARROW_LEFT),
 				T("feature.post_processing.back_to_pipeline", "Back to Pipeline"))) {
 			pipelinePageNum = 0;
 		}
@@ -418,6 +411,16 @@ void PostProcessing::SaveSettings(json& o_json)
 	cinematicCamera.SaveSettings(camJson);
 	o_json["cinematic_camera"] = camJson;
 	o_json.erase("ppsettings");
+}
+
+void PostProcessing::ApplyContextualDefaults(json& a_defaults) const
+{
+	for (const auto& pipe : pipeline) {
+		if (!pipe)
+			continue;
+		if (auto section = a_defaults.find(pipe->GetType()); section != a_defaults.end() && section->contains("settings"))
+			pipe->ApplyContextualDefaults((*section)["settings"]);
+	}
 }
 
 void PostProcessing::BuildPipeline()
