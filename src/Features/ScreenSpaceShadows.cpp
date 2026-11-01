@@ -210,11 +210,7 @@ ID3D11ComputeShader* ScreenSpaceShadows::GetShadowMaskFilterCS()
 void ScreenSpaceShadows::FilterShadowMask()
 {
 	auto renderer = globals::game::renderer;
-	if (!renderer)
-		return;
-
-	EnsureFilteredShadowMask();
-	if (!filteredShadowMaskTexture)
+	if (!filteredShadowMaskTexture || !renderer)
 		return;
 
 	auto& shadowMask = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGET::kSHADOW_MASK];
@@ -428,12 +424,8 @@ void ScreenSpaceShadows::Prepass()
 {
 	auto context = globals::d3d::context;
 
-	if (bendSettings.FilterShadowMask && shadowMaskFrame == globals::state->frameCount) {
+	if (bendSettings.FilterShadowMask && shadowMaskFrame == globals::state->frameCount)
 		FilterShadowMask();
-	} else if (!bendSettings.FilterShadowMask && filteredShadowMaskTexture) {
-		delete filteredShadowMaskTexture;
-		filteredShadowMaskTexture = nullptr;
-	}
 
 	auto sky = globals::game::sky;
 	const bool drawShadows = sky && bendSettings.Enable && sky->mode.get() == RE::Sky::Mode::kFull;
@@ -527,43 +519,38 @@ void ScreenSpaceShadows::SetupResources()
 	}
 
 	shadowMaskFilterCB = new ConstantBuffer(ConstantBufferDesc<ShadowMaskFilterCB>(), "SSS::ShadowMaskFilterCB");
-}
 
-void ScreenSpaceShadows::EnsureFilteredShadowMask()
-{
-	if (filteredShadowMaskTexture || filteredShadowMaskUnsupported)
-		return;
+	{
+		auto device = globals::d3d::device;
+		auto shadowMask = globals::game::renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGET::kSHADOW_MASK];
 
-	auto device = globals::d3d::device;
-	auto shadowMask = globals::game::renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGET::kSHADOW_MASK];
+		D3D11_TEXTURE2D_DESC texDesc{};
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 
-	D3D11_TEXTURE2D_DESC texDesc{};
-	D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+		shadowMask.texture->GetDesc(&texDesc);
+		shadowMask.SRV->GetDesc(&srvDesc);
 
-	shadowMask.texture->GetDesc(&texDesc);
-	shadowMask.SRV->GetDesc(&srvDesc);
+		UINT formatSupport = 0;
+		if (texDesc.SampleDesc.Count == 1 &&
+			SUCCEEDED(device->CheckFormatSupport(srvDesc.Format, &formatSupport)) &&
+			(formatSupport & D3D11_FORMAT_SUPPORT_TYPED_UNORDERED_ACCESS_VIEW)) {
+			texDesc.MipLevels = 1;
+			texDesc.ArraySize = 1;
+			texDesc.Usage = D3D11_USAGE_DEFAULT;
+			texDesc.CPUAccessFlags = 0;
+			texDesc.MiscFlags = 0;
+			texDesc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
 
-	UINT formatSupport = 0;
-	if (texDesc.SampleDesc.Count == 1 &&
-		SUCCEEDED(device->CheckFormatSupport(srvDesc.Format, &formatSupport)) &&
-		(formatSupport & D3D11_FORMAT_SUPPORT_TYPED_UNORDERED_ACCESS_VIEW)) {
-		texDesc.MipLevels = 1;
-		texDesc.ArraySize = 1;
-		texDesc.Usage = D3D11_USAGE_DEFAULT;
-		texDesc.CPUAccessFlags = 0;
-		texDesc.MiscFlags = 0;
-		texDesc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
-
-		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {
-			.Format = srvDesc.Format,
-			.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D,
-			.Texture2D = { .MipSlice = 0 }
-		};
-		filteredShadowMaskTexture = new Texture2D(texDesc, "SSS::FilteredShadowMask");
-		filteredShadowMaskTexture->CreateUAV(uavDesc);
-	} else {
-		logger::warn("[SSS] Shadow mask format {} has no typed UAV support, shadow mask filter disabled", magic_enum::enum_name(srvDesc.Format));
-		filteredShadowMaskUnsupported = true;
+			D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {
+				.Format = srvDesc.Format,
+				.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D,
+				.Texture2D = { .MipSlice = 0 }
+			};
+			filteredShadowMaskTexture = new Texture2D(texDesc, "SSS::FilteredShadowMask");
+			filteredShadowMaskTexture->CreateUAV(uavDesc);
+		} else {
+			logger::warn("[SSS] Shadow mask format {} has no typed UAV support, shadow mask filter disabled", magic_enum::enum_name(srvDesc.Format));
+		}
 	}
 }
 #undef I18N_KEY_PREFIX

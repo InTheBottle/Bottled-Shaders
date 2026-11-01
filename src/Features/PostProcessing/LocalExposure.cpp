@@ -258,17 +258,6 @@ void LocalExposure::SetupResources()
 	CompileComputeShaders();
 }
 
-void LocalExposure::ReleaseResources()
-{
-	outputReady = false;
-	texLogLuminance.reset();
-	texLuminanceGrid.reset();
-	texBlurTemp.reset();
-	texBlurredLuminance.reset();
-	logLuminanceMipSRVs.fill(nullptr);
-	logLuminanceMipUAVs.fill(nullptr);
-}
-
 void LocalExposure::ClearShaderCache()
 {
 	outputReady = false;

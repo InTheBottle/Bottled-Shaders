@@ -56,7 +56,6 @@ struct CODBloom : public PostProcessFeature
 	winrt::com_ptr<ID3D11PixelShader> compositePS = nullptr;
 
 	virtual void SetupResources() override;
-	virtual void ReleaseResources() override;
 	virtual void ClearShaderCache() override;
 	void CompileRasterShaders();
 

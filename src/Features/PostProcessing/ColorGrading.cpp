@@ -962,17 +962,6 @@ void ColorGrading::ReleaseActiveShaders()
 		}
 }
 
-void ColorGrading::ReleaseResources()
-{
-	texColor.reset();
-	texLUT.reset();
-	texCurveInput.reset();
-	texCurveOutput.reset();
-	curveStaging = nullptr;
-	curveReadbackRequested = false;
-	lutValid = false;
-}
-
 void ColorGrading::ClearShaderCache()
 {
 	ReleaseActiveShaders();

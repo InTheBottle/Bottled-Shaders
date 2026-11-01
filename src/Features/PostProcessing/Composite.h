@@ -51,7 +51,6 @@ struct Composite : public PostProcessFeature
 	std::array<winrt::com_ptr<ID3D11PixelShader>, CompositeFlags::FLAG_COUNT> compositeShaders = {};
 
 	virtual void SetupResources() override;
-	virtual void ReleaseResources() override;
 	virtual void ClearShaderCache() override;
 	void CompileRasterShaders();
 

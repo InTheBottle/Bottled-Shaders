@@ -43,7 +43,6 @@ struct LUT : PostProcessFeature
 	winrt::com_ptr<ID3D11PixelShader> lutPS = nullptr;
 
 	virtual void SetupResources() override;
-	virtual void ReleaseResources() override;
 	virtual void ClearShaderCache() override;
 	void CompileRasterShaders();
 

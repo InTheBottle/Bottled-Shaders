@@ -105,11 +105,6 @@ void Vignette::SetupResources()
 	CompileRasterShaders();
 }
 
-void Vignette::ReleaseResources()
-{
-	texOutput.reset();
-}
-
 void Vignette::ClearShaderCache()
 {
 	BumpShaderGeneration();

@@ -85,15 +85,6 @@ void MotionBlur::CompileComputeShaders()
 	CompileComputeShadersAsync(L"Data\\Shaders\\PostProcessing\\MotionBlur", shaderInfos);
 }
 
-void MotionBlur::ReleaseResources()
-{
-	horizontalPassTexture = nullptr;
-	verticalPassTexture = nullptr;
-	neighborMaxTexture = nullptr;
-	blurOutputTexture = nullptr;
-	lastWidth = lastHeight = 0;
-}
-
 void MotionBlur::ClearShaderCache()
 {
 	BumpShaderGeneration();

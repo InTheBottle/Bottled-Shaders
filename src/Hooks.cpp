@@ -877,7 +877,7 @@ namespace Hooks
 		static void thunk(RE::BSGraphics::Renderer* This, RE::RENDER_TARGETS::RENDER_TARGET a_target, RE::BSGraphics::RenderTargetProperties* a_properties)
 		{
 			const auto saved = *a_properties;
-			a_properties->format.set(RE::BSGraphics::Format::kR16G16_FLOAT);
+			a_properties->format.set(RE::BSGraphics::Format::kR16G16B16A16_FLOAT);
 			func(This, a_target, a_properties);
 			*a_properties = saved;
 		}
@@ -889,7 +889,7 @@ namespace Hooks
 		static void thunk(RE::BSGraphics::Renderer* This, RE::RENDER_TARGETS::RENDER_TARGET a_target, RE::BSGraphics::RenderTargetProperties* a_properties)
 		{
 			const auto saved = *a_properties;
-			a_properties->format.set(RE::BSGraphics::Format::kR16G16_FLOAT);
+			a_properties->format.set(RE::BSGraphics::Format::kR16G16B16A16_FLOAT);
 			func(This, a_target, a_properties);
 			*a_properties = saved;
 		}

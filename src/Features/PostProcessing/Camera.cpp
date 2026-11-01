@@ -149,11 +149,6 @@ void Camera::SetupResources()
 	}
 }
 
-void Camera::ReleaseResources()
-{
-	texOutput.reset();
-}
-
 void Camera::ClearShaderCache()
 {
 	BumpShaderGeneration();

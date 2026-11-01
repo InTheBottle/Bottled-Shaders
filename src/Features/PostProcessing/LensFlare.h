@@ -131,6 +131,7 @@ struct LensFlare : public PostProcessFeature
 	// FFT ghost pipeline textures
 	eastl::unique_ptr<Texture2D> texFFT[2] = {};          // RG32F ping-pong (N×N)
 	eastl::unique_ptr<Texture2D> texSceneFFT = nullptr;   // RG32F cached scene FFT (N×N)
+	eastl::unique_ptr<Texture2D> texFFTResult = nullptr;  // RGBA16F FFT convolution result (N×N)
 
 	winrt::com_ptr<ID3D11SamplerState> colorSampler = nullptr;
 	winrt::com_ptr<ID3D11SamplerState> borderSampler = nullptr;
@@ -157,7 +158,6 @@ struct LensFlare : public PostProcessFeature
 	bool bokehFFTDirty = true;
 
 	virtual void SetupResources() override;
-	virtual void ReleaseResources() override;
 	virtual void ClearShaderCache() override;
 	void CompileComputeShaders();
 	void CreateFFTTextures(uint resolution);

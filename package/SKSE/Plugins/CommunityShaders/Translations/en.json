@@ -2371,6 +2371,7 @@
     "feature.post_processing.lens_flare.aperture_rotation": "Aperture Rotation",
     "feature.post_processing.lens_flare.blur_iterations": "Blur Iterations",
     "feature.post_processing.lens_flare.buffer_blur_temp": "Blur Temp (quarter-res)",
+    "feature.post_processing.lens_flare.buffer_fft_result": "FFT Convolution Result",
     "feature.post_processing.lens_flare.buffer_ghost_halo": "Ghost + Halo (half-res)",
     "feature.post_processing.lens_flare.buffer_threshold": "Threshold (half-res)",
     "feature.post_processing.lens_flare.color": "Color",

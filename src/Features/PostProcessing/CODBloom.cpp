@@ -1,6 +1,5 @@
 #include "CODBloom.h"
 
-#include "Composite.h"
 #include "Features/PostProcessing.h"
 #include "I18n/I18n.h"
 #include "RasterPass.h"
@@ -37,12 +36,11 @@ void CODBloom::DrawSettings()
 	ImGui::Unindent();
 
 	if (Util::ShowDebugSections() && ImGui::CollapsingHeader(T("feature.post_processing.codbloom.debug", "Debug"))) {
-		static int mip = 1;
-		ImGui::SliderInt(T("feature.post_processing.codbloom.debug_mip_level", "Debug Mip Level"), &mip, 1, (int)s_BloomMips - 1, "%d", ImGuiSliderFlags_NoInput | ImGuiSliderFlags_AlwaysClamp);
+		static int mip = 0;
+		ImGui::SliderInt(T("feature.post_processing.codbloom.debug_mip_level", "Debug Mip Level"), &mip, 0, (int)s_BloomMips - 1, "%d", ImGuiSliderFlags_NoInput | ImGuiSliderFlags_AlwaysClamp);
 
 		ImGui::BulletText(T("feature.post_processing.codbloom.texbloom", "texBloom"));
-		if (texBloom)
-			ImGui::Image(texBloomMipSRVs[mip].get(), { texBloom->desc.Width * .4f, texBloom->desc.Height * .4f });
+		ImGui::Image(texBloomMipSRVs[mip].get(), { texBloom->desc.Width * .2f, texBloom->desc.Height * .2f });
 	}
 }
 
@@ -85,9 +83,7 @@ void CODBloom::SetupResources()
 			.Texture2D = { .MostDetailedMip = 0, .MipLevels = 1 }
 		};
 
-		texDesc.Width = std::max(1u, texDesc.Width >> 1);
-		texDesc.Height = std::max(1u, texDesc.Height >> 1);
-		texDesc.MipLevels = srvDesc.Texture2D.MipLevels = s_BloomMips - 1;
+		texDesc.MipLevels = srvDesc.Texture2D.MipLevels = s_BloomMips;
 		texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
 		texDesc.MiscFlags = 0;
 
@@ -95,11 +91,11 @@ void CODBloom::SetupResources()
 		texBloom->CreateSRV(srvDesc);
 
 		// SRV for each mip
-		for (uint i = 1; i < s_BloomMips; i++) {
+		for (uint i = 0; i < s_BloomMips; i++) {
 			D3D11_SHADER_RESOURCE_VIEW_DESC mipSrvDesc = {
 				.Format = texDesc.Format,
 				.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
-				.Texture2D = { .MostDetailedMip = i - 1, .MipLevels = 1 }
+				.Texture2D = { .MostDetailedMip = i, .MipLevels = 1 }
 			};
 			texBloomMipSRVs[i] = nullptr;
 			DX::ThrowIfFailed(device->CreateShaderResourceView(texBloom->resource.get(), &mipSrvDesc, texBloomMipSRVs[i].put()));
@@ -107,11 +103,11 @@ void CODBloom::SetupResources()
 		}
 
 		// RTV for each mip
-		for (uint i = 1; i < s_BloomMips; i++) {
+		for (uint i = 0; i < s_BloomMips; i++) {
 			D3D11_RENDER_TARGET_VIEW_DESC mipRtvDesc = {
 				.Format = texDesc.Format,
 				.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D,
-				.Texture2D = { .MipSlice = i - 1 }
+				.Texture2D = { .MipSlice = i }
 			};
 			texBloomMipRTVs[i] = nullptr;
 			DX::ThrowIfFailed(device->CreateRenderTargetView(texBloom->resource.get(), &mipRtvDesc, texBloomMipRTVs[i].put()));
@@ -159,14 +155,6 @@ void CODBloom::SetupResources()
 	CompileRasterShaders();
 }
 
-void CODBloom::ReleaseResources()
-{
-	outputReady = false;
-	texBloom.reset();
-	texBloomMipSRVs.fill(nullptr);
-	texBloomMipRTVs.fill(nullptr);
-}
-
 void CODBloom::ClearShaderCache()
 {
 	outputReady = false;
@@ -211,11 +199,6 @@ void CODBloom::Draw(TextureInfo& inout_tex)
 	if (!owner || !owner->GetFullscreenVS())
 		return;
 
-	auto* composite = owner->GetPipelineFeature<Composite>(PostProcessing::FeaturePipelineIndex::Composite);
-	auto* thresholdTex = composite ? composite->texOutput.get() : nullptr;
-	if (!thresholdTex)
-		return;
-
 	state->BeginPerfEvent("COD Bloom");
 
 	// update cb
@@ -244,7 +227,7 @@ void CODBloom::Draw(TextureInfo& inout_tex)
 	// Threshold
 	{
 		globals::profiler->BeginPass("PostProcessing::CODBloom::Threshold");
-		pass.SetTargets({ thresholdTex->rtv.get() }, (float)thresholdTex->desc.Width, (float)thresholdTex->desc.Height);
+		pass.SetTargets({ texBloomMipRTVs[0].get() }, (float)texBloom->desc.Width, (float)texBloom->desc.Height);
 		srvs.at(0) = inout_tex.srv;
 		context->PSSetShaderResources(0, (uint)srvs.size(), srvs.data());
 		pass.SetShaders(vs, thresholdPS.get());
@@ -261,12 +244,12 @@ void CODBloom::Draw(TextureInfo& inout_tex)
 		if (i == 1)
 			pass.SetShaders(vs, downsamplePS.get());
 
-		uint mipWidth = thresholdTex->desc.Width >> (i + 1);
-		uint mipHeight = thresholdTex->desc.Height >> (i + 1);
+		uint mipWidth = texBloom->desc.Width >> (i + 1);
+		uint mipHeight = texBloom->desc.Height >> (i + 1);
 		pass.SetTargets({ texBloomMipRTVs[i + 1].get() }, (float)mipWidth, (float)mipHeight);
 
 		srvs.fill(nullptr);
-		srvs.at(1) = i == 0 ? thresholdTex->srv.get() : texBloomMipSRVs[i].get();
+		srvs.at(1) = texBloomMipSRVs[i].get();
 		context->PSSetShaderResources(0, (uint)srvs.size(), srvs.data());
 		pass.Draw();
 	}
@@ -285,8 +268,8 @@ void CODBloom::Draw(TextureInfo& inout_tex)
 		float blendFactor[4] = { cbData.CurrentMipMult, cbData.CurrentMipMult, cbData.CurrentMipMult, 0.f };
 		pass.SetBlendState(upsampleBlendState.get(), blendFactor);
 
-		uint mipWidth = thresholdTex->desc.Width >> i;
-		uint mipHeight = thresholdTex->desc.Height >> i;
+		uint mipWidth = texBloom->desc.Width >> i;
+		uint mipHeight = texBloom->desc.Height >> i;
 		pass.SetTargets({ texBloomMipRTVs[i].get() }, (float)mipWidth, (float)mipHeight);
 
 		srvs.fill(nullptr);

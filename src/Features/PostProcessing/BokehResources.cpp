@@ -19,29 +19,6 @@ void BokehResources::Setup()
 {
 	auto device = globals::d3d::device;
 
-	logger::debug("BokehResources: Creating sampler...");
-	{
-		D3D11_SAMPLER_DESC samplerDesc = {
-			.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR,
-			.AddressU = D3D11_TEXTURE_ADDRESS_MIRROR,
-			.AddressV = D3D11_TEXTURE_ADDRESS_MIRROR,
-			.AddressW = D3D11_TEXTURE_ADDRESS_MIRROR,
-			.MaxAnisotropy = 1,
-			.MinLOD = 0,
-			.MaxLOD = D3D11_FLOAT32_MAX
-		};
-		bokehSampler = nullptr;
-		DX::ThrowIfFailed(device->CreateSamplerState(&samplerDesc, bokehSampler.put()));
-		Util::SetResourceName(bokehSampler.get(), "BokehResources::Sampler");
-	}
-}
-
-void BokehResources::EnsureShapes()
-{
-	if (shapesLoaded)
-		return;
-	shapesLoaded = true;
-
 	logger::debug("BokehResources: Loading built-in bokeh shapes...");
 	for (int i = 0; i < NUM_BUILTIN_SHAPES; i++) {
 		auto shapePath = bokehShapesPath / builtinShapeFiles[i];
@@ -57,15 +34,22 @@ void BokehResources::EnsureShapes()
 				numLoadedShapes = std::max(numLoadedShapes, NUM_BUILTIN_SHAPES + i + 1);
 		}
 	}
-}
 
-void BokehResources::ReleaseShapes()
-{
-	for (auto& tex : texBokehShapes)
-		tex.reset();
-	for (auto& buffer : shapeSampleBuffers)
-		buffer.reset();
-	shapesLoaded = false;
+	logger::debug("BokehResources: Creating sampler...");
+	{
+		D3D11_SAMPLER_DESC samplerDesc = {
+			.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR,
+			.AddressU = D3D11_TEXTURE_ADDRESS_MIRROR,
+			.AddressV = D3D11_TEXTURE_ADDRESS_MIRROR,
+			.AddressW = D3D11_TEXTURE_ADDRESS_MIRROR,
+			.MaxAnisotropy = 1,
+			.MinLOD = 0,
+			.MaxLOD = D3D11_FLOAT32_MAX
+		};
+		bokehSampler = nullptr;
+		DX::ThrowIfFailed(device->CreateSamplerState(&samplerDesc, bokehSampler.put()));
+		Util::SetResourceName(bokehSampler.get(), "BokehResources::Sampler");
+	}
 }
 
 bool BokehResources::LoadTextureFromFile(const std::filesystem::path& path, int index)

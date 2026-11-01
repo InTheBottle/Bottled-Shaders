@@ -160,8 +160,6 @@ public:
 	eastl::unique_ptr<Texture2D> texIlCoCg[2] = { nullptr };
 	eastl::unique_ptr<Texture2D> texGiSpecular[2] = { nullptr };
 
-	void EnsureTextures();
-	void ReleaseTextures();
 	void EnsureGiSpecularTextures();
 	ID3D11ShaderResourceView* GiSpecularSRV(uint i) const { return texGiSpecular[i] ? texGiSpecular[i]->srv.get() : nullptr; }
 	ID3D11UnorderedAccessView* GiSpecularUAV(uint i) const { return texGiSpecular[i] ? texGiSpecular[i]->uav.get() : nullptr; }
@@ -169,7 +167,7 @@ public:
 	/** @brief Returns the current output SRVs for AO, indirect lighting Y/CoCg, and specular GI (or nullptrs if disabled). */
 	inline auto GetOutputTextures()
 	{
-		return (loaded && settings.Enabled && texAo[outputAoIdx]) ?
+		return (loaded && settings.Enabled) ?
 		           std::make_tuple(
 					   texAo[outputAoIdx]->srv.get(),
 					   texIlY[outputIlIdx]->srv.get(),

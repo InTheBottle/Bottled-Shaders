@@ -82,11 +82,6 @@ void Border::SetupResources()
 	CompileComputeShaders();
 }
 
-void Border::ReleaseResources()
-{
-	texOutput.reset();
-}
-
 void Border::ClearShaderCache()
 {
 	BumpShaderGeneration();

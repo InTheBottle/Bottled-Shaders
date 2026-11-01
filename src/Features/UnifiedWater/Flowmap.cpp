@@ -295,7 +295,7 @@ bool Flowmap::GenerateFlowmap(bool useMips)
 	D3D11_TEXTURE2D_DESC desc{};
 	desc.Width = width * 64;
 	desc.Height = height * 64;
-	desc.MipLevels = useMips ? 6 : 1;
+	desc.MipLevels = 6;
 	desc.ArraySize = 1;
 	desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
 	desc.SampleDesc = { 1, 0 };
