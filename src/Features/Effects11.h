@@ -216,6 +216,8 @@ public:
 	bool gameVolumetricRaysIntensityApplied = false;
 	float gameVolumetricRaysIntensityLast = 1.0f;
 	float gameVolumetricRaysIntensityCurrent = 1.0f;
+	float nightLightLast = 1.0f;
+	float nightLightCurrent = 1.0f;
 
 	PerFrame GetCommonBufferData();
 	void UpdateSkyScattering(PerFrame& a_data);
@@ -252,6 +254,7 @@ public:
 	 * @return False when Effects 11 left the intensity alone this tick.
 	 */
 	bool GetGameVolumetricRaysIntensityEndpoints(float& a_last, float& a_current) const;
+	std::pair<float, float> GetNightLightEndpoints() const { return { nightLightLast, nightLightCurrent }; }
 	void OverrideWeather(RE::Sky* a_sky);
 	void CheckCommonData();
 	void OverridePointLightColor(float3& a_color);
@@ -297,7 +300,7 @@ private:
 	 */
 	float3 GradeSkyColors(std::span<RE::NiColor, RE::TESWeather::ColorTypes::kTotal> a_colors) const;
 	/** @brief Per-weather counterpart of BlendGradedAmbient for the sky colours graded by GradeSkyColors. */
-	void BlendGradedWeathers(RE::Sky* a_sky, std::span<RE::NiColor, RE::TESWeather::ColorTypes::kTotal> a_graded) const;
+	void BlendGradedWeathers(RE::Sky* a_sky, std::span<RE::NiColor, RE::TESWeather::ColorTypes::kTotal> a_graded);
 	bool presetActive = false;
 	bool resourcesReady = false;
 	/** @brief Compiles the sun ray shaders and (re)creates their half-res targets; false if anything failed. */

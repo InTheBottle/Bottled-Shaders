@@ -458,6 +458,7 @@ void VolumetricLighting::FinishSkyUpdate(RE::Sky* a_sky)
 {
 	auto& renderData = GetRenderData();
 
+	lightFade = 1.0f;
 	const float weatherPct = a_sky ? a_sky->currentWeatherPct : 1.0f;
 	if (a_sky && a_sky->mode.get() == RE::Sky::Mode::kFull && a_sky->currentClimate && a_sky->currentWeather && a_sky->lastWeather &&
 		weatherPct > 0.0f && weatherPct < 1.0f) {
@@ -467,8 +468,12 @@ void VolumetricLighting::FinishSkyUpdate(RE::Sky* a_sky)
 
 		float intensityLast = 1.0f;
 		float intensityCurrent = 1.0f;
-		if (globals::features::effects11.loaded)
+		float nightLightLast = 1.0f;
+		float nightLightCurrent = 1.0f;
+		if (globals::features::effects11.loaded) {
 			globals::features::effects11.GetGameVolumetricRaysIntensityEndpoints(intensityLast, intensityCurrent);
+			std::tie(nightLightLast, nightLightCurrent) = globals::features::effects11.GetNightLightEndpoints();
+		}
 
 		const auto lastData = GetWeatherVolumetricLighting(a_sky->lastWeather, time, nightVolumetricLighting);
 		const auto currentData = GetWeatherVolumetricLighting(a_sky->currentWeather, time, nightVolumetricLighting);
@@ -483,9 +488,12 @@ void VolumetricLighting::FinishSkyUpdate(RE::Sky* a_sky)
 
 		const float blendedBrightness = GetVolumetricBrightness(blendedData, blendedSunlight, std::lerp(intensityLast, intensityCurrent, weatherPct));
 		if (blendedBrightness > 1e-6f) {
-			const float targetBrightness = std::lerp(GetVolumetricBrightness(lastData, lastSunlight, intensityLast),
-				GetVolumetricBrightness(currentData, currentSunlight, intensityCurrent), weatherPct);
+			const float lastBrightness = GetVolumetricBrightness(lastData, lastSunlight, intensityLast);
+			const float currentBrightness = GetVolumetricBrightness(currentData, currentSunlight, intensityCurrent);
+			const float targetBrightness = std::lerp(lastBrightness, currentBrightness, weatherPct);
 			renderData.intensity *= std::clamp(targetBrightness / blendedBrightness, 0.0f, MaxTransitionCorrection);
+			if (targetBrightness > 1e-6f)
+				lightFade = std::lerp(lastBrightness * nightLightLast, currentBrightness * nightLightCurrent, weatherPct) / targetBrightness;
 		}
 	}
 

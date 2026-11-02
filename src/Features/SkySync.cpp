@@ -2,6 +2,7 @@
 #include "../I18n/I18n.h"
 #include "RE/B/BSVolumetricLightingRenderData.h"
 
+#include "Effects11.h"
 #include "LinearLighting.h"
 #include "Utils/Climate.h"
 #include "Utils/Game.h"
@@ -286,17 +287,19 @@ void SkySync::OnSkyUpdateColors(RE::Sky* sky)
 	}
 
 	auto lightFactor = [&](bool dimmed) { return dimmed ? shadowFader.intensityFactor * currentDim : shadowFader.intensityFactor; };
+	const bool moonsHidden = lightNightWeight >= 1.0f && globals::features::effects11.enableEffect && sky->skyColor[RE::TESWeather::ColorTypes::kMoonGlare] == RE::NiColor{};
+	const float casterFade = moonsHidden ? 0.0f : shadowFader.casterFade;
 
 	auto& dirLight = sky->skyColor[static_cast<uint>(RE::TESWeather::ColorTypes::kSunlight)];
 	// Lightning strikes from overhead rather than the caster, so only the light under the flash is dimmed
 	const float flash = GetDirectionalFlash(sky);
 	const RE::NiColor flashLight{ std::min(flash, dirLight.red), std::min(flash, dirLight.green), std::min(flash, dirLight.blue) };
-	dirLight = (dirLight - flashLight) * lightFactor(settings.DimSunlightUnderHorizon) * shadowFader.casterFade + flashLight;
+	dirLight = (dirLight - flashLight) * lightFactor(settings.DimSunlightUnderHorizon) * casterFade + flashLight;
 	const float totalLight = dirLight.red + dirLight.green + dirLight.blue;
 	flashWeight = totalLight > 0.0f ? (flashLight.red + flashLight.green + flashLight.blue) / totalLight : 0.0f;
 
 	if (gVolumetricLighting)
-		gVolumetricLighting->intensity *= lightFactor(settings.DimVolumetricLighting) * shadowFader.casterFade;
+		gVolumetricLighting->intensity *= lightFactor(settings.DimVolumetricLighting) * casterFade;
 }
 
 void SkySync::ApplyMoonlightColors(RE::Sky* sky)

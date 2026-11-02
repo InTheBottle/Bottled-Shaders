@@ -105,6 +105,8 @@ public:
 	 */
 	void FinishSkyUpdate(RE::Sky* a_sky);
 
+	float GetLightFade() const { return lightFade; }
+
 	/**
 	 * @brief Creates a BSImagespaceShader wrapping a compute shader for volumetric lighting passes.
 	 * @param name The shader's internal name.
@@ -206,6 +208,7 @@ private:
 	RE::BSVolumetricLightingRenderData writtenRenderData{};
 	bool hasWrittenRenderData = false;
 	bool nightRenderData = false;
+	float lightFade = 1.0f;
 	GodRayBufferData godRayBufferData{ 0.0f, 1.0f, { 0.0f, 0.0f } };
 
 	TextureSize exteriorSizeInUnits;
