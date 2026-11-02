@@ -167,7 +167,16 @@ VS_OUTPUT main(VS_INPUT input)
 
 #	ifdef REVERSE_Z
 	float4 skyPosition = mul(WorldViewProj, inputPosition);
-	vsout.Position = float4(skyPosition.xy, FrameBuffer::FarPlaneClipZ(skyPosition.w), skyPosition.w);
+	bool reverseProjection = FrameBuffer::IsReverseProjection();
+#		if defined(MOONMASK)
+	float skyDepthLayer = 1e-9;
+#		elif defined(TEX) && !defined(DITHER)
+	float skyDepthLayer = 2e-9;
+#		else
+	float skyDepthLayer = 0.0;
+#		endif
+	float skyLayerClipZ = reverseProjection ? skyDepthLayer * skyPosition.w : 0.0;
+	vsout.Position = float4(skyPosition.xy, FrameBuffer::FarPlaneClipZ(skyPosition.w, reverseProjection) + skyLayerClipZ, skyPosition.w);
 #	else
 	vsout.Position = mul(WorldViewProj, inputPosition).xyww;
 #	endif

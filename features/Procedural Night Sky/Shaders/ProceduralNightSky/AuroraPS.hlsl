@@ -14,9 +14,9 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 {
 	float depth = SceneDepth.Load(int3(position.xy, 0));
 #if defined(REVERSE_Z)
-	bool isSky = FrameBuffer::IsReverseProjection() ? depth <= 0.0 : depth >= 1.0;
+	bool isSky = FrameBuffer::IsReverseProjection() ? depth <= 0.000003 : depth >= 0.999997;
 #else
-	bool isSky = depth >= 1.0;
+	bool isSky = depth >= 0.999997;
 #endif
 	if (!isSky)
 		discard;
