@@ -141,6 +141,11 @@ namespace PostProcessingMode
 		return pendingMode == Mode::Vanilla && !detectPreset;
 	}
 
+	bool IsEffects11Pending()
+	{
+		return pendingMode == Mode::Effects11 && !detectPreset;
+	}
+
 	void ApplyPending()
 	{
 		if (!pendingMode)

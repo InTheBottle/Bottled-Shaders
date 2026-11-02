@@ -95,7 +95,7 @@ float GetSunGlareVisibility()
 #		else
 		bool isSky = sampleDepth >= 1.0;
 #		endif
-		visibleSamples += FrameBuffer::IsOutsideFrame(sampleUV) || isSky;
+		visibleSamples += isSky;
 	}
 	return FlareOcclusion::GetVisibility(visibleSamples);
 }
@@ -158,8 +158,8 @@ VS_OUTPUT main(VS_INPUT input)
 
 	vsout.Color.xyz = VParams * ColorManagement::SRGBToWorking(skyColor);
 	vsout.Color.w = BlendColor[0].w * input.Color.w;
-	vsout.SkyBlendColor0 = float4(BlendColor[0].xyz * VParams, 0);
-	vsout.SkyBlendColor2 = float4(BlendColor[2].xyz * VParams, 0);
+	vsout.SkyBlendColor0 = float4(ColorManagement::SRGBToWorking(BlendColor[0].xyz) * VParams, 0);
+	vsout.SkyBlendColor2 = float4(ColorManagement::SRGBToWorking(BlendColor[2].xyz) * VParams, 0);
 #		if defined(DITHER) && defined(TEX)
 	vsout.Color.w *= GetSunGlareVisibility();
 #		endif

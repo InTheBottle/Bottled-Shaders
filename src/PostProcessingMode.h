@@ -29,6 +29,8 @@ namespace PostProcessingMode
 	/** @brief Whether the mode read by Load() will apply as Vanilla; known before Effects 11 is ready, since only an explicit Vanilla choice resolves to it. */
 	bool IsVanillaPending();
 
+	bool IsEffects11Pending();
+
 	/** @brief Applies a mode read by Load() once Effects 11 is ready, running the installed default while its pipeline cannot. */
 	void ApplyPending();
 

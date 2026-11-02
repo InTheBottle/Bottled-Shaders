@@ -1687,9 +1687,9 @@ HDRDisplay::HDRDataCB HDRDisplay::BuildHDRData() const
 
 	// Linear Lighting keeps the pipeline linear throughout.
 	// Without it, ISHDR gamma-encodes its output even in HDR mode.
-	bool isSceneLinear = globals::features::linearLighting.IsLinearLightingActive() && !isMainOrLoadingMenu && !globals::state->IsFlatWorldMapOpen();
-
 	const bool applyAutoHDR = globals::features::effects11.ReplacedTonemapperThisFrame();
+	bool isSceneLinear = globals::features::linearLighting.IsLinearLightingActive() && !applyAutoHDR && !isMainOrLoadingMenu && !globals::state->IsFlatWorldMapOpen();
+
 	float effectivePeakNits = static_cast<float>(applyAutoHDR ? std::min(settings.hdrPeakNits, kAutoHDRMaxNits) : settings.hdrPeakNits);
 
 	HDRDataCB data{};

@@ -13,11 +13,9 @@ namespace Color
 	static const float BRDFScale = 1.0;
 #	endif
 
-	/** @brief Gamma lighting pipelines (Linear Lighting off, or an Effects 11 preset) keep PBR material colors gamma 2.2 encoded. */
+	/** @brief Gamma lighting pipelines (Linear Lighting off) keep PBR material colors gamma 2.2 encoded. */
 #	if !defined(ENABLE_LL)
 	static const bool PBRMaterialIsGammaEncoded = true;
-#	elif defined(EFFECTS11)
-	static const bool PBRMaterialIsGammaEncoded = SharedData::enbSettings.Enable;
 #	else
 	static const bool PBRMaterialIsGammaEncoded = false;
 #	endif

@@ -12,6 +12,7 @@
 #include "Deferred.h"
 #include "Globals.h"
 #include "IBL.h"
+#include "LinearLighting.h"
 #include "PostProcessing.h"
 #include "PostProcessingMode.h"
 #include "Presets/UnifiedPresetCatalog.h"
@@ -210,6 +211,7 @@ void Effects11::UpdateSkyScattering(PerFrame& a_data)
 		std::max(0.0f, 1.0f - color.y / colorPeak) * dustTint,
 		std::max(0.0f, 1.0f - color.z / colorPeak) * dustTint
 	};
+	globals::features::linearLighting.SRGBToWorking(&a_data.SkyScatteringColor.x);
 
 	const float dustVolume = timeOfDay("DustVolume");
 	const float horizonRange = timeOfDay("HorizonRange");
@@ -283,7 +285,8 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 	PerFrame data{};
 
 	data.Enable = enableEffect;
-	data.ColorPow = settingManager.GetInterpolatedTimeOfDayValue("ColorPow", "ENVIRONMENT");
+	auto& linearLighting = globals::features::linearLighting;
+	data.ColorPow = linearLighting.IsLinearLightingActive() ? 1.0f : settingManager.GetInterpolatedTimeOfDayValue("ColorPow", "ENVIRONMENT");
 	if (enableEffect)
 		data.SkyScaleMultiplier = settingManager.GetValue<bool>("DisableWrongSkyMath", "SKY") ? 0.0f : settingManager.GetInterpolatedTimeOfDayValue("GradientIntensity", "SKY");
 
@@ -316,9 +319,13 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 	data.GameVolumetricRaysDisableDithering = settingManager.GetValue<bool>("DisableGameDithering", "GAMEVOLUMETRICRAYS");
 	const auto& gameVolumetricLighting = VolumetricLighting::GetRenderData();
 	const float gameVolumetricLightFade = globals::features::volumetricLighting.GetLightFade();
-	data.GameVolumetricRaysSunColor = volumetricSunColor * gameVolumetricLightFade;
+	float3 gameVolumetricSunColor = volumetricSunColor;
+	float3 gameVolumetricCustomColor = { gameVolumetricLighting.color.red, gameVolumetricLighting.color.green, gameVolumetricLighting.color.blue };
+	linearLighting.SRGBToWorking(&gameVolumetricSunColor.x);
+	linearLighting.SRGBToWorking(&gameVolumetricCustomColor.x);
+	data.GameVolumetricRaysSunColor = gameVolumetricSunColor * gameVolumetricLightFade;
 	data.GameVolumetricRaysCustomContribution = gameVolumetricLighting.customColor.contribution;
-	data.GameVolumetricRaysCustomColor = float3(gameVolumetricLighting.color.red, gameVolumetricLighting.color.green, gameVolumetricLighting.color.blue) * gameVolumetricLightFade;
+	data.GameVolumetricRaysCustomColor = gameVolumetricCustomColor * gameVolumetricLightFade;
 
 	data.ParticleIntensity = settingManager.GetInterpolatedTimeOfDayValue("Intensity", "PARTICLE");
 	data.ParticleLightingInfluence = settingManager.GetInterpolatedTimeOfDayValue("LightingInfluence", "PARTICLE");

@@ -3,6 +3,7 @@
 #include "CSEditor/EditorWindow.h"
 #include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
 #include "Features/CSEditor.h"
+#include "Features/Effects11.h"
 #include "IconsTabler.h"
 #include "Menu/Icons/helpers/IconFonts.h"
 #include "imgui_stdlib.h"
@@ -693,7 +694,7 @@ void PostProcessing::PreProcess(RE::RENDER_TARGET a_input)
 		return;
 	auto& ll = globals::features::linearLighting;
 	const bool linear = ll.IsLinearLightingActive();
-	if (bypass && !linear)
+	if (bypass && (!linear || globals::features::effects11.IsActive()))
 		return;
 
 	auto renderer = globals::game::renderer;
@@ -776,7 +777,7 @@ void PostProcessing::ClearBorderMotionVectorsForFrameGen()
 
 bool PostProcessing::WantsTonemapOwnership() const
 {
-	if (globals::features::linearLighting.IsLinearLightingActive())
+	if (!bypass && globals::features::linearLighting.IsLinearLightingActive())
 		return !globals::state->IsMainOrLoadingMenuOpen();
 	if (bypass || globals::state->IsMainLoadingOrFlatMapOpen())
 		return false;

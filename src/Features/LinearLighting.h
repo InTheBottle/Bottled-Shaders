@@ -63,6 +63,8 @@ struct LinearLighting : Feature
 		float fireEffectCurve = 1.0f;
 
 		float waterGamma = 1.8f;
+
+		bool useWithEffects11 = false;
 	} settings;
 
 	struct alignas(16) PerFrameData
@@ -109,6 +111,7 @@ struct LinearLighting : Feature
 
 	bool IsLinearLightingActive() const;
 	bool IsACEScgActive() const { return IsLinearLightingActive() && configuredACEScg; }
+	float GetEffects11InputCurve() const { return IsLinearLightingActive() ? 1.0f / configuredGameGamma : 1.0f; }
 	RE::NiColor SRGBToWorking(RE::NiColor color) const;
 	void SRGBToWorking(float* color) const;
 	RE::NiColor LightColorToWorking(const RE::NiLight* light, bool effect = false) const;
@@ -126,5 +129,6 @@ private:
 
 	bool configuredLinearLighting = false;
 	bool configuredACEScg = false;
+	bool configuredWithEffects11 = false;
 	bool resourcesReady = false;
 };

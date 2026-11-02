@@ -950,7 +950,7 @@ float GetFresnelValue(float3 normal, float3 viewDirection)
 
 float3 GetWaterColor(float3 color)
 {
-#			if defined(EFFECTS11)
+#			if defined(EFFECTS11) && !defined(ENABLE_LL)
 	if (SharedData::enbSettings.Enable && SharedData::linearLightingSettings.waterGamma > 0.0)
 		return pow(abs(color), SharedData::linearLightingSettings.waterGamma);
 #			endif

@@ -3,6 +3,7 @@
 #include "D3D11StateBackup.h"
 #include "Editor/Effects11Editor.h"
 #include "Features/Effects11.h"
+#include "Features/LinearLighting.h"
 #include "Features/ProceduralSun.h"
 #include "Features/RainRefraction.h"
 #include "Features/ReverseZ.h"
@@ -1306,7 +1307,7 @@ bool EffectManager::ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV, 
 	auto& settingManager = SettingManager::GetSingleton();
 
 	auto brightness = settingManager.GetValue<float>(ids.brightness);
-	auto gammaCurve = settingManager.GetValue<float>(ids.gammaCurve);
+	auto gammaCurve = settingManager.GetValue<float>(ids.gammaCurve) * globals::features::linearLighting.GetEffects11InputCurve();
 
 	// Update constant buffer with current settings
 	D3D11_MAPPED_SUBRESOURCE mapped;

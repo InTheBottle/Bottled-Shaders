@@ -42,27 +42,35 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	lightSpriteEffectMult,
 	fireEffectMult,
 	fireEffectCurve,
-	waterGamma)
+	waterGamma,
+	useWithEffects11)
 
 void LinearLighting::DrawSettings()
 {
 	using PostProcessingMode::Mode;
 	const Mode mode = PostProcessingMode::Get();
-	if (mode == Mode::Effects11) {
-		ImGui::SliderFloat(T(TKEY("water_gamma"), "Water Gamma"), &settings.waterGamma, 0.1f, 3.0f, "%.2f");
-		Util::AddTooltip(T(TKEY("water_gamma_enb_tooltip"), "Still applied under ENB.\nENB darkens surface albedo but not water colours, so without this water reads too bright, most visibly in interiors.\nLower the value to brighten water, raise it to darken."));
+	const bool effects11Mode = mode == Mode::Effects11;
+	if (effects11Mode) {
+		ImGui::Checkbox(T(TKEY("use_with_effects11"), "Use Linear Lighting with Effects 11"), &settings.useWithEffects11);
+		Util::AddTooltip(T(TKEY("use_with_effects11_tooltip"), "Lights the scene with Linear Lighting instead of the preset's gamma lighting.\nPresets are tuned for gamma lighting, so expect to adjust the multipliers below."));
+		if (!settings.useWithEffects11) {
+			ImGui::SliderFloat(T(TKEY("water_gamma"), "Water Gamma"), &settings.waterGamma, 0.1f, 3.0f, "%.2f");
+			Util::AddTooltip(T(TKEY("water_gamma_enb_tooltip"), "Still applied under ENB.\nENB darkens surface albedo but not water colours, so without this water reads too bright, most visibly in interiors.\nLower the value to brighten water, raise it to darken."));
+		}
 	}
-	const bool overridden = mode != Mode::PostProcessing;
-	const Util::LockedSection modeLock(overridden, mode == Mode::Effects11 ?
+	const bool overridden = mode == Mode::Vanilla || (effects11Mode && !settings.useWithEffects11);
+	const Util::LockedSection modeLock(overridden, effects11Mode ?
 													   T(TKEY("overridden_by_effects11"), "Effects 11 overrides Linear Lighting.") :
 													   T(TKEY("off_in_vanilla"), "Vanilla post processing turns Linear Lighting off."));
 
-	// A disabled checkbox never reports a click, so the saved setting survives the forced-off display.
-	bool linearLightingDisplay = settings.enableLinearLighting && !overridden;
-	if (ImGui::Checkbox(T(TKEY("enable_linear_lighting"), "Enable Linear Lighting"), &linearLightingDisplay))
-		settings.enableLinearLighting = linearLightingDisplay;
-	ImGui::Checkbox(T(TKEY("enable_acescg"), "Enable ACEScg Wide Gamut"), (bool*)&settings.enableACEScg);
-	Util::Text::Secondary("%s", T(TKEY("startup_settings"), "Linear Lighting and working color space settings require a restart."));
+	if (!effects11Mode) {
+		// A disabled checkbox never reports a click, so the saved setting survives the forced-off display.
+		bool linearLightingDisplay = settings.enableLinearLighting && !overridden;
+		if (ImGui::Checkbox(T(TKEY("enable_linear_lighting"), "Enable Linear Lighting"), &linearLightingDisplay))
+			settings.enableLinearLighting = linearLightingDisplay;
+		ImGui::Checkbox(T(TKEY("enable_acescg"), "Enable ACEScg Wide Gamut"), (bool*)&settings.enableACEScg);
+		Util::Text::Secondary("%s", T(TKEY("startup_settings"), "Linear Lighting and working color space settings require a restart."));
+	}
 
 	if (Util::BeginPillTabBar("##LinearLightingTabs")) {
 		if (Util::BeginPillTabItem(T(TKEY("tab_general"), "General"))) {
@@ -134,12 +142,12 @@ void LinearLighting::SaveSettings(json& o_json)
 
 bool LinearLighting::IsLinearLightingActive() const
 {
-	return configuredLinearLighting && !globals::features::effects11.IsActive();
+	return configuredLinearLighting && (configuredWithEffects11 || !globals::features::effects11.IsActive());
 }
 
 void LinearLighting::PostSetupResources()
 {
-	assert(!configuredLinearLighting || globals::features::postProcessing.loaded);
+	assert(!configuredLinearLighting || configuredWithEffects11 || globals::features::postProcessing.loaded);
 	resourcesReady = true;
 }
 
@@ -149,14 +157,17 @@ void LinearLighting::Reset()
 		return;
 	if (applyGameGamma && !IsLinearLightingActive())
 		ApplyGameGamma();
-	// Needs Post Processing's display transform, so Vanilla mode turns it off; Effects 11 gates it separately via IsActive.
-	const bool linearLighting = settings.enableLinearLighting && globals::features::postProcessing.loaded &&
-	                            PostProcessingMode::Get() != PostProcessingMode::Mode::Vanilla;
-	const bool acescg = linearLighting && settings.enableACEScg;
-	if (linearLighting != configuredLinearLighting || acescg != configuredACEScg || applyGameGamma)
-		globals::shaderCache->Reload([this, linearLighting, acescg] {
+	using PostProcessingMode::Mode;
+	const Mode mode = PostProcessingMode::Get();
+	const bool withEffects11 = settings.useWithEffects11 && mode == Mode::Effects11;
+	// Needs a display transform, Post Processing's or the preset's own, so Vanilla mode turns it off; Effects 11 gates it separately via IsActive.
+	const bool linearLighting = withEffects11 || (settings.enableLinearLighting && globals::features::postProcessing.loaded && mode != Mode::Vanilla);
+	const bool acescg = linearLighting && settings.enableACEScg && !withEffects11;
+	if (linearLighting != configuredLinearLighting || acescg != configuredACEScg || withEffects11 != configuredWithEffects11 || applyGameGamma)
+		globals::shaderCache->Reload([this, linearLighting, acescg, withEffects11] {
 			configuredLinearLighting = linearLighting;
 			configuredACEScg = acescg;
+			configuredWithEffects11 = withEffects11;
 			if (applyGameGamma)
 				ApplyGameGamma();
 		});
@@ -666,9 +677,10 @@ void LinearLighting::Load()
 {
 	ApplyGameGamma();
 	// Matches Reset() so a saved Vanilla mode does not cost a shader reload on the first frame.
-	configuredLinearLighting = loaded && settings.enableLinearLighting && globals::features::postProcessing.loaded &&
-	                           !PostProcessingMode::IsVanillaPending();
-	configuredACEScg = configuredLinearLighting && settings.enableACEScg;
+	configuredWithEffects11 = loaded && settings.useWithEffects11 && PostProcessingMode::IsEffects11Pending();
+	configuredLinearLighting = configuredWithEffects11 || (loaded && settings.enableLinearLighting && globals::features::postProcessing.loaded &&
+															  !PostProcessingMode::IsVanillaPending());
+	configuredACEScg = configuredLinearLighting && settings.enableACEScg && !configuredWithEffects11;
 
 	// Installed regardless of the toggle so Reset() can enable Linear Lighting without a restart.
 	struct UploadCall : Xbyak::CodeGenerator

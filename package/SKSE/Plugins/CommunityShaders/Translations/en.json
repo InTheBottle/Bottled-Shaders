@@ -2048,6 +2048,8 @@
     "feature.linear_lighting.startup_settings": "Linear Lighting and working color space settings require a restart.",
     "feature.linear_lighting.tab_advanced": "Advanced",
     "feature.linear_lighting.tab_general": "General",
+    "feature.linear_lighting.use_with_effects11": "Use Linear Lighting with Effects 11",
+    "feature.linear_lighting.use_with_effects11_tooltip": "Lights the scene with Linear Lighting instead of the preset's gamma lighting.\nPresets are tuned for gamma lighting, so expect to adjust the multipliers below.",
     "feature.linear_lighting.water_gamma": "Water Gamma",
     "feature.linear_lighting.water_gamma_enb_tooltip": "Still applied under ENB.\nENB darkens surface albedo but not water colours, so without this water reads too bright, most visibly in interiors.\nLower the value to brighten water, raise it to darken.",
     "feature.lod_blending.description": "Provides seamless visual transitions between Level of Detail (LOD) objects and full-detail objects, eliminating harsh transitions and creating smooth visual continuity.",
