@@ -174,29 +174,26 @@ namespace SkyScattering
 		if (scattering)
 			visibility = GetCloudLightVisibility(textureBrightness);
 
-		float sunWeight = saturate(SharedData::SunColor.w * 4.0);
-		[branch] if (scattering && sunWeight > 0.0)
+		float3 sunDirection = GetSunDirection();
+		[branch] if (scattering && sunDirection.z > -0.5)
 		{
-			float3 sunDirection = GetSunDirection();
 			float facing = GetFacing(viewDirection, sunDirection);
 			float planetShadow = GetEarthShadow(GetElevation(viewDirection, sunDirection.z), facing, sunDirection.z);
 
-			float sunVisibility = SharedData::enbSettings.SkyScatteringSunVisibility;
+			float sunVisibility = max(SharedData::enbSettings.SkyScatteringSunVisibility, 0.5);
 			if (sunVisibility < 1.0) {
 				float3 flattened = normalize(float3(viewDirection.xy, viewDirection.z * 8.0));
 				planetShadow *= saturate(dot(flattened.xy, sunDirection.xy) * 0.5 + 0.5 + sunVisibility * 2.0 - 1.0);
 			}
 
-			float3 sunLit = result * lerp(1.0 - 0.5 * SharedData::enbSettings.SkyScatteringShadowAmount, 1.0, planetShadow);
+			result *= lerp(1.0, lerp(1.0 - 0.5 * SharedData::enbSettings.SkyScatteringShadowAmount, 1.0, planetShadow), saturate(SharedData::SunColor.w * 4.0));
 
 			[branch] if (SharedData::enbSettings.CloudsLightingSunIntensity > 0.0)
 			{
 				float3 sunLight = DesaturateCloudLight(GetScatteringColorAt(sunDirection));
 				float phase = GetCloudPhase(viewDirection, sunDirection, textureAlpha);
-				sunLit += sunLight * (visibility * phase * planetShadow * textureGray * SharedData::enbSettings.CloudsLightingSunIntensity);
+				result += sunLight * (visibility * phase * planetShadow * textureGray * SharedData::enbSettings.CloudsLightingSunIntensity);
 			}
-
-			result = lerp(result, sunLit, sunWeight);
 		}
 
 		[branch] if (edgeWeight > 0.0 && SharedData::SunColor.w > 0.0)
