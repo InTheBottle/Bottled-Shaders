@@ -3221,7 +3221,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		DirectContext pointLightContext;
 		DirectLightingOutput pointLightOutput;
 		float pointLightShadow = lightShadow * parallaxShadow;
+		MaterialProperties pointLightMaterial = material;
+		pointLightMaterial.Roughness = LightLimitFix::GetSphereLightRoughness(material.Roughness, light.sourceRadius, lightDist);
 #			if defined(TRUE_PBR)
+		pointLightMaterial.CoatRoughness = LightLimitFix::GetSphereLightRoughness(material.CoatRoughness, light.sourceRadius, lightDist);
 		pointLightContext = CreateDirectLightingContext(worldNormal.xyz, coatWorldNormal, vertexNormal.xyz, refractedViewDirection, viewDirection, refractedLightDirection, normalizedLightDirection, lightColor, pointLightShadow, pointLightShadow);
 		if (thinSurfaceNormals)
 			pointLightContext.backTransmissionVisibility = PBR::GetThinSurfaceBackTransmissionVisibility(thinSurfaceFaceNormal, normalizedLightDirection);
@@ -3234,10 +3237,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		}
 #				endif
 #			endif
-		EvaluateLighting(pointLightContext, material, tbnTr, uvOriginal, uvOriginal_ddx, uvOriginal_ddy, pointLightOutput);
+		EvaluateLighting(pointLightContext, pointLightMaterial, tbnTr, uvOriginal, uvOriginal_ddx, uvOriginal_ddy, pointLightOutput);
 #			if defined(WETNESS_EFFECTS)
 		if (waterRoughnessSpecular < 1)
-			EvaluateWetnessLighting(wetnessNormal, pointLightContext, waterRoughnessSpecular, wetnessFilmRoughness, pointLightOutput);
+			EvaluateWetnessLighting(wetnessNormal, pointLightContext, LightLimitFix::GetSphereLightRoughness(waterRoughnessSpecular, light.sourceRadius, lightDist), wetnessFilmRoughness, pointLightOutput);
 #			endif
 
 		lightsDiffuseColor += pointLightOutput.diffuse;

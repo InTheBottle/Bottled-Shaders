@@ -10,6 +10,8 @@ struct ProceduralNightSky : Feature
 		float auroraIntensity = 1.0f;
 		float auroraSpeed = 1.0f;
 		float auroraLighting = 1.0f;
+		float shootingStarRate = 2.0f;
+		float shootingStarIntensity = 1.0f;
 	};
 
 	struct alignas(16) PerFrameData
@@ -27,9 +29,15 @@ struct ProceduralNightSky : Feature
 
 		float auroraLighting;
 		float3 pad = { 0.0f, 0.0f, 0.0f };
+
+		float3 shootingStarHead;
+		float shootingStarIntensity;
+
+		float3 shootingStarTail;
+		float shootingStarWidth;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrameData);
-	static_assert(sizeof(PerFrameData) == 64);
+	static_assert(sizeof(PerFrameData) == 96);
 
 	Settings settings;
 
@@ -46,7 +54,8 @@ struct ProceduralNightSky : Feature
 			T("feature.procedural_night_sky.description", "Replaces the vanilla stars and aurora with procedural stars and animated aurora curtains."),
 			{ T("feature.procedural_night_sky.key_feature_1", "Stars with natural brightness and color that stay sharp at any resolution"),
 				T("feature.procedural_night_sky.key_feature_2", "Animated aurora curtains across the whole sky, following each weather's aurora colors and timing"),
-				T("feature.procedural_night_sky.key_feature_3", "Follows vanilla star fading, moons, clouds and reflections") }
+				T("feature.procedural_night_sky.key_feature_3", "Follows vanilla star fading, moons, clouds and reflections"),
+				T("feature.procedural_night_sky.key_feature_4", "Occasional shooting stars across clear night skies") }
 		};
 	}
 
@@ -68,7 +77,23 @@ struct ProceduralNightSky : Feature
 	bool HasAuroraLight() const;
 
 private:
+	struct ShootingStar
+	{
+		float3 start;
+		float3 direction;
+		float speed = 0.0f;
+		float life = 0.0f;
+		float age = 0.0f;
+		float trail = 0.0f;
+		float width = 0.0f;
+		float brightness = 0.0f;
+	};
+
 	static float GetAuroraVisibility(const RE::Sky* a_sky);
+
+	void UpdateShootingStar();
+	void SpawnShootingStar();
+	float NextShootingStarRandom();
 
 	ID3D11VertexShader* GetAuroraVS();
 	ID3D11PixelShader* GetAuroraPS();
@@ -76,6 +101,10 @@ private:
 
 	bool shaderCompileFailed = false;
 	uint32_t lastRenderedFrame = UINT32_MAX;
+
+	ShootingStar shootingStar;
+	float shootingStarTimer = 20.0f;
+	uint32_t shootingStarSeed = 0x6D2B79F5u;
 
 	winrt::com_ptr<ID3D11BlendState> blendState;
 	winrt::com_ptr<ID3D11RasterizerState> rasterizerState;

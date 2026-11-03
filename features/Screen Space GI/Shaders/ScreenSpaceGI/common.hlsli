@@ -50,7 +50,7 @@ cbuffer SSGICB : register(b1)
 	float GISaturation;
 	float GIDistanceCompensation;
 	float GICompensationMaxDist;
-	float pad1;
+	float SpecularStrength;
 
 	float AOPower;
 	float GIStrength;

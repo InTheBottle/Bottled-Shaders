@@ -25,12 +25,18 @@ Texture2D<float> DepthTexture : register(t4);
 Texture2D<SCENE_DEPTH_FORMAT> DepthTexture : register(t4);
 #endif
 
+#if defined(DYNAMIC_CUBEMAPS) || defined(CAPSULE_SHADOWS)
+SamplerState LinearSampler : register(s0);
+#endif
+
 #if defined(DYNAMIC_CUBEMAPS)
 Texture2D<float3> ReflectanceTexture : register(t5);
 TextureCube<float3> EnvTexture : register(t6);
 TextureCube<float3> EnvReflectionsTexture : register(t7);
+#endif
 
-SamplerState LinearSampler : register(s0);
+#if defined(CAPSULE_SHADOWS)
+Texture2D<unorm float2> CapsuleOcclusionTexture : register(t16);
 #endif
 
 #if defined(SKYLIGHTING)
@@ -98,6 +104,9 @@ void SampleSSGISpecular(uint2 pixCoord, sh2 lobe, inout float ao, out float3 il,
 		return;
 
 	float2 uv = float2(dispatchID.xy + 0.5) * SharedData::BufferDim.zw;
+#if defined(CAPSULE_SHADOWS)
+	float2 capsuleVisibility = 1.0 - CapsuleOcclusionTexture.SampleLevel(LinearSampler, uv, 0);
+#endif
 	uv *= FrameBuffer::DynamicResolutionParams2.xy;  // adjust for dynamic res
 
 	float3 normalGlossiness = NormalRoughnessTexture[dispatchID.xy];
@@ -105,6 +114,9 @@ void SampleSSGISpecular(uint2 pixCoord, sh2 lobe, inout float ao, out float3 il,
 
 	float3 diffuseColor = MainRW[dispatchID.xy].xyz;
 	float3 specularColor = SpecularTexture[dispatchID.xy];
+#if defined(CAPSULE_SHADOWS)
+	specularColor *= capsuleVisibility.y;
+#endif
 	float3 albedo = AlbedoTexture[dispatchID.xy];
 
 	float depth = DepthTexture[dispatchID.xy];
@@ -139,6 +151,9 @@ void SampleSSGISpecular(uint2 pixCoord, sh2 lobe, inout float ao, out float3 il,
 	// pixels with no vertex AO contribution, so vertexAO defaults to 1.
 	float vertexAO = 1.0 - Masks2Texture[dispatchID.xy].x;
 	ssgiAo = saturate(ssgiAo / max(vertexAO, EPSILON_DIVISION));
+#	if defined(CAPSULE_SHADOWS)
+	ssgiAo *= capsuleVisibility.x;
+#	endif
 
 	float3 linAlbedo = ColorManagement::SceneToLinear(albedo / Color::PBRLightingScale);
 	float3 multiBounceSSGIAo = MultiBounceAO(linAlbedo, ssgiAo);
@@ -186,6 +201,9 @@ void SampleSSGISpecular(uint2 pixCoord, sh2 lobe, inout float ao, out float3 il,
 
 		diffuseColor = max(0.0, diffuseColor - directionalAmbientColor);
 		diffuseColor = ColorManagement::SceneColor::ScaleByLinear(diffuseColor, sqrt(multiBounceSSGIAo));
+#	if defined(CAPSULE_SHADOWS)
+		diffuseColor = ColorManagement::SceneColor::ScaleByLinear(diffuseColor, capsuleVisibility.y);
+#	endif
 
 		directionalAmbientColor = ColorManagement::SceneColor::ScaleByLinear(directionalAmbientColor, multiBounceSSGIAo);
 		diffuseColor += directionalAmbientColor;
@@ -193,6 +211,8 @@ void SampleSSGISpecular(uint2 pixCoord, sh2 lobe, inout float ao, out float3 il,
 	}
 
 	linDiffuseColor += ssgiIl * linAlbedo;
+#elif defined(CAPSULE_SHADOWS)
+	linDiffuseColor *= capsuleVisibility.x * capsuleVisibility.y;
 #endif
 
 	float3 color = linDiffuseColor + specularColor;
@@ -300,6 +320,8 @@ void SampleSSGISpecular(uint2 pixCoord, sh2 lobe, inout float ao, out float3 il,
 		}
 
 		finalIrradiance += ssgiIlSpecular;
+#	elif defined(CAPSULE_SHADOWS)
+		finalIrradiance *= capsuleVisibility.x;
 #	endif
 
 		color += reflectance * finalIrradiance;

@@ -208,6 +208,7 @@ public:
 
 	void UpdateSurvival();
 	void LoadSnowMapCpu();
+	float GetEnvironmentSnowAmount(const RE::NiPoint3& a_position);
 
 	struct SnowMapLevel
 	{

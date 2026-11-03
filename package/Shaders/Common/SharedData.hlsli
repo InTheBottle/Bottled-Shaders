@@ -498,7 +498,8 @@ namespace SharedData
 		float MicroShadowStrength;
 		uint EnableMultiScatter;
 		uint EnableHorizonOcclusion;
-		uint3 pad;
+		uint EnableLayeredFuzz;
+		uint2 pad;
 	};
 
 
@@ -639,6 +640,12 @@ namespace SharedData
 
 		float auroraLighting;
 		float3 pad0;
+
+		float3 shootingStarHead;
+		float shootingStarIntensity;
+
+		float3 shootingStarTail;
+		float shootingStarWidth;
 	};
 
 	struct NightEyeSettings

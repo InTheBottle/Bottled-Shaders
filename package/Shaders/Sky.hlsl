@@ -458,7 +458,7 @@ PS_OUTPUT main(PS_INPUT input)
 		if (SharedData::enbSettings.Enable)
 			starTint *= SharedData::enbSettings.StarsIntensity;
 #				endif
-		psout.Color = ProceduralNightSky::Shade(starDirection, starPixelAngle, starTint, input.TexCoord2.x);
+		psout.Color = ProceduralNightSky::Shade(starDirection, normalize(input.WorldPosition.xyz), starPixelAngle, starTint, input.TexCoord2.x);
 	}
 #			endif
 #		else

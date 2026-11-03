@@ -32,6 +32,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	SnowIntensity,
 	SplashIntensity,
 	WadeIntensity,
+	BreathIntensity,
 	ParticleSize,
 	Lifetime,
 	Opacity,
@@ -59,6 +60,13 @@ namespace
 	constexpr float kWadeSpeedSmoothing = 0.08f;
 	constexpr float kWadePowder = 11.0f;
 	constexpr float kWadeClods = 5.0f;
+	constexpr uint32_t kBreathSlots = 4;
+	constexpr uint32_t kBreathForgetFrames = 120;
+	constexpr float kBreathMaxDistance = 2048.0f;
+	constexpr float kBreathInterval = 3.4f;
+	constexpr float kBreathExhale = 0.55f;
+	constexpr float kBreathEmitInterval = 0.09f;
+	constexpr float kBreathSnowThreshold = 0.15f;
 
 	constexpr uint32_t kTagLeft = 1u << 0;
 	constexpr uint32_t kTagRight = 1u << 1;
@@ -77,6 +85,7 @@ namespace
 	constexpr uint32_t kFrameFlagField = 1u << 5;
 	constexpr uint32_t kEventFlagLanding = 1u << 0;
 	constexpr uint32_t kEventFlagWade = 1u << 1;
+	constexpr uint32_t kEventFlagBreath = 1u << 2;
 
 	constexpr uint32_t kConstantSlots = 13;
 	constexpr uint32_t kCSResourceSlots = 8;
@@ -304,6 +313,30 @@ namespace
 		default:
 			return Surface::Hard;
 		}
+	}
+
+	bool CanBreathe(RE::Actor* a_actor)
+	{
+		auto race = a_actor->GetRace();
+		if (!race)
+			return false;
+		for (const auto keyword : { "ActorTypeUndead", "ActorTypeDaedra", "ActorTypeDwarven", "ActorTypeGhost", "Vampire" }) {
+			if (race->HasKeywordString(keyword))
+				return false;
+		}
+		return true;
+	}
+
+	bool IsColdAt(RE::Actor* a_actor, const RE::NiPoint3& a_position)
+	{
+		auto sky = globals::game::sky;
+		if (sky && sky->currentWeather && sky->currentWeather->data.flags.any(RE::TESWeather::WeatherDataFlag::kSnow))
+			return true;
+		auto& snowCover = globals::features::snowCover;
+		if (snowCover.loaded && snowCover.wsettings.EnableSnowCover && snowCover.GetEnvironmentSnowAmount(a_position) > kBreathSnowThreshold)
+			return true;
+		auto controller = a_actor->GetCharController();
+		return controller && (controller->surfaceMaterial == RE::MATERIAL_ID::kSnow || controller->surfaceMaterial == RE::MATERIAL_ID::kSnowStairs);
 	}
 
 	float4 ToFloat4(const RE::NiColor& a_color)
@@ -725,6 +758,114 @@ void FootstepParticles::BuildWadeEvents(const RE::NiPoint3& a_cameraPosition, fl
 		it = it->second.frame + kWadeForgetFrames < frame ? wadeTravel.erase(it) : std::next(it);
 }
 
+void FootstepParticles::UpdateActorBreath(RE::Actor* a_actor, const RE::NiPoint3& a_cameraPosition, float a_deltaTime)
+{
+	if (!a_actor || !a_actor->Is3DLoaded() || a_actor->IsDisabled() || a_actor->IsDead())
+		return;
+	const RE::NiPoint3 actorPosition = a_actor->GetPosition();
+	if (a_cameraPosition.GetSquaredDistance(actorPosition) > kBreathMaxDistance * kBreathMaxDistance)
+		return;
+
+	auto random = [this]() {
+		eventSeed = eventSeed * 1664525u + 1013904223u;
+		return static_cast<float>((eventSeed >> 8) & 0xFFFFu) / 65535.0f;
+	};
+
+	const uint32_t frame = globals::state->frameCount;
+	auto& breath = actorBreath[a_actor->GetFormID()];
+	if (breath.frame == 0) {
+		breath.breathes = CanBreathe(a_actor);
+		breath.timer = random() * kBreathInterval;
+	}
+	breath.frame = frame;
+	if (!breath.breathes)
+		return;
+
+	RE::NiPoint3 velocity;
+	a_actor->GetLinearVelocity(velocity);
+	if (!std::isfinite(velocity.x) || !std::isfinite(velocity.y) || !std::isfinite(velocity.z))
+		velocity = {};
+	const float exertion = std::clamp(std::sqrt(velocity.x * velocity.x + velocity.y * velocity.y) / 350.0f, 0.0f, 1.0f);
+
+	breath.timer -= a_deltaTime;
+	if (breath.exhale <= 0.0f) {
+		if (breath.timer > 0.0f)
+			return;
+		breath.timer = kBreathInterval * (1.0f - 0.45f * exertion) + (random() - 0.5f) * 0.8f;
+		if (!IsColdAt(a_actor, actorPosition))
+			return;
+		breath.exhale = kBreathExhale;
+		breath.emit = 0.0f;
+	}
+
+	breath.exhale -= a_deltaTime;
+	breath.emit -= a_deltaTime;
+	if (breath.emit > 0.0f || frameEvents.size() >= kMaxEventsPerFrame)
+		return;
+	breath.emit = kBreathEmitInterval;
+
+	static const RE::BSFixedString headNode{ "NPC Head [Head]" };
+	auto root = a_actor->Get3D(false);
+	auto head = root ? root->GetObjectByName(headNode) : nullptr;
+	if (!head) {
+		breath.breathes = false;
+		return;
+	}
+
+	const float heading = a_actor->GetAngleZ();
+	const RE::NiPoint3 forward{ std::sin(heading), std::cos(heading), 0.0f };
+	const float height = a_actor->GetHeight();
+	const float scale = std::clamp(std::isfinite(height) && height > 0.0f ? height / 128.0f : 1.0f, 0.35f, 4.0f);
+	const RE::NiPoint3 mouth = head->world.translate + forward * (7.0f * scale) + RE::NiPoint3{ 0.0f, 0.0f, 2.0f * scale };
+
+	if (auto cell = a_actor->GetParentCell()) {
+		float waterHeight = 0.0f;
+		if (cell->GetWaterHeight(mouth, waterHeight) && waterHeight > mouth.z)
+			return;
+	}
+
+	eventSeed = eventSeed * 1664525u + 1013904223u;
+
+	FootstepEvent breathEvent{};
+	breathEvent.Position = { mouth.x, mouth.y, mouth.z };
+	breathEvent.FirstSlot = ReserveSlots(kBreathSlots);
+	breathEvent.Velocity = { velocity.x, velocity.y, velocity.z };
+	breathEvent.Forward = { forward.x, forward.y };
+	breathEvent.Strength = settings.BreathIntensity * (1.0f + 0.3f * exertion);
+	breathEvent.Scale = scale;
+	breathEvent.Seed = eventSeed;
+	breathEvent.Flags = kEventFlagBreath;
+	breathEvent.SlotCount = kBreathSlots;
+	frameEvents.push_back(breathEvent);
+}
+
+void FootstepParticles::BuildBreathEvents(const RE::NiPoint3& a_cameraPosition, float a_deltaTime)
+{
+	if (settings.BreathIntensity <= 0.0f || Util::IsInterior()) {
+		actorBreath.clear();
+		return;
+	}
+	if (a_deltaTime <= 0.0f)
+		return;
+
+	auto camera = RE::PlayerCamera::GetSingleton();
+	if (auto player = globals::game::player; player && !(camera && camera->IsInFirstPerson()))
+		UpdateActorBreath(player, a_cameraPosition, a_deltaTime);
+
+	if (settings.IncludeNPCs) {
+		if (auto lists = RE::ProcessLists::GetSingleton()) {
+			for (auto& handle : lists->highActorHandles) {
+				auto actor = handle.get();
+				UpdateActorBreath(actor.get(), a_cameraPosition, a_deltaTime);
+			}
+		}
+	}
+
+	const uint32_t frame = globals::state->frameCount;
+	for (auto it = actorBreath.begin(); it != actorBreath.end();)
+		it = it->second.frame + kBreathForgetFrames < frame ? actorBreath.erase(it) : std::next(it);
+}
+
 void FootstepParticles::BuildEvents(const RE::NiPoint3& a_cameraPosition)
 {
 	frameEvents.clear();
@@ -863,6 +1004,7 @@ void FootstepParticles::Render(RE::BSShaderAccumulator* a_accumulator)
 
 	BuildEvents(cameraPosition);
 	BuildWadeEvents(cameraPosition, deltaTime);
+	BuildBreathEvents(cameraPosition, deltaTime);
 	if (!frameEvents.empty())
 		lastSpawnTime = simulationTime;
 
@@ -1034,6 +1176,10 @@ void FootstepParticles::DrawSettings()
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::TextWrapped("%s", T(TKEY("wade_intensity_tooltip"), "Snow poofs from legs ploughing through the Snow Deformation blanket. 0 turns them off."));
 
+		ImGui::SliderFloat(T(TKEY("breath_intensity"), "Cold Breath"), &settings.BreathIntensity, 0.0f, 3.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::TextWrapped("%s", T(TKEY("breath_intensity_tooltip"), "Visible breath outdoors in snowy weather, on snow and above the Snow Cover snow line. Undead, daedra, automatons and vampires don't breathe. 0 turns it off."));
+
 		ImGui::BeginDisabled(!globals::features::snowCover.loaded);
 		ImGui::Checkbox(T(TKEY("use_snow_cover"), "Snow Cover Kicks Up Snow"), &settings.UseSnowCover);
 		ImGui::EndDisabled();
@@ -1085,6 +1231,7 @@ void FootstepParticles::LoadSettings(json& o_json)
 	sanitize(settings.SnowIntensity, defaults.SnowIntensity, 0.0f, 3.0f);
 	sanitize(settings.SplashIntensity, defaults.SplashIntensity, 0.0f, 3.0f);
 	sanitize(settings.WadeIntensity, defaults.WadeIntensity, 0.0f, 3.0f);
+	sanitize(settings.BreathIntensity, defaults.BreathIntensity, 0.0f, 3.0f);
 	sanitize(settings.ParticleSize, defaults.ParticleSize, 0.25f, 3.0f);
 	sanitize(settings.Lifetime, defaults.Lifetime, 0.25f, 2.0f);
 	sanitize(settings.Opacity, defaults.Opacity, 0.0f, 2.0f);

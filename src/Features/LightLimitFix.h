@@ -103,7 +103,7 @@ public:
 		stl::enumeration<LightFlags> lightFlags;
 		uint32_t shadowMaskIndex = 0;
 		uint32_t localShadowIndex = 0;
-		uint pad1;
+		float sourceRadius = 0.0f;
 	};
 	STATIC_ASSERT_ALIGNAS_16(LightData);
 
@@ -500,6 +500,8 @@ public:
 
 		// Light attach gate: skips the engine's per-frame attach walk for unchanged dynamic lights.
 		bool SkipRedundantLightAttach = true;
+
+		float LightSourceSize = 1.0f;
 	};
 
 	uint clusterSize[3] = { 16 };
@@ -654,6 +656,13 @@ private:
 	static constexpr float MetresToUnitsSq = MetresToUnits * MetresToUnits;
 	static constexpr float ScaledUnitsSq = Scale * MetresToUnitsSq;
 	static constexpr float FadeZoneBase = 4.5f * Scale * MetresToUnits;
+
+	static constexpr float SourceRadiusScale = 0.015f;
+	static constexpr float MinSourceRadius = 1.5f;
+	static constexpr float MaxSourceRadius = 30.0f;
+	static constexpr float MaxLightSourceSize = 4.0f;
+
+	float GetSourceRadius(float a_lightRadius) const;
 
 	static void SetExtLightData(RE::NiLight* niLight, const RE::TESObjectLIGH* ligh);
 

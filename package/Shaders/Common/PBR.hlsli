@@ -116,6 +116,22 @@ namespace PBR
 		return color;
 	}
 
+	struct FuzzLayer
+	{
+		float weightedAlbedo;
+		float roughness;
+		float3 color;
+	};
+
+	FuzzLayer CreateFuzzLayer(MaterialProperties material, float NdotV)
+	{
+		FuzzLayer fuzz;
+		fuzz.roughness = clamp(material.Roughness, 0.01f, 1.0f);
+		fuzz.weightedAlbedo = saturate(saturate(material.FuzzWeight) * FuzzDirectionalAlbedo(NdotV, fuzz.roughness));
+		fuzz.color = saturate(material.FuzzColor);
+		return fuzz;
+	}
+
 	struct ThinSurface
 	{
 		float3 reflectionAlbedo;
@@ -289,7 +305,7 @@ namespace PBR
 			lightingOutput.specular += Fr * detailedLightColor * specularNdotL;
 
 #if !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
-			[branch] if ((PBRFlags & Flags::Fuzz) != 0)
+			[branch] if ((PBRFlags & Flags::Fuzz) != 0 && SharedData::truePBRSettings.EnableLayeredFuzz == 0)
 			{
 				float3 fuzzSpecular = SpecularMicroflakes(material.Roughness, material.FuzzColor, max(specularNdotL, EPSILON_DOT_CLAMP), specularNdotV, satNdotH, satVdotH) * detailedLightColor * specularNdotL;
 				lightingOutput.specular = lerp(lightingOutput.specular, fuzzSpecular, material.FuzzWeight);
@@ -329,6 +345,19 @@ namespace PBR
 
 				lightingOutput.coatDiffuse += context.coatLightColor * coatNdotL * BRDF::Diffuse_Lambert();
 				lightingOutput.specular += coatFr * context.coatLightColor * coatNdotL * material.CoatStrength;
+			}
+
+			[branch] if ((PBRFlags & Flags::Fuzz) != 0 && SharedData::truePBRSettings.EnableLayeredFuzz != 0)
+			{
+				float fuzzNdotV = clamp(abs(NdotV), EPSILON_DOT_CLAMP, 1.0f);
+				FuzzLayer fuzz = CreateFuzzLayer(material, fuzzNdotV);
+				float3 diffuseThroughput = Color::LinearToPBRMaterial((1.0f - fuzz.weightedAlbedo).xxx);
+
+				lightingOutput.diffuse *= diffuseThroughput;
+				lightingOutput.transmission *= diffuseThroughput;
+				lightingOutput.coatDiffuse *= diffuseThroughput;
+				lightingOutput.specular *= 1.0f - saturate(material.FuzzWeight);
+				lightingOutput.specular += fuzz.weightedAlbedo * Color::PBRMaterialToLinear(fuzz.color) * FuzzLobe(L, V, GetThinSurfaceNormal(N, V), fuzzNdotV, fuzz.roughness) * detailedLightColor;
 			}
 #endif
 		}
@@ -383,7 +412,7 @@ namespace PBR
 				lobeWeights.diffuse += material.SubsurfaceColor * (1 - material.Thickness) / Math::PI;
 			}
 #	endif
-			[branch] if ((PBRFlags & Flags::Fuzz) != 0)
+			[branch] if ((PBRFlags & Flags::Fuzz) != 0 && SharedData::truePBRSettings.EnableLayeredFuzz == 0)
 			{
 				lobeWeights.diffuse += material.FuzzColor * material.FuzzWeight;
 			}
@@ -425,6 +454,15 @@ namespace PBR
 		lobeWeights.specular *= SpecularOcclusion(NdotV, alpha, material.AO);
 		[branch] if (SharedData::truePBRSettings.EnableHorizonOcclusion != 0)
 			lobeWeights.specular *= SpecularHorizonOcclusion(specularN, V, horizonN);
+
+#if !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
+		[branch] if ((PBRFlags & Flags::Fuzz) != 0 && (PBRFlags & Flags::HairMarschner) == 0 && SharedData::truePBRSettings.EnableLayeredFuzz != 0)
+		{
+			FuzzLayer fuzz = CreateFuzzLayer(material, clamp(NdotV, EPSILON_DOT_CLAMP, 1.0f));
+			lobeWeights.diffuse = Color::LinearToPBRMaterial(Color::PBRMaterialToLinear(lobeWeights.diffuse) * (1.0f - fuzz.weightedAlbedo) + fuzz.weightedAlbedo * Color::PBRMaterialToLinear(fuzz.color) * material.AO);
+			lobeWeights.specular *= 1.0f - saturate(material.FuzzWeight);
+		}
+#endif
 	}
 }
 

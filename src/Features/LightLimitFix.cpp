@@ -35,7 +35,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	LocalShadowSamples,
 	LocalShadowFilterScale,
 	LocalShadowUpdatesPerFrame,
-	SkipRedundantLightAttach)
+	SkipRedundantLightAttach,
+	LightSourceSize)
 
 static constexpr uint CLUSTER_MAX_LIGHTS = 128;
 
@@ -170,6 +171,11 @@ void LightLimitFix::DrawSettings()
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T(TKEY("contact_shadow_edge_quality_tooltip"), "Rays traced per pixel, each starting from a different sub-pixel position. Edge pixels get partial coverage instead of being fully lit or fully shadowed, which removes the stair-stepped edges on faces and other close-up surfaces. 4x costs four times the contact shadow march, which only runs where a ray can hit something."));
 		}
+	}
+
+	ImGui::SliderFloat(T(TKEY("light_source_size"), "Light Source Size"), &settings.LightSourceSize, 0.0f, MaxLightSourceSize, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("light_source_size_tooltip"), "Gives local lights a physical size, so their highlights on polished and wet surfaces have a shape instead of a pinpoint. 0 turns it off."));
 	}
 
 	ImGui::Spacing();
@@ -381,6 +387,7 @@ void LightLimitFix::SaveSettings(json& o_json)
 void LightLimitFix::LoadSettings(json& o_json)
 {
 	settings = o_json;
+	settings.LightSourceSize = std::isfinite(settings.LightSourceSize) ? std::clamp(settings.LightSourceSize, 0.0f, MaxLightSourceSize) : 1.0f;
 }
 
 void LightLimitFix::RestoreDefaultSettings()
@@ -626,7 +633,13 @@ LightLimitFix::LightData LightLimitFix::ProcessLight(RE::BSLight* bsLight, RE::N
 		light.sizeBias = ScaledUnitsSq * runtimeData->size * runtimeData->size * 0.5f;
 	}
 	light.invRadius = 1.f / light.radius;
+	light.sourceRadius = GetSourceRadius(light.radius);
 	return light;
+}
+
+float LightLimitFix::GetSourceRadius(const float a_lightRadius) const
+{
+	return std::clamp(a_lightRadius * SourceRadiusScale, MinSourceRadius, MaxSourceRadius) * settings.LightSourceSize;
 }
 
 float LightLimitFix::CalculateRadius(const float intensity, const bool shadowCaster, const float cutoffOverride, const float size)
@@ -1235,6 +1248,7 @@ void LightLimitFix::AddParticleLightsToBuffer(eastl::vector<LightData>& a_lights
 		light.color *= invPI * pl.color.alpha;
 
 		light.radius = pl.radius * 0.5f;
+		light.sourceRadius = GetSourceRadius(light.radius);
 
 		light.lightFlags.set(LightFlags::Simple);
 		SetLightPosition(light, pl.position);

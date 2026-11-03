@@ -31,6 +31,11 @@ namespace LightLimitFix
 
 		return lerp(reg, invSq, isInvSq) * isEnabled;
 	}
+
+	float GetSphereLightRoughness(float roughness, float sourceRadius, float distance)
+	{
+		return sqrt(saturate(roughness * roughness + 0.5f * sourceRadius * rcp(max(distance, sourceRadius + 1.0f))));
+	}
 }
 
 #endif  //__LLF_ATTENUATION_DEPENDENCY_HLSL__

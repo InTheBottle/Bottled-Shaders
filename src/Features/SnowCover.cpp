@@ -1184,24 +1184,28 @@ void SnowCover::DataLoaded()
 	logger::info("[Snow Cover] Survival Mode region conditions now read ground snow");
 }
 
+float SnowCover::GetEnvironmentSnowAmount(const RE::NiPoint3& a_position)
+{
+	if (!snowMapCpuPath.empty())
+		LoadSnowMapCpu();
+	float map = 0.5f;
+	if (const auto* image = snowMapCpu.GetImage(0, 0, 0)) {
+		const float2 uv = float2(a_position.x, a_position.y) * wsettings.mapScale + wsettings.mapOffset;
+		const auto x = static_cast<size_t>(std::clamp(uv.x, 0.0f, 1.0f) * (image->width - 1) + 0.5f);
+		const auto y = static_cast<size_t>(std::clamp(uv.y, 0.0f, 1.0f) * (image->height - 1) + 0.5f);
+		map = image->pixels[y * image->rowPitch + x] / 255.0f;
+	}
+	return (a_position.z - settings.SnowHeightOffset + (map - 0.5f) * wsettings.mapZscale + perFrame.SeasonalAltitude) / std::max(wsettings.BlendSmoothness, 1.0f);
+}
+
 void SnowCover::UpdateSurvival()
 {
 	float amount = 0.0f;
 	if (survivalEnabled && survivalGlobal && wsettings.EnableSnowCover) {
-		if (!snowMapCpuPath.empty())
-			LoadSnowMapCpu();
 		auto* player = RE::PlayerCharacter::GetSingleton();
 		auto* tes = RE::TES::GetSingleton();
 		if (player && tes && !tes->interiorCell && !globals::state->isLoadingMenuOpen) {
-			const auto p = player->GetPosition();
-			float map = 0.5f;
-			if (const auto* image = snowMapCpu.GetImage(0, 0, 0)) {
-				const float2 uv = float2(p.x, p.y) * wsettings.mapScale + wsettings.mapOffset;
-				const auto x = static_cast<size_t>(std::clamp(uv.x, 0.0f, 1.0f) * (image->width - 1) + 0.5f);
-				const auto y = static_cast<size_t>(std::clamp(uv.y, 0.0f, 1.0f) * (image->height - 1) + 0.5f);
-				map = image->pixels[y * image->rowPitch + x] / 255.0f;
-			}
-			const float env = (p.z - settings.SnowHeightOffset + (map - 0.5f) * wsettings.mapZscale + perFrame.SeasonalAltitude) / std::max(wsettings.BlendSmoothness, 1.0f);
+			const float env = GetEnvironmentSnowAmount(player->GetPosition());
 			const float snowTime = perFrame.TimeSnowing;
 			const float weather = snowTime * snowTime * snowTime * std::max(500.0f, perFrame.SnowingDensity) / 500.0f;
 			amount = std::clamp(std::max(env, weather), 0.0f, 1.0f);

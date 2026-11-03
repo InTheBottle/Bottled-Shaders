@@ -57,7 +57,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	EnableMicroShadows,
 	MicroShadowStrength,
 	EnableMultiScatter,
-	EnableHorizonOcclusion);
+	EnableHorizonOcclusion,
+	EnableLayeredFuzz);
 
 #define CHECK_PBR_TEXTURE(textureName)                                                                         \
 	if (!(pbrMaterial->textureName)) {                                                                         \
@@ -139,6 +140,10 @@ void TruePBR::DrawSettings()
 		ImGui::Checkbox(T(TKEY("horizon_occlusion"), "Horizon Occlusion"), (bool*)&settings.EnableHorizonOcclusion);
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text("%s", T(TKEY("horizon_occlusion_tooltip"), "Darkens reflections that a normal map tilts below the surface, keeping bumps and crevices from catching a flat sheen of sky."));
+
+		ImGui::Checkbox(T(TKEY("layered_fuzz"), "Layered Fuzz"), (bool*)&settings.EnableLayeredFuzz);
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("layered_fuzz_tooltip"), "Shades fuzz as a layer over the material, so cloth gains a soft sheen at glancing angles instead of a flat haze across the whole surface."));
 
 		ImGui::TreePop();
 	}

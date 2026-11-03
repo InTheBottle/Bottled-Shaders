@@ -327,7 +327,7 @@ void CalculateGI(
 	o_ao = visibility;
 	o_currY = radianceY;
 	o_currCoCg = radianceCoCg;
-	o_currGIAOSpecular = float4(radianceSpecular, visibilitySpecular);
+	o_currGIAOSpecular = float4(radianceSpecular * SpecularStrength, visibilitySpecular * saturate(SpecularStrength));
 }
 
 #ifdef TEMPORAL_DENOISER

@@ -4,6 +4,7 @@
 #include "CSEditor/SceneManager/SceneSettingsManager.h"
 #include "Deferred.h"
 #include "Features/CSEditor.h"
+#include "Features/CapsuleShadows.h"
 #include "Features/CloudShadows.h"
 #include "Features/DetailMaps.h"
 #include "Features/DeveloperTools.h"
@@ -20,6 +21,7 @@
 #include "Features/HairBacklighting.h"
 #include "Features/HDRDisplay.h"
 #include "Features/HairSpecular.h"
+#include "Features/HeatHaze.h"
 #include "Features/HiZOcclusion.h"
 #include "Features/HorizonFix.h"
 #include "Features/IBL.h"
@@ -125,6 +127,8 @@ namespace globals
 		FootstepParticles footstepParticles{};
 		ProceduralLightning proceduralLightning{};
 		ProceduralNightSky proceduralNightSky{};
+		HeatHaze heatHaze{};
+		CapsuleShadows capsuleShadows{};
 		HairBacklighting hairBacklighting{};
 		NightEye nightEye{};
 		FurShells furShells{};

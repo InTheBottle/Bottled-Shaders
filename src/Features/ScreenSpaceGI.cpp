@@ -29,6 +29,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	GIDistanceCompensation,
 	AOPower,
 	GIStrength,
+	SpecularStrength,
 	EnableTemporalDenoiser,
 	EnableBlur,
 	DepthDisocclusion,
@@ -77,10 +78,11 @@ void ScreenSpaceGI::DrawSettings()
 			}
 		}
 		ImGui::TableNextColumn();
-		if (showAdvanced) {
-			recompileFlag |= ImGui::Checkbox(T(TKEY("hq_specular_il"), "(Experimental) HQ Specular IL"), &settings.EnableExperimentalSpecularGI);
+		{
+			auto reflectionsGuard = Util::DisableGuard(!settings.Enabled || !settings.EnableGI);
+			recompileFlag |= ImGui::Checkbox(T(TKEY("hq_specular_il"), "Screen Space Reflections"), &settings.EnableExperimentalSpecularGI);
 			if (auto _tt = Util::HoverTooltipWrapper())
-				ImGui::Text("%s", T(TKEY("hq_specular_il_tooltip"), "An experimental specular GI that is more accurate but requires more samples. Won't be blurred."));
+				ImGui::Text("%s", T(TKEY("hq_specular_il_tooltip"), "Reflects nearby objects on screen in glossy surfaces. Requires Indirect Lighting.\nThe sharpest surfaces stay slightly blurred."));
 		}
 
 		ImGui::EndTable();
@@ -195,6 +197,9 @@ void ScreenSpaceGI::DrawSettings()
 		{
 			auto ilGuard = Util::DisableGuard(!settings.EnableGI);
 			ImGui::SliderFloat(T(TKEY("il_source_brightness"), "IL Source Brightness"), &settings.GIStrength, 0.f, 6.f, "%.2f");
+
+			auto reflectionGuard = Util::DisableGuard(!settings.EnableExperimentalSpecularGI);
+			ImGui::SliderFloat(T(TKEY("reflection_strength"), "Reflection Strength"), &settings.SpecularStrength, 0.f, 4.f, "%.2f");
 		}
 
 		ImGui::Separator();
@@ -358,6 +363,7 @@ void ScreenSpaceGI::LoadSettings(json& o_json)
 	settings.ResolutionMode = std::clamp(settings.ResolutionMode, 0, 2);
 	settings.NumSlices = std::clamp(settings.NumSlices, 1u, 10u);
 	settings.NumSteps = std::clamp(settings.NumSteps, 1u, 20u);
+	settings.SpecularStrength = std::isfinite(settings.SpecularStrength) ? std::clamp(settings.SpecularStrength, 0.f, 4.f) : 1.f;
 
 	// Scene overrides reload settings on every value change, so recompile only when a setting
 	// CompileComputeShaders turns into a define changed.
@@ -729,6 +735,7 @@ void ScreenSpaceGI::UpdateSB()
 
 		data.AOPower = settings.AOPower;
 		data.GIStrength = settings.GIStrength;
+		data.SpecularStrength = settings.SpecularStrength;
 
 		data.DepthDisocclusion = settings.DepthDisocclusion;
 		data.NormalDisocclusion = settings.NormalDisocclusion;

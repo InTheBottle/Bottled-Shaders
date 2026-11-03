@@ -85,7 +85,8 @@ public:
 		float MicroShadowStrength = 1.0f;
 		uint EnableMultiScatter = 1;
 		uint EnableHorizonOcclusion = 1;
-		uint pad[3];
+		uint EnableLayeredFuzz = 1;
+		uint pad[2];
 	};
 	STATIC_ASSERT_ALIGNAS_16(Settings);
 	static_assert(sizeof(Settings) == 32);

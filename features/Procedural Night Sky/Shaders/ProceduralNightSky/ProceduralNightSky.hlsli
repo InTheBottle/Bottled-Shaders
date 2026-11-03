@@ -95,6 +95,17 @@ namespace ProceduralNightSky
 		return stars;
 	}
 
+	float3 ShootingStar(float3 view, float pixelAngle, float3 head, float3 tail, float width)
+	{
+		float3 axis = head - tail;
+		float along = saturate(dot(view - tail, axis) / max(dot(axis, axis), 1e-8));
+		float3 offset = view - lerp(tail, head, along);
+		float taperedWidth = width * (0.2 + 0.8 * along);
+		float radius = max(taperedWidth, pixelAngle);
+		float core = exp(-dot(offset, offset) / (radius * radius)) * taperedWidth / radius;
+		return lerp(float3(1.0, 0.62, 0.35), float3(0.85, 0.95, 1.0), along) * core * along * along;
+	}
+
 	float AuroraFold(float2 p, float timer)
 	{
 		float broad = Noise(p * 0.31 + float2(timer * 0.021, -timer * 0.009)) - 0.5;
@@ -159,13 +170,15 @@ namespace ProceduralNightSky
 		return Aurora(view, SharedData::Timer * settings.auroraSpeed, dither, lowColor, highColor) * settings.auroraIntensity;
 	}
 
-	float4 Shade(float3 starDirection, float pixelAngle, float3 starTint, float horizon)
+	float4 Shade(float3 starDirection, float3 view, float pixelAngle, float3 starTint, float horizon)
 	{
 		const SharedData::ProceduralNightSkySettings settings = SharedData::proceduralNightSkySettings;
 
 		float3 starLight = 0.0;
 		[branch] if (settings.starIntensity > 0.0)
 			starLight = Stars(starDirection, pixelAngle, settings.starTwinkle, SharedData::Timer) * settings.starIntensity;
+		[branch] if (settings.shootingStarIntensity > 0.0)
+			starLight += ShootingStar(view, pixelAngle, settings.shootingStarHead, settings.shootingStarTail, settings.shootingStarWidth) * settings.shootingStarIntensity;
 
 		float3 emitted = ColorManagement::SRGBToWorking(starLight) * starTint;
 		return ToAdditiveBlend(emitted * horizon, settings.radianceLimit);

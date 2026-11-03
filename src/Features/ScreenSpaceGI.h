@@ -73,7 +73,7 @@ public:
 	{
 		bool Enabled = true;
 		bool EnableGI = true;
-		bool EnableExperimentalSpecularGI = false;
+		bool EnableExperimentalSpecularGI = true;
 		bool EnableVanillaSSAO = false;
 		// performance/quality
 		uint NumSlices = 4u;
@@ -91,6 +91,7 @@ public:
 		// mix
 		float AOPower = 1.0f;
 		float GIStrength = 1.0f;
+		float SpecularStrength = 1.0f;
 		// denoise
 		bool EnableTemporalDenoiser = true;
 		bool EnableBlur = true;
@@ -127,7 +128,7 @@ public:
 		float GISaturation;  //
 		float GIDistanceCompensation;
 		float GICompensationMaxDist;
-		float pad1;
+		float SpecularStrength;
 
 		float AOPower;  //
 		float GIStrength;

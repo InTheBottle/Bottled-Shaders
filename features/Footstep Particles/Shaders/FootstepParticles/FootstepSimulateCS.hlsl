@@ -41,8 +41,8 @@ static const uint kRestingFlag = 0x200u;
 			}
 		}
 	} else {
-		float drag = type == FootstepParticles::TypeSnow ? 2.4 : (type == FootstepParticles::TypeMist ? 3.5 : 2.8);
-		float lift = type == FootstepParticles::TypeSnow ? -45.0 : (type == FootstepParticles::TypeMist ? -20.0 : 6.0);
+		float drag = type == FootstepParticles::TypeSnow ? 2.4 : (type == FootstepParticles::TypeMist ? 3.5 : (type == FootstepParticles::TypeBreath ? 2.2 : 2.8));
+		float lift = type == FootstepParticles::TypeSnow ? -45.0 : (type == FootstepParticles::TypeMist ? -20.0 : (type == FootstepParticles::TypeBreath ? 10.0 : 6.0));
 		float damping = 1.0 - exp(-drag * deltaTime);
 
 		particle.Velocity.xy = lerp(particle.Velocity.xy, FootstepParticles::Wind, damping);
