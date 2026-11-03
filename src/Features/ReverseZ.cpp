@@ -558,6 +558,17 @@ bool ReverseZ::ExpectPublishedReversal(const RE::NiCamera* a_camera, bool a_rend
 	return !a_camera->GetRuntimeData2().viewFrustum.bOrtho;
 }
 
+void ReverseZ::ClearSkyDepthBias()
+{
+	if (!g_projectionReversed)
+		return;
+	auto& runtimeData = globals::game::shadowState->GetRuntimeData();
+	if (runtimeData.rasterStateDepthBiasMode == 0)
+		return;
+	runtimeData.rasterStateDepthBiasMode = 0;
+	globals::game::stateUpdateFlags->set(RE::BSGraphics::ShaderFlags::DIRTY_RASTER_DEPTH_BIAS);
+}
+
 void ReverseZ::ReversePublishedProjection()
 {
 	if (!activeThisBoot || !g_reversalActive.load(std::memory_order_relaxed))

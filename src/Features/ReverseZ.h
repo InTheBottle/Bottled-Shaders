@@ -56,6 +56,7 @@ struct ReverseZ : Feature
 	[[nodiscard]] bool IsActive() const { return activeThisBoot; }
 	[[nodiscard]] float GetViewportBiasScale() const;
 	void ApplyNearPlane(const RE::NiCamera* a_camera);
+	void ClearSkyDepthBias();
 
 	[[nodiscard]] bool IsReverseDepthView(ID3D11DepthStencilView* a_view) const;
 	[[nodiscard]] ID3D11DepthStencilView* ResolveCubemapFaceDepthView(ID3D11RenderTargetView* a_renderTarget, ID3D11DepthStencilView* a_depthView) const;

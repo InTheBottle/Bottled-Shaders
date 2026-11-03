@@ -305,6 +305,7 @@ namespace SkyExtensions
 			globals::state->UpdateSkyShaderPermutation(pass);
 			VanillaBinding::BindSkyResources(pass);
 			func(shader, pass, renderFlags);
+			globals::features::reverseZ.ClearSkyDepthBias();
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
