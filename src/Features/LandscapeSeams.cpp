@@ -199,12 +199,20 @@ bool LandscapeSeams::IsBlended(RE::BSGeometry* a_geometry)
 	if (!settings.Enabled)
 		return false;
 
+	return CaptureResources(a_geometry) != nullptr;
+}
+
+std::shared_ptr<const LandscapeSeams::Resources> LandscapeSeams::CaptureResources(RE::BSGeometry* a_geometry)
+{
+	if (!settings.Enabled)
+		return nullptr;
+
 	const std::shared_lock lock(mutex);
 	const auto loadedIt = loadedQuads.find(a_geometry);
 	if (loadedIt == loadedQuads.end())
-		return false;
+		return nullptr;
 	const auto quadIt = quads.find(loadedIt->second);
-	return quadIt != quads.end() && quadIt->second.resources;
+	return quadIt != quads.end() ? quadIt->second.resources : nullptr;
 }
 
 void LandscapeSeams::Bind(RE::BSGeometry* a_geometry)

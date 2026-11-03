@@ -477,7 +477,7 @@ void FeatureListRenderer::DrawStageBadge(Feature::ReleaseStage stage, float rowH
 		return;
 	const auto& statusPalette = globals::menu->GetTheme().StatusPalette;
 	MenuFonts::FontRoleGuard badgeFont(Menu::FontRole::Subtext);
-	Util::Badge(label, stage == Feature::ReleaseStage::Alpha ? statusPalette.Error : statusPalette.Warning, rowHeight);
+	Util::Badge(label, stage == Feature::ReleaseStage::Alpha ? statusPalette.Error : statusPalette.Warning, { .rowHeight = rowHeight });
 }
 
 std::uint32_t FeatureListRenderer::GetFilterBits(Feature* feat)
@@ -1483,8 +1483,15 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureHeader(Feature* feat, bo
 		// Enable/Disable at boot toggle
 		nextItem(ImGui::CalcTextSize(bootLabel).x + style.ItemInnerSpacing.x + bootToggleWidth);
 		bool bootEnabled = !isDisabled;
-		auto bootTooltip = [isDisabled]() {
-			if (auto _tt = Util::HoverTooltipWrapper()) {
+		auto bootTooltip = [isDisabled, feat]() {
+			if (auto _tt = Util::HoverTooltipWrapper(); _tt && feat->loaded && feat->AppliesBootToggleLive()) {
+				ImGui::Text(
+					T("menu.features.live_toggle_tooltip",
+						"Toggle this feature.\n"
+						"Current state: %s\n"
+						"Applies immediately, and is remembered for the next launch."),
+					!isDisabled ? T("menu.features.enabled", "Enabled") : T("menu.features.disabled", "Disabled"));
+			} else if (_tt) {
 				ImGui::Text(
 					T("menu.features.boot_toggle_tooltip",
 						"Toggle feature loading at boot.\n"

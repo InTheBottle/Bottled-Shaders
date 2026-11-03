@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Feature.h"
+
 #include <array>
 #include <atomic>
 #include <memory>
@@ -115,6 +117,7 @@ struct LandscapeSeams : Feature
 
 	bool IsRenderable() const { return loaded && settings.Enabled; }
 	bool IsBlended(RE::BSGeometry* a_geometry);
+	std::shared_ptr<const Resources> CaptureResources(RE::BSGeometry* a_geometry);
 	void Bind(RE::BSGeometry* a_geometry);
 	void TESObjectLAND_SetupMaterial(RE::TESObjectLAND* a_land);
 

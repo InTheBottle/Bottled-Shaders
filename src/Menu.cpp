@@ -1,6 +1,7 @@
 #include "Menu.h"
 #include "Menu/FeatureUndo.h"
 #include "Menu/FontAtlasState.h"
+#include "Utils/Logging.h"
 #include "Utils/Notifications.h"
 
 #ifndef DIRECTINPUT_VERSION
@@ -31,7 +32,6 @@
 #include "Features/Upscaling.h"
 #include "I18n/I18n.h"
 #include "Menu/AdvancedSettingsRenderer.h"
-#include "Menu/BackgroundBlur.h"
 #include "Menu/CursorLoader.h"
 #include "Menu/FeatureListRenderer.h"
 #include "Menu/Fonts.h"
@@ -60,6 +60,10 @@
 #include "Features/PerformanceOverlay/ABTesting/ABTestAggregator.h"
 #include "Features/PerformanceOverlay/ABTesting/ABTesting.h"
 #include "Features/ScreenshotFeature.h"
+#if defined(CS_HAS_RENDER_GRAPH)
+#	include "RenderGraph/MemoryWindow.h"
+#	include "RenderGraph/ScheduleWindow.h"
+#endif
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	Menu::ThemeSettings::PaletteColors,
@@ -171,7 +175,6 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	UseSimplePalette,
 	ShowFooter,
 	TooltipHoverDelay,
-	BackgroundBlurEnabled,
 	MenuFadeEnabled,
 	UseCustomCursor,
 	Cursor,
@@ -203,8 +206,6 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	UseResolutionFont,
 	Theme,
 	SelectedThemePreset)
-
-bool IsEnabled = false;
 
 namespace
 {
@@ -401,9 +402,6 @@ Menu::~Menu()
 {
 	Util::CursorLoader::Shutdown();
 
-	// Clean up blur resources
-	BackgroundBlur::Cleanup();
-
 	if (!initialized)
 		return;
 
@@ -571,8 +569,6 @@ void Menu::LoadTheme(json& o_json)
 			settings.Theme.FontName = defaults.File;
 		}
 
-		// Apply background blur enabled state from theme
-		BackgroundBlur::SetEnabled(settings.Theme.BackgroundBlurEnabled);
 	} catch (const std::exception& e) {
 		logger::warn("Error loading theme: {}", e.what());
 		settings.Theme = backupTheme;
@@ -649,9 +645,6 @@ bool Menu::LoadThemePreset(const std::string& themeName)
 			}
 
 			pendingCursorReload = true;
-
-			// Apply background blur enabled state from theme
-			BackgroundBlur::SetEnabled(settings.Theme.BackgroundBlurEnabled);
 
 			logger::info("Applied theme preset: {}", themeName);
 			return true;
@@ -783,11 +776,6 @@ void Menu::Init()
 	}
 	Util::CursorLoader::Reload(this);
 
-	// Initialize background blur system
-	if (!BackgroundBlur::Initialize()) {
-		logger::warn("Menu::Init() - Failed to initialize background blur system");
-	}
-
 	// Detours must land before any feature draws, and this is the first guaranteed render-thread
 	// point; Install logs its own failure and leaves the interceptor inert.
 	SceneWidgetInterceptor::Install();
@@ -850,7 +838,10 @@ void Menu::DrawSettings()
 	if (!wasDocked)
 		windowFlags |= ImGuiWindowFlags_NoTitleBar;
 
-	Util::BeginWithRoundedClose(title.c_str(), &IsEnabled, windowFlags);
+	bool keepOpen = true;
+	Util::BeginWithRoundedClose(title.c_str(), &keepOpen, windowFlags);
+	if (!keepOpen)
+		Close();
 	{
 		const bool isDocked = ImGui::IsWindowDocked();
 		wasDocked = isDocked;
@@ -896,6 +887,8 @@ void Menu::DrawSettings()
 		Util::DrawRestoreSavedSettingsConfirmation();
 	}
 	ImGui::End();
+
+	DrawRenderGraphWindows();
 
 	// After every watched feature has drawn; records the change an interaction that ended this frame made
 	undoHistory.EndFrame();
@@ -1051,7 +1044,7 @@ void Menu::DispatchShortcuts()
 	// The CS Editor has its own Ctrl+Z / Ctrl+S, a focused text field owns its keys, a hotkey capture
 	// records the next chord as a binding, and a modal (confirmation) must be answered first.
 	const auto* editorWindow = EditorWindow::GetSingleton();
-	const bool allowed = IsEnabled && !ImGui::GetIO().WantTextInput && !IsCapturingHotkeyInput() &&
+	const bool allowed = open && !ImGui::GetIO().WantTextInput && !IsCapturingHotkeyInput() &&
 	                     !(editorWindow && editorWindow->open) && !ImGui::GetTopMostPopupModal() &&
 	                     !SetupRenderer::ShouldShowFirstTimeSetup();
 	if (allowed)
@@ -1173,7 +1166,7 @@ void Menu::DrawOverlay()
 	ImGuiContext* ctx = ImGui::GetCurrentContext();
 	bool canReload = ctx && !ctx->WithinFrameScope && ctx->WithinEndChildID == 0;
 
-	if (auto& atlas = MenuFonts::GetAtlasState(); !IsEnabled && atlas.wantsFontPreviewAtlas) {
+	if (auto& atlas = MenuFonts::GetAtlasState(); !open && atlas.wantsFontPreviewAtlas) {
 		atlas.wantsFontPreviewAtlas = false;
 		atlas.pendingFontReload = true;
 	}
@@ -1188,13 +1181,12 @@ void Menu::DrawOverlay()
 	}
 
 	if (pendingCursorReload && canReload) {
-		static bool loggedCursorReloadRetry = false;
+		static Util::OnceFlag loggedCursorReloadRetry;
 		if (Util::CursorLoader::Reload(this)) {
 			pendingCursorReload = false;
-			loggedCursorReloadRetry = false;
-		} else if (!loggedCursorReloadRetry) {
+			loggedCursorReloadRetry.Reset();
+		} else if (loggedCursorReloadRetry.First()) {
 			logger::warn("Menu::DrawOverlay() - Cursor reload deferred (will retry when ready)");
-			loggedCursorReloadRetry = true;
 		}
 	}
 
@@ -1306,10 +1298,13 @@ void Menu::ProcessInputEventQueue()
 				KeyAction keyActions[] = {
 					{ settings.ToggleKey, [this]() {
 						 if (!SetupRenderer::ShouldShowFirstTimeSetup() && !EditorWindow::GetSingleton()->open) {
-							 IsEnabled = !IsEnabled;
 							 suppressNextEscape = false;
-							 if (IsEnabled)
+							 if (open) {
+								 Close();
+							 } else {
+								 Open();
 								 ImGui::GetIO().ClearInputKeys();  // Prevent toggle key from remaining "held" in ImGui after open.
+							 }
 						 } else if (SetupRenderer::ShouldShowFirstTimeSetup()) {
 							 SetupRenderer::MarkFirstTimeSetupComplete();
 						 }
@@ -1465,12 +1460,12 @@ void Menu::ProcessInputEventQueue()
 					} else if (auto& effects11Editor = Effects11Editor::GetSingleton(); effects11Editor.IsOpen()) {
 						if (effects11Editor.ShouldHandleEscapeKey())
 							effects11Editor.Close();
-					} else if (IsEnabled && (!editorWindow || !editorWindow->open)) {
+					} else if (open && (!editorWindow || !editorWindow->open)) {
 						const bool escapeClaimed = TakeConsumedEscape();
 						if (suppressNextEscape)
 							suppressNextEscape = false;
 						else if (!escapeClaimed)
-							IsEnabled = false;
+							Close();
 					}
 				}
 			} else if (event.IsDown() && !wasCapturingHotkey) {
@@ -1534,7 +1529,7 @@ void Menu::ProcessInputEventQueue()
 	if (openRequested && !(GetAsyncKeyState(VK_LBUTTON) & Constants::KEY_PRESSED_MASK)) {
 		openRequested = false;
 		if (!SetupRenderer::ShouldShowFirstTimeSetup() && !EditorWindow::GetSingleton()->open) {
-			IsEnabled = true;
+			Open();
 			suppressNextEscape = false;
 			io.ClearEventsQueue();
 			io.ClearInputKeys();
@@ -1596,15 +1591,15 @@ void Menu::ProcessInputEvents(RE::InputEvent* const* a_events)
 void Menu::UpdateOpenFade(float deltaTime)
 {
 	if (settings.Theme.MenuFadeEnabled)
-		Util::StepFade(openFade, IsEnabled, deltaTime);
+		Util::StepFade(openFade, open, deltaTime);
 	else
-		openFade = IsEnabled ? 1.0f : 0.0f;
+		openFade = open ? 1.0f : 0.0f;
 }
 
 bool Menu::ShouldSwallowInput()
 {
 	auto editorWindow = EditorWindow::GetSingleton();
-	return IsEnabled || SetupRenderer::ShouldShowFirstTimeSetup() || (editorWindow && editorWindow->open) ||
+	return open || SetupRenderer::ShouldShowFirstTimeSetup() || (editorWindow && editorWindow->open) ||
 	       Effects11Editor::GetSingleton().IsOpen();
 }
 
@@ -1662,6 +1657,18 @@ bool Menu::IsPreviewFlying()
 	return editorWindow && editorWindow->IsPreviewFlying();
 }
 
+void Menu::Open()
+{
+	open = true;
+}
+
+void Menu::Close()
+{
+	if (!std::exchange(open, false))
+		return;
+	globals::state->SaveCoreSettings(State::SELF_SAVING_SETTINGS);
+}
+
 void Menu::SelectFeatureMenu(const std::string& featureName)
 {
 	pendingFeatureSelection = featureName;
@@ -1681,4 +1688,17 @@ void Menu::DrawWeatherDetailsWindow()
 	if (!csEditor.WeatherDetailsWindow.Enabled || !csEditor.loaded)
 		return;
 	csEditor.RenderWeatherDetailsWindow(&csEditor.WeatherDetailsWindow.Enabled, !globals::features::performanceOverlay.settings.ShowWeatherPicker);
+}
+
+/**
+ * @brief Renders the render graph's schedule and memory windows while they are open
+ *
+ * Opened from Drawcall Limit Fix's settings; drawn with the menu. The schedule window owns its tracing switch (RenderGraph/ScheduleWindow.h).
+ */
+void Menu::DrawRenderGraphWindows()
+{
+#if defined(CS_HAS_RENDER_GRAPH)
+	RenderGraphSchedule::DrawWindow();
+	RenderGraphMemory::DrawWindow();
+#endif
 }

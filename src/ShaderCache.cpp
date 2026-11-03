@@ -21,6 +21,8 @@
 #include "Features/ReverseZ.h"
 #include "Features/SnowCover.h"
 #include "Features/WetnessEffects.h"
+#include "Features/DrawcallLimitFix.h"
+#include "RenderGraph/RenderGraphRuntime.h"
 
 #include "ShaderDDC.h"
 
@@ -1290,13 +1292,26 @@ namespace SIE
 					 (0b1111ull << (4 * attribute + 4)));
 		}
 
-		template <size_t MaxOffsetsSize>
+		// A constant table entry: the variable's offset in its buffer, in floats. The engine reads entries unsigned,
+		// so a variable has to start within the first 256 floats of its buffer.
+		static uint8_t ConstantTableEntry(uint32_t startOffsetBytes, const char* name, ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor)
+		{
+			const uint32_t offset = startOffsetBytes / 4;
+			if (offset > std::numeric_limits<uint8_t>::max()) {
+				logger::error("Variable {} in {} shader {}::{:X} starts at float {}, beyond what a constant table entry holds",
+					name, magic_enum::enum_name(shaderClass), magic_enum::enum_name(shader.shaderType.get()), descriptor, offset);
+			}
+			return static_cast<uint8_t>(offset);
+		}
+
+		template <typename TableByte, size_t MaxOffsetsSize>
 		static void ReflectConstantBuffers(ID3D11ShaderReflection& reflector,
 			std::array<size_t, 3>& bufferSizes,
-			std::array<int8_t, MaxOffsetsSize>& constantOffsets,
+			std::array<TableByte, MaxOffsetsSize>& constantOffsets,
 			uint64_t& vertexDesc,
 			ShaderClass shaderClass, uint32_t descriptor, const RE::BSShader& shader)
 		{
+			static_assert(std::is_same_v<TableByte, std::int8_t> || std::is_same_v<TableByte, std::uint8_t>);
 			D3D11_SHADER_DESC desc;
 			if (FAILED(reflector.GetDesc(&desc))) {
 				logger::error("Failed to get shader descriptor for {} shader {}::{:X}",
@@ -1395,7 +1410,7 @@ namespace SIE
 							GetVariableIndex(shaderClass, shader, varDesc.Name);
 						const bool variableFound = variableIndex != -1;
 						if (variableFound) {
-							constantOffsets[variableIndex] = (int8_t)(varDesc.StartOffset / 4);
+							constantOffsets[variableIndex] = ConstantTableEntry(varDesc.StartOffset, varDesc.Name, shaderClass, shader, descriptor);
 						} else {
 							logger::trace("Unknown variable name {} in {} shader {}::{:X}",
 								varDesc.Name, magic_enum::enum_name(shaderClass),
@@ -1413,7 +1428,7 @@ namespace SIE
 									const auto variableArrayIndex =
 										GetVariableIndex(shaderClass, shader, arrayName.c_str());
 									if (variableArrayIndex != -1) {
-										constantOffsets[variableArrayIndex] = static_cast<int8_t>(varDesc.StartOffset / 4);
+										constantOffsets[variableArrayIndex] = ConstantTableEntry(varDesc.StartOffset, arrayName.c_str(), shaderClass, shader, descriptor);
 									} else {
 										logger::debug("Unknown variable name {} in {} shader {}::{:X}",
 											arrayName, magic_enum::enum_name(shaderClass),
@@ -1428,8 +1443,8 @@ namespace SIE
 										const auto variableArrayElementIndex =
 											GetVariableIndex(shaderClass, shader, varName.c_str());
 										if (variableArrayElementIndex != -1) {
-											constantOffsets[variableArrayElementIndex] =
-												static_cast<int8_t>((varDesc.StartOffset + elementSize * arrayIndex) / 4);
+											constantOffsets[variableArrayElementIndex] = ConstantTableEntry(
+												varDesc.StartOffset + elementSize * arrayIndex, varName.c_str(), shaderClass, shader, descriptor);
 										} else {
 											logger::debug(
 												"Unknown variable name {} in {} shader {}::{:X}", varName,
@@ -1740,7 +1755,7 @@ namespace SIE
 					descriptor);
 			} else {
 				std::array<size_t, 3> bufferSizes = { 0, 0, 0 };
-				std::ranges::fill(newShader->constantTable, (int8_t)0);
+				std::ranges::fill(newShader->constantTable, static_cast<uint8_t>(0));
 				uint64_t dummy;
 				ReflectConstantBuffers(*reflector.get(), bufferSizes, newShader->constantTable,
 					dummy,
@@ -2502,7 +2517,10 @@ namespace SIE
 
 	bool ShaderCache::IsCompiling()
 	{
-		return compilationSet.totalTasks && compilationSet.completedTasks + compilationSet.failedTasks < compilationSet.totalTasks;
+		// ORG requests retained before renderer initialization also run in this pool.
+		// Keep the initial compilation gate up until those stage futures have completed.
+		return (compilationSet.totalTasks && compilationSet.completedTasks + compilationSet.failedTasks < compilationSet.totalTasks) ||
+		       compilationPool.get_tasks_total() != 0;
 	}
 
 	void ShaderCache::StopCompilation()
@@ -3033,6 +3051,43 @@ namespace SIE
 		return !modifiedShaderMap.empty() && modifiedShaderMap.contains(a_type) && modifiedShaderMap.at(a_type) > a_current;
 	}
 
+	namespace
+	{
+		// Names the next D3D11 shader this thread creates for capture tools (DXVK's dxvkSetNextShaderName, which Nsight Graphics then
+		// shows as the stage's entry point): type, stage, descriptor and the descriptor's own defines, without the features' global ones.
+		// Null clears it.
+		void SetNextDxvkShaderName(ShaderClass a_class, const RE::BSShader* a_shader, uint32_t a_descriptor)
+		{
+			using SetNextShaderName = void(__stdcall*)(const char*);
+			static const auto setName = []() -> SetNextShaderName {
+				const auto module = ::GetModuleHandleW(L"dxvk_d3d11.dll");
+				return module ? reinterpret_cast<SetNextShaderName>(::GetProcAddress(module, "dxvkSetNextShaderName")) : nullptr;
+			}();
+			if (!setName)
+				return;
+			if (!a_shader) {
+				setName(nullptr);
+				return;
+			}
+
+			const auto type = a_shader->shaderType.get();
+			std::array<D3D_SHADER_MACRO, 64> defines{};
+			SShaderCache::GetShaderDefines(*a_shader, a_descriptor, defines);
+			std::string name = std::format("{} {} {:08X}", magic_enum::enum_name(type),
+				a_class == ShaderClass::Vertex ? "vs" : a_class == ShaderClass::Pixel ? "ps" : "cs", a_descriptor);
+			for (const auto& define : defines) {
+				if (!define.Name)
+					break;
+				const bool global = std::ranges::any_of(Feature::GetFeatureList(), [&](Feature* feature) {
+					return feature->loaded && feature->HasShaderDefine(type) && feature->GetShaderDefineName() == define.Name;
+				});
+				if (!global)
+					name += std::format(" {}", define.Name);
+			}
+			setName(name.c_str());
+		}
+	}
+
 	RE::BSGraphics::VertexShader* ShaderCache::MakeAndAddVertexShader(const RE::BSShader& shader,
 		uint32_t descriptor)
 	{
@@ -3043,8 +3098,10 @@ namespace SIE
 			auto newShader = SShaderCache::CreateVertexShader(*shaderBlob, shader,
 				descriptor);
 
+			SetNextDxvkShaderName(ShaderClass::Vertex, &shader, descriptor);
 			const auto result = device->CreateVertexShader(shaderBlob->GetBufferPointer(),
 				newShader->byteCodeSize, nullptr, reinterpret_cast<ID3D11VertexShader**>(&newShader->shader));
+			SetNextDxvkShaderName(ShaderClass::Vertex, nullptr, 0);
 			if (FAILED(result)) {
 				logger::error("Failed to create vertex shader {}::{:X}",
 					magic_enum::enum_name(shader.shaderType.get()), descriptor);
@@ -3073,8 +3130,10 @@ namespace SIE
 			auto newShader = SShaderCache::CreatePixelShader(*shaderBlob, shader,
 				descriptor);
 
+			SetNextDxvkShaderName(ShaderClass::Pixel, &shader, descriptor);
 			const auto result = device->CreatePixelShader(shaderBlob->GetBufferPointer(),
 				shaderBlob->GetBufferSize(), nullptr, reinterpret_cast<ID3D11PixelShader**>(&newShader->shader));
+			SetNextDxvkShaderName(ShaderClass::Pixel, nullptr, 0);
 			if (FAILED(result)) {
 				logger::error("Failed to create pixel shader {}::{:X}",
 					magic_enum::enum_name(shader.shaderType.get()),
@@ -3104,8 +3163,10 @@ namespace SIE
 			auto newShader = SShaderCache::CreateComputeShader(*shaderBlob, shader,
 				descriptor);
 
+			SetNextDxvkShaderName(ShaderClass::Compute, &shader, descriptor);
 			const auto result = device->CreateComputeShader(shaderBlob->GetBufferPointer(),
 				shaderBlob->GetBufferSize(), nullptr, reinterpret_cast<ID3D11ComputeShader**>(&newShader->shader));
+			SetNextDxvkShaderName(ShaderClass::Compute, nullptr, 0);
 			if (FAILED(result)) {
 				logger::error("Failed to create pixel shader {}::{:X}",
 					magic_enum::enum_name(shader.shaderType.get()),
@@ -3131,6 +3192,30 @@ namespace SIE
 		SIE::SShaderCache::GetShaderDefines(shader, descriptor, std::span{ defines });
 
 		return SIE::SShaderCache::MergeDefinesString(defines, true);
+	}
+
+	std::vector<std::pair<std::string, std::string>> ShaderCache::GetCompileDefines(const RE::BSShader& shader, ShaderClass shaderClass, uint32_t descriptor)
+	{
+		// Same composition as the D3DCompile path in CompileShader.
+		std::vector<std::pair<std::string, std::string>> result;
+		if (shaderClass == ShaderClass::Vertex)
+			result.emplace_back("VSHADER", "");
+		else if (shaderClass == ShaderClass::Pixel)
+			result.emplace_back("PSHADER", "");
+		else if (shaderClass == ShaderClass::Compute)
+			result.emplace_back("CSHADER", "");
+		if (const auto stateDefines = globals::state->GetDefines()) {
+			for (const auto& define : *stateDefines)
+				result.push_back(define);
+		}
+		std::array<D3D_SHADER_MACRO, 64> defines{};
+		SIE::SShaderCache::GetShaderDefines(shader, descriptor, std::span{ defines });
+		for (const auto& define : defines) {
+			if (!define.Name)
+				break;
+			result.emplace_back(define.Name, define.Definition ? define.Definition : "");
+		}
+		return result;
 	}
 
 	uint64_t ShaderCache::GetCachedHitTasks()
@@ -3574,6 +3659,14 @@ namespace SIE
 		} else if (shaderClass == ShaderClass::Compute) {
 			ShaderCache::Instance().MakeAndAddComputeShader(shader, descriptor);
 		}
+		if (shaderClass == ShaderClass::Vertex || shaderClass == ShaderClass::Pixel) {
+			try {
+				DrawcallLimitFix::PrecompileShader(shader, shaderClass == ShaderClass::Pixel, descriptor);
+			} catch (const std::exception& e) {
+				// An optional ORG artifact must not turn a successful native compile into a failed task.
+				logger::warn("[DCLF] ORG shader precompile failed: {}", e.what());
+			}
+		}
 	}
 
 	size_t ShaderCompilationTask::MakeId(ShaderClass a_shaderClass, RE::BSShader::Type a_type, uint32_t a_descriptor)
@@ -3767,6 +3860,7 @@ namespace SIE
 					availableTasks.insert(std::move(node));
 				}
 			}
+			bool batchStarted = false;
 			if (wasAdded) {
 				// Increment counters inside the lock so that TryTakeNext, which reads
 				// IsCompiling() after waking up, sees the updated totalTasks and
@@ -3783,6 +3877,7 @@ namespace SIE
 				if (doneTasks >= prevTotal) {
 					QueryPerformanceCounter(&lastReset);
 					lastCalculation = lastReset;
+					batchStarted = true;
 				}
 
 				// If compilation was previously marked complete (prematurely, because a
@@ -3799,6 +3894,9 @@ namespace SIE
 				totalPriorityWeight += static_cast<uint64_t>(task.GetPriority()) + 1;
 			}
 			lock.unlock();
+			// Info, with the completion below: a run can tell from the log whether compilation is still going.
+			if (batchStarted)
+				logger::info("Compilation started");
 			if (wasAdded) {
 				conditionVariable.notify_one();
 			}
@@ -4057,6 +4155,20 @@ namespace SIE
 		std::string lowerExtension = extension;
 		std::transform(lowerExtension.begin(), lowerExtension.end(), lowerExtension.begin(),
 			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		// The render graph's live pipelines (its compute programs, Drawcall Limit Fix's graphics pipelines) build from the same tree
+		// (docs/development/dclf-hot-reload.md): an edited shader rebuilds those built from it, an include every one, at the next present.
+		// DCLF's own shaders (Data/Shaders/DrawcallLimitFix/) are no D3D11 shader's: an .hlsl there leaves this cache alone (an include there
+		// still invalidates the D3D11 shaders that include it, below).
+		if (lowerExtension == ".hlsl" || lowerExtension == ".hlsli") {
+			RenderGraphRuntime::RequestShaderReload(filePath.generic_string());
+			std::string lowerPath = filePath.generic_string();
+			std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			if (lowerExtension == ".hlsl" && lowerPath.find("/drawcalllimitfix/") != std::string::npos) {
+				logger::info("Shader watcher: {} is Drawcall Limit Fix's; its pipelines are rebuilt, the D3D11 cache kept", filePath.string());
+				fileDone = false;
+				return;
+			}
+		}
 		if (!std::filesystem::is_directory(filePath) && lowerExtension == ".hlsl") {
 			ShaderDDC::InvalidateSources();
 			// Update cache with the modified shader

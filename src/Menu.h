@@ -123,10 +123,16 @@ public:
 	}
 
 	bool initialized = false;
-	bool IsEnabled = false;
-	float openFade = 0.0f;  // 0 = closed, 1 = fully open; eased toward IsEnabled each frame
 
-	/** @brief Eases openFade toward IsEnabled, or snaps to it when the menu fade setting is off. */
+	/** @brief Whether the main menu is open. */
+	bool IsOpen() const { return open; }
+	/** @brief Opens the main menu. */
+	void Open();
+	/** @brief Closes the main menu and saves the State::SELF_SAVING_SETTINGS that changed. */
+	void Close();
+	float openFade = 0.0f;  // 0 = closed, 1 = fully open; eased toward IsOpen() each frame
+
+	/** @brief Eases openFade toward IsOpen(), or snaps to it when the menu fade setting is off. */
 	void UpdateOpenFade(float deltaTime);
 
 	/** @brief Loads menu settings from JSON, including legacy migration */
@@ -162,6 +168,8 @@ public:
 	void DrawOverlay();
 	/** @brief Draws the detached weather details editor window */
 	void DrawWeatherDetailsWindow();
+	/** @brief Draws the render graph's schedule and memory windows while they are open (RenderGraph/ScheduleWindow.h, MemoryWindow.h); nothing without the render graph */
+	void DrawRenderGraphWindows();
 
 	/** @brief Translates raw Skyrim input events into the internal key event queue */
 	void ProcessInputEvents(RE::InputEvent* const* a_events);
@@ -273,8 +281,7 @@ public:
 		bool UseSimplePalette = false;      // DEPRECATED: No longer affects behavior. UI now shows both Simple and Advanced controls.
 		bool ShowFooter = true;             // whether to show the status bar at the bottom of the window
 		float TooltipHoverDelay = 0.5f;     // tooltip hover delay in seconds
-		bool BackgroundBlurEnabled = true;  // enable background blur effect
-		bool MenuFadeEnabled = true;        // fade the menu and its blur in and out when it is toggled
+		bool MenuFadeEnabled = true;        // fade the menu in and out when it is toggled
 		bool UseCustomCursor = true;        // use theme cursor images instead of default ImGui cursors (each bundled theme ships a set)
 		struct CursorImageSettings
 		{
@@ -644,6 +651,9 @@ private:
 	// Skyrim AFK vanity camera: delayed spin while idle. Held off while any CS UI is open.
 	bool vanityCameraDisabled = false;
 	float savedVanityCameraDelay = 180.0f;
+
+	/// Changed only through Open() and Close(), so a close always saves.
+	bool open = false;
 
 	Menu() = default;
 

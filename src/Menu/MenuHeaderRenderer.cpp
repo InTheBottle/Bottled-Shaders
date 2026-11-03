@@ -90,7 +90,7 @@ namespace
 
 		ImGui::SameLine();
 		if (Util::Icons::IconButton("##CloseMenu", Util::Icons::Kind::Close))
-			menu->IsEnabled = false;
+			menu->Close();
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text("%s", T("menu.close_tooltip", "Close the menu (Esc)."));
 	}

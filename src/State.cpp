@@ -13,6 +13,10 @@
 #include "Deferred.h"
 #include "EngineFixes/LODBlendRingFix.h"
 #include "EngineFixes/SunShadowMaskFix.h"
+#include "Utils/SwitchFile.h"
+#include "Features/DrawcallLimitFix.h"
+#include "GpuEventTimers.h"
+#include "GpuIdleTrace.h"
 #include "FeatureIssues.h"
 #include "Features/CSEditor.h"
 #include "Features/CloudShadows.h"
@@ -39,12 +43,14 @@
 #include "Menu.h"
 #include "PostProcessingMode.h"
 #include "Presets/UnifiedPresetCatalog.h"
+#include "RenderGraph/RenderGraphRuntime.h"
 #include "ShaderCache.h"
 #include "TruePBR.h"
 #include "Utils/FileSystem.h"
 #include "Utils/SettingsCatalog.h"
 #include "Utils/SphericalHarmonics.h"
 #include "VanillaBinding.h"
+#include "Vram/DxvkMemory.h"
 
 #ifdef TRACY_ENABLE
 static thread_local std::vector<TracyCZoneCtx> s_tracyPerfZones;
@@ -417,15 +423,27 @@ void State::Reset()
 
 void State::Setup()
 {
-	globals::features::truePBR.SetupResources();
+	// VRAM attribution: what DXVK creates here is CS's core memory, unless a narrower scope (a feature's callbacks) says otherwise.
+	Vram::OwnerScope vramScope("CS/Core");
+	{
+		Vram::OwnerScope truePbrScope("CS/TruePBR");
+		globals::features::truePBR.SetupResources();
+	}
 	SetupResources();
 
 	// Probe typed UAV load support before features set up their resources, so any
 	// gating logic that wants to read the log can run during feature SetupResources.
 	CheckTypedUAVLoadSupport();
 
+	// Adopt DXVK's Vulkan device for the render graph before features create
+	// resources; features fall back to their D3D11 paths when it stays inactive.
+	RenderGraphRuntime::Get().Initialize();
+
 	Feature::ForEachLoadedFeature("SetupResources", [](Feature* feature) { feature->SetupResources(); });
-	globals::deferred->SetupResources();
+	{
+		Vram::OwnerScope deferredScope("CS/Deferred");
+		globals::deferred->SetupResources();
+	}
 	Feature::ForEachLoadedFeature("PostSetupResources", [](Feature* feature) { feature->PostSetupResources(); });
 	PostProcessingMode::ApplyPending();
 	tonemapOwner.reset();
@@ -716,7 +734,7 @@ void State::SaveCoreToJson(json& settings)
 	advanced["Compiler Threads"] = shaderCache->compilationThreadCount;
 	advanced["Background Compiler Threads"] = shaderCache->backgroundCompilationThreadCount;
 	advanced["Use FileWatcher"] = shaderCache->UseFileWatcher();
-	advanced["Frame Annotations"] = frameAnnotations;
+	advanced["Frame Annotations"] = frameAnnotationsSetting.value_or(frameAnnotations);
 	advanced["Partial Precision"] = enablePartialPrecision.load(std::memory_order_relaxed);
 	advanced["Throttle Water Cubemap"] = throttleWaterCubemap;
 	settings["Advanced"] = advanced;
@@ -747,21 +765,32 @@ void State::SaveCoreToJson(json& settings)
 	settings["Version"] = Plugin::VERSION.string();
 }
 
-size_t State::HashCoreSettings()
+namespace
+{
+	/** @brief Drops the core settings that save themselves, so the unsaved check never counts them. */
+	void EraseSelfSavingSettings(json& core)
+	{
+		for (const auto path : State::SELF_SAVING_SETTINGS) {
+			const json::json_pointer pointer{ std::string(path) };
+			if (core.contains(pointer))
+				core.at(pointer.parent_pointer()).erase(pointer.back());
+		}
+	}
+}
+
+json State::CaptureCoreSettings()
 {
 	json core;
-	{
-		std::lock_guard<std::mutex> lock(m_mutex);
-		SaveCoreToJson(core);
-	}
-	return std::hash<std::string>{}(core.dump());
+	std::lock_guard<std::mutex> lock(m_mutex);
+	SaveCoreToJson(core);
+	return core;
 }
 
 void State::MarkSettingsSaved()
 {
 	settingsChanged = false;
 	coreSettingsChanged = false;
-	savedCoreHash = HashCoreSettings();
+	savedCore = CaptureCoreSettings();
 	globals::menu->ClearUnsavedChanges();
 }
 
@@ -785,7 +814,44 @@ void State::CheckFeatureSettingsChanged(Feature* feature)
 
 void State::CheckCoreSettingsChanged()
 {
-	coreSettingsChanged = HashCoreSettings() != savedCoreHash;
+	auto current = CaptureCoreSettings();
+	auto saved = savedCore;
+	EraseSelfSavingSettings(current);
+	EraseSelfSavingSettings(saved);
+	coreSettingsChanged = current != saved;
+}
+
+bool State::SaveCoreSettings(std::span<const std::string_view> paths)
+{
+	if (savedCore.is_null())
+		return false;
+	const auto current = CaptureCoreSettings();
+	json patch = json::object();
+	for (const auto path : paths) {
+		const json::json_pointer pointer{ std::string(path) };
+		if (!current.contains(pointer))
+			continue;
+		const auto& value = current.at(pointer);
+		if (!savedCore.contains(pointer) || savedCore.at(pointer) != value)
+			patch[pointer] = value;
+	}
+	if (patch.empty())
+		return true;
+
+	const auto configPath = Util::PathHelpers::GetSettingsUserPath();
+	std::error_code ec;
+	const bool fileExists = std::filesystem::exists(configPath, ec);
+	if (ec)
+		return false;
+	// Never replace a config that fails to parse with just the patch
+	auto settings = fileExists ? Util::FileHelpers::ReadJsonObject(configPath, "user config") : std::optional<json>(json::object());
+	if (!settings)
+		return false;
+	settings->merge_patch(patch);
+	if (!Util::FileHelpers::WriteJsonAtomically(configPath, *settings, 1, "config"))
+		return false;
+	savedCore.merge_patch(patch);
+	return true;
 }
 
 void State::LoadFromJson(nlohmann::json& settings)
@@ -818,6 +884,11 @@ void State::LoadFromJson(nlohmann::json& settings)
 			shaderCache->SetFileWatcher(advanced["Use FileWatcher"]);
 		if (advanced.contains("Frame Annotations") && advanced["Frame Annotations"].is_boolean())
 			frameAnnotations = advanced["Frame Annotations"];
+		// The GPU idle trace attributes gaps to the engine's render phases, which only the annotations mark.
+		if ((GpuIdleTrace::Requested() || GpuEventTimers::Requested() || NvPerf::EnvironmentRequested()) && !frameAnnotations) {
+			frameAnnotationsSetting = frameAnnotations;
+			frameAnnotations = true;
+		}
 		if (advanced.contains("Partial Precision") && advanced["Partial Precision"].is_boolean())
 			enablePartialPrecision.store(advanced["Partial Precision"].get<bool>(), std::memory_order_relaxed);
 		if (advanced.contains("Throttle Water Cubemap") && advanced["Throttle Water Cubemap"].is_boolean())
@@ -1174,7 +1245,17 @@ std::string State::GetDefinesString()
 
 std::shared_ptr<const std::vector<std::pair<std::string, std::string>>> State::GetDefines()
 {
+	// CS_DCLF_SHADOW_DEBUG_OUTPUT (dclf-validation.md, "Shader debug output (`CS_DCLF_SHADOW_DEBUG_OUTPUT`)"): Lighting.hlsl writes chosen intermediate values into the Diffuse
+	// target, native and DCLF alike (DCLF_SHADOW_DEBUG).
+	static const bool shadowDebug = Util::SwitchFile::Enabled("CS_DCLF_SHADOW_DEBUG_OUTPUT");
 	std::scoped_lock lock(shaderDefinesMutex);
+	if (shadowDebug && std::ranges::none_of(*shaderDefines, [](const auto& a_define) { return a_define.first == "DCLF_SHADOW_DEBUG"; })) {
+		auto defines = std::make_shared<std::vector<std::pair<std::string, std::string>>>(*shaderDefines);
+		defines->emplace_back("DCLF_SHADOW_DEBUG", "1");
+		shaderDefines = std::move(defines);
+		// The disk cache's file names carry this string, so the debug builds are cached apart.
+		shaderDefinesString += shaderDefinesString.empty() ? "DCLF_SHADOW_DEBUG=1" : ";DCLF_SHADOW_DEBUG=1";
+	}
 	return shaderDefines;
 }
 
@@ -1278,6 +1359,7 @@ void State::SetupResources()
 	auto [data, size] = GetFeatureBufferData(false);
 	(void)data;
 	featureDataCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc((uint32_t)size), "State::FeatureDataCB");
+	featureDataBytes = static_cast<std::uint32_t>(size);
 
 	// Grab main texture to get resolution
 	D3D11_TEXTURE2D_DESC texDesc{};
@@ -1295,25 +1377,46 @@ void State::SetupResources()
 
 	globals::profiler->Initialize(globals::d3d::device, globals::d3d::context);
 
-	// Checked per pass rather than bound once, so annotations forced on at runtime (RenderDoc capture, Nsight Perf)
-	// also cover the profiler's passes. Toggles happen between frames, so a pass's begin and end agree.
+	// Debugger events (Nsight, RenderDoc, PIX) around CS's own GPU work: the profiler's passes and each
+	// feature's frame callbacks. With Frame Annotations on, or whenever a capture tool is attached, which
+	// DXVK reports through GetStatus (it forwards D3D11 events only then). Checked per pass rather than
+	// bound once, so annotations forced on at runtime (RenderDoc capture, Nsight Perf) also cover them.
+	// Toggles happen between frames, so a pass's begin and end agree.
+	const bool captureAttached = pPerf && pPerf->GetStatus();
+	debuggerEvents = pPerf && (frameAnnotations || captureAttached);
+	if (debuggerEvents)
+		logger::info("Debugger events on ({})", frameAnnotations ? "Frame Annotations" : "capture tool attached");
 	globals::profiler->SetPerfEventCallbacks(
 		[this](std::string_view name) {
-			if (frameAnnotations)
+			if (debuggerEvents || frameAnnotations)
 				BeginPerfEvent(name);
 		},
 		[this](std::string_view) {
-			if (frameAnnotations)
+			if (debuggerEvents || frameAnnotations)
 				EndPerfEvent();
+		});
+	Feature::SetGpuEventCallbacks(
+		[](std::string_view name) {
+			if (globals::state->debuggerEvents || globals::state->frameAnnotations)
+				globals::state->BeginPerfEvent(name);
+		},
+		[] {
+			if (globals::state->debuggerEvents || globals::state->frameAnnotations)
+				globals::state->EndPerfEvent();
 		});
 }
 
 void State::ModifyShaderLookup(const RE::BSShader& a_shader, uint& a_vertexDescriptor, uint& a_pixelDescriptor, bool a_forceDeferred)
 {
+	ModifyShaderLookup(a_shader.shaderType.get(), a_vertexDescriptor, a_pixelDescriptor, a_forceDeferred);
+}
+
+void State::ModifyShaderLookup(RE::BSShader::Type a_shaderType, uint& a_vertexDescriptor, uint& a_pixelDescriptor, bool a_forceDeferred)
+{
 	auto deferred = globals::deferred;
 
-	if (a_shader.shaderType.get() != RE::BSShader::Type::Utility && a_shader.shaderType.get() != RE::BSShader::Type::ImageSpace) {
-		switch (a_shader.shaderType.get()) {
+	if (a_shaderType != RE::BSShader::Type::Utility && a_shaderType != RE::BSShader::Type::ImageSpace) {
+		switch (a_shaderType) {
 		case RE::BSShader::Type::Lighting:
 			{
 				a_vertexDescriptor &= ~((uint32_t)SIE::ShaderCache::LightingShaderFlags::AdditionalAlphaMask |
@@ -1423,7 +1526,7 @@ void State::ModifyShaderLookup(const RE::BSShader& a_shader, uint& a_vertexDescr
 			}
 			break;
 		}
-	} else if (a_shader.shaderType.get() == RE::BSShader::Type::Utility) {
+	} else if (a_shaderType == RE::BSShader::Type::Utility) {
 		a_vertexDescriptor &= ~(uint32_t)SIE::ShaderCache::UtilityShaderFlags::TruePbr;
 	}
 }
@@ -1467,6 +1570,8 @@ void State::BeginPerfEvent(std::string_view title)
 	pPerf->BeginEvent(std::wstring(title.begin(), title.end()).c_str());
 	if (NvPerf::RangesActive())
 		NvPerf::PushRange(title);
+	GpuIdleTrace::BeginEvent(title);
+	GpuEventTimers::BeginEvent(title);
 }
 
 void State::EndPerfEvent()
@@ -1490,6 +1595,21 @@ void State::EndPerfEvent()
 	if (NvPerf::RangesActive())
 		NvPerf::PopRange();
 	pPerf->EndEvent();
+	GpuIdleTrace::EndEvent();
+	GpuEventTimers::EndEvent();
+}
+
+ScopedPerfEvent::ScopedPerfEvent(std::string_view a_name) :
+	active(globals::state && globals::state->debuggerEvents)
+{
+	if (active)
+		globals::state->BeginPerfEvent(a_name);
+}
+
+ScopedPerfEvent::~ScopedPerfEvent()
+{
+	if (active)
+		globals::state->EndPerfEvent();
 }
 
 void State::SetPerfMarker(std::string_view title)
@@ -1497,6 +1617,7 @@ void State::SetPerfMarker(std::string_view title)
 	if (!PerfEventsConsumed())
 		return;
 	pPerf->SetMarker(std::wstring(title.begin(), title.end()).c_str());
+	GpuIdleTrace::Mark(title);
 }
 
 void State::SetAdapterDescription(const std::wstring& description)
@@ -1642,11 +1763,17 @@ void State::UpdateSharedData([[maybe_unused]] bool a_inWorld, [[maybe_unused]] b
 		data.MasserColor = lighting.masser.GetColor();
 		data.SecundaColor = lighting.secunda.GetColor();
 		data.TonemapOwner = static_cast<uint>(GetTonemapOwner());
+		lastSharedData = data;  // Drawcall Limit Fix packs these bytes itself; see State::lastSharedData
 		sharedDataCB->Update(data);
 	}
 
 	{
 		auto [data, size] = GetFeatureBufferData(a_inWorld);
+
+		// Kept for Drawcall Limit Fix, for the same reason as lastSharedData: it packs these bytes into its
+		// own per-draw constants and cannot read them back from the GPU buffer.
+		lastFeatureData.assign(static_cast<const std::byte*>(static_cast<const void*>(data)),
+			static_cast<const std::byte*>(static_cast<const void*>(data)) + size);
 
 		featureDataCB->Update(data, size);
 	}

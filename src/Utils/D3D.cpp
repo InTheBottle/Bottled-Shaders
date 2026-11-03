@@ -7,7 +7,9 @@
 #include "ShaderCache.h"
 #include "ShaderDDC.h"
 #include "State.h"
+#include "Utils/FileRename.h"
 #include "Utils/Format.h"
+#include "Utils/Logging.h"
 #include <DDSTextureLoader.h>
 #include <DirectXTex.h>
 #include <d3dcompiler.h>
@@ -416,11 +418,10 @@ namespace Util
 		const UINT pixelCount = desc.Width * desc.Height;
 		const UINT largeTextureThreshold = 1024 * 1024;  // 1 megapixel
 		if (pixelCount > largeTextureThreshold) {
-			static std::once_flag largeTextureWarning;
-			std::call_once(largeTextureWarning, [&]() {
+			static Util::OnceFlag largeTextureWarning;
+			if (largeTextureWarning.First())
 				logger::warn("ApplyHighlightTintToTexture: Processing large texture ({}x{} = {} pixels). Consider using compute shader for better performance. This warning will only be shown once.",
 					desc.Width, desc.Height, pixelCount);
-			});
 		}  // Create a temporary staging texture to read from
 		ID3D11Texture2D* stagingTexture = nullptr;
 		desc.Usage = D3D11_USAGE_STAGING;
@@ -582,7 +583,7 @@ namespace Util
 			return hr;
 		}
 
-		fs::rename(tmp, path, ec);
+		Util::RenameSerialized(tmp, path, ec);
 		if (ec) {
 			fs::remove(path, ec);
 			if (ec) {
@@ -590,9 +591,10 @@ namespace Util
 				fs::remove(tmp);
 				return HRESULT_FROM_WIN32(static_cast<DWORD>(ec.value()));
 			}
-			fs::rename(tmp, path, ec);
+			Util::RenameSerialized(tmp, path, ec);
 			if (ec) {
-				logger::error("SaveTextureToFile: failed to rename file");
+				logger::error("SaveTextureToFile: failed to rename {} onto {}: {} {} ({})", Util::WStringToString(tmp), Util::WStringToString(path.wstring()),
+					ec.value(), ec.message(), Util::UnderUsvfs() ? "under usvfs" : "no usvfs");
 				fs::remove(tmp);
 				return HRESULT_FROM_WIN32(static_cast<DWORD>(ec.value()));
 			}

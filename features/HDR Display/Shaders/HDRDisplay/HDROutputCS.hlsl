@@ -16,7 +16,7 @@ cbuffer PerFrame : register(b0)
 	float enableHDR : packoffset(c0.x);
 	float paperWhite : packoffset(c0.y);
 	float peakNits : packoffset(c0.z);
-	float skipUIComposite : packoffset(c0.w);
+	float hdrPad0 : packoffset(c0.w);
 	float uiBrightness : packoffset(c1.x);
 	float isSceneLinear : packoffset(c1.y);
 	float isMainOrLoadingMenu : packoffset(c1.z);
@@ -52,7 +52,6 @@ float3 CompositeUI(float3 scene, float4 ui, bool sceneIsLinear, bool sceneIsBT20
 	float4 ui = UITex[dispatchID.xy];
 
 	bool hdrEnabled = enableHDR > 0.5;
-	bool skipUI = skipUIComposite > 0.5;
 	bool isMainLoading = isMainOrLoadingMenu > 0.5;
 	bool postProcessOutput = SharedData::TonemapOwner == SharedData::TonemapOwnerPostProcessing && !isMainLoading;
 
@@ -86,13 +85,7 @@ float3 CompositeUI(float3 scene, float4 ui, bool sceneIsLinear, bool sceneIsBT20
 		}
 	} else {
 		float3 sceneGamma22 = scene.rgb;
-
-		if (skipUI) {
-			finalColor = sceneGamma22;
-		} else {
-			finalColor = ui.rgb + sceneGamma22 * (1.0 - ui.a);
-		}
-
+		finalColor = ui.rgb + sceneGamma22 * (1.0 - ui.a);
 		finalColor = saturate(finalColor);
 	}
 

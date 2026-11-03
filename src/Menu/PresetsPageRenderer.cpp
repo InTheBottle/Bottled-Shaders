@@ -754,7 +754,7 @@ void PresetsPageRenderer::Open()
 	auto* menu = globals::menu;
 	if (!menu)
 		return;
-	menu->IsEnabled = true;
+	menu->Open();
 	menu->SelectFeatureMenu(std::string(MenuPageIds::kPresets));
 }
 
@@ -805,7 +805,7 @@ void PresetsPageRenderer::RenderScreenshotLightbox()
 	const ImGuiStyle& style = ImGui::GetStyle();
 	const int shotCount = static_cast<int>(pack->screenshotSRVs.size());
 
-	// Full-viewport dim layer. Semi-transparent WindowBg lets BackgroundBlur show through.
+	// Full-viewport dim layer. Semi-transparent WindowBg lets the scene show through.
 	ImGui::SetNextWindowPos(viewport->Pos);
 	ImGui::SetNextWindowSize(viewport->Size);
 	ImGui::SetNextWindowFocus();

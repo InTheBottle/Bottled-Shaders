@@ -1,6 +1,23 @@
-#include "Common/FrameBuffer.hlsli"
-
 #include "LightLimitFix/Common.hlsli"
+
+// LLF_ORG_BINDLESS: the OpenRenderGraph build (SPIR-V, push constants and descriptor-heap
+// resources). Otherwise the D3D11 build with register bindings and the FrameBuffer cbuffer.
+#if defined(LLF_ORG_BINDLESS)
+#	include "LightLimitFix/OrgBindless.hlsli"
+#	define GetPositionVS LLFGetPositionVS
+#	define LLF_DECLARE_RESOURCES \
+		LLFLoadLatch(); \
+		RWStructuredBuffer<ClusterAABB> clusters = ResourceDescriptorHeap[ClustersIndex]; \
+		RWStructuredBuffer<uint> lightIndexCounter = ResourceDescriptorHeap[LightIndexCounterIndex];
+#	if defined(REVERSE_Z)
+#		define LLF_FAR_PLANE_DEPTH 0.0f
+#	else
+#		define LLF_FAR_PLANE_DEPTH 1.0f
+#	endif
+#else
+#	include "Common/FrameBuffer.hlsli"
+#	define LLF_DECLARE_RESOURCES
+#	define LLF_FAR_PLANE_DEPTH FrameBuffer::FarPlaneDepth()
 
 cbuffer PerFrame : register(b0)
 {
@@ -21,10 +38,11 @@ float3 GetPositionVS(float2 texcoord, float depth)
 	return homogenousLocation.xyz / homogenousLocation.w;
 }
 
+RWStructuredBuffer<ClusterAABB> clusters : register(u0);
+#endif
+
 //reference
 //https://github.com/Angelo1211/HybridRenderingEngine/
-
-RWStructuredBuffer<ClusterAABB> clusters : register(u0);
 
 float3 IntersectionZPlane(float3 B, float z_dist)
 {
@@ -41,7 +59,17 @@ float3 IntersectionZPlane(float3 B, float z_dist)
 }
 
 [numthreads(64, 1, 1)] void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
+	LLF_DECLARE_RESOURCES
+
 	uint clusterIndex = dispatchThreadId.x;
+
+#if defined(LLF_ORG_BINDLESS)
+	// The ORG graph has no separate clear pass: building runs before culling, so it
+	// resets the culling pass's append counter.
+	if (clusterIndex == 0)
+		lightIndexCounter[0] = 0;
+#endif
+
 	if (clusterIndex >= ClusterSize.x * ClusterSize.y * ClusterSize.z)
 		return;
 
@@ -52,8 +80,8 @@ float3 IntersectionZPlane(float3 B, float z_dist)
 
 	float2 texcoordMax = (groupId.xy + 1) * clusterSize;
 	float2 texcoordMin = groupId.xy * clusterSize;
-	float3 maxPointVS = GetPositionVS(texcoordMax, FrameBuffer::FarPlaneDepth());
-	float3 minPointVS = GetPositionVS(texcoordMin, FrameBuffer::FarPlaneDepth());
+	float3 maxPointVS = GetPositionVS(texcoordMax, LLF_FAR_PLANE_DEPTH);
+	float3 minPointVS = GetPositionVS(texcoordMin, LLF_FAR_PLANE_DEPTH);
 
 	float clusterNear = LightsNear * pow(abs(LightsFar / LightsNear), groupId.z / float(ClusterSize.z));
 	float clusterFar = LightsNear * pow(abs(LightsFar / LightsNear), (groupId.z + 1) / float(ClusterSize.z));

@@ -1,6 +1,7 @@
 #include "NativeMenu/NativeMenu.h"
 
 #include "Features/Upscaling.h"
+#include "Features/Upscaling/Streamline.h"
 #include "Globals.h"
 #include "I18n/I18n.h"
 
@@ -25,7 +26,17 @@ namespace
 
 	bool HasDLSS()
 	{
-		return globals::features::upscaling.streamline.featureDLSS;
+		return Streamline::GetSingleton()->IsDLSSSupported();
+	}
+
+	std::vector<Method> AvailableMethods()
+	{
+		std::vector<Method> methods{ Method::kNONE, Method::kTAA, Method::kFSR };
+		if (Streamline::GetSingleton()->IsXeSSSupported())
+			methods.push_back(Method::kXeSS);
+		if (HasDLSS())
+			methods.push_back(Method::kDLSS);
+		return methods;
 	}
 
 	uint& SelectedMethod()
@@ -34,45 +45,66 @@ namespace
 		return HasDLSS() ? settings.upscaleMethod : settings.upscaleMethodNoDLSS;
 	}
 
+	float IndexOf(Method a_method)
+	{
+		const auto methods = AvailableMethods();
+		const auto it = std::ranges::find(methods, a_method);
+		return static_cast<float>(it != methods.end() ? std::distance(methods.begin(), it) : 0);
+	}
+
 	std::vector<std::string> MethodOptions()
 	{
-		std::vector<std::string> options{
-			T(TKEY("method_none"), "None"),
-			T(TKEY("method_taa"), "TAA"),
-			"AMD FSR 3.1",
-		};
-		if (HasDLSS())
-			options.emplace_back("NVIDIA DLSS");
+		std::vector<std::string> options;
+		for (const auto method : AvailableMethods()) {
+			switch (method) {
+			case Method::kNONE:
+				options.emplace_back(T(TKEY("method_none"), "None"));
+				break;
+			case Method::kTAA:
+				options.emplace_back(T(TKEY("method_taa"), "TAA"));
+				break;
+			case Method::kFSR:
+				options.emplace_back("AMD FSR");
+				break;
+			case Method::kXeSS:
+				options.emplace_back("Intel XeSS");
+				break;
+			case Method::kDLSS:
+				options.emplace_back("NVIDIA DLSS");
+				break;
+			}
+		}
 		return options;
 	}
 
 	float __stdcall GetMethod()
 	{
-		return static_cast<float>(SelectedMethod());
+		return IndexOf(static_cast<Method>(SelectedMethod()));
 	}
 
 	void __stdcall SetMethod(float v)
 	{
-		const auto highest = HasDLSS() ? Method::kDLSS : Method::kFSR;
-		SelectedMethod() = static_cast<uint>(std::clamp(v, 0.0f, static_cast<float>(highest)));
+		const auto methods = AvailableMethods();
+		const auto index = static_cast<size_t>(std::clamp(v, 0.0f, static_cast<float>(methods.size() - 1)));
+		SelectedMethod() = static_cast<uint>(methods[index]);
 	}
 
 	float DefaultMethod()
 	{
 		const auto defaults = UpscalingRoot::Defaults();
-		return static_cast<float>(HasDLSS() ? defaults.upscaleMethod : defaults.upscaleMethodNoDLSS);
+		return IndexOf(static_cast<Method>(HasDLSS() ? defaults.upscaleMethod : defaults.upscaleMethodNoDLSS));
 	}
 
 	bool __stdcall IsUpscalerActive()
 	{
 		const auto method = globals::features::upscaling.GetUpscaleMethod();
-		return method == Method::kFSR || method == Method::kDLSS;
+		return method == Method::kFSR || method == Method::kXeSS || method == Method::kDLSS;
 	}
 
 	std::vector<std::string> QualityOptions()
 	{
 		return {
-			T(TKEY("preset_native_aa"), "Native AA"),
+			T(TKEY("preset_native"), "Native"),
 			T(TKEY("preset_quality"), "Quality"),
 			T(TKEY("preset_balanced"), "Balanced"),
 			T(TKEY("preset_performance"), "Performance"),
@@ -88,28 +120,14 @@ namespace
 		return options;
 	}
 
-	bool UsesDLSSSharpness()
-	{
-		return globals::features::upscaling.GetUpscaleMethod() == Method::kDLSS;
-	}
-
 	float __stdcall GetSharpness()
 	{
-		const auto& settings = UpscalingRoot::Live();
-		const auto dlssSharpness = settings.sharpnessEnabledDLSS ? settings.sharpnessDLSS : 0.0f;
-		return std::round((UsesDLSSSharpness() ? dlssSharpness : settings.sharpnessFSR) * kSharpnessSteps);
+		return std::round(UpscalingRoot::Live().sharpnessFSR * kSharpnessSteps);
 	}
 
 	void __stdcall SetSharpness(float v)
 	{
-		auto& settings = UpscalingRoot::Live();
-		const auto sharpness = v / kSharpnessSteps;
-		if (UsesDLSSSharpness()) {
-			settings.sharpnessDLSS = sharpness;
-			settings.sharpnessEnabledDLSS = sharpness > 0.0f;
-		} else {
-			settings.sharpnessFSR = sharpness;
-		}
+		UpscalingRoot::Live().sharpnessFSR = v / kSharpnessSteps;
 	}
 }
 

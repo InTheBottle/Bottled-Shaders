@@ -70,7 +70,7 @@ public:
 	static void RenderLanguageSection();
 	/** @brief General interface options (animations, window and layout, tooltips); drawn on the Behavior tab. */
 	static void RenderInterfaceOptions();
-	/** @brief The status bar toggle, background blur, menu fade and the theme cursor. */
+	/** @brief The status bar toggle, menu fade and the theme cursor. */
 	static void RenderHeaderEffectsSection();
 	/** @brief Theme preset picker with save, save-as and delete. */
 	static void RenderThemesSection();

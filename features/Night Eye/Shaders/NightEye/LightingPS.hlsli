@@ -28,7 +28,9 @@
 		float nightEyeFacingFourth = nightEyeFacingSquared * nightEyeFacingSquared;
 		float nightEyeFacingEighth = nightEyeFacingFourth * nightEyeFacingFourth;
 		float nightEyeMask = 1.0;
+#if !defined(DCLF_BINDLESS)
 		[branch] if (NightEye::HasFlag(Permutation::ExtraFlags::NightEyeMask))
 			nightEyeMask = NightEye::EyeshineMask.SampleLevel(SampColorSampler, uvOriginal, 0.0);
+#endif
 		specularColor += NightEye::GetEyeshine() * (nightEyeMask * nightEyeFacingEighth);
 	}

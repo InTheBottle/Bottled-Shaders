@@ -119,6 +119,11 @@ public:
 
 	Settings GetCommonBufferData() const;
 
+	/** @brief The view Prepass binds at t19 (null before the volumetric resources exist). Render thread. */
+	ID3D11ShaderResourceView* IntegratedLightScatteringView() const { return integratedLightScattering ? integratedLightScattering->srv.get() : nullptr; }
+	ID3D11ShaderResourceView* IntegratedLightScatteringFarView() const { return integratedLightScatteringFar ? integratedLightScatteringFar->srv.get() : nullptr; }
+	ID3D11ShaderResourceView* FogIBLColorView() const { return fogIBLColor ? fogIBLColor->srv.get() : nullptr; }
+
 private:
 	void DrawHeightFogSettings();
 	void DrawVolumetricSettings();

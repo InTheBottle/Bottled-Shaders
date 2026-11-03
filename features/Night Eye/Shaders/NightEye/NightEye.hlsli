@@ -5,7 +5,9 @@
 
 namespace NightEye
 {
+#if !defined(DCLF_BINDLESS)
 	Texture2D<float> EyeshineMask : register(t127);
+#endif
 
 	static const float kInfraredMode = 1.0;
 	static const float kPredatorMode = 2.0;

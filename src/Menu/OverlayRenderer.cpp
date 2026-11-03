@@ -1,5 +1,4 @@
 #include "OverlayRenderer.h"
-#include "BackgroundBlur.h"
 #include "Plugin.h"
 #include "SetupRenderer.h"
 #include "ThemeManager.h"
@@ -29,6 +28,7 @@
 #include "Util.h"
 #include "Utils/Notifications.h"
 #include "Utils/UISurface.h"
+#include "Vram/DxvkMemory.h"
 
 #include "Features/PerformanceOverlay.h"
 #include "Features/PerformanceOverlay/ABTesting/ABTesting.h"
@@ -220,17 +220,6 @@ namespace
 		for (auto it = s_windowOverlapAlpha.begin(); it != s_windowOverlapAlpha.end();)
 			it->second < C::OVERLAP_ALPHA_EPSILON ? it = s_windowOverlapAlpha.erase(it) : ++it;
 	}
-
-	/** @brief Blur strength this frame: the editor's fullscreen blur follows its widgets, other windows follow the menu fade. */
-	float GetBlurFade()
-	{
-		auto* editorWindow = EditorWindow::GetSingleton();
-		if (editorWindow->open)
-			return editorWindow->IsViewportActive() ? editorWindow->widgetsFade : 1.0f;
-
-		const float menuFade = Menu::GetSingleton()->openFade;
-		return menuFade > 0.0f ? menuFade : 1.0f;
-	}
 }  // namespace
 
 void OverlayRenderer::RenderOverlay(
@@ -287,7 +276,7 @@ void OverlayRenderer::RenderOverlay(
 
 	// The Effects 11 editor and the Bottled Shaders menu are exclusive; the CS Editor hosts it.
 	auto& effects11Editor = Effects11Editor::GetSingleton();
-	if (effects11Editor.IsOpen() && menu.IsEnabled)
+	if (effects11Editor.IsOpen() && menu.IsOpen())
 		effects11Editor.Close(false);
 
 	if (editorWindow->open) {
@@ -299,9 +288,9 @@ void OverlayRenderer::RenderOverlay(
 	} else if (effects11Editor.IsOpen()) {
 		ImGui::GetIO().MouseDrawCursor = true;
 		effects11Editor.Draw();
-	} else if (menu.IsEnabled || menu.openFade > 0.0f || SetupRenderer::ShouldShowFirstTimeSetup()) {
-		ImGui::GetIO().MouseDrawCursor = menu.IsEnabled || SetupRenderer::ShouldShowFirstTimeSetup();
-		if (menu.IsEnabled || menu.openFade > 0.0f) {
+	} else if (menu.IsOpen() || menu.openFade > 0.0f || SetupRenderer::ShouldShowFirstTimeSetup()) {
+		ImGui::GetIO().MouseDrawCursor = menu.IsOpen() || SetupRenderer::ShouldShowFirstTimeSetup();
+		if (menu.IsOpen() || menu.openFade > 0.0f) {
 			const auto& context = *ImGui::GetCurrentContext();
 			const bool editedBefore = context.ActiveIdHasBeenEditedThisFrame;
 			drawSettings();
@@ -314,7 +303,7 @@ void OverlayRenderer::RenderOverlay(
 	}
 
 	// Enabling a Baseline pack can happen from either the menu or the CS editor, and the answer outlives the page.
-	if (editorWindow->open || menu.IsEnabled)
+	if (editorWindow->open || menu.IsOpen())
 		UnifiedPresetCatalog::GetSingleton().DrawBaselineOverlapPrompt();
 
 	// The editor draws the notifications in its own frame; while it is closed they still need a host,
@@ -340,7 +329,7 @@ bool OverlayRenderer::ShouldSkipRendering()
 	const uint32_t effectFailed = GetFailedEffectCount();
 
 	return !((shaderCache->IsCompiling() && (!shaderCache->backgroundCompilation || shaderCache->IsShowBackgroundOverlay())) ||
-			 Menu::GetSingleton()->IsEnabled ||
+			 Menu::GetSingleton()->IsOpen() ||
 			 Menu::GetSingleton()->openFade > 0.0f ||
 			 SetupRenderer::ShouldShowFirstTimeSetup() ||
 			 EditorWindow::GetSingleton()->open ||
@@ -370,11 +359,17 @@ void OverlayRenderer::HandleFontReload(Menu& menu, float& cachedFontSize, float 
 void OverlayRenderer::InitializeImGuiFrame(Menu& menu)
 {
 	// Start the Dear ImGui frame
-	ImGui_ImplDX11_NewFrame();
-	ImGui_ImplWin32_NewFrame();
+	{
+		ZoneScopedN("CS.Present.Overlay.ImplNewFrame");
+		ImGui_ImplDX11_NewFrame();
+		ImGui_ImplWin32_NewFrame();
+	}
 
 	DXGI_SWAP_CHAIN_DESC desc{};
-	globals::d3d::swapChain->GetDesc(&desc);
+	{
+		ZoneScopedN("CS.Present.Overlay.SwapChainDesc");
+		globals::d3d::swapChain->GetDesc(&desc);
+	}
 
 	const float displayW = static_cast<float>(desc.BufferDesc.Width);
 	const float displayH = static_cast<float>(desc.BufferDesc.Height);
@@ -523,12 +518,12 @@ void OverlayRenderer::FinalizeImGuiFrame()
 
 	ImGui::Render();
 
-	BackgroundBlur::SetFade(GetBlurFade());
-
-	// Apply background blur behind ImGui windows before rendering them
-	BackgroundBlur::RenderBackgroundBlur();
-
-	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+	{
+		ZoneScopedN("CS.Present.Overlay.RenderDrawData");
+		// The backend grows its vertex and index buffers, and uploads font atlas pages, here.
+		Vram::OwnerScope vramScope("CS/Menu");
+		ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+	}
 }
 
 void OverlayRenderer::RenderFirstTimeSetupOverlay()

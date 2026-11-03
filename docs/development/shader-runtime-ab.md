@@ -25,13 +25,12 @@ op-reordering restructure produces.
 - RenderDoc, reachable via the `renderdoc` MCP (`Eval`, `Get-Texture`, `Instance`).
 - SkyrimSE or SkyrimVR launchable with RenderDoc injected (`rd.ExecuteAndInject(<loader>, …,
 hookIntoChildren=True)`, or launch from the RenderDoc GUI) — `<loader>` is `skse64_loader.exe`
-  for SE/AE and `sksevr_loader.exe` for VR. The **main menu** already runs the TAA pass, so it is
-  a valid capture surface on either edition.
-- The build must be in **TAA upscaling mode** (DLSS/FSR replace `ISTemporalAA`) and ideally with
-  **HDR and frame-generation off** — otherwise Open Shaders presents through a DX12 interop
-  swapchain and RenderDoc captures only the D3D12 present (Copy/Present, no draws), not the
-  D3D11 TAA pass.
-- `fxc.exe` (Windows SDK) — same compiler the offline verifier uses.
+    for SE/AE and `sksevr_loader.exe` for VR. The **main menu** already runs the TAA pass, so it is
+    a valid capture surface on either edition.
+-   The build must be in **TAA upscaling mode** (DLSS/FSR replace `ISTemporalAA`) and ideally with
+    **HDR and frame-generation off**. Capture the D3D11 work before the Vulkan presentation path;
+    otherwise the D3D11 TAA pass may not appear in the captured frame.
+-   `fxc.exe` (Windows SDK) — same compiler the offline verifier uses.
 
 ## Steps
 
@@ -160,41 +159,40 @@ So to point it at a different shader you change only:
 
 These transfer to any GPU-shader RE/validation work, not just TAA:
 
-- **Offline byte-identity beats any runtime check — try it first.** Far more refactoring stays
-  bytecode-identical than you'd expect (even destructuring deeply-aliased decompile scratch, since
-  the compiler already SSA's it). Prove those with an `fxc` byte-compare
-  (`verify-shader-refactor.ps1`), one small step at a time — no game needed. Reserve a runtime swap
-  for changes where the compiler legitimately emits different-but-equivalent code (op reordering,
-  algebraic rewrites).
-- **Freeze inputs with a same-frame swap.** Any pass whose inputs are bound resources can be
-  validated by replacing only that shader on one captured frame: A and B then run on byte-identical
-  inputs, so the output diff is pure shader behaviour — no cross-launch timing/RNG/pose noise.
-- **Judge against a baseline noise floor, not zero.** The runtime compiler differs from offline
-  `fxc` by a few LSBs, so even an identical shader isn't bit-exact vs the live RT. Always swap the
-  _shipping_ shader in too and measure the candidate relative to that floor.
-- **Capture a state that exercises the path under test.** A degenerate frame (idle menu, static
-  camera, untaken branch) gives a false pass for any state-dependent code — temporal history,
-  motion vectors, conditionally-enabled features. Identify what state your code depends on and
-  capture a frame in it. _(TAA: a static menu read `EQUIVALENT` even with a real motion-path bug;
-  only an in-game motion frame exposed it.)_
-- **Baseline against the change's true parent, not a distant branch.** If your work is stacked on
-  an unmerged fix, diffing against `dev` folds that fix into the "floor" → a huge bogus residue and
-  a meaningless verdict. Compile the baseline from the immediate parent commit.
-- **Confirm which source you compiled.** A wrong-branch/ref compile silently validates the deployed
-  shader against itself and always reports `EQUIVALENT`. Check `git branch`/the ref first.
-- **Find the pass by its resource fingerprint, and reverse-scan.** Match a draw by its bound
-  textures/buffers, not its index (indices shift frame to frame). Post-process sits near frame end,
-  so scan drawcalls in reverse — a full-frame state sweep can time out on a large capture.
-- **Interop swapchains hide the inner API.** When an app presents D3D11 work through a DX12 interop
-  swapchain (here: HDR / frame-gen / upscaler paths), RenderDoc hooks the D3D12 present and the
-  D3D11 draws aren't in the frame at all. Disable the feature that triggers interop to capture the
-  inner API; if you can't, fall back to offline byte-identity for that permutation.
-- **Captures scale with scene complexity.** A heavy scene (especially stereo/VR) can produce a
-  multi-GB capture that wedges the tools; shrink the scene (interior, lower res) to keep captures
-  loadable. Verify a new capture by file timestamp/size — capture APIs sometimes return a stale path.
-- **Know your tooling's quirks.** (Here, the `renderdoc` MCP `Eval`: a fresh namespace per call can
-  drop your defs — `exec` the harness and call it in the _same_ `Eval`; and stdout may lag one call
-  behind, so poll again to drain it.)
-- One frame proves equivalence on that frame; loop over a few representative frames for confidence.
-  This is a regression check against a known-good baseline, not a formal proof — pair it with the
-  offline verifier, which formally covers everything that stays bytecode-identical.
+-   **Offline byte-identity beats any runtime check — try it first.** Far more refactoring stays
+    bytecode-identical than you'd expect (even destructuring deeply-aliased decompile scratch, since
+    the compiler already SSA's it). Prove those with an `fxc` byte-compare
+    (`verify-shader-refactor.ps1`), one small step at a time — no game needed. Reserve a runtime swap
+    for changes where the compiler legitimately emits different-but-equivalent code (op reordering,
+    algebraic rewrites).
+-   **Freeze inputs with a same-frame swap.** Any pass whose inputs are bound resources can be
+    validated by replacing only that shader on one captured frame: A and B then run on byte-identical
+    inputs, so the output diff is pure shader behaviour — no cross-launch timing/RNG/pose noise.
+-   **Judge against a baseline noise floor, not zero.** The runtime compiler differs from offline
+    `fxc` by a few LSBs, so even an identical shader isn't bit-exact vs the live RT. Always swap the
+    _shipping_ shader in too and measure the candidate relative to that floor.
+-   **Capture a state that exercises the path under test.** A degenerate frame (idle menu, static
+    camera, untaken branch) gives a false pass for any state-dependent code — temporal history,
+    motion vectors, conditionally-enabled features. Identify what state your code depends on and
+    capture a frame in it. _(TAA: a static menu read `EQUIVALENT` even with a real motion-path bug;
+    only an in-game motion frame exposed it.)_
+-   **Baseline against the change's true parent, not a distant branch.** If your work is stacked on
+    an unmerged fix, diffing against `dev` folds that fix into the "floor" → a huge bogus residue and
+    a meaningless verdict. Compile the baseline from the immediate parent commit.
+-   **Confirm which source you compiled.** A wrong-branch/ref compile silently validates the deployed
+    shader against itself and always reports `EQUIVALENT`. Check `git branch`/the ref first.
+-   **Find the pass by its resource fingerprint, and reverse-scan.** Match a draw by its bound
+    textures/buffers, not its index (indices shift frame to frame). Post-process sits near frame end,
+    so scan drawcalls in reverse — a full-frame state sweep can time out on a large capture.
+-   **Interop presentation can hide the inner API.** With the Vulkan frame-gen/upscaler path active,
+    RenderDoc may capture presentation without the D3D11 draws. Disable the feature that triggers
+    interop to capture the inner API; if you can't, fall back to offline byte-identity for that permutation.
+-   **Captures scale with scene complexity.** A heavy scene (especially stereo/VR) can produce a
+    multi-GB capture that wedges the tools; shrink the scene (interior, lower res) to keep captures
+    loadable. Verify a new capture by file timestamp/size — capture APIs sometimes return a stale path.
+-   **Know your tooling's quirks.** (Here, the `renderdoc` MCP `Eval`: a fresh namespace per call can
+    drop your defs — `exec` the harness and call it in the _same_ `Eval`; and stdout may lag one call
+    behind, so poll again to drain it.)
+-   One frame proves equivalence on that frame; loop over a few representative frames for confidence.
+    This is a regression check against a known-good baseline, not a formal proof — pair it with the
+    offline verifier, which formally covers everything that stays bytecode-identical.

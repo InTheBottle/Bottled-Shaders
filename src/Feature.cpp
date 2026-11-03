@@ -23,12 +23,12 @@
 #include "Features/HDRDisplay.h"
 #include "Features/HairSpecular.h"
 #include "Features/HeatHaze.h"
-#include "Features/HiZOcclusion.h"
 #include "Features/HorizonFix.h"
 #include "Features/IBL.h"
 #include "Features/InteriorSun.h"
 #include "Features/LODBlending.h"
 #include "Features/LandscapeSeams.h"
+#include "Features/DrawcallLimitFix.h"
 #include "Features/LightLimitFix.h"
 #include "Features/LinearLighting.h"
 #include "Features/NightEye.h"
@@ -56,11 +56,13 @@
 #include "Features/VolumetricLighting.h"
 #include "Features/VolumetricShadows.h"
 #include "Features/ReverseZ.h"
+#include "Features/VRAMBudget.h"
 #include "Features/WaterEffects.h"
 #include "Features/WetnessEffects.h"
 #include "I18n/I18n.h"
 #include "Menu.h"
 #include "Utils/Format.h"
+#include "Vram/Attribution.h"
 
 #include "State.h"
 #include "TruePBR.h"
@@ -221,6 +223,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::extendedMaterials,
 		&globals::features::wetnessEffects,
 		&globals::features::lightLimitFix,
+		&globals::features::drawcallLimitFix,
 		&globals::features::dynamicCubemaps,
 		&globals::features::cloudShadows,
 		&globals::features::proceduralSun,
@@ -244,7 +247,6 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::reverseZ,
 		&globals::features::upscaling,
 		&globals::features::developerTools,
-		&globals::features::hiZOcclusion,
 		&globals::features::csEditor,
 		&globals::features::sceneManager,
 		&globals::features::screenshotFeature,
@@ -253,6 +255,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::rainRefraction,
 		&globals::features::unifiedWater,
 		&globals::features::horizonFix,
+		&globals::features::vramBudget,
 		&globals::features::exponentialHeightFog,
 		&globals::features::hdrDisplay,
 		&globals::features::postProcessing,
@@ -352,6 +355,21 @@ std::string Feature::GetReleaseStageTag(ReleaseStage stage)
 	default:
 		return {};
 	}
+}
+
+const char* Feature::GetVramOwner()
+{
+	// Cached outside the class: a member would change every feature's layout (and padding). Read on every feature callback.
+	static std::shared_mutex mutex;
+	static std::unordered_map<const Feature*, const char*> owners;
+	{
+		std::shared_lock lock(mutex);
+		if (const auto it = owners.find(this); it != owners.end())
+			return it->second;
+	}
+	const char* owner = Vram::FeatureOwner(GetShortName());
+	std::unique_lock lock(mutex);
+	return owners.emplace(this, owner).first->second;
 }
 
 void Feature::DrawUnloadedUI()

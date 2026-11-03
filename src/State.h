@@ -5,11 +5,14 @@
 #include <Tracy/TracyD3D11.hpp>
 
 #include <Buffer.h>
+#include <array>
 #include <atomic>
 #include <d3d11_1.h>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <span>
+#include <string_view>
 
 using json = nlohmann::json;
 
@@ -22,6 +25,9 @@ using json = nlohmann::json;
 
 struct Feature;
 
+// lastSharedData (an alignas(16) block) pads the class.
+#pragma warning(push)
+#pragma warning(disable: 4324)
 class State
 {
 public:
@@ -218,6 +224,20 @@ public:
 	 *  load. Cheap enough to call on any frame the main menu edited something. */
 	void CheckCoreSettingsChanged();
 
+	/** @brief Core settings, as JSON pointers into the user config, that save themselves when the menu closes and
+	 *  never count as unsaved. */
+	static constexpr std::array<std::string_view, 5> SELF_SAVING_SETTINGS = {
+		"/Menu/RecentFeatures", "/Menu/LastSettingsSection", "/Menu/FeatureListSort", "/Menu/SkipConstraintWarning",
+		"/Menu/SkipClearCacheConfirmation"
+	};
+
+	/**
+	 * @brief Saves the named core settings that differ from the last save in one write, without a full Save.
+	 * @param paths JSON pointers into the user config naming core settings, e.g. "/Menu/RecentFeatures".
+	 * @return True when nothing differed or the write succeeded.
+	 */
+	bool SaveCoreSettings(std::span<const std::string_view> paths);
+
 	/**
 	 * @brief A feature's settings in the layers beneath the user's edits: defaults with the enabled Baseline packs applied.
 	 * @param featureName The feature's GetName().
@@ -314,6 +334,7 @@ public:
 	 * @param a_forceDeferred If true, forces the Deferred flag regardless of current pass.
 	 */
 	void ModifyShaderLookup(const RE::BSShader& a_shader, uint& a_vertexDescriptor, uint& a_pixelDescriptor, bool a_forceDeferred = false);
+	void ModifyShaderLookup(RE::BSShader::Type a_shaderType, uint& a_vertexDescriptor, uint& a_pixelDescriptor, bool a_forceDeferred = false);
 
 	/**
 	 * @brief Pixel descriptor bits a shader type reads at runtime although they also take part in the lookup.
@@ -337,6 +358,10 @@ public:
 
 	bool frameAnnotations = false;
 	bool throttleWaterCubemap = true;
+	// The saved "Frame Annotations" value while CS_GPU_IDLE_TRACE forces annotations on.
+	std::optional<bool> frameAnnotationsSetting;
+	/** @brief Debugger events are being emitted (Frame Annotations, or a capture tool is attached). */
+	bool debuggerEvents = false;
 
 	// Pass D3DCOMPILE_PARTIAL_PRECISION to fxc. With explicit min16float types this is
 	// mostly belt-and-braces in SM5, but it lets the compiler downgrade unmarked float
@@ -517,6 +542,20 @@ public:
 	std::unique_ptr<ConstantBuffer> sharedDataCB;
 	std::unique_ptr<ConstantBuffer> featureDataCB;
 
+	/**
+	 * @brief The last SharedData uploaded to sharedDataCB.
+	 *
+	 * Drawcall Limit Fix packs this buffer's contents into its own per-draw constants, and it cannot read
+	 * them back from the GPU buffer: the constant mirror only sees writes made through the hooked device
+	 * context, which this one is not. Keeping the struct is exact and costs a copy per frame.
+	 */
+	SharedDataCB lastSharedData{};
+
+	/** @brief The last FeatureData uploaded to featureDataCB, for the same reason as lastSharedData. */
+	std::vector<std::byte> lastFeatureData;
+	/** @brief featureDataCB's size (FeatureBuffer.cpp's packed size, fixed at build time): where Drawcall Limit Fix lays the block out. */
+	std::uint32_t featureDataBytes = 0;
+
 	PermutationCB permutationData{};
 	PermutationCB permutationDataPrevious{};
 
@@ -636,8 +675,8 @@ private:
 
 	/** @brief Writes the sections that are not feature settings; the caller holds m_mutex. */
 	void SaveCoreToJson(nlohmann::json& settings);
-	/** @brief Hash of what SaveCoreToJson writes, to tell whether those sections changed. */
-	size_t HashCoreSettings();
+	/** @brief What SaveCoreToJson writes, to tell whether those sections changed. */
+	nlohmann::json CaptureCoreSettings();
 	/** @brief Clears the unsaved state after the user config was written or read. */
 	void MarkSettingsSaved();
 	/** @brief Drops a feature's edits to the settings packData sets, so those show the pack's values.
@@ -646,10 +685,28 @@ private:
 
 	bool settingsChanged = false;
 	bool coreSettingsChanged = false;
-	size_t savedCoreHash = 0;
+	/// The core sections as last saved or loaded; partial saves patch it.
+	nlohmann::json savedCore;
 
 	std::optional<TonemapOwner> tonemapOwner;
 	uint historyResetFrame = UINT_MAX;
 	winrt::com_ptr<ID3DUserDefinedAnnotation> pPerf;
 	std::mutex statsMutex;
+};
+#pragma warning(pop)
+
+/**
+ * @brief A debugger event (Nsight, RenderDoc, PIX) around one scope of GPU work, emitted only while
+ * State::debuggerEvents is on, so the name costs nothing otherwise.
+ */
+class ScopedPerfEvent
+{
+public:
+	explicit ScopedPerfEvent(std::string_view a_name);
+	~ScopedPerfEvent();
+	ScopedPerfEvent(const ScopedPerfEvent&) = delete;
+	ScopedPerfEvent& operator=(const ScopedPerfEvent&) = delete;
+
+private:
+	bool active = false;
 };
