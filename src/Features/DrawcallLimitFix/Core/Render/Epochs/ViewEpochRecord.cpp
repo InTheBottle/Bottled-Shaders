@@ -3,6 +3,7 @@
 
 #include "Features/DrawcallLimitFix/Core/Render/Internal.h"
 #include "Features/DrawcallLimitFix/Core/Engine/ReverseDepth.h"
+#include "Features/DrawcallLimitFix/Core/Render/Epochs/GraphConditions.h"
 #include "Features/DrawcallLimitFix/Core/Render/Epochs/ScheduleExecutor.h"
 #include "Features/DrawcallLimitFix/Core/Extensions/PassContext.h"
 
@@ -472,7 +473,7 @@ namespace DCLF
 			{
 				const auto& resources = a_context.View();
 				const auto& traits = *resources->traits;
-				if (!traits.depthPass || !traits.forwardPart || !resources->main->forwardSort)
+				if (!traits.depthPass || !traits.forwardPart || !resources->main->forwardSort || CurrentGraphConditions().firstPersonForwardDirect)
 					return nullptr;
 				return MakeForwardSortPass(resources->sequences, { nullptr, resources->bucketCounts[0] }, [view = resources](const org::PassPrepareContext& a_preparation) {
 					const auto frame = CurrentViewFrame(a_preparation, view->traits->kind);
@@ -497,7 +498,9 @@ namespace DCLF
 			{
 				const auto& resources = a_context.View();
 				const auto& traits = *resources->traits;
-				return traits.depthPass && traits.forwardPart && resources->main->forwardSort && resources->preprocessForward ? std::make_shared<ForwardPass>(resources) : nullptr;
+				return traits.depthPass && traits.forwardPart && resources->main->forwardSort && resources->preprocessForward && !CurrentGraphConditions().firstPersonForwardDirect ?
+				           std::make_shared<ForwardPass>(resources) :
+				           nullptr;
 			}
 
 			// Named with the view's prefix (ViewTraits::prefix).

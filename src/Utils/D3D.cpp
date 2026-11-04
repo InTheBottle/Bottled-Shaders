@@ -1,11 +1,12 @@
 #include "D3D.h"
+#include "Utils/FxcShaderStore.h"
+#include "Utils/SharedShaderStore.h"
 
 #include "Features/ReverseZ.h"
 #include "Deferred.h"
 #include "Feature.h"
 #include "Features/TerrainBlending.h"
 #include "ShaderCache.h"
-#include "ShaderDDC.h"
 #include "State.h"
 #include "Utils/FileRename.h"
 #include "Utils/Format.h"
@@ -167,32 +168,6 @@ namespace Util
 
 	namespace
 	{
-		std::wstring GetCompileShaderCacheGroup(const std::filesystem::path& a_sourcePath)
-		{
-			std::wstring rel;
-			bool pastShaders = false;
-			for (const auto& part : a_sourcePath.parent_path()) {
-				if (!pastShaders) {
-					if (_wcsicmp(part.c_str(), L"Shaders") == 0)
-						pastShaders = true;
-					continue;
-				}
-				if (!rel.empty())
-					rel += L"/";
-				rel += part.wstring();
-			}
-			return rel.empty() ? std::wstring(L"CompileShader") : L"CompileShader/" + rel;
-		}
-
-		/** @brief True for the targets CreateShaderObject can turn into a shader: only those are read from or written to the cache. */
-		bool IsCacheableTarget(const char* programType)
-		{
-			for (const auto* target : { "ps_5_0", "vs_5_0", "hs_5_0", "ds_5_0", "cs_5_0", "cs_4_0" })
-				if (!_stricmp(programType, target))
-					return true;
-			return false;
-		}
-
 		/**
 		 * @brief Creates the shader object for a CompileShader target.
 		 * @return The device's result; a target without a creation path returns S_OK and no shader.
@@ -231,8 +206,6 @@ namespace Util
 	ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const std::vector<std::pair<const char*, const char*>>& Defines, const char* ProgramType, const char* Program)
 	{
 		auto device = globals::d3d::device;
-
-		CustomInclude include;
 
 		// Build defines (aka convert vector->D3DCONSTANT array)
 		std::vector<D3D_SHADER_MACRO> macros;
@@ -291,19 +264,7 @@ namespace Util
 		macros.push_back({ nullptr, nullptr });
 
 		// Compiler setup
-		uint32_t flags = !debugCompile ? (D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3) : D3DCOMPILE_DEBUG;
-		if (globals::state->enablePartialPrecision.load(std::memory_order_relaxed))
-			flags |= D3DCOMPILE_PARTIAL_PRECISION;
-		if (globals::state->enableAvoidFlowControl.load(std::memory_order_relaxed))
-			flags |= D3DCOMPILE_AVOID_FLOW_CONTROL;
-		// Disk cache on = user is running shipped, known-good shaders — skip the fxc
-		// validation pass to trim compile time. Disk cache off = dev workflow, keep
-		// validation so malformed source produces a clean error instead of UB.
-		if (globals::shaderCache->IsDiskCache())
-			flags |= D3DCOMPILE_SKIP_VALIDATION;
-
-		winrt::com_ptr<ID3DBlob> shaderBlob;
-		winrt::com_ptr<ID3DBlob> shaderErrors;
+		const uint32_t flags = Util::FxcCompileFlags(debugCompile);
 
 		const auto failureKey = std::format("{}|{}|{}|{}|{}", str, ProgramType, Program, flags, DefinesToString(macros));
 		{
@@ -316,40 +277,36 @@ namespace Util
 			shaderCompileFailures.insert(failureKey);
 		};
 
-		if (!std::filesystem::exists(FilePath)) {
-			logger::error("Failed to compile shader; {} does not exist", str);
-			recordFailure();
-			return nullptr;
-		}
-		std::optional<ShaderDDC::Entry> diskEntry;
-		if (globals::shaderCache->IsDiskCache() && IsCacheableTarget(ProgramType)) {
-			diskEntry.emplace(FilePath, L"Data/Shaders", GetCompileShaderCacheGroup(FilePath), macros.data(), Program, ProgramType, flags, 0u, L".cso");
-			if (auto cachedBlob = diskEntry->Load()) {
-				ID3D11DeviceChild* shader = nullptr;
-				if (SUCCEEDED(CreateShaderObject(device, ProgramType, cachedBlob.get(), &shader))) {
-					Util::SetResourceName(shader, "%s:%s", str.c_str(), Program);
-					logger::debug("Loaded {} from {}", str, Util::WStringToString(diskEntry->GetPath()));
-					return shader;
-				}
-				logger::warn("Discarding cached shader {} rejected by the device", Util::WStringToString(diskEntry->GetPath()));
-				DeleteFileW(diskEntry->GetPath().c_str());
-			}
-		}
+		Util::FxcRequest request;
+		request.root = FilePath;
+		request.includeBase = L"Data\\Shaders";
+		request.defines = macros.data();
+		request.entryPoint = Program;
+		request.profile = ProgramType;
+		request.flags = flags;
+		request.debug = debugCompile;
 
-		logger::debug("Compiling {} with {}", str, DefinesToString(macros));
-		if (FAILED(D3DCompileFromFile(FilePath, macros.data(), &include, Program, ProgramType, flags, 0, shaderBlob.put(), shaderErrors.put()))) {
-			logger::warn("Shader compilation failed:\n\n{}", shaderErrors ? static_cast<char*>(shaderErrors->GetBufferPointer()) : "Unknown error");
-			recordFailure();
-			return nullptr;
-		}
-		if (shaderErrors)
-			logger::debug("Shader logs:\n{}", static_cast<char*>(shaderErrors->GetBufferPointer()));
-		if (diskEntry && !diskEntry->Store(shaderBlob.get()))
-			logger::debug("Failed to write utility shader cache entry {}", Util::WStringToString(diskEntry->GetPath()));
-
+		logger::debug("Building {} with {}", str, DefinesToString(macros));
+		auto built = Util::ResolveFxcShader(request);
 		ID3D11DeviceChild* shader = nullptr;
-		DX::ThrowIfFailed(CreateShaderObject(device, ProgramType, shaderBlob.get(), &shader));
-		Util::SetResourceName(shader, "%s:%s", str.c_str(), Program);
+		if (built.blob && FAILED(CreateShaderObject(device, ProgramType, built.blob.get(), &shader)) && built.store.outcome != org::services::ShaderStoreOutcome::Compiled) {
+			// A whole artifact can still hold bytecode the device rejects. Drop it and build from source once.
+			logger::warn("Discarding the stored copy of {}, rejected by the device", str);
+			Util::SharedShaderStore()->RemoveArtifact(built.store.compileKey);
+			built = Util::ResolveFxcShader(request);
+			shader = nullptr;
+			if (built.blob)
+				DX::ThrowIfFailed(CreateShaderObject(device, ProgramType, built.blob.get(), &shader));
+		}
+		if (!built.blob) {
+			logger::warn("Shader compilation failed:\n\n{}", built.store.diagnostics.empty() ? "Unknown error" : built.store.diagnostics);
+			recordFailure();
+			return nullptr;
+		}
+		if (!built.store.diagnostics.empty())
+			logger::debug("Shader logs:\n{}", built.store.diagnostics);
+		if (shader)
+			Util::SetResourceName(shader, "%s:%s", str.c_str(), Program);
 		return shader;
 	}
 

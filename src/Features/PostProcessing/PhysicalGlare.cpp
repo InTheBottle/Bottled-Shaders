@@ -534,7 +534,7 @@ void PhysicalGlare::ClearShaderCache()
 	psfDirty = true;
 	apertureDirty = true;
 
-	globals::shaderCache->InvalidateShaderSources();
+	globals::shaderCache->ReloadShaderSources();
 	CompileComputeShaders();
 }
 

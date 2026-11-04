@@ -37,9 +37,8 @@ namespace FrameAnnotations
 				if (globals::game::currentPixelShader && *globals::game::currentPixelShader) {
 					descriptor = (*globals::game::currentPixelShader)->id;
 				}
-				const std::string diskPath = Util::WStringToString(globals::shaderCache->GetShaderDiskPath(SIE::ShaderClass::Pixel, *shader, descriptor));
-				const std::string passName = std::format("[{}:{:X}] ({:X}) <{}> {} -> {}", magic_enum::enum_name(ShaderType), descriptor, pass->passEnum,
-					pass->accumulationHint, pass->geometry->name.c_str(), diskPath);
+				const std::string passName = std::format("[{}:{:X}] ({:X}) <{}> {}", magic_enum::enum_name(ShaderType), descriptor, pass->passEnum,
+					pass->accumulationHint, pass->geometry->name.c_str());
 				globals::state->BeginPerfEvent(passName);
 			}
 

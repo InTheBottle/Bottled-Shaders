@@ -358,7 +358,6 @@ namespace SIE
 		ShaderCompilationTask::Status status;
 		system_clock::time_point compileTime = system_clock::now();
 		bool loadedFromDisk = false;  /**< true when the shader blob was read from the disk cache rather than compiled */
-		std::wstring diskPath;
 	};
 
 	namespace SShaderCache
@@ -373,6 +372,7 @@ namespace SIE
 		};
 
 		using VertexShaderPtr = std::unique_ptr<RE::BSGraphics::VertexShader, VertexShaderDeleter>;
+
 	}
 
 	class UpdateListener;
@@ -438,14 +438,11 @@ namespace SIE
 		void SetDiskCache(bool value);
 		/** @brief Whether shaders compile with debug info: Developer Mode, or RenderDoc attached. */
 		static bool IsDebugCompile();
-		/** @brief Deletes the entire on-disk shader cache directory. */
+		/** @brief Deletes the shader store and everything else in the on-disk cache folder, so every shader compiles again. */
 		void DeleteDiskCache();
 		/** @brief True after a user action cleared every shader, until the menu banner is dismissed. */
 		bool IsRecachePending() const { return recachePending; }
 		void SetRecachePending(bool value) { recachePending = value; }
-		void RemoveLegacyDiskCache();
-		void TrimDiskCache();
-		void InvalidateShaderSources();
 		void SetPrecompiling(bool value);
 		static uint32_t GetLiteLightingDescriptor(uint32_t descriptor);
 		static bool IsReflectionsCandidate(uint32_t descriptor);
@@ -508,7 +505,7 @@ namespace SIE
 		*/
 		bool Clear(const std::string& a_path);
 
-		bool AddCompletedShader(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor, winrt::com_ptr<ID3DBlob> a_blob, bool fromDisk = false, std::wstring diskPath = {});
+		bool AddCompletedShader(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor, winrt::com_ptr<ID3DBlob> a_blob, bool fromDisk = false);
 
 		enum class ClaimResult
 		{
@@ -523,7 +520,6 @@ namespace SIE
 		winrt::com_ptr<ID3DBlob> GetCompletedShader(const SIE::ShaderCompilationTask& a_task);
 		winrt::com_ptr<ID3DBlob> GetCompletedShader(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor);
 		bool IsShaderLoadedFromDisk(const std::string& a_key);
-		std::wstring GetShaderDiskPath(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor);
 		ShaderCompilationTask::Status GetShaderStatus(const std::string& a_key);
 		std::string GetShaderStatsString(bool a_timeOnly = false, bool a_elapsedOnly = false);
 
@@ -589,6 +585,10 @@ namespace SIE
 			std::vector<std::pair<const char*, const char*>> defines,
 			ComputeShaderReadyCallback onReady);
 
+		/// @brief Source files may have changed, so the next builds must read them again.
+		///        A feature calls this before it recompiles its own shaders.
+		void ReloadShaderSources();
+
 		RE::BSGraphics::VertexShader* MakeAndAddVertexShader(const RE::BSShader& shader,
 			uint32_t descriptor);
 		RE::BSGraphics::PixelShader* MakeAndAddPixelShader(const RE::BSShader& shader,
@@ -618,6 +618,16 @@ namespace SIE
 		uint64_t GetTotalTasks();
 		uint64_t GetDiskHitTasks();
 		void IncCacheHitTasks();
+		/** @brief Where the shader store lives and how much it holds. */
+		struct ShaderStoreUsage
+		{
+			std::string path;  ///< Absolute, UTF-8
+			uint64_t artifacts = 0;
+			uint64_t bytes = 0;
+			uint64_t maxBytes = 0;
+		};
+		/** @brief Measures the shader store on disk. This walks its folder, so call it away from the frame. */
+		ShaderStoreUsage GetShaderStoreUsage();
 		void ToggleErrorMessages();
 		void DisableShaderBlocking();
 		void IterateShaderBlock(bool a_forward = true);
@@ -880,7 +890,6 @@ namespace SIE
 			RE::BSShader::Type shaderType;
 			ShaderClass shaderClass;
 			uint32_t descriptor;
-			std::wstring diskPath;
 			uint32_t drawCalls = 0;
 			bool isActive = false;  // Used in current/recent frames
 			std::chrono::steady_clock::time_point lastUsed;

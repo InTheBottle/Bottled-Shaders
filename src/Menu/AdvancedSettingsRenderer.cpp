@@ -52,6 +52,7 @@ namespace
 		{ Ids::kDeveloper, "menu.advanced.frame_annotations", "Frame Annotations" },
 		{ Ids::kDeveloper, "menu.advanced.half_precision", "Half Precision (Partial Precision)" },
 		{ Ids::kDeveloper, "menu.advanced.throttle_water_cubemap", "Throttle Water Reflection Cubemap" },
+		{ Ids::kDeveloper, "menu.advanced.shader_store_limit", "Shader Store Size Limit" },
 		{ Ids::kDeveloper, "menu.advanced.avoid_flow_control", "Avoid Flow Control" },
 		// Logging
 		{ Ids::kLogging, "menu.advanced.log_level", "Log Level" },
@@ -69,25 +70,55 @@ namespace
 		{ Ids::kDisableAtBoot, "menu.settings.disabled_only", "Disabled only" },
 	};
 
-	/** @brief Clipboard text describing an active shader: type, class, descriptor, key and cache path. */
+	/** @brief Clipboard text describing an active shader: type, class, descriptor and key. */
 	std::string DescribeShader(const SIE::ShaderCache::ActiveShaderInfo& shader)
 	{
-		std::string diskPath;
-		diskPath.reserve(shader.diskPath.size());
-		for (wchar_t wc : shader.diskPath)
-			diskPath += static_cast<char>(wc);
-
-		return std::format("Type: {}\nClass: {}\nDescriptor: 0x{:X}\nKey: {}\nCache Path: {}",
+		return std::format("Type: {}\nClass: {}\nDescriptor: 0x{:X}\nKey: {}",
 			magic_enum::enum_name(shader.shaderType).data(),
 			magic_enum::enum_name(shader.shaderClass).data(),
 			shader.descriptor,
-			shader.key,
-			diskPath);
+			shader.key);
 	}
 
 	// Short name of a utility feature whose tab should be activated on the next frame,
 	// set when navigation is requested from elsewhere in the UI.
 	std::string g_pendingUtilityTab;
+	constexpr double kStoreUsageRefreshSeconds = 5.0;
+	constexpr double kBytesPerMB = 1024.0 * 1024.0;
+
+	/// Location and size of the shader store, with its size limit.
+	void DrawShaderStoreDetails(SIE::ShaderCache* a_cache)
+	{
+		// Measuring walks the whole store, so it runs on a worker every few seconds instead of in the frame.
+		static SIE::ShaderCache::ShaderStoreUsage usage;
+		static std::future<SIE::ShaderCache::ShaderStoreUsage> pendingUsage;
+		static double lastRefresh = -kStoreUsageRefreshSeconds;
+		const double now = ImGui::GetTime();
+		if (pendingUsage.valid() && pendingUsage.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+			usage = pendingUsage.get();
+		if (!pendingUsage.valid() && now - lastRefresh >= kStoreUsageRefreshSeconds) {
+			pendingUsage = std::async(std::launch::async, [a_cache] { return a_cache->GetShaderStoreUsage(); });
+			lastRefresh = now;
+		}
+
+		ImGui::SeparatorText(T("menu.advanced.shader_store", "Shader Store"));
+		ImGui::TextDisabled("%s", I18n::GetSingleton()->Format("menu.advanced.shader_store_location", { { "path", usage.path } }, "Location: {path}").c_str());
+		ImGui::TextDisabled("%s", I18n::GetSingleton()->Format("menu.advanced.shader_store_usage",
+														  { { "count", std::to_string(usage.artifacts) },
+															  { "size", std::format("{:.0f}", static_cast<double>(usage.bytes) / kBytesPerMB) },
+															  { "cap", std::format("{:.0f}", static_cast<double>(usage.maxBytes) / kBytesPerMB) } },
+														  "Stored: {count} shaders, {size} MB (limit {cap} MB)")
+									  .c_str());
+
+		auto limitMB = static_cast<int>(globals::state->shaderStoreMaxMB.load(std::memory_order_relaxed));
+		if (ImGui::SliderInt(T("menu.advanced.shader_store_limit", "Shader Store Size Limit"), &limitMB,
+				static_cast<int>(State::kShaderStoreMinMB), static_cast<int>(State::kShaderStoreMaxMB), "%d MB", ImGuiSliderFlags_AlwaysClamp))
+			globals::state->shaderStoreMaxMB.store(static_cast<uint32_t>(limitMB), std::memory_order_relaxed);
+		Util::HoverTip(T("menu.advanced.shader_store_limit_tooltip",
+			"Applies at the next start. Shaders that no setup uses any more are deleted first, then the longest unused. "
+			"Shaders used in the last few starts are always kept, even over this limit. "
+			"Keep several builds' worth if you switch branches or feature sets."));
+	}
 }
 
 std::span<const SettingsSearchEntry> AdvancedSettingsRenderer::GetSearchIndex()
@@ -588,6 +619,8 @@ void AdvancedSettingsRenderer::RenderDeveloperSection()
 
 	// Engine object addresses, for attaching a debugger; each button copies its address
 	ImGui::Spacing();
+	DrawShaderStoreDetails(shaderCache);
+
 	Util::SeparatorTextWithFont(T("menu.advanced.addresses", "Addresses"), Menu::FontRole::Subheading);
 	{
 		auto Renderer = globals::game::renderer;

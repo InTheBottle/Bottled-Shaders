@@ -12,6 +12,12 @@
 #include "Deferred.h"
 #include "State.h"
 #include "Utils/D3D.h"
+#include "Utils/FileRename.h"
+#include "Utils/FxcShaderStore.h"
+#include "Utils/Logging.h"
+#include "Utils/SharedShaderStore.h"
+
+#include <ORGModuleServices/ShaderStore.h>
 
 #include "Features/DetailMaps.h"
 #include "Features/DynamicCubemaps.h"
@@ -24,69 +30,8 @@
 #include "Features/DrawcallLimitFix.h"
 #include "RenderGraph/RenderGraphRuntime.h"
 
-#include "ShaderDDC.h"
-
 namespace SIE
 {
-	// Custom include handler to track all includes during shader compilation
-	class TrackingIncludeHandler : public ID3DInclude
-	{
-	public:
-		// Captured include paths (normalized)
-		std::vector<std::string> includes;
-		// Owned buffers for include contents; kept alive for the lifetime of this handler
-		std::vector<std::vector<char>> buffers;
-		std::filesystem::path baseDir;
-
-		TrackingIncludeHandler(const std::filesystem::path& base) :
-			baseDir(base) {}
-
-		HRESULT Open(D3D_INCLUDE_TYPE IncludeType, LPCSTR pFileName, LPCVOID /*pParentData*/, LPCVOID* ppData, UINT* pBytes) override
-		{
-			(void)IncludeType;
-			try {
-				std::filesystem::path includePath = baseDir / pFileName;
-				// Normalize path to reduce duplicates (weakly_canonical may throw)
-				std::error_code ec;
-				auto canonical = std::filesystem::weakly_canonical(includePath, ec);
-				std::string openPath = (ec ? includePath.string() : canonical.string());
-				std::string pathStr = openPath;
-				// On Windows, normalize to lowercase for comparison
-#ifdef _WIN32
-				std::transform(pathStr.begin(), pathStr.end(), pathStr.begin(), [](unsigned char c) { return std::tolower(c); });
-#endif
-				includes.push_back(pathStr);
-
-				// Read file into owned buffer
-				std::ifstream ifs(openPath, std::ios::binary | std::ios::ate);
-				if (!ifs)
-					return E_FAIL;
-				std::streamsize size = ifs.tellg();
-				if (size < 0)
-					return E_FAIL;
-				ifs.seekg(0, std::ios::beg);
-				std::vector<char> buf(static_cast<size_t>(size));
-				if (size > 0) {
-					if (!ifs.read(buf.data(), size))
-						return E_FAIL;
-				}
-				buffers.push_back(std::move(buf));
-				const auto& storage = buffers.back();
-				*ppData = storage.empty() ? nullptr : storage.data();
-				*pBytes = static_cast<UINT>(storage.size());
-				return S_OK;
-			} catch (...) {
-				return E_FAIL;
-			}
-		}
-
-		HRESULT Close(LPCVOID /*pData*/) override
-		{
-			// Buffers are owned by this handler; no action required on Close.
-			return S_OK;
-		}
-	};
-
 	class SharedBlob final : public ID3DBlob
 	{
 	public:
@@ -1466,19 +1411,6 @@ namespace SIE
 			mapBufferConsts("PerGeometry", bufferSizes[2]);
 		}
 
-		static const wchar_t* GetDiskCacheExtension(ShaderClass shaderClass)
-		{
-			switch (shaderClass) {
-			case ShaderClass::Pixel:
-				return L".pso";
-			case ShaderClass::Vertex:
-				return L".vso";
-			case ShaderClass::Compute:
-				return L".cso";
-			}
-			return L".bin";
-		}
-
 		static std::string GetShaderString(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor, bool hashkey)
 		{
 			auto sourceShaderFile = shader.fxpFilename;
@@ -1506,17 +1438,15 @@ namespace SIE
 		/**
 		 * @brief Compiles or retrieves a cached shader.
 		 *
-		 * Checks the in-memory shader cache, then the disk cache (if enabled and valid),
-		 * and compiles from HLSL source if necessary. Records include dependencies for
-		 * hot-reload invalidation.
+		 * Checks the in-memory shader cache, then the shader store, which compiles from
+		 * HLSL source if necessary. Records include dependencies for hot-reload invalidation.
 		 *
-		 * @param useDiskCache Whether to use disk cache for reading and writing compiled shaders.
 		 * @param dependencyTracker Optional tracker for include dependency registration;
 		 *                          enables cache invalidation when dependencies change.
 		 *
 		 * @return Compiled shader blob, or nullptr if compilation failed or source file not found.
 		 */
-		static winrt::com_ptr<ID3DBlob> CompileShader(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor, bool useDiskCache, ShaderFileDependencyTracker* dependencyTracker)
+		static winrt::com_ptr<ID3DBlob> CompileShader(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor, ShaderFileDependencyTracker* dependencyTracker)
 		{
 			if (!SShaderCache::ResolveImageSpaceDescriptor(shader, descriptor)) {
 				return nullptr;
@@ -1540,7 +1470,6 @@ namespace SIE
 			}
 
 			const auto type = shader.shaderType.get();
-			winrt::com_ptr<ID3DBlob> shaderBlob;
 
 			// Read once: Developer Mode can toggle mid-compile
 			const bool debugCompile = ShaderCache::IsDebugCompile();
@@ -1571,63 +1500,27 @@ namespace SIE
 				shader.shaderType == RE::BSShader::Type::ImageSpace ?
 					static_cast<const RE::BSImagespaceShader&>(shader).originalShaderName :
 					shader.fxpFilename);
-			auto pathString = Util::WStringToString(path);
-			if (!std::filesystem::exists(path)) {
-				logger::error("Failed to compile {} shader {}::{:X}: {} does not exist", magic_enum::enum_name(shaderClass), magic_enum::enum_name(type), descriptor, pathString);
-				cache.AddCompletedShader(shaderClass, shader, descriptor, nullptr);
-				return nullptr;
+			logger::debug("Building {} {}:{}:{:X} from {}", Util::WStringToString(path), magic_enum::enum_name(type), magic_enum::enum_name(shaderClass), descriptor, MergeDefinesString(defines));
+
+			Util::FxcRequest request;
+			request.root = path;
+			request.includeBase = std::filesystem::path(path).parent_path();
+			request.defines = defines.data();
+			request.profile = GetShaderProfile(shaderClass);
+			request.flags = Util::FxcCompileFlags(debugCompile);
+			request.stripFlags = debugCompile ? 0 : (D3DCOMPILER_STRIP_DEBUG_INFO | D3DCOMPILER_STRIP_TEST_BLOBS | D3DCOMPILER_STRIP_PRIVATE_DATA);
+			request.debug = debugCompile;
+			auto built = Util::ResolveFxcShader(request);
+
+			// The watcher needs each shader's includes, also when nothing compiled. This is development only, so a normal start skips the work.
+			if (dependencyTracker && cache.UseFileWatcher()) {
+				if (const auto includes = Util::FxcDependencyPaths(built.variantKey); !includes.empty())
+					dependencyTracker->RegisterDependencies(Util::WStringToString(path), includes);
 			}
 
-			// compile shaders — match Utils/D3D.cpp CompileShader flag policy (strictness, optional toggles, validation).
-			winrt::com_ptr<ID3DBlob> errorBlob;
-			uint32_t flags = !debugCompile ? (D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3) : D3DCOMPILE_DEBUG;
-			if (globals::state->enablePartialPrecision.load(std::memory_order_relaxed)) {
-				flags |= D3DCOMPILE_PARTIAL_PRECISION;
-			}
-			if (globals::state->enableAvoidFlowControl.load(std::memory_order_relaxed)) {
-				flags |= D3DCOMPILE_AVOID_FLOW_CONTROL;
-			}
-			if (useDiskCache) {
-				flags |= D3DCOMPILE_SKIP_VALIDATION;
-			}
-			const uint32_t stripFlags = debugCompile ?
-			                                0u :
-			                                (D3DCOMPILER_STRIP_DEBUG_INFO | D3DCOMPILER_STRIP_TEST_BLOBS | D3DCOMPILER_STRIP_PRIVATE_DATA);
-
-			std::optional<ShaderDDC::Entry> diskEntry;
-			if (useDiskCache) {
-				const std::string_view group = shader.fxpFilename;
-				diskEntry.emplace(path, std::filesystem::path(path).parent_path(), std::wstring(group.begin(), group.end()),
-					defines.data(), "main", GetShaderProfile(shaderClass), flags, stripFlags, GetDiskCacheExtension(shaderClass));
-				if (auto diskBlob = diskEntry->Load()) {
-					logger::debug("Loaded shader from {}", Util::WStringToString(diskEntry->GetPath()));
-					cache.AddCompletedShader(shaderClass, shader, descriptor, diskBlob, /*fromDisk=*/true, diskEntry->GetPath());
-					return diskBlob;
-				}
-			}
-			logger::debug("Compiling {} {}:{}:{:X} to {}", pathString, magic_enum::enum_name(type), magic_enum::enum_name(shaderClass), descriptor, MergeDefinesString(defines));
-
-			// Track includes
-			TrackingIncludeHandler includeHandler(std::filesystem::path(path).parent_path());
-			const HRESULT compileResult = D3DCompileFromFile(path.c_str(), defines.data(), &includeHandler, "main",
-				GetShaderProfile(shaderClass), flags, 0, shaderBlob.put(), errorBlob.put());
-			// If the include handler captured any includes, register them so the watcher
-			// can invalidate dependents even if this compilation fails. Do NOT clear
-			// mappings when there are no captured includes to avoid removing prior
-			// dependency information on transient failures.
-			if (dependencyTracker && !includeHandler.includes.empty()) {
-				dependencyTracker->RegisterDependencies(Util::WStringToString(path), includeHandler.includes);
-			}
-
-			if (FAILED(compileResult)) {
-				if (errorBlob != nullptr) {
-					logger::error("Failed to compile {} shader {}::{:X}:\n{}",
-						magic_enum::enum_name(shaderClass), magic_enum::enum_name(type), descriptor,
-						static_cast<char*>(errorBlob->GetBufferPointer()));
-				} else {
-					logger::error("Failed to compile {} shader {}::{:X}",
-						magic_enum::enum_name(shaderClass), magic_enum::enum_name(type), descriptor);
-				}
+			if (!built.blob) {
+				logger::error("Failed to compile {} shader {}::{:X}{}:\n{}", magic_enum::enum_name(shaderClass), magic_enum::enum_name(type), descriptor,
+					built.store.failureFromCache ? " (same inputs as the last failure, so it was not retried)" : "", built.store.diagnostics);
 
 #ifdef TRACY_ENABLE
 				{
@@ -1643,13 +1536,13 @@ namespace SIE
 				cache.AddCompletedShader(shaderClass, shader, descriptor, nullptr);
 				return nullptr;
 			}
-			if (errorBlob) {
-				logger::debug("Shader logs:\n{}", static_cast<char*>(errorBlob->GetBufferPointer()));
-			}
-			logger::debug("Compiled shader {}:{}:{:X}", magic_enum::enum_name(type), magic_enum::enum_name(shaderClass), descriptor);
+			if (!built.store.diagnostics.empty())
+				logger::debug("Shader logs:\n{}", built.store.diagnostics);
+
+			using org::services::ShaderStoreOutcome;
 
 #ifdef TRACY_ENABLE
-			{
+			if (built.store.outcome == ShaderStoreOutcome::Compiled) {
 				// Timeline annotation: a shader (re)compiled successfully. During
 				// a hot-reload this marks the exact frame the new shader went
 				// live, so A/B perf windows split precisely on it.
@@ -1659,20 +1552,8 @@ namespace SIE
 			}
 #endif
 
-			// strip debug info
-			if (stripFlags) {
-				winrt::com_ptr<ID3DBlob> strippedShaderBlob;
-				if (SUCCEEDED(D3DStripShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), stripFlags, strippedShaderBlob.put())))
-					shaderBlob = std::move(strippedShaderBlob);
-			}
-
-			std::wstring diskPath;
-			if (diskEntry && diskEntry->Store(shaderBlob.get())) {
-				diskPath = diskEntry->GetPath();
-				logger::debug("Saved shader to {}", Util::WStringToString(diskPath));
-			}
-			cache.AddCompletedShader(shaderClass, shader, descriptor, shaderBlob, /*fromDisk=*/false, std::move(diskPath));
-			return shaderBlob;
+			cache.AddCompletedShader(shaderClass, shader, descriptor, built.blob, /*fromDisk=*/built.store.outcome == ShaderStoreOutcome::Hit);
+			return built.blob;
 		}
 
 		VertexShaderPtr CreateVertexShader(ID3DBlob& shaderData,
@@ -2181,6 +2062,8 @@ namespace SIE
 
 	void ShaderCache::Clear()
 	{
+		// A clear asks for shaders to be built from what is on disk now, so the store must read the files again.
+		Util::BeginShaderStoreGeneration();
 		auto* state = globals::state;
 		if (globals::game::currentVertexShader && *globals::game::currentVertexShader == state->customVertexShader)
 			*globals::game::currentVertexShader = nullptr;
@@ -2188,7 +2071,6 @@ namespace SIE
 			*globals::game::currentPixelShader = nullptr;
 		state->customVertexShader = nullptr;
 		state->customPixelShader = nullptr;
-		ShaderDDC::InvalidateSources();
 		{
 			std::lock_guard lockGuardV(vertexShadersMutex);
 			for (auto& shaders : vertexShaders) {
@@ -2336,7 +2218,7 @@ namespace SIE
 		compilationSet.Clear();
 	}
 
-	bool ShaderCache::AddCompletedShader(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor, winrt::com_ptr<ID3DBlob> a_blob, bool fromDisk, std::wstring diskPath)
+	bool ShaderCache::AddCompletedShader(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor, winrt::com_ptr<ID3DBlob> a_blob, bool fromDisk)
 	{
 		auto key = SIE::SShaderCache::GetShaderString(shaderClass, shader, descriptor, true);
 		auto status = a_blob ? ShaderCompilationTask::Status::Completed : ShaderCompilationTask::Status::Failed;
@@ -2349,7 +2231,7 @@ namespace SIE
 			shared.attach(new SharedBlob(*a_blob));
 		{
 			std::unique_lock lockM{ mapMutex };
-			shaderMap.insert_or_assign(key, ShaderCacheResult{ std::move(shared), status, system_clock::now(), fromDisk, std::move(diskPath) });
+			shaderMap.insert_or_assign(key, ShaderCacheResult{ std::move(shared), status, system_clock::now(), fromDisk });
 		}
 		mapCV.notify_all();  // wake threads waiting on a Pending→Completed/Failed transition
 		const std::wstring path = SIE::SShaderCache::GetShaderPath(
@@ -2468,14 +2350,6 @@ namespace SIE
 		return GetCompletedShader(key);
 	}
 
-	std::wstring ShaderCache::GetShaderDiskPath(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor)
-	{
-		const auto key = SIE::SShaderCache::GetShaderString(shaderClass, shader, descriptor, true);
-		std::scoped_lock lockM{ mapMutex };
-		auto it = shaderMap.find(key);
-		return it != shaderMap.end() ? it->second.diskPath : std::wstring{};
-	}
-
 	bool ShaderCache::IsShaderLoadedFromDisk(const std::string& a_key)
 	{
 		std::scoped_lock lockM{ mapMutex };
@@ -2573,26 +2447,6 @@ namespace SIE
 		isDump = value;
 	}
 
-	namespace
-	{
-		std::wstring GetStandaloneCacheGroup(const std::filesystem::path& sourcePath)
-		{
-			std::wstring rel;
-			bool pastShaders = false;
-			for (const auto& part : sourcePath.parent_path()) {
-				if (!pastShaders) {
-					if (part == L"Shaders")
-						pastShaders = true;
-					continue;
-				}
-				if (!rel.empty())
-					rel += L"/";
-				rel += part.wstring();
-			}
-			return pastShaders && !rel.empty() ? rel : L"Standalone";
-		}
-	}
-
 	void ShaderCache::EnqueueStandaloneShaderCompile(
 		std::wstring sourcePath,
 		std::string entryPoint,
@@ -2620,68 +2474,26 @@ namespace SIE
 
 				const char* stageName;
 				const char* profile;
-				const wchar_t* cacheExt;
 				switch (shaderClass) {
 				case StandaloneShaderClass::Vertex:
 					stageName = "vertex";
 					profile = "vs_5_0";
-					cacheExt = L".vso";
 					break;
 				case StandaloneShaderClass::Pixel:
 					stageName = "pixel";
 					profile = "ps_5_0";
-					cacheExt = L".pso";
 					break;
 				default:
 					stageName = "compute";
 					profile = "cs_5_0";
-					cacheExt = L".cso";
 					break;
 				}
 
 				const std::filesystem::path srcPath{ sourcePath };
 				const std::string srcPathStr = Util::WStringToString(sourcePath);
-				if (!std::filesystem::exists(srcPath)) {
-					logger::error("Failed to compile {} shader; {} does not exist", stageName, srcPathStr);
-					onReady(nullptr);
-					return;
-				}
 
 				if (globals::features::reverseZ.IsActive())
 					defines.emplace_back("REVERSE_Z", "");
-
-				const bool debugCompile = IsDebugCompile();
-				std::vector<D3D_SHADER_MACRO> macros;
-				for (const auto& d : defines) {
-					if (d.first && d.first[0])
-						macros.push_back({ d.first, d.second });
-				}
-				if (debugCompile) {
-					macros.push_back({ "D3DCOMPILE_SKIP_OPTIMIZATION", "" });
-					macros.push_back({ "D3DCOMPILE_DEBUG", "" });
-				}
-				auto shaderDefines = state->GetDefines();
-				if (!shaderDefines->empty()) {
-					for (unsigned int i = 0; i < shaderDefines->size(); i++)
-						macros.push_back({ shaderDefines->at(i).first.c_str(), shaderDefines->at(i).second.c_str() });
-				}
-				if (shaderClass == StandaloneShaderClass::Compute)
-					macros.push_back({ "COMPUTESHADER", "" });
-				else if (shaderClass == StandaloneShaderClass::Pixel)
-					macros.push_back({ "PSHADER", "" });
-				else
-					macros.push_back({ "VSHADER", "" });
-				macros.push_back({ "WINPC", "" });
-				macros.push_back({ "DX11", "" });
-				macros.push_back({ nullptr, nullptr });
-
-				uint32_t flags = !debugCompile ? (D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3) : D3DCOMPILE_DEBUG;
-				if (state->enablePartialPrecision.load(std::memory_order_relaxed))
-					flags |= D3DCOMPILE_PARTIAL_PRECISION;
-				if (state->enableAvoidFlowControl.load(std::memory_order_relaxed))
-					flags |= D3DCOMPILE_AVOID_FLOW_CONTROL;
-				if (IsDiskCache())
-					flags |= D3DCOMPILE_SKIP_VALIDATION;
 
 				ID3D11DeviceChild* shader = nullptr;
 
@@ -2711,46 +2523,62 @@ namespace SIE
 					}
 				};
 
-				std::optional<ShaderDDC::Entry> diskEntry;
-				if (IsDiskCache()) {
-					diskEntry.emplace(srcPath, L"Data/Shaders", GetStandaloneCacheGroup(srcPath), macros.data(), entryPoint, profile, flags, 0u, cacheExt);
-					if (auto blob = diskEntry->Load()) {
-						HRESULT hr = createShader(blob.get());
-						if (SUCCEEDED(hr)) {
-							Util::SetResourceName(shader, "%s:%s", srcPathStr.c_str(), entryPoint.c_str());
-							logger::debug("Loaded standalone {} shader {}:{} from {}", stageName, srcPathStr, entryPoint, Util::WStringToString(diskEntry->GetPath()));
-						} else {
-							logger::warn("Failed to create {} shader from cached blob for {}:{}", stageName, srcPathStr, entryPoint);
-						}
-					}
+				const bool debugCompile = IsDebugCompile();
+				std::vector<D3D_SHADER_MACRO> macros;
+				for (const auto& d : defines) {
+					if (d.first && d.first[0])
+						macros.push_back({ d.first, d.second });
 				}
+				if (debugCompile) {
+					macros.push_back({ "D3DCOMPILE_SKIP_OPTIMIZATION", "" });
+					macros.push_back({ "D3DCOMPILE_DEBUG", "" });
+				}
+				auto shaderDefines = state->GetDefines();
+				if (!shaderDefines->empty()) {
+					for (unsigned int i = 0; i < shaderDefines->size(); i++)
+						macros.push_back({ shaderDefines->at(i).first.c_str(), shaderDefines->at(i).second.c_str() });
+				}
+				if (shaderClass == StandaloneShaderClass::Compute)
+					macros.push_back({ "COMPUTESHADER", "" });
+				else if (shaderClass == StandaloneShaderClass::Pixel)
+					macros.push_back({ "PSHADER", "" });
+				else
+					macros.push_back({ "VSHADER", "" });
+				macros.push_back({ "WINPC", "" });
+				macros.push_back({ "DX11", "" });
+				macros.push_back({ nullptr, nullptr });
 
+				Util::FxcRequest request;
+				request.root = srcPath;
+				request.includeBase = L"Data\\Shaders";
+				request.defines = macros.data();
+				request.entryPoint = entryPoint.c_str();
+				request.profile = profile;
+				request.flags = Util::FxcCompileFlags(debugCompile);
+				request.debug = debugCompile;
+
+				auto built = Util::ResolveFxcShader(request);
+				if (built.blob && FAILED(createShader(built.blob.get())) && built.store.outcome != org::services::ShaderStoreOutcome::Compiled) {
+					// A whole artifact can still hold bytecode the device rejects. Drop it and build from source once.
+					logger::warn("Failed to create {} shader from the stored copy of {}:{}", stageName, srcPathStr, entryPoint);
+					Util::SharedShaderStore()->RemoveArtifact(built.store.compileKey);
+					built = Util::ResolveFxcShader(request);
+					if (built.blob)
+						createShader(built.blob.get());
+				}
+				if (!built.blob) {
+					logger::warn("Standalone {} shader compilation failed for {}:{}:\n{}", stageName, srcPathStr, entryPoint, built.store.diagnostics);
+					onReady(nullptr);
+					return;
+				}
+				if (!built.store.diagnostics.empty())
+					logger::debug("Shader logs:\n{}", built.store.diagnostics);
 				if (!shader) {
-					Util::CustomInclude include;
-
-					winrt::com_ptr<ID3DBlob> shaderBlob;
-					winrt::com_ptr<ID3DBlob> errorBlob;
-					if (FAILED(D3DCompileFromFile(srcPath.c_str(), macros.data(), &include, entryPoint.c_str(), profile, flags, 0, shaderBlob.put(), errorBlob.put()))) {
-						logger::warn("Standalone {} shader compilation failed for {}:{}:\n{}",
-							stageName, srcPathStr, entryPoint, errorBlob ? static_cast<char*>(errorBlob->GetBufferPointer()) : "Unknown error");
-						onReady(nullptr);
-						return;
-					}
-					if (errorBlob) {
-						logger::debug("Shader logs:\n{}", static_cast<char*>(errorBlob->GetBufferPointer()));
-					}
-
-					HRESULT hr = createShader(shaderBlob.get());
-					if (FAILED(hr)) {
-						logger::warn("Failed to create {} shader for {}:{}", stageName, srcPathStr, entryPoint);
-						onReady(nullptr);
-						return;
-					}
-					Util::SetResourceName(shader, "%s:%s", srcPathStr.c_str(), entryPoint.c_str());
-
-					if (diskEntry && diskEntry->Store(shaderBlob.get()))
-						logger::debug("Saved standalone {} shader {}:{} to {}", stageName, srcPathStr, entryPoint, Util::WStringToString(diskEntry->GetPath()));
+					logger::warn("Failed to create {} shader for {}:{}", stageName, srcPathStr, entryPoint);
+					onReady(nullptr);
+					return;
 				}
+				Util::SetResourceName(shader, "%s:%s", srcPathStr.c_str(), entryPoint.c_str());
 
 				onReady(shader);
 			});
@@ -2769,9 +2597,9 @@ namespace SIE
 			});
 	}
 
-	void ShaderCache::InvalidateShaderSources()
+	void ShaderCache::ReloadShaderSources()
 	{
-		ShaderDDC::InvalidateSources();
+		Util::BeginShaderStoreGeneration();
 	}
 
 	bool ShaderCache::IsDiskCache() const
@@ -2822,22 +2650,18 @@ namespace SIE
 	void ShaderCache::DeleteDiskCache()
 	{
 		std::scoped_lock lock{ compilationSet.compilationMutex };
-		try {
-			std::filesystem::remove_all(L"Data/ShaderCache");
-			logger::info("Deleted disk cache");
-		} catch (std::filesystem::filesystem_error const& ex) {
-			logger::error("Failed to delete disk cache: {}", ex.what());
+		// Through the store: it holds the index in memory too, and would save it back.
+		Util::SharedShaderStore()->Clear();
+		std::error_code ec;
+		for (const auto& entry : std::filesystem::directory_iterator(L"Data/ShaderCache", ec)) {
+			if (entry.path().filename().wstring() == Util::kShaderStoreDirName)
+				continue;
+			std::error_code removeError;
+			std::filesystem::remove_all(entry.path(), removeError);
+			if (removeError)
+				logger::error("Failed to delete disk cache entry {}: {}", Util::WStringToString(entry.path().wstring()), removeError.message());
 		}
-	}
-
-	void ShaderCache::RemoveLegacyDiskCache()
-	{
-		ShaderDDC::RemoveLegacyCache();
-	}
-
-	void ShaderCache::TrimDiskCache()
-	{
-		compilationSet.EnqueueAux([] { ShaderDDC::Trim(); });
+		logger::info("Deleted disk cache");
 	}
 
 	void ShaderCache::SetPrecompiling(bool value)
@@ -3092,7 +2916,7 @@ namespace SIE
 		uint32_t descriptor)
 	{
 		if (const auto shaderBlob =
-				SShaderCache::CompileShader(ShaderClass::Vertex, shader, descriptor, isDiskCache, dependencyTracker.get())) {
+				SShaderCache::CompileShader(ShaderClass::Vertex, shader, descriptor, dependencyTracker.get())) {
 			auto device = globals::d3d::device;
 
 			auto newShader = SShaderCache::CreateVertexShader(*shaderBlob, shader,
@@ -3124,7 +2948,7 @@ namespace SIE
 		uint32_t descriptor)
 	{
 		if (const auto shaderBlob =
-				SShaderCache::CompileShader(ShaderClass::Pixel, shader, descriptor, isDiskCache, dependencyTracker.get())) {
+				SShaderCache::CompileShader(ShaderClass::Pixel, shader, descriptor, dependencyTracker.get())) {
 			auto device = globals::d3d::device;
 
 			auto newShader = SShaderCache::CreatePixelShader(*shaderBlob, shader,
@@ -3157,7 +2981,7 @@ namespace SIE
 		uint32_t descriptor)
 	{
 		if (const auto shaderBlob =
-				SShaderCache::CompileShader(ShaderClass::Compute, shader, descriptor, isDiskCache, dependencyTracker.get())) {
+				SShaderCache::CompileShader(ShaderClass::Compute, shader, descriptor, dependencyTracker.get())) {
 			auto device = globals::d3d::device;
 
 			auto newShader = SShaderCache::CreateComputeShader(*shaderBlob, shader,
@@ -3254,6 +3078,15 @@ namespace SIE
 	void ShaderCache::IncCacheHitTasks()
 	{
 		compilationSet.cacheHitTasks++;
+	}
+	ShaderCache::ShaderStoreUsage ShaderCache::GetShaderStoreUsage()
+	{
+		const auto usage = Util::SharedShaderStore()->MeasureArtifacts();
+		std::error_code ec;
+		const std::filesystem::path relative = std::filesystem::path(L"Data/ShaderCache") / Util::kShaderStoreDirName;
+		const auto absolute = std::filesystem::absolute(relative, ec);
+		return { Util::WStringToString((ec ? relative : absolute).wstring()), usage.count, usage.bytes,
+			static_cast<uint64_t>(globals::state->shaderStoreMaxMB.load(std::memory_order_relaxed)) << 20 };
 	}
 
 	bool ShaderCache::IsHideErrors()
@@ -3461,7 +3294,6 @@ namespace SIE
 			info.shaderType = shader.shaderType.get();
 			info.shaderClass = shaderClass;
 			info.descriptor = descriptor;
-			info.diskPath = GetShaderDiskPath(shaderClass, shader, descriptor);
 		}
 
 		info.isActive = true;
@@ -3992,7 +3824,8 @@ namespace SIE
 
 		// Log completion outside the lock
 		if (shouldLogCompletion) {
-			logger::debug("Compilation completed in {} ms", GetHumanTime(completionTimeMs));
+			logger::info("Compilation completed in {} ms", GetHumanTime(completionTimeMs));
+			Util::FinishShaderStoreBatch("shader compilation");
 
 #ifdef DEVBENCH_BRIDGE_ENABLED
 			// A compilation batch finished (initial build OR a hot-reload recompile).
@@ -4159,7 +3992,9 @@ namespace SIE
 		// (docs/development/dclf-hot-reload.md): an edited shader rebuilds those built from it, an include every one, at the next present.
 		// DCLF's own shaders (Data/Shaders/DrawcallLimitFix/) are no D3D11 shader's: an .hlsl there leaves this cache alone (an include there
 		// still invalidates the D3D11 shaders that include it, below).
-		if (lowerExtension == ".hlsl" || lowerExtension == ".hlsli") {
+		if (lowerExtension == ".hlsl" || lowerExtension == ".hlsli" || lowerExtension == ".h") {
+			// Before anything asks for a rebuild: the store must see this file's new contents.
+			Util::BeginShaderStoreGeneration();
 			RenderGraphRuntime::RequestShaderReload(filePath.generic_string());
 			std::string lowerPath = filePath.generic_string();
 			std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -4170,7 +4005,6 @@ namespace SIE
 			}
 		}
 		if (!std::filesystem::is_directory(filePath) && lowerExtension == ".hlsl") {
-			ShaderDDC::InvalidateSources();
 			// Update cache with the modified shader
 			cache->InsertModifiedShaderMap(shaderTypeString, modifiedTime);
 
@@ -4192,18 +4026,17 @@ namespace SIE
 				}
 			}
 		}
-		// Handle include file changes (.hlsli) by invalidating dependents
-		else if (!std::filesystem::is_directory(filePath) && lowerExtension == ".hlsli") {
+		// Handle include file changes (.hlsli, .h) by invalidating dependents
+		else if (!std::filesystem::is_directory(filePath) && (lowerExtension == ".hlsli" || lowerExtension == ".h")) {
 			// Normalize to absolute canonical path to match how dependencies are tracked
 			std::error_code ec;
 			auto canonicalPath = std::filesystem::weakly_canonical(filePath, ec);
 			std::string pathStr = (ec ? filePath.string() : canonicalPath.string());
-			// On Windows, normalize to lowercase to match TrackingIncludeHandler
+			// On Windows, normalize to lowercase to match Util::FxcDependencyPaths
 #ifdef _WIN32
 			std::transform(pathStr.begin(), pathStr.end(), pathStr.begin(),
 				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 #endif
-			ShaderDDC::InvalidateSources();
 			// Invalidate all .hlsl files that depend on this .hlsli
 			auto dependents = deps->GetDependents(pathStr);
 			for (const auto& hlsl : dependents) {

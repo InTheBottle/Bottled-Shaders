@@ -104,7 +104,7 @@ void MotionBlur::ClearShaderCache()
 
 	lastWidth = lastHeight = 0;
 
-	globals::shaderCache->InvalidateShaderSources();
+	globals::shaderCache->ReloadShaderSources();
 	CompileComputeShaders();
 }
 

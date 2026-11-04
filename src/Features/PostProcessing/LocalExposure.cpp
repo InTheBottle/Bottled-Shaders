@@ -275,7 +275,7 @@ void LocalExposure::ClearShaderCache()
 			}
 	}
 
-	globals::shaderCache->InvalidateShaderSources();
+	globals::shaderCache->ReloadShaderSources();
 	CompileComputeShaders();
 }
 

@@ -504,7 +504,7 @@ void DoF::ClearShaderCache()
 			}
 	}
 
-	globals::shaderCache->InvalidateShaderSources();
+	globals::shaderCache->ReloadShaderSources();
 	CompileComputeShaders();
 }
 

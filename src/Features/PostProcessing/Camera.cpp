@@ -165,7 +165,7 @@ void Camera::ClearShaderCache()
 			}
 	}
 
-	globals::shaderCache->InvalidateShaderSources();
+	globals::shaderCache->ReloadShaderSources();
 	CompileRasterShaders();
 }
 

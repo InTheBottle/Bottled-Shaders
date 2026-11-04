@@ -172,7 +172,7 @@ void CODBloom::ClearShaderCache()
 			}
 	}
 
-	globals::shaderCache->InvalidateShaderSources();
+	globals::shaderCache->ReloadShaderSources();
 	CompileRasterShaders();
 }
 

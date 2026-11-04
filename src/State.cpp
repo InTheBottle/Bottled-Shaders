@@ -737,6 +737,7 @@ void State::SaveCoreToJson(json& settings)
 	advanced["Frame Annotations"] = frameAnnotationsSetting.value_or(frameAnnotations);
 	advanced["Partial Precision"] = enablePartialPrecision.load(std::memory_order_relaxed);
 	advanced["Throttle Water Cubemap"] = throttleWaterCubemap;
+	advanced["Shader Store Max MB"] = shaderStoreMaxMB.load(std::memory_order_relaxed);
 	settings["Advanced"] = advanced;
 
 	json general;
@@ -893,6 +894,8 @@ void State::LoadFromJson(nlohmann::json& settings)
 			enablePartialPrecision.store(advanced["Partial Precision"].get<bool>(), std::memory_order_relaxed);
 		if (advanced.contains("Throttle Water Cubemap") && advanced["Throttle Water Cubemap"].is_boolean())
 			throttleWaterCubemap = advanced["Throttle Water Cubemap"];
+		if (advanced.contains("Shader Store Max MB") && advanced["Shader Store Max MB"].is_number_unsigned())
+			shaderStoreMaxMB.store(static_cast<uint32_t>(std::clamp<uint64_t>(advanced["Shader Store Max MB"].get<uint64_t>(), kShaderStoreMinMB, kShaderStoreMaxMB)), std::memory_order_relaxed);
 	}
 
 	if (settings.contains("General") && settings["General"].is_object()) {

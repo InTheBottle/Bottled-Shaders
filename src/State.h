@@ -378,6 +378,12 @@ public:
 	// Atomic: written from the UI thread, read from compilation pool workers.
 	std::atomic_bool enableAvoidFlowControl{ false };
 
+	/// Size limit of the shader store in MB. It applies at startup, and never evicts what recent starts used.
+	/// Atomic: written from the UI thread.
+	std::atomic<uint32_t> shaderStoreMaxMB{ 4096 };
+	static constexpr uint32_t kShaderStoreMinMB = 512;
+	static constexpr uint32_t kShaderStoreMaxMB = 32768;
+
 	uint lastVertexDescriptor = 0;
 	uint lastPixelDescriptor = 0;
 	uint modifiedVertexDescriptor = 0;
