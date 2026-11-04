@@ -49,6 +49,10 @@ struct ReverseZ : Feature
 	void ApplyReverseProjection(void* a_cameraStateEntry, const RE::NiCamera* a_camera);
 	void ReversePublishedProjection();
 	bool FixupMappedFrameBuffer(globals::FrameBuffer& a_frameBuffer);
+	/** @brief Makes the depth compare follow the projection just uploaded to the per-frame buffer, which is what the draws use. */
+	void ReconcileUploadedProjection(const globals::FrameBuffer& a_frameBuffer);
+	/** @brief Logs a depth-tested draw whose projection and depth target disagree on the depth convention, and the first-person draws. */
+	void CheckDrawConsistency();
 	void TracePublishedCamera(const RE::NiCamera* a_camera);
 	[[nodiscard]] bool IsConvertedDepthTarget(uint32_t a_target) const;
 	[[nodiscard]] bool ExpectPublishedReversal(const RE::NiCamera* a_camera, bool a_renderingCubemap) const;

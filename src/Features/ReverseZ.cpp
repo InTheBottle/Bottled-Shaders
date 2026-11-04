@@ -69,6 +69,8 @@ namespace
 	ID3D11RasterizerState* g_boundRasterState = nullptr;
 	bool g_reverseTargetBound = false;
 	bool g_projectionReversed = false;
+	ID3D11DepthStencilView* g_boundDepthView = nullptr;
+	const RE::NiCamera* g_lastPublishedCamera = nullptr;
 
 	D3D11_VIEWPORT g_requestedViewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE]{};
 	D3D11_VIEWPORT g_mappedViewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE]{};
@@ -776,6 +778,7 @@ namespace
 	{
 		if (This != globals::d3d::context)
 			return;
+		g_boundDepthView = pDepthStencilView;
 		const bool reverseBound = globals::features::reverseZ.IsReverseDepthView(pDepthStencilView);
 		if (reverseBound == g_reverseTargetBound)
 			return;
@@ -807,6 +810,7 @@ namespace
 		static void thunk(RE::BSGraphics::State* a_state, const RE::NiCamera* a_camera, std::uint32_t a_flags)
 		{
 			const bool renderingCubemap = globals::state && (globals::state->permutationData.ExtraShaderDescriptor & static_cast<uint32_t>(State::ExtraShaderDescriptors::IsReflections)) != 0;
+			g_lastPublishedCamera = a_camera;
 			if (!renderingCubemap)
 				globals::features::reverseZ.ApplyNearPlane(a_camera);
 			SetProjectionReversed(globals::features::reverseZ.ExpectPublishedReversal(a_camera, renderingCubemap));
@@ -918,6 +922,99 @@ namespace
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
 
+}
+
+namespace
+{
+	bool IsPerspectiveUpload(const Matrix& a_projection)
+	{
+		return std::abs(a_projection.m[3][3]) < 1e-4f && std::abs(std::abs(a_projection.m[3][2]) - 1.0f) < 1e-3f;
+	}
+
+	bool IsFirstPersonCamera(const RE::NiCamera* a_camera)
+	{
+		static const REL::Relocation<RE::NiCamera**> firstPersonCamera{ REL::RelocationID(528062, 415007) };
+		return a_camera && a_camera == *firstPersonCamera;
+	}
+
+	const char* DescribeCamera(const RE::NiCamera* a_camera)
+	{
+		if (!a_camera)
+			return "";
+		if (a_camera == RE::Main::WorldRootCamera())
+			return " (world root)";
+		return IsFirstPersonCamera(a_camera) ? " (first person)" : "";
+	}
+
+	int32_t PublishedDepthTarget()
+	{
+		const auto* shadowState = globals::game::shadowState;
+		return shadowState ? static_cast<int32_t>(shadowState->GetRuntimeData().depthStencil) : -2;
+	}
+}
+
+void ReverseZ::ReconcileUploadedProjection(const globals::FrameBuffer& a_frameBuffer)
+{
+	if (!activeThisBoot || !g_reversalActive.load(std::memory_order_relaxed))
+		return;
+	const auto& proj = a_frameBuffer.CameraProj;
+	if (!IsPerspectiveUpload(proj))
+		return;
+	const bool reversed = proj.m[2][2] * proj.m[3][2] < 0.0f;
+	if (reversed == g_projectionReversed)
+		return;
+	static uint32_t logged = 0;
+	if (logged < 16) {
+		++logged;
+		logger::warn("ReverseZ: camera {}{} uploaded a {} projection while depth compared {} (depth target {}); following the upload",
+			static_cast<const void*>(g_lastPublishedCamera), DescribeCamera(g_lastPublishedCamera), reversed ? "reversed" : "standard",
+			g_projectionReversed ? "reversed" : "standard", PublishedDepthTarget());
+	}
+	SetProjectionReversed(reversed);
+}
+
+void ReverseZ::CheckDrawConsistency()
+{
+	static uint32_t reports = 0;
+	if (!activeThisBoot || !g_boundDepthView || !g_requestedState || reports >= 32 || !g_reversalActive.load(std::memory_order_relaxed))
+		return;
+	const auto& proj = globals::game::frameBufferCached.data.CameraProj;
+	if (!IsPerspectiveUpload(proj))
+		return;
+	const bool reversed = proj.m[2][2] * proj.m[3][2] < 0.0f;
+	const bool consistent = reversed == g_reverseTargetBound && reversed == ShouldFlip();
+	if (consistent && !IsFirstPersonCamera(g_lastPublishedCamera))
+		return;
+
+	D3D11_DEPTH_STENCIL_DESC desc{};
+	g_requestedState->GetDesc(&desc);
+	const bool ordered = desc.DepthFunc == D3D11_COMPARISON_LESS || desc.DepthFunc == D3D11_COMPARISON_LESS_EQUAL ||
+	                     desc.DepthFunc == D3D11_COMPARISON_GREATER || desc.DepthFunc == D3D11_COMPARISON_GREATER_EQUAL;
+	if (!desc.DepthEnable || !ordered)
+		return;
+
+	static std::unordered_set<uint64_t> seen;
+	const int32_t target = PublishedDepthTarget();
+	const uint64_t key = reinterpret_cast<uint64_t>(g_lastPublishedCamera) ^ (static_cast<uint64_t>(target & 0xFF) << 56) ^
+	                     (static_cast<uint64_t>(desc.DepthFunc) << 48) ^ (static_cast<uint64_t>(consistent) << 47);
+	if (!seen.insert(key).second)
+		return;
+	++reports;
+
+	D3D11_DEPTH_STENCIL_DESC boundDesc{};
+	if (g_boundState)
+		g_boundState->GetDesc(&boundDesc);
+	const D3D11_VIEWPORT requested = g_requestedViewportCount ? g_requestedViewports[0] : D3D11_VIEWPORT{};
+	const D3D11_VIEWPORT mapped = g_requestedViewportCount ? g_mappedViewports[0] : D3D11_VIEWPORT{};
+	const auto message = std::format("ReverseZ: {} draw: camera {}{} depth target {} ({}), {} projection (z row {:.6f} {:.4f}), depth func {} -> {}, write {}, viewport depth {:.6f}..{:.6f} -> {:.6f}..{:.6f}",
+		consistent ? "consistent" : "INCONSISTENT", static_cast<const void*>(g_lastPublishedCamera), DescribeCamera(g_lastPublishedCamera), target,
+		g_reverseTargetBound ? "reversed" : "standard", reversed ? "reversed" : "standard", proj.m[2][2], proj.m[2][3],
+		static_cast<int>(desc.DepthFunc), static_cast<int>(boundDesc.DepthFunc), desc.DepthWriteMask == D3D11_DEPTH_WRITE_MASK_ALL ? "on" : "off",
+		requested.MinDepth, requested.MaxDepth, mapped.MinDepth, mapped.MaxDepth);
+	if (consistent)
+		logger::info("{}", message);
+	else
+		logger::warn("{}", message);
 }
 
 void ReverseZ::InstallRuntimeHooks()

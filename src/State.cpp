@@ -29,6 +29,7 @@
 #include "Features/PostProcessing.h"
 #include "Features/RainRefraction.h"
 #include "Features/RemoteControl/NvPerf.h"
+#include "Features/ReverseZ.h"
 #include "Features/ScreenSpaceShadows.h"
 #include "Features/Skin.h"
 #include "Features/SkySync.h"
@@ -169,6 +170,8 @@ void State::Draw()
 	ZoneScoped;
 	if (globals::features::sceneManager.loaded)
 		globals::features::sceneManager.Update();
+
+	globals::features::reverseZ.CheckDrawConsistency();
 
 	auto shaderCache = globals::shaderCache;
 	auto& terrainBlending = globals::features::terrainBlending;
