@@ -188,6 +188,8 @@ public:
 	 */
 	static void RenderSortPopup(const char* popupId);
 
+	static void DrawFilterDot(const ImVec2& buttonMin, const ImVec2& buttonMax);
+
 private:
 	struct ListMenuVisitor
 	{

@@ -517,6 +517,7 @@ namespace DCLF
 			std::vector<std::shared_ptr<Version>> retired;
 			std::uint32_t handedOut = 0;  // the pipelines whose Entry::index is set
 			bool failureLogged = false;
+			std::chrono::steady_clock::time_point retryAt{};
 
 			void Retire()
 			{
@@ -544,6 +545,8 @@ namespace DCLF
 				const auto current = published.load();
 				if (current && current->applied == a_admitted)
 					return PublishResult::Current;
+				if (std::chrono::steady_clock::now() < retryAt)
+					return PublishResult::Failed;
 				// A free one (unreferenced, and unreachable until published), or a new one.
 				auto free = std::ranges::find_if(owned, [&](const std::shared_ptr<Version>& a_version) {
 					return !a_version || (a_version != current && a_version.use_count() == 1);
@@ -559,8 +562,10 @@ namespace DCLF
 					if (!a_apply(*version)) {
 						// Start that version over: what it holds may be partial.
 						version.reset();
+						retryAt = std::chrono::steady_clock::now() + std::chrono::seconds(2);
 						return PublishResult::Failed;
 					}
+					retryAt = {};
 					version->applied = a_admitted;
 					published.store(version);
 					return PublishResult::Published;

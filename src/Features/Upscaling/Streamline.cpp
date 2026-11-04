@@ -53,6 +53,7 @@ namespace
 		PFun_slEvaluateFeature* slEvaluateFeature = nullptr;
 		PFun_slGetFeatureFunction* slGetFeatureFunction = nullptr;
 		PFun_slSetFeatureLoaded* slSetFeatureLoaded = nullptr;
+		PFun_slFreeResources* slFreeResources = nullptr;
 
 		PFun_slDLSSGetOptimalSettings* slDLSSGetOptimalSettings = nullptr;
 		PFun_slDLSSSetOptions* slDLSSSetOptions = nullptr;
@@ -188,6 +189,8 @@ namespace
 			return true;
 		if (!g_sl.slSetFeatureLoaded)
 			return false;
+		if (!want && a_feature == sl::kFeatureDLSS_G && g_sl.slFreeResources)
+			g_sl.slFreeResources(a_feature, g_sl.viewport);
 		if (g_sl.slSetFeatureLoaded(a_feature, want) != sl::Result::eOk)
 			return false;
 		a_current.store(want, std::memory_order_release);
@@ -453,6 +456,7 @@ bool Streamline::Initialize()
 		Resolve(g_sl.slGetFeatureFunction, "slGetFeatureFunction");
 
 	Resolve(g_sl.slSetFeatureLoaded, "slSetFeatureLoaded");
+	Resolve(g_sl.slFreeResources, "slFreeResources");
 	if (!resolved) {
 		FreeLibrary(g_sl.interposer);
 		g_sl.interposer = nullptr;
@@ -932,6 +936,13 @@ static bool cs_BuildConstants(sl::Constants& a_consts, uint32_t a_outputWidth, u
 			if (++s_singularCount >= s_nextReport) {
 				s_nextReport = s_singularCount * 8u;
 				logger::warn("[Streamline] singular camera reprojection matrices on {} frame(s) so far", s_singularCount);
+				logger::warn("[Streamline]   curVP det {:.4e} r0 [{:.5f} {:.5f} {:.5f} {:.5f}] r1 [{:.5f} {:.5f} {:.5f} {:.5f}] r2 [{:.5f} {:.5f} {:.5f} {:.5f}] r3 [{:.5f} {:.5f} {:.5f} {:.5f}]",
+					curVP.Determinant(), curVP._11, curVP._12, curVP._13, curVP._14, curVP._21, curVP._22, curVP._23, curVP._24, curVP._31, curVP._32, curVP._33, curVP._34,
+					curVP._41, curVP._42, curVP._43, curVP._44);
+				logger::warn("[Streamline]   prevVP det {:.4e} r0 [{:.5f} {:.5f} {:.5f} {:.5f}] r1 [{:.5f} {:.5f} {:.5f} {:.5f}] r2 [{:.5f} {:.5f} {:.5f} {:.5f}] r3 [{:.5f} {:.5f} {:.5f} {:.5f}]; posAdj ({:.3f} {:.3f} {:.3f}) prev ({:.3f} {:.3f} {:.3f}); world snapshot {}",
+					prevVP.Determinant(), prevVP._11, prevVP._12, prevVP._13, prevVP._14, prevVP._21, prevVP._22, prevVP._23, prevVP._24, prevVP._31, prevVP._32, prevVP._33,
+					prevVP._34, prevVP._41, prevVP._42, prevVP._43, prevVP._44, posAdj.x, posAdj.y, posAdj.z, prevPosAdj.x, prevPosAdj.y, prevPosAdj.z,
+					globals::features::upscaling.worldCameraFrameValid);
 			}
 		}
 	}
@@ -2061,7 +2072,13 @@ bool Streamline::SetDLSSGMode(bool a_enable, uint32_t a_displayWidth, uint32_t a
 	// swamped by which way the camera happened to be facing. The mode was trading a correctness
 	// guarantee for nothing measurable, so take the documented default, whose contract CS meets.
 	options.queueParallelismMode = sl::DLSSGQueueParallelismMode::eBlockPresentingClientQueue;
-	const sl::Result res = g_sl.slDLSSGSetOptions(g_sl.viewport, options);
+	sl::Result res = g_sl.slDLSSGSetOptions(g_sl.viewport, options);
+	if (res == sl::Result::eWarnOutOfVRAM) {
+		static std::atomic<bool> s_logged{ false };
+		if (!s_logged.exchange(true))
+			logger::warn("[Streamline] DLSS-G options set over the VRAM budget (eWarnOutOfVRAM): applied; expect stutter");
+		res = sl::Result::eOk;
+	}
 	if (res != sl::Result::eOk) {
 		if (changed)
 			logger::warn("[Streamline] slDLSSGSetOptions failed (result {})", static_cast<int>(res));

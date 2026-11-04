@@ -319,6 +319,9 @@ namespace globals
 		if (features::reverseZ.FixupMappedFrameBuffer(frameBufferCached.data))
 			*reinterpret_cast<FrameBuffer*>(source) = frameBufferCached.data;
 
+		if (features::upscaling.loaded && globals::state && globals::state->inWorld)
+			features::upscaling.CaptureWorldCamera();
+
 		mappedFrameBuffer = nullptr;
 	}
 

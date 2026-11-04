@@ -67,8 +67,7 @@ float3 CompositeUI(float3 scene, float4 ui, bool sceneIsLinear, bool sceneIsBT20
 		}
 
 		float3 compositedColor = sceneIsLinear ? max(0.0, scene.rgb) : scene.rgb;
-		if (!skipUI)
-			compositedColor = CompositeUI(compositedColor, ui, sceneIsLinear, postProcessOutput, isMainLoading ? 1.0 : uiBrightness);
+		compositedColor = CompositeUI(compositedColor, ui, sceneIsLinear, postProcessOutput, isMainLoading ? 1.0 : uiBrightness);
 		float3 compositedColorLinear = sceneIsLinear ? compositedColor : TransferFunctions::SignedGamma22ToLinear(compositedColor);
 
 		if (previewSDR > 0.5) {

@@ -1999,7 +1999,15 @@ void Upscaling::PrepareFrameGeneration(ID3D11Resource* a_hudlessColor)
 
 void Upscaling::CaptureWorldCamera()
 {
-	worldCameraFrame = globals::game::frameBufferCached;
+	const auto* camera = RE::Main::WorldRootCamera();
+	if (!camera)
+		return;
+	const auto& frame = globals::game::frameBufferCached;
+	const auto& eye = camera->world.translate;
+	const auto& posAdjust = frame.GetCameraPosAdjust();
+	if (std::abs(posAdjust.x - eye.x) > 1.0f || std::abs(posAdjust.y - eye.y) > 1.0f || std::abs(posAdjust.z - eye.z) > 1.0f)
+		return;
+	worldCameraFrame = frame;
 	worldCameraFrameValid = true;
 }
 

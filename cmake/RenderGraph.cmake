@@ -59,6 +59,10 @@ if(CS_RENDER_GRAPH)
         # Nsight Perf for OpenRenderGraph's Telemetry/NvPerfCapture (NvPerf's Vulkan backend): ORG_ENABLE_NVPERF and the
         # NVPerf::Host target come from CMakeLists.txt's NVPERF_SUPPORT block, which also delay-loads and installs the DLL.
         add_subdirectory("${CS_ORG_ROOT}/OpenRenderGraph" "${CMAKE_BINARY_DIR}/extern/OpenRenderGraph" EXCLUDE_FROM_ALL)
+        if(TARGET SPIRV-Tools-static)
+            get_target_property(_cs_spvtools_source_dir SPIRV-Tools-static SOURCE_DIR)
+            target_include_directories(SPIRV-Tools-static PRIVATE "${_cs_spvtools_source_dir}")
+        endif()
 
         # Runtime SPIR-V compilation (every render-graph shader): ORGModuleServices' content-addressed DXC service.
         # Optional; without it the render-graph features stay on their D3D11 paths.

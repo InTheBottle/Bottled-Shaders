@@ -350,7 +350,11 @@ VS_OUTPUT main(VS_INPUT input)
 	precise float4 previousInputPosition = inputPosition;
 
 #	if defined(FUR_SHELLS)
+#		if defined(DCLF_PULLED) || defined(DCLF_PULLED_VERTICES)
+	float furShell = 0.0;
+#		else
 	float furShell = FurShells::GetShell(instanceID);
+#		endif
 	float4 furRootPosition = inputPosition;
 #		if defined(MODELSPACENORMALS)
 	float3 furNormal = FurShells::GetModelNormal(input.TexCoord0.xy * TexcoordOffset.zw + TexcoordOffset.xy);
