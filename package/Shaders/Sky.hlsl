@@ -566,16 +566,6 @@ PS_OUTPUT main(PS_INPUT input)
 		psout.Color.rgb = ColorManagement::WorkingToUI(psout.Color.rgb);
 #	endif
 	psout.Color.w *= alphaTransmittance;
-
-#	if defined(TEX) && !defined(DITHER) && !defined(CLOUDS) && !defined(MOONMASK) && !defined(OCCLUSION)
-	[branch] if ((Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsMoon) && (!Permutation::RenderToUI || inReflection))
-	{
-		float3 moonEmitted = max(psout.Color.xyz, 0.0) * saturate(psout.Color.w);
-		float moonPeak = max(moonEmitted.x, max(moonEmitted.y, moonEmitted.z));
-		float moonAlpha = clamp(moonPeak, 1.0 / 256.0, 1.0);
-		psout.Color = moonPeak > 0.0 ? float4(moonEmitted / moonAlpha, moonAlpha) : 0.0;
-	}
-#	endif
 	return psout;
 }
 #endif
