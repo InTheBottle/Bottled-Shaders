@@ -1,7 +1,6 @@
 #include "HeatHaze.h"
 
 #include "Deferred.h"
-#include "Features/Effects11/D3D11StateBackup.h"
 #include "Features/SnowCover.h"
 #include "Features/TerrainBlending.h"
 #include "Globals.h"
@@ -32,6 +31,10 @@ namespace
 	constexpr float kMinDistance = 512.0f;
 	constexpr float kMaxDistance = 6000.0f;
 	constexpr float kMaxStrength = 3.0f;
+	constexpr float kPlumeWidthScale = 1.6f;
+	constexpr float kCopyBoundsPadding = 1.15f;
+	constexpr float kMaxSampleOffsetUV = 0.006f;
+	constexpr float kCopyMarginPixels = 2.0f;
 
 	struct BSShaderAccumulator_RenderEffects
 	{
@@ -51,6 +54,104 @@ namespace
 		return a_camera->WorldPtToScreenPt3(a_point, x, y, z, 1e-5f) && z > 0.0f &&
 		       x > -kScreenMargin && x < 1.0f + kScreenMargin && y > -kScreenMargin && y < 1.0f + kScreenMargin;
 	}
+
+	class HazeStateBackup
+	{
+	public:
+		explicit HazeStateBackup(ID3D11DeviceContext* a_context) :
+			context(a_context)
+		{
+			context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, renderTargets, &depthStencilView);
+			context->OMGetBlendState(&blendState, blendFactor, &sampleMask);
+			context->OMGetDepthStencilState(&depthStencilState, &stencilRef);
+			context->RSGetState(&rasterizerState);
+			context->RSGetViewports(&viewportCount, viewports);
+			context->IAGetInputLayout(&inputLayout);
+			context->IAGetPrimitiveTopology(&topology);
+			context->VSGetShader(&vertexShader, nullptr, nullptr);
+			context->VSGetConstantBuffers(0, 1, &vsFrame);
+			context->VSGetConstantBuffers(12, 1, &vsPerFrame);
+			context->PSGetShader(&pixelShader, nullptr, nullptr);
+			context->PSGetConstantBuffers(0, 1, &psFrame);
+			context->PSGetConstantBuffers(5, 2, psShared);
+			context->PSGetConstantBuffers(12, 1, &psPerFrame);
+			context->PSGetShaderResources(0, 2, psResources);
+			context->PSGetSamplers(0, 1, &psSampler);
+		}
+
+		HazeStateBackup(const HazeStateBackup&) = delete;
+		HazeStateBackup& operator=(const HazeStateBackup&) = delete;
+
+		~HazeStateBackup()
+		{
+			context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, renderTargets, depthStencilView);
+			context->OMSetBlendState(blendState, blendFactor, sampleMask);
+			context->OMSetDepthStencilState(depthStencilState, stencilRef);
+			context->RSSetState(rasterizerState);
+			context->RSSetViewports(viewportCount, viewports);
+			context->IASetInputLayout(inputLayout);
+			context->IASetPrimitiveTopology(topology);
+			context->VSSetShader(vertexShader, nullptr, 0);
+			context->VSSetConstantBuffers(0, 1, &vsFrame);
+			context->VSSetConstantBuffers(12, 1, &vsPerFrame);
+			context->PSSetShader(pixelShader, nullptr, 0);
+			context->PSSetConstantBuffers(0, 1, &psFrame);
+			context->PSSetConstantBuffers(5, 2, psShared);
+			context->PSSetConstantBuffers(12, 1, &psPerFrame);
+			context->PSSetShaderResources(0, 2, psResources);
+			context->PSSetSamplers(0, 1, &psSampler);
+
+			for (auto* view : renderTargets)
+				SafeRelease(view);
+			SafeRelease(depthStencilView);
+			SafeRelease(blendState);
+			SafeRelease(depthStencilState);
+			SafeRelease(rasterizerState);
+			SafeRelease(inputLayout);
+			SafeRelease(vertexShader);
+			SafeRelease(vsFrame);
+			SafeRelease(vsPerFrame);
+			SafeRelease(pixelShader);
+			SafeRelease(psFrame);
+			for (auto* buffer : psShared)
+				SafeRelease(buffer);
+			SafeRelease(psPerFrame);
+			for (auto* view : psResources)
+				SafeRelease(view);
+			SafeRelease(psSampler);
+		}
+
+	private:
+		template <class T>
+		static void SafeRelease(T* a_object)
+		{
+			if (a_object)
+				a_object->Release();
+		}
+
+		ID3D11DeviceContext* context;
+		ID3D11RenderTargetView* renderTargets[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
+		ID3D11DepthStencilView* depthStencilView = nullptr;
+		ID3D11BlendState* blendState = nullptr;
+		FLOAT blendFactor[4] = {};
+		UINT sampleMask = 0;
+		ID3D11DepthStencilState* depthStencilState = nullptr;
+		UINT stencilRef = 0;
+		ID3D11RasterizerState* rasterizerState = nullptr;
+		UINT viewportCount = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
+		D3D11_VIEWPORT viewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE] = {};
+		ID3D11InputLayout* inputLayout = nullptr;
+		D3D11_PRIMITIVE_TOPOLOGY topology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+		ID3D11VertexShader* vertexShader = nullptr;
+		ID3D11Buffer* vsFrame = nullptr;
+		ID3D11Buffer* vsPerFrame = nullptr;
+		ID3D11PixelShader* pixelShader = nullptr;
+		ID3D11Buffer* psFrame = nullptr;
+		ID3D11Buffer* psShared[2] = {};
+		ID3D11Buffer* psPerFrame = nullptr;
+		ID3D11ShaderResourceView* psResources[2] = {};
+		ID3D11SamplerState* psSampler = nullptr;
+	};
 }
 
 void HeatHaze::SetupResources()
@@ -254,6 +355,65 @@ void HeatHaze::Prepass()
 		SelectPlumes();
 }
 
+bool HeatHaze::BuildCopyBoxes(const float2& a_resolution, const float2& a_size)
+{
+	copyBoxes.clear();
+
+	auto* camera = RE::Main::WorldRootCamera();
+	if (!camera)
+		return false;
+
+	const RE::NiPoint3 eye = Util::GetEyePosition();
+	const float marginX = std::ceil(kMaxSampleOffsetUV * a_size.x) + kCopyMarginPixels;
+	const float marginY = std::ceil(kMaxSampleOffsetUV * a_size.y) + kCopyMarginPixels;
+
+	for (uint32_t i = 0; i < plumeCount; ++i) {
+		const auto& plume = frameData.Plumes[i];
+		const RE::NiPoint3 center{ plume.x, plume.y, plume.z };
+		const RE::NiPoint3 toPlume = center - eye;
+		RE::NiPoint3 side{ toPlume.y, -toPlume.x, 0.0f };
+		const float sideLength = side.Length();
+		if (sideLength < 1e-3f)
+			return false;
+		side *= plume.w * kPlumeWidthScale * kCopyBoundsPadding / sideLength;
+		const RE::NiPoint3 up{ 0.0f, 0.0f, plume.w * kPlumeHeightScale * kCopyBoundsPadding };
+
+		float minX = std::numeric_limits<float>::max();
+		float minY = std::numeric_limits<float>::max();
+		float maxX = std::numeric_limits<float>::lowest();
+		float maxY = std::numeric_limits<float>::lowest();
+		const RE::NiPoint3 corners[4] = { center - side, center + side, center - side + up, center + side + up };
+		for (const auto& corner : corners) {
+			float x = 0.0f;
+			float y = 0.0f;
+			float z = 0.0f;
+			if (!camera->WorldPtToScreenPt3(corner, x, y, z, 1e-5f) || z <= 0.0f)
+				return false;
+			minX = std::min(minX, x);
+			maxX = std::max(maxX, x);
+			minY = std::min(minY, 1.0f - y);
+			maxY = std::max(maxY, 1.0f - y);
+		}
+
+		const float left = std::clamp(std::floor(minX * a_resolution.x) - marginX, 0.0f, a_size.x);
+		const float right = std::clamp(std::ceil(maxX * a_resolution.x) + marginX, 0.0f, a_size.x);
+		const float top = std::clamp(std::floor(minY * a_resolution.y) - marginY, 0.0f, a_size.y);
+		const float bottom = std::clamp(std::ceil(maxY * a_resolution.y) + marginY, 0.0f, a_size.y);
+		if (right <= left || bottom <= top)
+			continue;
+
+		D3D11_BOX box{};
+		box.left = static_cast<UINT>(left);
+		box.top = static_cast<UINT>(top);
+		box.right = static_cast<UINT>(right);
+		box.bottom = static_cast<UINT>(bottom);
+		box.front = 0;
+		box.back = 1;
+		copyBoxes.push_back(box);
+	}
+	return true;
+}
+
 bool HeatHaze::EnsureSceneCopy(const D3D11_TEXTURE2D_DESC& a_desc)
 {
 	if (sceneCopy && sceneCopy->desc.Width == a_desc.Width && sceneCopy->desc.Height == a_desc.Height && sceneCopy->desc.Format == a_desc.Format)
@@ -340,14 +500,22 @@ void HeatHaze::Draw()
 	frameData.Strength = settings.Strength;
 	frameConstants->Update(frameData);
 
-	Effects11Util::D3D11FullStateBackup backup;
-	backup.Save(context);
+	const bool partialCopy = BuildCopyBoxes(resolution, size);
+	if (partialCopy && copyBoxes.empty())
+		return;
+
+	HazeStateBackup backup(context);
 
 	auto profiler = globals::profiler;
 	profiler->BeginPass("HeatHaze");
 
 	context->OMSetRenderTargets(0, nullptr, nullptr);
-	context->CopyResource(sceneCopy->resource.get(), mainTarget.texture);
+	if (partialCopy) {
+		for (const auto& box : copyBoxes)
+			context->CopySubresourceRegion(sceneCopy->resource.get(), 0, box.left, box.top, 0, mainTarget.texture, 0, &box);
+	} else {
+		context->CopyResource(sceneCopy->resource.get(), mainTarget.texture);
+	}
 
 	const D3D11_VIEWPORT viewport{ 0.0f, 0.0f, resolution.x, resolution.y, 0.0f, 1.0f };
 	context->RSSetViewports(1, &viewport);
@@ -379,7 +547,6 @@ void HeatHaze::Draw()
 	context->DrawInstanced(4, plumeCount, 0, 0);
 
 	profiler->EndPass();
-	backup.Restore(context);
 }
 
 void HeatHaze::DrawSettings()
