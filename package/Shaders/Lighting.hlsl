@@ -2253,8 +2253,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	pbrVertexColor = pbrVertexAO == 0.0f ? 1.0f : pbrVertexColor * lerp(1 / max(pbrVertexAO, 0.001), 1, SharedData::truePBRSettings.VertexAOStrength);
 	pbrVertexColor = Color::LinearSRGBToWorking(pbrVertexColor);
 
-	baseColor.xyz = Color::PBRMaterialToLinear(baseColor.xyz) * pbrVertexColor;
-	material.F0 = lerp(rawRMAOS.w, baseColor.xyz, material.Metallic);
+	float3 linearBaseColor = Color::PBRMaterialToLinear(baseColor.xyz);
+	baseColor.xyz = linearBaseColor * pbrVertexColor;
+	material.F0 = lerp(rawRMAOS.w, Color::UndoEnbColorPow(linearBaseColor) * pbrVertexColor, material.Metallic);
 	baseColor.xyz = Color::LinearToPBRMaterial(baseColor.xyz);
 
 	material.GlintScreenSpaceScale = max(1, glintParameters.x);
@@ -2271,7 +2272,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		if !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
 	[branch] if ((PBRFlags & PBR::Flags::Subsurface) != 0)
 	{
-		material.SubsurfaceColor = PBRParams2.xyz;
+		material.SubsurfaceColor = Color::EnbColorPow(PBRParams2.xyz);
 		material.Thickness = PBRParams2.w;
 		material.SubsurfaceBalance = LightingEffectParams.x;
 		[branch] if ((PBRFlags & PBR::Flags::HasFeatureTexture0) != 0)
@@ -2370,7 +2371,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	material.RoughnessSecondary = min(1.0, material.RoughnessSecondary + ExtraRoughness);
 	material.SecondarySpecIntensity = SharedData::skinData.skinParams2.x;
 	material.Thickness = 1 - skinsk.x;
-	material.SubsurfaceColor = skinsk.xyz;
+	material.SubsurfaceColor = Color::EnbColorPow(skinsk.xyz);
 	material.F0 = SharedData::skinData.skinParams2.zzz;
 	material.AO = skinAO;
 	material.Curvature = Skin::CalculateCurvature(worldNormal.xyz);
@@ -2497,7 +2498,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #				endif
 						material.Roughness = lerp(originRoughness, material.Roughness, envMask);
 						if (!isEyeMaterial && !usingDynamicCubemap) {
-							material.F0 = saturate(material.F0 + envMask * material.BaseColor);
+							material.F0 = saturate(material.F0 + envMask * Color::UndoEnbColorPow(material.BaseColor));
 							material.BaseColor = lerp(material.BaseColor, 0, envMask);
 						}
 #				if defined(EMAT)
@@ -3483,6 +3484,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	}
 #	else
 	color.xyz += diffuseColor * material.BaseColor;
+#		if defined(EFFECTS11)
+	color.xyz += emitColor * (Color::UndoEnbColorPow(material.BaseColor) - material.BaseColor);
+#		endif
 #	endif
 
 	color.xyz += indirectLobeWeights.diffuse * directionalAmbientColor;

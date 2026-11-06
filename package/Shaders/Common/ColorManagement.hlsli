@@ -42,6 +42,15 @@ namespace Color
 		return color;
 	}
 
+	float3 UndoEnbColorPow(float3 color)
+	{
+#	if defined(EFFECTS11)
+		if (SharedData::enbSettings.Enable)
+			color = pow(abs(color), rcp(max(SharedData::enbSettings.ColorPow, 1e-3)));
+#	endif
+		return color;
+	}
+
 	float3 Albedo(float3 color)
 	{
 		color = EnbColorPow(color);

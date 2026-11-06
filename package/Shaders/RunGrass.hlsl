@@ -554,12 +554,12 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float vertexAO = max(max(vertexColor.r, vertexColor.g), vertexColor.b);
 	vertexColor = Color::LinearSRGBToWorking(vertexColor / max(vertexAO, EPSILON_DIVISION));
 	material.BaseColor = Color::LinearToPBRMaterial(Color::PBRMaterialToLinear(baseColor.xyz) * vertexColor);
-	material.F0 = lerp(saturate(rawRMAOS.w), material.BaseColor, material.Metallic);
+	material.F0 = lerp(saturate(rawRMAOS.w), Color::UndoEnbColorPow(material.BaseColor), material.Metallic);
 	material.BaseColor *= 1 - material.Metallic;
 	material.Thickness = 1.0f;
 	[branch] if ((PBRFlags & PBR::Flags::Subsurface) != 0)
 	{
-		material.SubsurfaceColor = PBRParams2.xyz;
+		material.SubsurfaceColor = Color::EnbColorPow(PBRParams2.xyz);
 		material.Thickness = PBRParams2.w;
 		material.SubsurfaceBalance = PBRParams4.x;
 		[branch] if (pbrDetail && (PBRFlags & PBR::Flags::HasFeatureTexture0) != 0)
