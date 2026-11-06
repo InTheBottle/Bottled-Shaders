@@ -23,7 +23,7 @@ namespace WaterEffects
 		return lerp(center.xxx, dispersed, 0.5);
 	}
 
-	float3 ComputeCaustics(float4 waterData, float3 worldPosition)
+	float3 ComputeCaustics(float4 waterData, float3 worldPosition, float2 pixelPos)
 	{
 		float3 result = 1.0.xxx;
 		float causticsDistToWater = waterData.w - worldPosition.z;
@@ -32,10 +32,11 @@ namespace WaterEffects
 		float2 causticsUV = (worldPosition.xy + FrameBuffer::CameraPosAdjust.xy) * 0.005;
 		float dispersionAmount = 0.025 * shoreFactorCaustics * saturate(causticsDistToWater / 256.0);
 		float2 dispersionOffset = float2(0.6, 0.8) * dispersionAmount;
-		float2 causticsUVDdx = ddx(causticsUV);
-		float2 causticsUVDdy = ddy(causticsUV);
-		float2 dispersionDdx = float2(0.6, 0.8) * ddx(dispersionAmount);
-		float2 dispersionDdy = float2(0.6, 0.8) * ddy(dispersionAmount);
+		const float mipBiasScale = exp2(SharedData::MipBias);
+		float2 causticsUVDdx = ddx(causticsUV) * mipBiasScale;
+		float2 causticsUVDdy = ddy(causticsUV) * mipBiasScale;
+		float2 dispersionDdx = float2(0.6, 0.8) * ddx(dispersionAmount) * mipBiasScale;
+		float2 dispersionDdy = float2(0.6, 0.8) * ddy(dispersionAmount) * mipBiasScale;
 
 		if (shoreFactorCaustics > 0.0) {
 			float causticsFade = 1.0 - saturate(causticsDistToWater / 1024.0);

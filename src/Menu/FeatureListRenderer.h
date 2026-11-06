@@ -182,6 +182,9 @@ public:
 	 */
 	static bool PassesFilter(std::uint32_t bits, std::uint32_t filter);
 
+	/** @brief Accent dot in the top-right corner of a sort button while a filter is on. */
+	static void DrawFilterDot(const ImVec2& buttonMin, const ImVec2& buttonMax);
+
 	/**
 	 * @brief Draws the sort and filter popup (sort order, filters, Clear filters) if `popupId` is open.
 	 * @param popupId ID passed to ImGui::OpenPopup.

@@ -432,7 +432,9 @@ void ScreenSpaceShadows::Prepass()
 
 	if (drawShadows || !shadowTextureCleared) {
 		float white[4] = { 1, 1, 1, 1 };
+		globals::profiler->BeginPass("ScreenSpaceShadows::Clear");
 		context->ClearUnorderedAccessViewFloat(screenSpaceShadowsTexture->uav.get(), white);
+		globals::profiler->EndPass();
 	}
 	shadowTextureCleared = !drawShadows;
 

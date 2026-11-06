@@ -477,7 +477,7 @@ void FeatureListRenderer::DrawStageBadge(Feature::ReleaseStage stage, float rowH
 		return;
 	const auto& statusPalette = globals::menu->GetTheme().StatusPalette;
 	MenuFonts::FontRoleGuard badgeFont(Menu::FontRole::Subtext);
-	Util::Badge(label, stage == Feature::ReleaseStage::Alpha ? statusPalette.Error : statusPalette.Warning, rowHeight);
+	Util::Badge(label, stage == Feature::ReleaseStage::Alpha ? statusPalette.Error : statusPalette.Warning, { .rowHeight = rowHeight });
 }
 
 std::uint32_t FeatureListRenderer::GetFilterBits(Feature* feat)
@@ -503,6 +503,14 @@ bool FeatureListRenderer::PassesFilter(std::uint32_t bits, std::uint32_t filter)
 	constexpr std::uint32_t kAttributes = FeatureListFilter::kKnown & ~FeatureListFilter::kUnloaded;
 	const std::uint32_t required = filter & kAttributes;
 	return (bits & required) == required;
+}
+
+void FeatureListRenderer::DrawFilterDot(const ImVec2& buttonMin, const ImVec2& buttonMax)
+{
+	if ((globals::menu->GetSettings().FeatureListFilter & FeatureListFilter::kKnown) == 0)
+		return;
+	const float radius = ImGui::GetFrameHeight() * ThemeManager::Constants::STATUS_DOT_RATIO;
+	Util::DrawIconCircle(ImVec2(buttonMax.x - radius * 1.5f, buttonMin.y + radius * 1.5f), radius, ImGui::GetColorU32(Util::Colors::GetAccent()), true);
 }
 
 void FeatureListRenderer::RenderSortPopup(const char* popupId)

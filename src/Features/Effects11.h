@@ -226,6 +226,7 @@ public:
 	virtual void LoadSettings(json& o_json) override;
 	virtual void SaveSettings(json& o_json) override;
 	virtual void RestoreDefaultSettings() override;
+	virtual void Load() override;
 	virtual void SetupResources() override;
 	virtual void PostSetupResources() override;
 	virtual void Reset() override;

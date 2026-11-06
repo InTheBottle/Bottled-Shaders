@@ -498,8 +498,7 @@ namespace SharedData
 		float MicroShadowStrength;
 		uint EnableMultiScatter;
 		uint EnableHorizonOcclusion;
-		uint EnableLayeredFuzz;
-		uint2 pad;
+		uint3 pad;
 	};
 
 
@@ -768,14 +767,11 @@ namespace SharedData
 	// Returns water data for the tile containing worldPosition (camera-relative XY).
 	float4 GetWaterData(float3 worldPosition)
 	{
-		float2 cellF = (((worldPosition.xy + FrameBuffer::CameraPosAdjust.xy)) / 4096.0) + 64.0;  // always positive
-		int2 cellInt;
-		float2 cellFrac = modf(cellF, cellInt);
-
-		cellF = worldPosition.xy / float2(4096.0, 4096.0);  // remap to cell scale
-		cellF += 2.5;                                       // 5x5 cell grid
-		cellF -= cellFrac;                                  // align to cell borders
-		cellInt = round(cellF);
+		// floor keeps negative coordinates and cell borders exact
+		float2 cellPosition = (worldPosition.xy + FrameBuffer::CameraPosAdjust.xy) / 4096.0;
+		float2 cellFloor = floor(cellPosition);
+		float2 cellFrac = cellPosition - cellFloor;
+		int2 cellInt = (int2)(cellFloor - floor(FrameBuffer::CameraPosAdjust.xy / 4096.0)) + 2;  // 5x5 cell grid
 
 		return BlendWaterData(cellInt, cellFrac, worldPosition.z);
 	}

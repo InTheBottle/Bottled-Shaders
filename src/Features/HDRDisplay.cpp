@@ -901,7 +901,9 @@ void HDRDisplay::SetUIBuffer()
 
 		if (uiBufferMode.useUIBuffer) {
 			float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			globals::profiler->BeginPass("HDRDisplay::ClearUI");
 			globals::d3d::context->ClearRenderTargetView(targetRTV, clearColor);
+			globals::profiler->EndPass();
 		}
 
 		fb.RTV = targetRTV;
@@ -925,7 +927,9 @@ void HDRDisplay::SetUIBuffer()
 	}
 
 	float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	globals::profiler->BeginPass("HDRDisplay::ClearUI");
 	globals::d3d::context->ClearRenderTargetView(uiTexture->rtv.get(), clearColor);
+	globals::profiler->EndPass();
 
 	fb.RTV = uiTexture->rtv.get();
 	globals::d3d::context->OMSetRenderTargets(1, &fb.RTV, nullptr);
@@ -1178,7 +1182,9 @@ void HDRDisplay::ClearUIBuffer()
 		return;
 
 	float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	globals::profiler->BeginPass("HDRDisplay::ClearUI");
 	globals::d3d::context->ClearRenderTargetView(uiTexture->rtv.get(), clearColor);
+	globals::profiler->EndPass();
 
 	if (savedFramebufferRTV) {
 		auto& data = globals::game::renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGET::kFRAMEBUFFER];
@@ -1229,6 +1235,7 @@ void HDRDisplay::ApplyHDR()
 
 		if (!GetHDROutputCS()) {
 			// Fallback: HDR shader files not present - copy kFRAMEBUFFER directly to output
+			globals::profiler->BeginPass("HDRDisplay::BackBufferCopy");
 			if (upscaling.d3d12SwapChainActive) {
 				// SetUIBuffer keeps non-FG fallback UI in kFRAMEBUFFER; FG keeps using
 				// uiBufferWrapped for FidelityFX UI composition.
@@ -1241,6 +1248,7 @@ void HDRDisplay::ApplyHDR()
 					backBuffer->Release();
 				}
 			}
+			globals::profiler->EndPass();
 
 			RestoreCleanScene();
 			state->EndPerfEvent();
@@ -1263,6 +1271,7 @@ void HDRDisplay::ApplyHDR()
 		DispatchHDROutput(sceneSRV, uiSRV, outputTexture->uav.get());
 	}
 
+	globals::profiler->BeginPass("HDRDisplay::BackBufferCopy");
 	if (upscaling.d3d12SwapChainActive) {
 		if (upscaling.dx12SwapChain.swapChainBufferWrapped &&
 			upscaling.dx12SwapChain.swapChainBufferWrapped->resource11 &&
@@ -1277,6 +1286,7 @@ void HDRDisplay::ApplyHDR()
 			backBuffer->Release();
 		}
 	}
+	globals::profiler->EndPass();
 
 	RestoreCleanScene();
 	state->EndPerfEvent();
@@ -1356,7 +1366,9 @@ void HDRDisplay::SnapshotCleanScene()
 		cleanSceneCapture->CreateSRV(srvDesc);
 	}
 
+	globals::profiler->BeginPass("HDRDisplay::CleanSceneSnapshot");
 	globals::d3d::context->CopyResource(cleanSceneCapture->resource.get(), hdrTexture->resource.get());
+	globals::profiler->EndPass();
 	cleanSceneCaptureFrame = globals::state->frameCount;
 }
 
@@ -1366,7 +1378,9 @@ void HDRDisplay::RestoreCleanScene()
 		!cleanSceneCapture || !cleanSceneCapture->resource)
 		return;
 
+	globals::profiler->BeginPass("HDRDisplay::CleanSceneRestore");
 	globals::d3d::context->CopyResource(hdrTexture->resource.get(), cleanSceneCapture->resource.get());
+	globals::profiler->EndPass();
 }
 
 bool HDRDisplay::IsCleanSceneCaptureFresh() const

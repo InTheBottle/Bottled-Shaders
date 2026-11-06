@@ -23,6 +23,7 @@
 #include "Menu.h"
 #include "Menu/CursorLoader.h"
 #include "Menu/FontAtlasState.h"
+#include "Menu/SettingsTabRenderer.h"
 #include "Presets/UnifiedPresetCatalog.h"
 #include "ShaderCache.h"
 #include "State.h"
@@ -287,7 +288,7 @@ void OverlayRenderer::RenderOverlay(
 
 	// The Effects 11 editor and the Bottled Shaders menu are exclusive; the CS Editor hosts it.
 	auto& effects11Editor = Effects11Editor::GetSingleton();
-	if (effects11Editor.IsOpen() && menu.IsEnabled)
+	if (effects11Editor.IsOpen() && menu.IsOpen())
 		effects11Editor.Close(false);
 
 	if (editorWindow->open) {
@@ -299,22 +300,24 @@ void OverlayRenderer::RenderOverlay(
 	} else if (effects11Editor.IsOpen()) {
 		ImGui::GetIO().MouseDrawCursor = true;
 		effects11Editor.Draw();
-	} else if (menu.IsEnabled || menu.openFade > 0.0f || SetupRenderer::ShouldShowFirstTimeSetup()) {
-		ImGui::GetIO().MouseDrawCursor = menu.IsEnabled || SetupRenderer::ShouldShowFirstTimeSetup();
-		if (menu.IsEnabled || menu.openFade > 0.0f) {
+	} else if (menu.IsOpen() || menu.openFade > 0.0f || SetupRenderer::ShouldShowFirstTimeSetup()) {
+		ImGui::GetIO().MouseDrawCursor = menu.IsOpen() || SetupRenderer::ShouldShowFirstTimeSetup();
+		if (menu.IsOpen() || menu.openFade > 0.0f) {
 			const auto& context = *ImGui::GetCurrentContext();
 			const bool editedBefore = context.ActiveIdHasBeenEditedThisFrame;
 			drawSettings();
 			// Only frames that edited something pay for the check; search boxes edit too, so it compares.
-			if (!editedBefore && context.ActiveIdHasBeenEditedThisFrame)
+			const bool edited = !editedBefore && context.ActiveIdHasBeenEditedThisFrame;
+			if (edited)
 				globals::state->CheckCoreSettingsChanged();
+			SettingsTabRenderer::CheckThemeChanged(edited || ImGui::IsMouseReleased(ImGuiMouseButton_Left) || context.NavActivateId != 0);
 		}
 	} else {
 		ImGui::GetIO().MouseDrawCursor = false;
 	}
 
 	// Enabling a Baseline pack can happen from either the menu or the CS editor, and the answer outlives the page.
-	if (editorWindow->open || menu.IsEnabled)
+	if (editorWindow->open || menu.IsOpen())
 		UnifiedPresetCatalog::GetSingleton().DrawBaselineOverlapPrompt();
 
 	// The editor draws the notifications in its own frame; while it is closed they still need a host,
@@ -340,7 +343,7 @@ bool OverlayRenderer::ShouldSkipRendering()
 	const uint32_t effectFailed = GetFailedEffectCount();
 
 	return !((shaderCache->IsCompiling() && (!shaderCache->backgroundCompilation || shaderCache->IsShowBackgroundOverlay())) ||
-			 Menu::GetSingleton()->IsEnabled ||
+			 Menu::GetSingleton()->IsOpen() ||
 			 Menu::GetSingleton()->openFade > 0.0f ||
 			 SetupRenderer::ShouldShowFirstTimeSetup() ||
 			 EditorWindow::GetSingleton()->open ||

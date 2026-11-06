@@ -1294,31 +1294,32 @@ void Upscaling::PostDisplay()
 	globals::state->UpdateSharedData(false, false);
 }
 
-void Upscaling::TimerSleepQPC(int64_t targetQPC)
+void Upscaling::TimerSleepQPC(int64_t targetQPC, int64_t frequency)
 {
-	constexpr DWORD kHighResolutionTimer = 0x00000002;
-	static const HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, kHighResolutionTimer, TIMER_ALL_ACCESS);
-	static const int64_t frequency = [] {
-		LARGE_INTEGER value;
-		QueryPerformanceFrequency(&value);
-		return value.QuadPart;
-	}();
+	static const HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
 
 	LARGE_INTEGER currentQPC;
 	QueryPerformanceCounter(&currentQPC);
-	const int64_t spinTicks = frequency / 1000;
-	const int64_t remaining = targetQPC - currentQPC.QuadPart;
-	if (timer && remaining > spinTicks) {
+	const int64_t duration = targetQPC - currentQPC.QuadPart;
+	if (duration <= 0)
+		return;
+
+	// Spin the tail like DXVK; timer wakes land late, more so on long waits
+	const int64_t spinTicks = frequency / 500 + duration / 6;
+	while (timer) {
+		const int64_t sleepTicks = targetQPC - currentQPC.QuadPart - spinTicks;
 		LARGE_INTEGER due;
-		due.QuadPart = -((remaining - spinTicks) * 10000000LL / frequency);
-		if (SetWaitableTimerEx(timer, &due, 0, nullptr, nullptr, nullptr, 0))
-			WaitForSingleObject(timer, 100);
+		due.QuadPart = -(sleepTicks * 10000000LL / frequency);
+		if (due.QuadPart >= 0 || !SetWaitableTimerEx(timer, &due, 0, nullptr, nullptr, nullptr, 0))
+			break;
+		WaitForSingleObject(timer, 100);
+		QueryPerformanceCounter(&currentQPC);
 	}
 
-	do {
+	while (currentQPC.QuadPart < targetQPC) {
 		YieldProcessor();
 		QueryPerformanceCounter(&currentQPC);
-	} while (currentQPC.QuadPart < targetQPC);
+	}
 }
 
 void Upscaling::FrameLimiter()
@@ -1338,15 +1339,19 @@ void Upscaling::FrameLimiter()
 			int64_t targetFrameTimeNS = int64_t(static_cast<double>(kNanosecondsPerSecond) / (refreshRate * frameRateScale));
 			int64_t targetFrameTicks = (targetFrameTimeNS * qpf.QuadPart) / kNanosecondsPerSecond;
 
-			static LARGE_INTEGER lastFrame = {};
+			// Fixed cadence: a late frame is repaid next frame instead of drifting
+			static int64_t nextFrame = 0;
+			// FG toggles with menus; rebase the pending deadline onto the new interval
+			static int64_t lastFrameTicks = 0;
+			nextFrame += targetFrameTicks - lastFrameTicks;
+			lastFrameTicks = targetFrameTicks;
+
 			LARGE_INTEGER timeNow;
 			QueryPerformanceCounter(&timeNow);
-
-			int64_t delta = timeNow.QuadPart - lastFrame.QuadPart;
-			if (delta < targetFrameTicks) {
-				TimerSleepQPC(lastFrame.QuadPart + targetFrameTicks);
-			}
-			QueryPerformanceCounter(&lastFrame);
+			if (timeNow.QuadPart < nextFrame)
+				TimerSleepQPC(nextFrame, qpf.QuadPart);
+			// Over a whole interval behind (hitch, limiter re-enabled): restart from now
+			nextFrame = timeNow.QuadPart < nextFrame + targetFrameTicks ? nextFrame + targetFrameTicks : timeNow.QuadPart + targetFrameTicks;
 		}
 	}
 }

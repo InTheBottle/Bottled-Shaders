@@ -188,7 +188,8 @@ void EvaluateLighting(DirectContext context, MaterialProperties material, float3
 #endif
 }
 
-void GetIndirectLobeWeights(out IndirectLobeWeights lobeWeights, IndirectContext context, MaterialProperties material, float2 uv)
+void GetIndirectLobeWeights(out IndirectLobeWeights lobeWeights, IndirectContext context, MaterialProperties material,
+	float2 uv)
 {
 	lobeWeights = (IndirectLobeWeights)0;
 #if defined(TRUE_PBR)

@@ -25,6 +25,7 @@
 #pragma warning(pop)
 
 #include <format>
+#include <fstream>
 #include <functional>
 #include <malloc.h>
 
@@ -360,7 +361,7 @@ namespace
 			if (!hdr.hdrTexture || !hdr.outputTexture || !hdr.hdrDataCB || !hdr.GetHDROutputCS())
 				return src;
 
-			if (Menu::GetSingleton()->IsEnabled && hdr.outputTexture && hdr.outputTexture->srv) {
+			if (Menu::GetSingleton()->IsOpen() && hdr.outputTexture && hdr.outputTexture->srv) {
 				ID3D11ShaderResourceView* sceneSRV =
 					(forCapture && hdr.IsCleanSceneCaptureFresh()) ? hdr.cleanSceneCapture->srv.get() :
 																	 (hdr.hdrTexture ? hdr.hdrTexture->srv.get() : nullptr);
@@ -413,7 +414,7 @@ namespace
 	// Paired with ImDrawCallback_ResetRenderState queued by Subrect::DrawEditor.
 	void OpaquePreviewBlendCallback(const ImDrawList*, const ImDrawCmd*)
 	{
-		const bool writeAlpha = IsFlatHdrScreenshotCapture() && Menu::GetSingleton()->IsEnabled;
+		const bool writeAlpha = IsFlatHdrScreenshotCapture() && Menu::GetSingleton()->IsOpen();
 
 		static winrt::com_ptr<ID3D11BlendState> rgbBlend;
 		static winrt::com_ptr<ID3D11BlendState> rgbaBlend;
@@ -531,6 +532,44 @@ namespace
 		return saved;
 	}
 
+	/** @brief Removes the cICP chunk from a PNG; Discord misreads it, while the iCCP profile still describes the HDR colour space. */
+	bool StripPngCicpChunk(const std::filesystem::path& path)
+	{
+		constexpr size_t kPngSignatureSize = 8;
+		constexpr size_t kChunkTypeOffset = 4;
+		constexpr size_t kChunkOverhead = 12;  // length + type + CRC
+
+		std::error_code ec;
+		const auto fileSize = std::filesystem::file_size(path, ec);
+		if (ec) {
+			return false;
+		}
+		std::string data(fileSize, '\0');
+		{
+			std::ifstream file(path, std::ios::binary);
+			if (!file.read(data.data(), static_cast<std::streamsize>(data.size()))) {
+				return false;
+			}
+		}
+
+		for (size_t offset = kPngSignatureSize; offset + kChunkOverhead <= data.size();) {
+			uint32_t length;
+			std::memcpy(&length, &data[offset], sizeof(length));
+			const size_t chunkSize = kChunkOverhead + _byteswap_ulong(length);
+			const auto* type = &data[offset + kChunkTypeOffset];
+			// cICP must precede IDAT, so stop there.
+			if (offset + chunkSize > data.size() || std::memcmp(type, "IDAT", 4) == 0) {
+				return false;
+			}
+			if (std::memcmp(type, "cICP", 4) == 0) {
+				data.erase(offset, chunkSize);
+				return Util::FileHelpers::WriteFileAtomically(path, data, "HDR screenshot");
+			}
+			offset += chunkSize;
+		}
+		return false;
+	}
+
 	bool SaveSdrScreenshot(
 		DirectX::ScratchImage& image,
 		const std::filesystem::path& outputPath,
@@ -618,6 +657,8 @@ void ScreenshotFeature::LoadSettings(json& a_json)
 		hdrPngBitDepth = std::clamp<unsigned int>(a_json["HdrPngBitDepth"], 7u, 16u);
 	if (a_json.contains("HdrUseAvif") && a_json["HdrUseAvif"].is_boolean())
 		hdrUseAvif = a_json["HdrUseAvif"];
+	if (a_json.contains("FixDiscordHdr") && a_json["FixDiscordHdr"].is_boolean())
+		fixDiscordHdr = a_json["FixDiscordHdr"];
 	if (a_json.contains("SdrUsePng"))
 		sdrUsePng = a_json["SdrUsePng"];
 	if (a_json.contains("CopyToClipboard"))
@@ -635,6 +676,7 @@ void ScreenshotFeature::SaveSettings(json& a_json)
 	a_json["ApplyCropToScreenshot"] = applyCropToScreenshot;
 	a_json["HdrPngBitDepth"] = hdrPngBitDepth;
 	a_json["HdrUseAvif"] = hdrUseAvif;
+	a_json["FixDiscordHdr"] = fixDiscordHdr;
 	a_json["SdrUsePng"] = sdrUsePng;
 	a_json["CopyToClipboard"] = copyToClipboard;
 	a_json["DisableVanillaScreenshot"] = disableVanillaScreenshot;
@@ -677,6 +719,12 @@ void ScreenshotFeature::DrawSettings()
 					"%s", T(TKEY("hdr_bit_depth_tooltip"),
 							  "Quantization for the 48 bpp RGB PNG payload. 11-bit is a good default; "
 							  "higher values increase file size with diminishing returns."));
+			ImGui::Checkbox(T(TKEY("fix_discord_hdr"), "Fix Discord HDR screenshots"), &fixDiscordHdr);
+			if (auto _tt = Util::HoverTooltipWrapper())
+				ImGui::Text(
+					"%s", T(TKEY("fix_discord_hdr_tooltip"),
+							  "Removes the cICP tag from HDR PNGs, which Discord misreads and shows washed out.\n"
+							  "The embedded ICC profile still describes the HDR colour space."));
 		}
 	} else {
 		ImGui::TextWrapped("%s",
@@ -877,7 +925,7 @@ void ScreenshotFeature::EnsurePreviewCache(ID3D11Texture2D* sourceTexture)
 
 void ScreenshotFeature::Reset()
 {
-	if (previewCacheTexture && !Menu::GetSingleton()->IsEnabled) {
+	if (previewCacheTexture && !Menu::GetSingleton()->IsOpen()) {
 		previewCacheSRV = nullptr;
 		previewCacheTexture = nullptr;
 	}
@@ -992,6 +1040,10 @@ void ScreenshotFeature::ScreenshotWorkerLoop()
 				logger::error(
 					"Failed to save {} screenshot.",
 					screenshot.saveAsHdrAvif ? "HDR AVIF" : (screenshot.saveAsHdrPng ? "HDR PNG" : "SDR"));
+			}
+
+			if (saveOk && screenshot.saveAsHdrPng && screenshot.fixDiscordHdr && !StripPngCicpChunk(screenshot.outputPath)) {
+				logger::warn("Failed to strip cICP chunk from HDR PNG for Discord.");
 			}
 
 			if (saveOk) {
@@ -1109,6 +1161,7 @@ void ScreenshotFeature::Capture()
 	screenshot.saveAsHdrAvif = saveAsHdrAvif;
 	screenshot.saveAsSdrPng = saveAsSdrPng;
 	screenshot.hdrPngBitDepth = static_cast<int>(hdrPngBitDepth);
+	screenshot.fixDiscordHdr = fixDiscordHdr;
 	screenshot.outputPath = BuildScreenshotPath(screenshotPath, saveAsHdrAvif ? ".avif" : (saveAsHdrPng || saveAsSdrPng ? ".png" : ".bmp"));
 	screenshot.copyToClipboard = copyToClipboard;
 	pendingReadbacks.push_back(std::move(screenshot));

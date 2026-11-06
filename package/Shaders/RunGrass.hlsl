@@ -459,6 +459,7 @@ cbuffer PerMaterial : register(b1)
 	float4 PBRParams2 : packoffset(c1);    // subsurface color, subsurface opacity
 	float4 PBRParams3 : packoffset(c2);    // fuzz color, fuzz weight
 	float4 PBRParams4 : packoffset(c3);    // subsurface balance, front/back specular weights, back roughness scale
+	float4 PBRParams5 : packoffset(c4);    // fuzz roughness in x (negative uses base roughness)
 };
 
 #		endif
@@ -574,12 +575,13 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	}
 	[branch] if (pbrDetail && (PBRFlags & PBR::Flags::Fuzz) != 0)
 	{
-		material.FuzzColor = PBRParams3.xyz;
+		material.FuzzColor = Color::LinearSRGBToWorking(PBRParams3.xyz);
 		material.FuzzWeight = PBRParams3.w;
+		material.FuzzRoughness = PBRParams5.x;
 		[branch] if ((PBRFlags & PBR::Flags::HasFeatureTexture1) != 0)
 		{
 			float4 fuzz = TexFuzzSampler.Sample(SampFuzzSampler, input.TexCoord.xy);
-			material.FuzzColor *= Color::Albedo(Color::LinearSRGBToWorking(fuzz.xyz));
+			material.FuzzColor *= Color::LinearSRGBToWorking(fuzz.xyz);
 			material.FuzzWeight *= fuzz.w;
 		}
 	}
@@ -597,7 +599,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	if (!SharedData::InInterior)
 		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, cloudScatter);
 #				if defined(WATER_EFFECTS)
-	dirLightColor *= WaterEffects::ComputeCaustics(SharedData::GetWaterData(input.WorldPosition.xyz), input.WorldPosition.xyz);
+	dirLightColor *= WaterEffects::ComputeCaustics(SharedData::GetWaterData(input.WorldPosition.xyz), input.WorldPosition.xyz, input.HPosition.xy);
 #				endif
 
 	float4 shadowColor = TexShadowMaskSampler.Load(int3(input.HPosition.xy, 0));
@@ -638,7 +640,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		SnowCover::ApplySnowFoliagePBR(material, float3(input.TexCoord.xy, normal.z * 0.5 + 0.5), input.WorldPosition.xyz + FrameBuffer::CameraPosAdjust.xyz, snowOcclusion, length(viewPosition.xyz));
 	}
 #				endif
-	PBR::ThinSurface grassSurface = PBR::CreateThinSurface(material, clamp(abs(dot(normal, viewDirection)), EPSILON_DOT_CLAMP, 1.0f), pbrDetail);
+	const float grassNdotV = clamp(abs(dot(normal, viewDirection)), EPSILON_DOT_CLAMP, 1.0f);
+	PBR::ThinSurface grassSurface = PBR::CreateThinSurface(material, grassNdotV, pbrDetail);
+	material.Fuzz = PBR::CreateFuzzLayer(material, grassNdotV, pbrDetail);
+	PBR::CacheFuzzLTC(material.Fuzz, normal, viewDirection, grassNdotV);
 
 	float canopyVisibility = GrassLighting::GetCanopyVisibility(input.VertexNormal.w);
 	float dirClumpVisibility = canopyVisibility * (sphereNormal ? 1.0 : GrassLighting::GetClumpLightVisibility(clumpNormal, SharedData::DirLightDirection.xyz));
@@ -920,7 +925,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	if (!SharedData::InInterior)
 		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, cloudScatter);
 #				if defined(WATER_EFFECTS)
-	dirLightColor *= WaterEffects::ComputeCaustics(SharedData::GetWaterData(input.WorldPosition.xyz), input.WorldPosition.xyz);
+	dirLightColor *= WaterEffects::ComputeCaustics(SharedData::GetWaterData(input.WorldPosition.xyz), input.WorldPosition.xyz, input.HPosition.xy);
 #				endif
 
 	float dirShadow = SharedData::InInterior ? 1.0 : shadowColor.x;
@@ -1199,7 +1204,7 @@ PS_OUTPUT main(PS_INPUT input)
 	if (!SharedData::InInterior)
 		dirLightColor *= ShadowSampling::GetWorldShadow(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, cloudScatter);
 #			if defined(WATER_EFFECTS)
-	dirLightColor *= WaterEffects::ComputeCaustics(SharedData::GetWaterData(input.WorldPosition.xyz), input.WorldPosition.xyz);
+	dirLightColor *= WaterEffects::ComputeCaustics(SharedData::GetWaterData(input.WorldPosition.xyz), input.WorldPosition.xyz, input.HPosition.xy);
 #			endif
 
 	float dirDetailedShadow = 1.0;

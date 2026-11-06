@@ -1,6 +1,7 @@
 #include "Menu.h"
 #include "Menu/FeatureUndo.h"
 #include "Menu/FontAtlasState.h"
+#include "Utils/Logging.h"
 #include "Utils/Notifications.h"
 
 #ifndef DIRECTINPUT_VERSION
@@ -204,8 +205,6 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	Theme,
 	SelectedThemePreset)
 
-bool IsEnabled = false;
-
 namespace
 {
 	/**
@@ -244,12 +243,6 @@ namespace
 		{ "Hand", ImGuiMouseCursor_Hand },
 		{ "NotAllowed", ImGuiMouseCursor_NotAllowed },
 	};
-}
-
-void Menu::ThemeFromJson(const json& themeJson, ThemeSettings& theme)
-{
-	theme = themeJson.get<ThemeSettings>();
-	PaletteFromJson(themeJson, theme.FullPalette);
 }
 
 void Menu::CursorFromJson(const json& cursorJson, ThemeSettings::CursorSettings& cursor)
@@ -309,6 +302,26 @@ static void SanitizeFontRolesJson(json& themeJson)
 		for (size_t i = fontRoles.size(); i < expected; ++i) {
 			fontRoles.push_back(defaults[i]);
 		}
+	}
+}
+
+void Menu::ThemeFromJson(const json& themeJson, ThemeSettings& theme)
+{
+	json sanitized = themeJson;
+	SanitizeFontRolesJson(sanitized);
+	theme = sanitized.get<ThemeSettings>();
+	PaletteFromJson(sanitized, theme.FullPalette);
+	if (sanitized.contains("Cursor") && sanitized["Cursor"].is_object())
+		CursorFromJson(sanitized["Cursor"], theme.Cursor);
+
+	MenuFonts::NormalizeFontRoles(theme, themeJson.contains("FontRoles"));
+	Util::CursorLoader::MigrateLegacyCursorSettings(theme);
+	auto& bodyRole = theme.FontRoles[static_cast<size_t>(FontRole::Body)];
+	if (!Util::ValidateFont(bodyRole.File)) {
+		const auto& defaults = GetDefaultFontRole(FontRole::Body);
+		logger::warn("Theme font '{}' not found, falling back to default font '{}'", bodyRole.File, defaults.File);
+		bodyRole = defaults;
+		theme.FontName = defaults.File;
 	}
 }
 
@@ -590,9 +603,17 @@ void Menu::SaveTheme(json& o_json)
 		settings.Theme.FontName = defaults.File;
 	}
 
-	o_json["Theme"] = settings.Theme;
-	PaletteToJson(o_json["Theme"], settings.Theme.FullPalette);
-	CursorToJson(o_json["Theme"]["Cursor"], settings.Theme.Cursor);
+	o_json["Theme"] = ThemeToJson(settings.Theme);
+}
+
+json Menu::ThemeToJson(const ThemeSettings& theme)
+{
+	json out = theme;
+	PaletteToJson(out, theme.FullPalette);
+	CursorToJson(out["Cursor"], theme.Cursor);
+	// The font reload rewrites FontName on its own; the Body role is what counts
+	out["FontName"] = theme.FontRoles[static_cast<size_t>(FontRole::Body)].File;
+	return out;
 }
 
 std::vector<std::string> Menu::DiscoverThemes()
@@ -619,29 +640,13 @@ bool Menu::LoadThemePreset(const std::string& themeName)
 	if (themeManager->LoadTheme(themeName, themeSettings)) {
 		// Create a backup of current theme in case loading fails
 		ThemeSettings backupTheme = settings.Theme;
-		bool hasFontRoles = themeSettings.contains("FontRoles");
-
-		SanitizeFontRolesJson(themeSettings);
 
 		try {
-			settings.Theme = themeSettings;
-			PaletteFromJson(themeSettings, settings.Theme.FullPalette);
-			if (themeSettings.contains("Cursor") && themeSettings["Cursor"].is_object()) {
-				CursorFromJson(themeSettings["Cursor"], settings.Theme.Cursor);
-			}
-
-			MenuFonts::NormalizeFontRoles(settings.Theme, hasFontRoles);
-			Util::CursorLoader::MigrateLegacyCursorSettings(settings.Theme);
-			auto& bodyRole = settings.Theme.FontRoles[static_cast<size_t>(FontRole::Body)];
-			if (!Util::ValidateFont(bodyRole.File)) {
-				const auto& defaults = Menu::GetDefaultFontRole(FontRole::Body);
-				logger::warn("Font '{}' from theme '{}' not found, falling back to default font '{}'",
-					bodyRole.File, themeName, defaults.File);
-				settings.Theme.FontRoles[static_cast<size_t>(FontRole::Body)] = defaults;
-				settings.Theme.FontName = defaults.File;
-			}
+			ThemeFromJson(themeSettings, settings.Theme);
 
 			settings.SelectedThemePreset = themeName;
+			// Colours and Fonts undo steps belong to the theme they were made on
+			undoHistory.Forget("theme.");
 
 			// Schedule deferred font reload if font has changed
 			if (settings.Theme.FontName != MenuFonts::GetAtlasState().cachedFontName) {
@@ -850,7 +855,10 @@ void Menu::DrawSettings()
 	if (!wasDocked)
 		windowFlags |= ImGuiWindowFlags_NoTitleBar;
 
-	Util::BeginWithRoundedClose(title.c_str(), &IsEnabled, windowFlags);
+	bool keepOpen = true;
+	Util::BeginWithRoundedClose(title.c_str(), &keepOpen, windowFlags);
+	if (!keepOpen)
+		Close();
 	{
 		const bool isDocked = ImGui::IsWindowDocked();
 		wasDocked = isDocked;
@@ -1051,7 +1059,7 @@ void Menu::DispatchShortcuts()
 	// The CS Editor has its own Ctrl+Z / Ctrl+S, a focused text field owns its keys, a hotkey capture
 	// records the next chord as a binding, and a modal (confirmation) must be answered first.
 	const auto* editorWindow = EditorWindow::GetSingleton();
-	const bool allowed = IsEnabled && !ImGui::GetIO().WantTextInput && !IsCapturingHotkeyInput() &&
+	const bool allowed = open && !ImGui::GetIO().WantTextInput && !IsCapturingHotkeyInput() &&
 	                     !(editorWindow && editorWindow->open) && !ImGui::GetTopMostPopupModal() &&
 	                     !SetupRenderer::ShouldShowFirstTimeSetup();
 	if (allowed)
@@ -1173,7 +1181,7 @@ void Menu::DrawOverlay()
 	ImGuiContext* ctx = ImGui::GetCurrentContext();
 	bool canReload = ctx && !ctx->WithinFrameScope && ctx->WithinEndChildID == 0;
 
-	if (auto& atlas = MenuFonts::GetAtlasState(); !IsEnabled && atlas.wantsFontPreviewAtlas) {
+	if (auto& atlas = MenuFonts::GetAtlasState(); !open && atlas.wantsFontPreviewAtlas) {
 		atlas.wantsFontPreviewAtlas = false;
 		atlas.pendingFontReload = true;
 	}
@@ -1188,13 +1196,12 @@ void Menu::DrawOverlay()
 	}
 
 	if (pendingCursorReload && canReload) {
-		static bool loggedCursorReloadRetry = false;
+		static Util::OnceFlag loggedCursorReloadRetry;
 		if (Util::CursorLoader::Reload(this)) {
 			pendingCursorReload = false;
-			loggedCursorReloadRetry = false;
-		} else if (!loggedCursorReloadRetry) {
+			loggedCursorReloadRetry.Reset();
+		} else if (loggedCursorReloadRetry.First()) {
 			logger::warn("Menu::DrawOverlay() - Cursor reload deferred (will retry when ready)");
-			loggedCursorReloadRetry = true;
 		}
 	}
 
@@ -1306,10 +1313,13 @@ void Menu::ProcessInputEventQueue()
 				KeyAction keyActions[] = {
 					{ settings.ToggleKey, [this]() {
 						 if (!SetupRenderer::ShouldShowFirstTimeSetup() && !EditorWindow::GetSingleton()->open) {
-							 IsEnabled = !IsEnabled;
 							 suppressNextEscape = false;
-							 if (IsEnabled)
+							 if (open) {
+								 Close();
+							 } else {
+								 Open();
 								 ImGui::GetIO().ClearInputKeys();  // Prevent toggle key from remaining "held" in ImGui after open.
+							 }
 						 } else if (SetupRenderer::ShouldShowFirstTimeSetup()) {
 							 SetupRenderer::MarkFirstTimeSetupComplete();
 						 }
@@ -1465,12 +1475,12 @@ void Menu::ProcessInputEventQueue()
 					} else if (auto& effects11Editor = Effects11Editor::GetSingleton(); effects11Editor.IsOpen()) {
 						if (effects11Editor.ShouldHandleEscapeKey())
 							effects11Editor.Close();
-					} else if (IsEnabled && (!editorWindow || !editorWindow->open)) {
+					} else if (open && (!editorWindow || !editorWindow->open)) {
 						const bool escapeClaimed = TakeConsumedEscape();
 						if (suppressNextEscape)
 							suppressNextEscape = false;
 						else if (!escapeClaimed)
-							IsEnabled = false;
+							Close();
 					}
 				}
 			} else if (event.IsDown() && !wasCapturingHotkey) {
@@ -1534,7 +1544,7 @@ void Menu::ProcessInputEventQueue()
 	if (openRequested && !(GetAsyncKeyState(VK_LBUTTON) & Constants::KEY_PRESSED_MASK)) {
 		openRequested = false;
 		if (!SetupRenderer::ShouldShowFirstTimeSetup() && !EditorWindow::GetSingleton()->open) {
-			IsEnabled = true;
+			Open();
 			suppressNextEscape = false;
 			io.ClearEventsQueue();
 			io.ClearInputKeys();
@@ -1596,15 +1606,15 @@ void Menu::ProcessInputEvents(RE::InputEvent* const* a_events)
 void Menu::UpdateOpenFade(float deltaTime)
 {
 	if (settings.Theme.MenuFadeEnabled)
-		Util::StepFade(openFade, IsEnabled, deltaTime);
+		Util::StepFade(openFade, open, deltaTime);
 	else
-		openFade = IsEnabled ? 1.0f : 0.0f;
+		openFade = open ? 1.0f : 0.0f;
 }
 
 bool Menu::ShouldSwallowInput()
 {
 	auto editorWindow = EditorWindow::GetSingleton();
-	return IsEnabled || SetupRenderer::ShouldShowFirstTimeSetup() || (editorWindow && editorWindow->open) ||
+	return open || SetupRenderer::ShouldShowFirstTimeSetup() || (editorWindow && editorWindow->open) ||
 	       Effects11Editor::GetSingleton().IsOpen();
 }
 
@@ -1660,6 +1670,18 @@ bool Menu::IsPreviewFlying()
 {
 	auto editorWindow = EditorWindow::GetSingleton();
 	return editorWindow && editorWindow->IsPreviewFlying();
+}
+
+void Menu::Open()
+{
+	open = true;
+}
+
+void Menu::Close()
+{
+	if (!std::exchange(open, false))
+		return;
+	globals::state->SaveCoreSettings(State::SELF_SAVING_SETTINGS);
 }
 
 void Menu::SelectFeatureMenu(const std::string& featureName)

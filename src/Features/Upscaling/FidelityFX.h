@@ -22,6 +22,7 @@
 
 #include "../../Buffer.h"
 #include "../../State.h"
+#include "Utils/Logging.h"
 
 class WrappedResource;
 
@@ -185,7 +186,7 @@ private:
 	bool hostFsrContextFailed = false;
 
 	// Flag to prevent spamming the log with FSR3 dispatch crash messages
-	bool fsrDispatchCrashLogged = false;
+	Util::OnceFlag fsrDispatchCrashLogged;
 
 	uint32_t runtimeUpscalerContextCount = 0;
 	uint32_t runtimeUpscalerMaxRenderWidth = 0;
