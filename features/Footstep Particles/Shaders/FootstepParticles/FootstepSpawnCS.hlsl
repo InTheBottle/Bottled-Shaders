@@ -460,7 +460,7 @@ uint ResolveType(uint localIndex, out bool alive)
 
 	if (breath) {
 		position = footstep.Position + float3(radial * r1 * 0.8, r2 - 0.5) * scale;
-		velocity = float3(footstep.Velocity.xy * 0.6 + footstep.Forward * lerp(18.0, 46.0, r3) + radial * lerp(2.0, 8.0, r4), lerp(-6.0, 10.0, r5));
+		velocity = float3(footstep.Velocity.xy * 0.6 + footstep.Forward * lerp(18.0, 46.0, r3) + radial * lerp(2.0, 8.0, r4), lerp(-8.0, 2.0, r5));
 		size = lerp(1.0, 1.8, r6) * scale;
 		growth = lerp(2.6, 3.8, r7);
 		lifetime = lerp(0.9, 1.6, r1);

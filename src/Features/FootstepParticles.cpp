@@ -805,6 +805,7 @@ void FootstepParticles::UpdateActorBreath(RE::Actor* a_actor, const RE::NiPoint3
 	breath.emit = kBreathEmitInterval;
 
 	static const RE::BSFixedString headNode{ "NPC Head [Head]" };
+	static const RE::BSFixedString eyeNode{ "NPCEyeBone" };
 	auto root = a_actor->Get3D(false);
 	auto head = root ? root->GetObjectByName(headNode) : nullptr;
 	if (!head) {
@@ -816,7 +817,9 @@ void FootstepParticles::UpdateActorBreath(RE::Actor* a_actor, const RE::NiPoint3
 	const RE::NiPoint3 forward{ std::sin(heading), std::cos(heading), 0.0f };
 	const float height = a_actor->GetHeight();
 	const float scale = std::clamp(std::isfinite(height) && height > 0.0f ? height / 128.0f : 1.0f, 0.35f, 4.0f);
-	const RE::NiPoint3 mouth = head->world.translate + forward * (7.0f * scale) + RE::NiPoint3{ 0.0f, 0.0f, 2.0f * scale };
+	const auto eye = root->GetObjectByName(eyeNode);
+	const RE::NiPoint3 mouth = eye ? eye->world.translate + forward * (2.0f * scale) - RE::NiPoint3{ 0.0f, 0.0f, 5.0f * scale } :
+	                                 head->world.translate + forward * (8.0f * scale) - RE::NiPoint3{ 0.0f, 0.0f, 1.0f * scale };
 
 	if (auto cell = a_actor->GetParentCell()) {
 		float waterHeight = 0.0f;
