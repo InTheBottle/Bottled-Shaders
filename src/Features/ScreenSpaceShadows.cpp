@@ -24,6 +24,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	SurfaceThickness,
 	BilinearThreshold,
 	ShadowContrast,
+	MaxRayLength,
 	FilterShadowMask,
 	Denoise)
 
@@ -49,6 +50,10 @@ void ScreenSpaceShadows::DrawSettings()
 		ImGui::SliderFloat(T(TKEY("shadow_contrast"), "Shadow Contrast"), &bendSettings.ShadowContrast, 0.0f, 4.0f);
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text("%s", T(TKEY("shadow_contrast_tooltip"), "Contrast boost for the shadow transition. Higher values produce harder shadow edges."));
+
+		ImGui::SliderFloat(T(TKEY("max_ray_length"), "Max Ray Length"), &bendSettings.MaxRayLength, 0.0f, 128.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("max_ray_length_tooltip"), "Maximum world-space length of a contact shadow ray. Keeps screen space shadows from duplicating the shadow map at a distance. 0 disables the cap."));
 
 		ImGui::Checkbox(T(TKEY("denoise"), "Denoise"), (bool*)&bendSettings.Denoise);
 		if (auto _tt = Util::HoverTooltipWrapper())
@@ -380,6 +385,13 @@ void ScreenSpaceShadows::DrawShadows()
 				data.InvDepthTextureSize[1] = invTexSizeY;
 
 				data.settings = bendSettings;
+
+				std::copy_n(lightProj, 4, data.LightProjection);
+				const auto cameraData = Util::GetCameraData();
+				data.CameraData[0] = cameraData.x;
+				data.CameraData[1] = cameraData.y;
+				data.CameraData[2] = cameraData.z;
+				data.CameraData[3] = cameraData.w;
 
 				raymarchCB->Update(data);
 			}
