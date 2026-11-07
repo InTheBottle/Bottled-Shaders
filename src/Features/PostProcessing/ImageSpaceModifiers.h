@@ -34,6 +34,12 @@ namespace ImageSpaceModifiers
 		float4 fade;
 	};
 
+	/** @brief The engine's per-modifier cinematic fold: lerp(value, value * multiply + add, strength). */
+	inline float BlendValue(float a_value, float a_multiply, float a_add, float a_strength)
+	{
+		return a_value - (a_value - (a_value * a_multiply + a_add)) * a_strength;
+	}
+
 	void Install();
 	void Snapshot(Frame& a_frame);
 	bool IsNightEyeActive();

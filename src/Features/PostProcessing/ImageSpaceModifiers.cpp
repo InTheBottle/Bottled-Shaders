@@ -1,5 +1,6 @@
 #include "ImageSpaceModifiers.h"
 
+#include "Features/CameraFX.h"
 #include "Features/NightEye.h"
 #include "Utils/ColorSpace.h"
 #include "Utils/VersionedRelocation.h"
@@ -40,6 +41,17 @@ namespace ImageSpaceModifiers
 					}
 					return;
 				}
+				if (a_multiply && a_add && a_mod && globals::features::cameraFX.TakesOverModifiers()) {
+					CameraFXModifiers::Record(currentModifier, *a_multiply, *a_add, *a_mod, a_strength);
+					RE::ImageSpaceBaseData multiply = *a_multiply;
+					RE::ImageSpaceBaseData add = *a_add;
+					multiply.cinematic = { 1.0f, 1.0f, 1.0f };
+					add.cinematic = {};
+					multiply.tint.amount = 0.0f;
+					RE::ImageSpaceModData mod{};
+					func(a_manager, &multiply, &add, &mod, a_strength);
+					return;
+				}
 				func(a_manager, a_multiply, a_add, a_mod, a_strength);
 				if (!a_multiply || !a_add || !a_mod)
 					return;
@@ -61,6 +73,7 @@ namespace ImageSpaceModifiers
 			static void thunk(RE::ImageSpaceData* a_data, const RE::ImageSpaceBaseData* a_base)
 			{
 				func(a_data, a_base);
+				CameraFXModifiers::BeginFrame(a_base);
 				const std::scoped_lock guard(lock);
 				pending.contributions.clear();
 				pending.captured = true;
@@ -68,11 +81,6 @@ namespace ImageSpaceModifiers
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
-
-		float BlendValue(float a_value, float a_multiply, float a_add, float a_strength)
-		{
-			return a_value - (a_value - (a_value * a_multiply + a_add)) * a_strength;
-		}
 	}
 
 	void Install()

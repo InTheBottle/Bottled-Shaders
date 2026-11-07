@@ -48,6 +48,7 @@ struct HeatHaze : Feature
 	virtual void RestoreDefaultSettings() override;
 
 	void Render(RE::BSShaderAccumulator* a_accumulator);
+	float GetNearestFireDistance() const;
 
 private:
 	struct Fire

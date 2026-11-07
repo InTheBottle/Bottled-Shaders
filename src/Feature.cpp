@@ -4,6 +4,7 @@
 #include "FeatureIssues.h"
 #include "FeatureVersions.h"
 #include "Features/CSEditor.h"
+#include "Features/CameraFX.h"
 #include "Features/CapsuleShadows.h"
 #include "Features/CloudShadows.h"
 #include "Features/DetailMaps.h"
@@ -262,6 +263,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::proceduralLightning,
 		&globals::features::proceduralNightSky,
 		&globals::features::heatHaze,
+		&globals::features::cameraFX,
 		&globals::features::capsuleShadows,
 		&globals::features::hairBacklighting,
 		&globals::features::nightEye,

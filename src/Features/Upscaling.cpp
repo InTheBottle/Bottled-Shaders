@@ -1,6 +1,7 @@
 #include "Upscaling.h"
 
 #include "../I18n/I18n.h"
+#include "CameraFX.h"
 #include "Deferred.h"
 #include "HDRDisplay.h"
 #include "Hooks.h"
@@ -1860,6 +1861,8 @@ void Upscaling::MenuManagerDrawInterfaceStartHook::thunk(int64_t a1)
 	if (!upscaling.d3d12SwapChainActive && globals::features::hdrDisplay.loaded) {
 		globals::features::hdrDisplay.SetUIBuffer();
 	}
+
+	globals::features::cameraFX.DrawBeforeInterface();
 
 	func(a1);
 }

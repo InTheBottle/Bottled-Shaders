@@ -331,6 +331,17 @@ void HeatHaze::SelectPlumes()
 	plumeCount = static_cast<uint32_t>(count);
 }
 
+float HeatHaze::GetNearestFireDistance() const
+{
+	if (!loaded || !settings.Enabled || fires.empty())
+		return std::numeric_limits<float>::max();
+	const RE::NiPoint3 eye = Util::GetEyePosition();
+	float nearest = std::numeric_limits<float>::max();
+	for (const auto& fire : fires)
+		nearest = std::min(nearest, eye.GetDistance(fire.center) - fire.radius);
+	return std::max(nearest, 0.0f);
+}
+
 void HeatHaze::Prepass()
 {
 	plumeCount = 0;

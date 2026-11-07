@@ -4,6 +4,7 @@
 #include "CSEditor/SceneManager/SceneSettingsManager.h"
 #include "Deferred.h"
 #include "Features/CSEditor.h"
+#include "Features/CameraFX.h"
 #include "Features/CapsuleShadows.h"
 #include "Features/CloudShadows.h"
 #include "Features/DetailMaps.h"
@@ -128,6 +129,7 @@ namespace globals
 		ProceduralLightning proceduralLightning{};
 		ProceduralNightSky proceduralNightSky{};
 		HeatHaze heatHaze{};
+		CameraFX cameraFX{};
 		CapsuleShadows capsuleShadows{};
 		HairBacklighting hairBacklighting{};
 		NightEye nightEye{};

@@ -3,6 +3,7 @@
 #include "PCH.h"
 
 #include "Buffer.h"
+#include "CameraFX.h"
 #include "Effects11.h"
 #include "Globals.h"
 #include "I18n/I18n.h"
@@ -241,6 +242,7 @@ namespace
 		{
 			globals::features::screenshotFeature.SnapshotCleanScene();
 			globals::features::hdrDisplay.SetUIBuffer();
+			globals::features::cameraFX.DrawBeforeInterface();
 			func(a1);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;

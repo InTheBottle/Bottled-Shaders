@@ -29,4 +29,17 @@ namespace Util
 	{
 		return std::clamp(std::isfinite(value) ? value : fallback, min, max);
 	}
+
+	/** @brief Hermite step from edge0 to edge1, matching HLSL smoothstep. */
+	inline float Smoothstep(float edge0, float edge1, float x) noexcept
+	{
+		const float t = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+		return t * t * (3.0f - 2.0f * t);
+	}
+
+	/** @brief Moves current toward target at riseRate or fallRate per unit of step, without overshooting. */
+	inline float Approach(float current, float target, float riseRate, float fallRate, float step) noexcept
+	{
+		return target > current ? std::min(target, current + riseRate * step) : std::max(target, current - fallRate * step);
+	}
 }
