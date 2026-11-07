@@ -421,7 +421,10 @@ void ApplyFrost(inout Composite c, float2 uv, float2 q, float2 viewUV, float fro
 	float glaze = smoothstep(-0.06, 0.0, lead);
 	float age = saturate(lead / 0.5);
 	float profile = pow(saturate(1.0 - arrival / 0.72), 1.6);
-	float thickness = profile * glaze * (0.12 + 0.88 * pow(age, 1.2)) * (0.25 + 0.75 * cold) * (0.9 + 0.2 * CameraFX::ValueNoise(q * 12.0));
+	float grain = CameraFX::ValueNoise(q * 12.0);
+	float thickness = profile * glaze * (0.12 + 0.88 * pow(age, 1.2)) * (0.25 + 0.75 * cold) * (0.9 + 0.2 * grain);
+	float frosting = profile * glaze * (0.35 + 0.65 * age) * (0.45 + 0.55 * cold) * (0.75 + 0.5 * grain);
+	float3 frostLight = (ambient * 0.75 + 0.18) * IceTint;
 	float bubblesIn = glaze * saturate(age * 1.6) * saturate(0.35 + cold * 1.6) * saturate(profile * 2.5);
 
 	float aspect = Aspect();
@@ -432,14 +435,14 @@ void ApplyFrost(inout Composite c, float2 uv, float2 q, float2 viewUV, float fro
 	float bendL = IceBend(uv - ex, n, growth, cold, baked);
 	float bendD = IceBend(uv + ey, n, growth, cold, baked);
 	float bendU = IceBend(uv - ey, n, growth, cold, baked);
-	float2 offset = float2(bendR - bendL, bendD - bendU) / (2.0 * stride) * 0.0045;
-	offset += (float2(CameraFX::Fbm(q * 4.2, 3), CameraFX::Fbm(q * 4.2 + 7.3, 3)) - 0.5) * 0.1 * thickness;
+	float2 offset = float2(bendR - bendL, bendD - bendU) / (2.0 * stride) * 0.0015;
+	offset += (float2(CameraFX::Fbm(q * 4.2, 3), CameraFX::Fbm(q * 4.2 + 7.3, 3)) - 0.5) * 0.02 * thickness;
 	float ripples = smoothstep(0.88, 0.99, amount);
 	[branch] if (ripples > 0.001)
 	{
 		float2 warp = float2(CameraFX::Fbm(q * 2.1, 3), CameraFX::Fbm(q * 2.1 + 11.7, 3)) - 0.5;
 		float2 rp = q * 7.4 + warp * 2.5;
-		offset += (float2(CameraFX::Fbm(rp, 3), CameraFX::Fbm(rp + 5.3, 3)) - 0.5) * 0.019 * thickness * ripples;
+		offset += (float2(CameraFX::Fbm(rp, 3), CameraFX::Fbm(rp + 5.3, 3)) - 0.5) * 0.006 * thickness * ripples;
 	}
 
 	float2 reliefGradient = 0.0;
@@ -453,11 +456,11 @@ void ApplyFrost(inout Composite c, float2 uv, float2 q, float2 viewUV, float fro
 		float4 sampleU = FrostTexture.SampleLevel(LinearSampler, uv - float2(0.0, texel.y), 0);
 		reliefGradient = float2(sampleR.r - sampleL.r, sampleD.r - sampleU.r) * fernIn * 0.6;
 		snowGradient = float2(sampleR.a - sampleL.a, sampleD.a - sampleU.a);
-		offset += reliefGradient * 0.006;
-		offset += float2(sampleR.b - sampleL.b, sampleD.b - sampleU.b) * bubblesIn * 0.005;
+		offset += reliefGradient * 0.003;
+		offset += float2(sampleR.b - sampleL.b, sampleD.b - sampleU.b) * bubblesIn * 0.003;
 	}
 	float offsetLength = length(offset);
-	offset *= offsetLength > 0.024 ? 0.024 / offsetLength : 1.0;
+	offset *= offsetLength > 0.008 ? 0.008 / offsetLength : 1.0;
 	offset = all(isfinite(offset)) ? offset : 0.0;
 
 	float dEdge = max(0.0, (1.0 + 0.1 * saturate((9.0 - n) / 7.0) - CameraFX::SuperellipseRadius(uv, n)) * 0.5);
@@ -467,14 +470,14 @@ void ApplyFrost(inout Composite c, float2 uv, float2 q, float2 viewUV, float fro
 	rim = saturate(rim * (0.7 + 0.5 * smoothstep(0.5, 0.85, CameraFX::ValueNoise(q * 680.0))));
 
 	float cloud = saturate(CameraFX::Fbm(q * 7.5, 4) * 2.6 - 1.5) * profile;
-	float blur = thickness * 2.5 + cloud * bubblesIn * 4.0 + rim * 8.0 + (1.0 - exp(-relief * 1.8)) * 6.0;
+	float blur = frosting * 7.0 + cloud * bubblesIn * 4.0 + rim * 8.0 + (1.0 - exp(-relief * 1.8)) * 6.0;
 	float3 ice = Scene(viewUV + ToUV(offset), MipForRadius(blur * 1.6));
 
 	float settle = smoothstep(0.0, 0.3, lead);
 	float blue = profile * settle * (0.45 + 0.55 * cold) * (0.5 + 0.5 * age);
 	ice *= exp(-blue * float3(0.5, 0.17, 0.06));
-	ice = lerp(ice, ambient * float3(0.86, 0.95, 1.0), thickness * 0.12);
-	ice = lerp(ice, ambient * 1.1, cloud * bubblesIn * cold * 0.3);
+	ice = lerp(ice, frostLight, frosting * 0.5);
+	ice = lerp(ice, frostLight * 1.1, cloud * bubblesIn * cold * 0.3);
 
 	[branch] if (relief > 0.002)
 	{
@@ -491,10 +494,10 @@ void ApplyFrost(inout Composite c, float2 uv, float2 q, float2 viewUV, float fro
 
 	float rimOpacity = rim * (0.62 + 0.3 * cold);
 	cover = max(cover, rimOpacity);
-	ice = lerp(ice, ambient * 1.3 * IceTint, rimOpacity);
+	ice = lerp(ice, frostLight * 1.25, rimOpacity);
 
 	float bubble = (tex.b - 0.5) * 1.2;
-	ice = ice * (1.0 - saturate(-bubble) * 0.7 * bubblesIn) + saturate(bubble) * 1.4 * bubblesIn * ambient * 1.4;
+	ice = ice * (1.0 - saturate(-bubble) * 0.7 * bubblesIn) + saturate(bubble) * 1.4 * bubblesIn * frostLight * 1.4;
 
 	float snowIn = glaze * saturate((amount - 0.25) / 0.35);
 	float crustZone = smoothstep(0.88, 0.92, uv.y);
@@ -502,7 +505,7 @@ void ApplyFrost(inout Composite c, float2 uv, float2 q, float2 viewUV, float fro
 	[branch] if (snow > 0.002)
 	{
 		float shade = lerp(1.0, clamp(1.0 - (snowGradient.x * 0.6 + snowGradient.y * 0.8) * 8.0, 0.75, 1.25), crustZone);
-		ice = lerp(ice, ambient * 1.35 * shade * lerp(1.0, float3(0.97, 0.99, 1.03), crustZone), saturate(snow));
+		ice = lerp(ice, frostLight * 1.3 * shade * lerp(1.0, float3(0.97, 0.99, 1.03), crustZone), saturate(snow));
 		cover = max(cover, saturate(snow));
 	}
 	[branch] if (snowIn > 0.5)
@@ -1235,13 +1238,13 @@ float3 MoonLight(float2 uv, float2 q, float4 moon, float visibility)
 		float aspect = Aspect();
 		float radius = max(moon.w, 0.008);
 		float d = length(float2((moon.x - uv.x) * aspect, moon.y - uv.y));
-		float aureole = exp(-d * d / (radius * radius * 9.0)) * 0.2 + exp(-d / (radius * 6.0)) * 0.05;
-		float ring = exp(-pow((d - radius * 4.2) / (radius * 0.9), 2.0)) * 0.03;
+		float aureole = exp(-d * d / (radius * radius * 7.0)) * 0.11 + exp(-d / (radius * 5.0)) * 0.022;
+		float ring = exp(-pow((d - radius * 4.2) / (radius * 0.9), 2.0)) * 0.016;
 		float ghostDistance = length(float2((1.0 - moon.x - uv.x) * aspect, 1.0 - moon.y - uv.y));
-		float ghost = exp(-ghostDistance * ghostDistance / (radius * radius * 2.5)) * 0.025 + exp(-pow((ghostDistance - radius * 1.4) / (radius * 0.3), 2.0)) * 0.012;
+		float ghost = exp(-ghostDistance * ghostDistance / (radius * radius * 2.5)) * 0.014 + exp(-pow((ghostDistance - radius * 1.4) / (radius * 0.3), 2.0)) * 0.007;
 		light = MoonTint * (aureole + ring + ghost);
 		[branch] if (CameraFX::Lens.w > 0.001)
-			light += MoonTint * Dirt(q, 1.0, 0.0) * exp(-d * d * 6.0) * CameraFX::Lens.w * 0.35;
+			light += MoonTint * Dirt(q, 1.0, 0.0) * exp(-d * d * 8.0) * CameraFX::Lens.w * 0.2;
 		light *= strength;
 	}
 	return light;
