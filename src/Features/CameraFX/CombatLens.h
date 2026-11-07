@@ -24,7 +24,8 @@ namespace CameraFXLens
 		SplatType type = SplatType::kBlood;
 		float u = 0.5f;
 		float v = 0.5f;
-		float radius = 0.05f;
+		float radius = 0.1f;
+		float angle = 0.0f;
 		float age = 0.0f;
 		float life = 5.0f;
 		float seed = 0.0f;
@@ -51,13 +52,20 @@ namespace CameraFXLens
 		float flashWarmth = 0.0f;
 		float slash = 0.0f;
 		float slashAngle = 0.0f;
+		float hitU = 0.5f;
+		float hitV = 0.5f;
+		float hitAge = 99.0f;
 		float shock = 0.0f;
+		float shockAge = 99.0f;
+		float shockSeed = 0.0f;
+		float shockLasting = 0.0f;
 		float fire = 0.0f;
 		float frost = 0.0f;
 		float staminaLow = 0.0f;
 		float exertion = 0.0f;
 		float exhaleAge = 99.0f;
 		float exhaleStrength = 0.0f;
+		float exhaleSeed = 0.0f;
 		bool firstPerson = false;
 		std::vector<Splat> splats;
 	};
@@ -111,6 +119,7 @@ namespace CameraFXLens
 		float breathTimer = 0.0f;
 		float flashCooldown = 0.0f;
 		uint32_t breathCount = 0;
+		uint32_t shockCount = 0;
 		uint32_t randomState = 0x9E3779B9u;
 		float cooldowns[8] = {};
 	};

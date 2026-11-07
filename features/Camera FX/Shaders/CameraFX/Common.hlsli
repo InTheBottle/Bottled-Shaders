@@ -44,6 +44,9 @@ namespace CameraFX
 		float4 Wind;
 		float4 Combat;
 		float4 Combat2;
+		float4 Combat3;
+		float4 Combat4;
+		float4 LensLook;
 		float4 Splats[MaxSplats * 2];
 	};
 
@@ -115,10 +118,33 @@ namespace CameraFX
 		return sum;
 	}
 
+	float Ridge(float2 p)
+	{
+		return 1.0 - abs(ValueNoise(p) * 2.0 - 1.0);
+	}
+
+	float2 Rotate(float2 p, float angle)
+	{
+		float s, c;
+		sincos(angle, s, c);
+		return float2(p.x * c - p.y * s, p.x * s + p.y * c);
+	}
+
 	float EdgeDistance(float2 uv)
 	{
 		float2 centered = (uv - 0.5) * float2(Resolution.x * Resolution.w, 1.0);
 		return length(centered) / length(float2(0.5 * Resolution.x * Resolution.w, 0.5));
+	}
+
+	float SuperellipseRadius(float2 uv, float n)
+	{
+		float2 x = max(abs(uv - 0.5) * 2.0, 1e-4);
+		return pow(pow(x.x, n) + pow(x.y, n), 1.0 / n);
+	}
+
+	float FrameArrival(float2 uv, float n)
+	{
+		return saturate(1.0 - SuperellipseRadius(uv, n) / pow(2.0, 1.0 / n));
 	}
 }
 

@@ -53,7 +53,6 @@ struct CameraFX : Feature
 		bool FogCondensation = true;
 		bool Atmosphere = true;
 		float AtmosphereStrength = 1.0f;
-		bool HeatRipple = true;
 		bool Combat = true;
 		bool Blood = true;
 		float BloodStrength = 1.0f;
@@ -92,6 +91,9 @@ struct CameraFX : Feature
 		float4 Wind;
 		float4 Combat;
 		float4 Combat2;
+		float4 Combat3;
+		float4 Combat4;
+		float4 LensLook;
 		float4 Splats[CameraFXLens::kMaxSplats * 2];
 	};
 	static_assert(sizeof(FrameData) % 16 == 0);
@@ -127,9 +129,16 @@ private:
 		bool hdr = false;
 	};
 
+	struct LensPass
+	{
+		bool overlay = false;
+		bool additive = false;
+	};
+
 	SceneTarget GetSceneTarget() const;
 	ID3D11RenderTargetView* GetLensTarget(const SceneTarget& a_scene, bool& o_uiLayer) const;
 	bool EnsureSceneCopy(const D3D11_TEXTURE2D_DESC& a_desc);
+	void EnsureLensTextures(bool a_needFrost, float a_deltaTime);
 	void UpdateFrame(float a_deltaTime, bool a_hasDepth);
 	void UpdateLights(RE::Sky* a_sky);
 	void UpdateThemeClocks(float a_deltaTime);
@@ -137,7 +146,9 @@ private:
 	ID3D11VertexShader* GetVS();
 	ID3D11PixelShader* GetScenePS();
 	ID3D11PixelShader* GetLensPS();
+	ID3D11PixelShader* GetCombatLensPS();
 	ID3D11ComputeShader* GetVisibilityCS();
+	ID3D11ComputeShader* GetBakeCS(bool a_frost);
 	bool EnsurePipeline();
 	float GetSceneEncoding(bool a_hdrTarget) const;
 
@@ -153,11 +164,9 @@ private:
 	bool sceneActive = false;
 	bool lensActive = false;
 	bool lightsActive = false;
-	bool lensOverlay = false;
-	bool lensAdditive = false;
+	LensPass weatherPass;
+	LensPass combatPass;
 	bool sceneNeedsMips = false;
-	bool lensNeedsMips = false;
-	bool lensSamplesScene = false;
 	bool visibilityCleared = true;
 
 	float time = 0.0f;
@@ -170,15 +179,19 @@ private:
 	std::array<float, 2> moonAmount{};
 	std::array<float, CameraFXModifiers::kThemeCount> themeLevels{};
 	float idleSeconds = 0.0f;
+	float frostIdleSeconds = 0.0f;
 	float windOffset = 0.0f;
 	uint32_t lastDrawnFrame = UINT32_MAX;
 
 	eastl::unique_ptr<Texture2D> sceneCopy;
 	eastl::unique_ptr<Texture2D> visibility;
+	eastl::unique_ptr<Texture2D> lensDirt;
+	eastl::unique_ptr<Texture2D> frostMask;
 	eastl::unique_ptr<ConstantBuffer> frameConstants;
 	eastl::unique_ptr<ConstantBuffer> visibilityConstants;
 
 	winrt::com_ptr<ID3D11SamplerState> linearSampler;
+	winrt::com_ptr<ID3D11SamplerState> wrapSampler;
 	winrt::com_ptr<ID3D11BlendState> opaqueBlend;
 	winrt::com_ptr<ID3D11BlendState> lensSceneBlend;
 	winrt::com_ptr<ID3D11BlendState> lensUIBlend;
@@ -187,11 +200,19 @@ private:
 	winrt::com_ptr<ID3D11VertexShader> vertexShader;
 	winrt::com_ptr<ID3D11PixelShader> scenePixelShader;
 	winrt::com_ptr<ID3D11PixelShader> lensPixelShader;
+	winrt::com_ptr<ID3D11PixelShader> combatLensPixelShader;
 	winrt::com_ptr<ID3D11ComputeShader> visibilityShader;
+	winrt::com_ptr<ID3D11ComputeShader> dirtBakeShader;
+	winrt::com_ptr<ID3D11ComputeShader> frostBakeShader;
 	bool vertexShaderFailed = false;
 	bool sceneShaderFailed = false;
 	bool lensShaderFailed = false;
+	bool combatLensShaderFailed = false;
 	bool visibilityShaderFailed = false;
+	bool dirtBakeShaderFailed = false;
+	bool frostBakeShaderFailed = false;
+	bool dirtBakeFailed = false;
+	bool frostBakeFailed = false;
 	bool pipelineReady = false;
 	bool pipelineFailureLogged = false;
 	bool sceneCopyFailed = false;

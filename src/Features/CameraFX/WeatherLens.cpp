@@ -18,7 +18,9 @@ namespace CameraFXLens
 		constexpr float kExposureInterval = 0.3f;
 		constexpr float kExposureDistance = 2500.0f;
 		constexpr float kExposureTilt = 0.57f;
-		constexpr float kSheetDrySeconds = 5.0f;
+		constexpr float kSheetDrySeconds = 6.0f;
+		constexpr float kClimbOutSheet = 0.7f;
+		constexpr float kSwimSplash = 0.55f;
 		constexpr float kEntryFogSeconds = 10.0f;
 		constexpr float kRecentColdSeconds = 20.0f;
 		constexpr float kBlizzardWindSpeed = 150.0f / 255.0f;
@@ -32,16 +34,23 @@ namespace CameraFXLens
 		{
 			RE::FormID localID;
 			std::string_view plugin;
-			float ash;
-			float embers;
+			WeatherAir air;
 		};
 
 		constexpr WeatherEntry kWeatherEntries[] = {
-			{ 0x032336, "Dragonborn.esm", 1.0f, 0.0f },
-			{ 0x0D9329, "Skyrim.esm", 0.5f, 0.8f },
+			{ 0x032336, "Dragonborn.esm", { 1.0f, 0.3f, 0.0f } },
+			{ 0x0D9329, "Skyrim.esm", { 0.5f, 0.8f, 0.7f } },
+			{ 0x0D64B4, "NAT-ENB.esp", { 1.0f, 0.0f, 0.0f } },
+			{ 0x000823, "TrueStormsSE.esp", { 1.0f, 1.0f, 0.0f } },
+			{ 0x000825, "TrueStormsSE.esp", { 0.8f, 0.0f, 0.0f } },
+			{ 0x00081B, "TrueStormsSE.esp", { 0.0f, 0.0f, 1.0f } },
+			{ 0x2401C8, "Glenmoril.esm", { 1.0f, 0.0f, 0.0f } },
+			{ 0x0031FD, "Glenmoril.esm", { 0.0f, 0.0f, 0.6f } },
+			{ 0x09A995, "legacyorsinium.esm", { 0.8f, 0.5f, 0.0f } },
+			{ 0x057760, "legacyorsinium.esm", { 0.8f, 0.0f, 0.0f } },
 		};
 
-		std::unordered_map<RE::FormID, std::pair<float, float>> knownWeathers;
+		std::unordered_map<RE::FormID, WeatherAir> knownWeathers;
 
 		float FlagAmount(const RE::Sky* a_sky, RE::TESWeather::WeatherDataFlag a_flag)
 		{
@@ -90,7 +99,7 @@ namespace CameraFXLens
 		knownWeathers.clear();
 		for (const auto& entry : kWeatherEntries) {
 			if (const auto formID = dataHandler->LookupFormID(entry.localID, entry.plugin))
-				knownWeathers[formID] = { entry.ash, entry.embers };
+				knownWeathers[formID] = entry.air;
 		}
 	}
 
@@ -103,14 +112,15 @@ namespace CameraFXLens
 		exposure = 1.0f;
 		recentCold = 0.0f;
 		wasUnderwater = false;
+		wasInWater = false;
 		wasExterior = true;
 		initialised = false;
 	}
 
-	std::pair<float, float> WeatherLens::ClassifyWeather(const RE::TESWeather* a_weather)
+	WeatherAir WeatherLens::ClassifyWeather(const RE::TESWeather* a_weather)
 	{
 		if (!a_weather)
-			return { 0.0f, 0.0f };
+			return {};
 		const auto formID = a_weather->GetFormID();
 		if (const auto known = knownWeathers.find(formID); known != knownWeathers.end())
 			return known->second;
@@ -136,7 +146,7 @@ namespace CameraFXLens
 				start = end;
 			}
 		}
-		return weatherCache.emplace(formID, std::pair{ ash, 0.0f }).first->second;
+		return weatherCache.emplace(formID, WeatherAir{ ash, 0.0f, 0.0f }).first->second;
 	}
 
 	float WeatherLens::SampleExposure()
@@ -174,6 +184,8 @@ namespace CameraFXLens
 		state.exterior = !cell->IsInteriorCell() && sky && sky->mode.get() == RE::Sky::Mode::kFull;
 		auto* water = RE::TESWaterSystem::GetSingleton();
 		state.underwater = water && water->playerUnderwater;
+		auto* actorState = player->AsActorState();
+		state.swimming = actorState && actorState->IsSwimming();
 
 		if (auto* camera = RE::Main::WorldRootCamera()) {
 			const auto& rotate = camera->world.rotate;
@@ -189,14 +201,16 @@ namespace CameraFXLens
 
 		float ash = 0.0f;
 		float embers = 0.0f;
+		float dust = 0.0f;
 		float snow = 0.0f;
 		bool exposureWanted = false;
 		if (state.exterior) {
 			const float pct = std::clamp(sky->currentWeatherPct, 0.0f, 1.0f);
 			const auto current = ClassifyWeather(sky->currentWeather);
 			const auto last = sky->lastWeather ? ClassifyWeather(sky->lastWeather) : current;
-			ash = std::lerp(last.first, current.first, pct);
-			embers = std::lerp(last.second, current.second, pct);
+			ash = std::lerp(last.ash, current.ash, pct);
+			embers = std::lerp(last.embers, current.embers, pct);
+			dust = std::lerp(last.dust, current.dust, pct);
 			snow = FlagAmount(sky, RE::TESWeather::WeatherDataFlag::kSnow) * (1.0f - std::clamp(ash, 0.0f, 1.0f));
 			const float rain = FlagAmount(sky, RE::TESWeather::WeatherDataFlag::kRainy);
 
@@ -206,14 +220,15 @@ namespace CameraFXLens
 					exposureTimer = kExposureInterval;
 					exposure = SampleExposure();
 				}
+				state.exposure = exposure;
 				targets.rain = rain * exposure * a_options.rainStrength;
 			}
 
 			if (a_options.atmosphere) {
 				targets.ash = ash * a_options.atmosphereStrength;
 				targets.embers = embers * a_options.atmosphereStrength;
-				if (rain < 0.01f && snow < 0.01f)
-					targets.dust = 0.6f * Util::Smoothstep(kDustWindSpeed, 1.0f, state.windSpeed) * a_options.atmosphereStrength;
+				const float gale = rain < 0.01f && snow < 0.01f ? 0.6f * Util::Smoothstep(kDustWindSpeed, 1.0f, state.windSpeed) : 0.0f;
+				targets.dust = std::max(dust, gale) * (1.0f - std::clamp(ash, 0.0f, 1.0f)) * a_options.atmosphereStrength;
 			}
 
 			if (a_options.condensation) {
@@ -221,9 +236,10 @@ namespace CameraFXLens
 				const float fogFar = std::isfinite(sky->fogFar) ? sky->fogFar : 0.0f;
 				const float fogPower = std::isfinite(sky->fogPower) ? std::max(sky->fogPower, 0.01f) : 1.0f;
 				const float fogMax = std::isfinite(sky->fogClamp) ? std::clamp(sky->fogClamp, 0.0f, 1.0f) : 0.0f;
-				if (fogFar > fogNear + 1.0f && fogMax > 0.5f) {
-					const float half = fogNear + (fogFar - fogNear) * std::pow(0.5f / fogMax, 1.0f / fogPower);
-					targets.condensation = 1.0f - Util::Smoothstep(1500.0f, 12000.0f, half);
+				if (fogFar > fogNear + 1.0f && fogMax > 0.05f) {
+					const float reach = std::pow(std::min(0.5f / fogMax, 1.0f), 1.0f / fogPower);
+					const float half = fogNear + (fogFar - fogNear) * reach;
+					targets.condensation = (1.0f - Util::Smoothstep(2000.0f, 20000.0f, half)) * std::clamp(fogMax * 2.0f, 0.0f, 1.0f);
 				}
 			}
 
@@ -255,20 +271,28 @@ namespace CameraFXLens
 		if (!initialised) {
 			initialised = true;
 			wasUnderwater = state.underwater;
+			wasInWater = state.underwater || state.swimming;
 			wasExterior = state.exterior;
 		}
 
 		if (state.underwater) {
 			state.sheet = 0.0f;
 			state.rain = 0.0f;
-		} else if (wasUnderwater && a_options.waterSheet) {
+		} else if (wasUnderwater) {
 			state.sheet = 1.0f;
+		} else if (wasInWater && !state.swimming) {
+			state.sheet = std::max(state.sheet, kClimbOutSheet);
 		} else {
 			state.sheet = std::max(0.0f, state.sheet - a_step / kSheetDrySeconds);
 		}
-		if (!a_options.waterSheet)
+		const bool splashing = state.swimming && !state.underwater && a_options.waterSheet;
+		state.splash = Util::Approach(state.splash, splashing ? kSwimSplash : 0.0f, 2.0f, 0.5f, a_step);
+		if (!a_options.waterSheet) {
 			state.sheet = 0.0f;
+			state.splash = 0.0f;
+		}
 		wasUnderwater = state.underwater;
+		wasInWater = state.underwater || state.swimming;
 
 		recentCold = std::max(recentCold - a_step / kRecentColdSeconds, state.exterior ? state.breathCold : 0.0f);
 		if (a_options.entryFog && wasExterior && !state.exterior && recentCold > 0.35f)

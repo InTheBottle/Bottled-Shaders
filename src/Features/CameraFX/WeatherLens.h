@@ -4,6 +4,13 @@
 
 namespace CameraFXLens
 {
+	struct WeatherAir
+	{
+		float ash = 0.0f;
+		float embers = 0.0f;
+		float dust = 0.0f;
+	};
+
 	struct WeatherOptions
 	{
 		bool rain = true;
@@ -24,6 +31,8 @@ namespace CameraFXLens
 		float rain = 0.0f;
 		float lookUp = 0.0f;
 		float sheet = 0.0f;
+		float splash = 0.0f;
+		float exposure = 1.0f;
 		float entryFog = 0.0f;
 		float condensation = 0.0f;
 		float ash = 0.0f;
@@ -35,6 +44,7 @@ namespace CameraFXLens
 		float2 wind{};
 		float windSpeed = 0.0f;
 		bool underwater = false;
+		bool swimming = false;
 		bool exterior = false;
 	};
 
@@ -61,7 +71,7 @@ namespace CameraFXLens
 
 		void Query(const WeatherOptions& a_options);
 		float SampleExposure();
-		std::pair<float, float> ClassifyWeather(const RE::TESWeather* a_weather);
+		WeatherAir ClassifyWeather(const RE::TESWeather* a_weather);
 
 		WeatherState state;
 		Targets targets;
@@ -70,8 +80,9 @@ namespace CameraFXLens
 		float exposure = 1.0f;
 		float recentCold = 0.0f;
 		bool wasUnderwater = false;
+		bool wasInWater = false;
 		bool wasExterior = true;
 		bool initialised = false;
-		std::unordered_map<RE::FormID, std::pair<float, float>> weatherCache;
+		std::unordered_map<RE::FormID, WeatherAir> weatherCache;
 	};
 }

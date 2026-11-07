@@ -49,7 +49,6 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	FogCondensation,
 	Atmosphere,
 	AtmosphereStrength,
-	HeatRipple,
 	Combat,
 	Blood,
 	BloodStrength,
@@ -94,6 +93,15 @@ namespace
 	constexpr float kSecundaLensScale = 0.6f;
 	constexpr float kSceneCopyIdleSeconds = 10.0f;
 	constexpr float kContrastPivot = 0.5f;
+	constexpr float kFrostIdleSeconds = 30.0f;
+	constexpr UINT kLensResourceCount = 5;
+	constexpr UINT kLensSamplerCount = 2;
+	constexpr UINT kDirtSize = 1024;
+	constexpr UINT kFrostWidth = 2048;
+	constexpr UINT kFrostHeight = 1152;
+	constexpr UINT kBakeGroupSize = 8;
+	constexpr float kSwimDropsFromSheet = 0.8f;
+	constexpr float kThawStart = 0.05f;
 
 	struct MenuManager_DrawInterfaceStart
 	{
@@ -133,8 +141,8 @@ namespace
 			context->GSGetShader(&geometryShader, nullptr, nullptr);
 			context->PSGetShader(&pixelShader, nullptr, nullptr);
 			context->PSGetConstantBuffers(0, 1, &psBuffer);
-			context->PSGetShaderResources(0, 3, psResources);
-			context->PSGetSamplers(0, 1, &psSampler);
+			context->PSGetShaderResources(0, kLensResourceCount, psResources);
+			context->PSGetSamplers(0, kLensSamplerCount, psSamplers);
 			context->CSGetShader(&computeShader, nullptr, nullptr);
 			context->CSGetConstantBuffers(0, 1, &csBuffer);
 			context->CSGetShaderResources(0, 1, &csResource);
@@ -159,8 +167,8 @@ namespace
 			context->GSSetShader(geometryShader, nullptr, 0);
 			context->PSSetShader(pixelShader, nullptr, 0);
 			context->PSSetConstantBuffers(0, 1, &psBuffer);
-			context->PSSetShaderResources(0, 3, psResources);
-			context->PSSetSamplers(0, 1, &psSampler);
+			context->PSSetShaderResources(0, kLensResourceCount, psResources);
+			context->PSSetSamplers(0, kLensSamplerCount, psSamplers);
 			context->CSSetShader(computeShader, nullptr, 0);
 			context->CSSetConstantBuffers(0, 1, &csBuffer);
 			context->CSSetShaderResources(0, 1, &csResource);
@@ -181,7 +189,8 @@ namespace
 			SafeRelease(psBuffer);
 			for (auto*& view : psResources)
 				SafeRelease(view);
-			SafeRelease(psSampler);
+			for (auto*& sampler : psSamplers)
+				SafeRelease(sampler);
 			SafeRelease(computeShader);
 			SafeRelease(csBuffer);
 			SafeRelease(csResource);
@@ -208,8 +217,8 @@ namespace
 		ID3D11GeometryShader* geometryShader = nullptr;
 		ID3D11PixelShader* pixelShader = nullptr;
 		ID3D11Buffer* psBuffer = nullptr;
-		ID3D11ShaderResourceView* psResources[3] = {};
-		ID3D11SamplerState* psSampler = nullptr;
+		ID3D11ShaderResourceView* psResources[kLensResourceCount] = {};
+		ID3D11SamplerState* psSamplers[kLensSamplerCount] = {};
 		ID3D11ComputeShader* computeShader = nullptr;
 		ID3D11Buffer* csBuffer = nullptr;
 		ID3D11ShaderResourceView* csResource = nullptr;
@@ -364,6 +373,12 @@ void CameraFX::SetupResources()
 		samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
 		DX::ThrowIfFailed(device->CreateSamplerState(&samplerDesc, linearSampler.put()));
 		Util::SetResourceName(linearSampler.get(), "CameraFX::LinearSampler");
+
+		samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+		samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+		samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+		DX::ThrowIfFailed(device->CreateSamplerState(&samplerDesc, wrapSampler.put()));
+		Util::SetResourceName(wrapSampler.get(), "CameraFX::WrapSampler");
 	}
 
 	{
@@ -420,11 +435,21 @@ void CameraFX::ClearShaderCache()
 	vertexShader = nullptr;
 	scenePixelShader = nullptr;
 	lensPixelShader = nullptr;
+	combatLensPixelShader = nullptr;
 	visibilityShader = nullptr;
+	dirtBakeShader = nullptr;
+	frostBakeShader = nullptr;
 	vertexShaderFailed = false;
 	sceneShaderFailed = false;
 	lensShaderFailed = false;
+	combatLensShaderFailed = false;
 	visibilityShaderFailed = false;
+	dirtBakeShaderFailed = false;
+	frostBakeShaderFailed = false;
+	dirtBakeFailed = false;
+	frostBakeFailed = false;
+	lensDirt.reset();
+	frostMask.reset();
 	pipelineReady = false;
 }
 
@@ -455,6 +480,15 @@ ID3D11PixelShader* CameraFX::GetLensPS()
 	return lensPixelShader.get();
 }
 
+ID3D11PixelShader* CameraFX::GetCombatLensPS()
+{
+	if (!combatLensPixelShader && !combatLensShaderFailed) {
+		combatLensPixelShader.attach(static_cast<ID3D11PixelShader*>(Util::CompileShader(L"Data\\Shaders\\CameraFX\\LensPS.hlsl", { { "COMBAT_PASS", "" } }, "ps_5_0")));
+		combatLensShaderFailed = !combatLensPixelShader;
+	}
+	return combatLensPixelShader.get();
+}
+
 ID3D11ComputeShader* CameraFX::GetVisibilityCS()
 {
 	if (!visibilityShader && !visibilityShaderFailed) {
@@ -464,11 +498,26 @@ ID3D11ComputeShader* CameraFX::GetVisibilityCS()
 	return visibilityShader.get();
 }
 
+ID3D11ComputeShader* CameraFX::GetBakeCS(bool a_frost)
+{
+	auto& shader = a_frost ? frostBakeShader : dirtBakeShader;
+	bool& failed = a_frost ? frostBakeShaderFailed : dirtBakeShaderFailed;
+	if (!shader && !failed) {
+		shader.attach(static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\CameraFX\\LensBakeCS.hlsl", { { a_frost ? "BAKE_FROST" : "BAKE_DIRT", "" } }, "cs_5_0")));
+		failed = !shader;
+	}
+	return shader.get();
+}
+
 bool CameraFX::EnsurePipeline()
 {
 	pipelineReady = GetVS() && GetScenePS() && GetLensPS();
-	if (pipelineReady)
+	if (pipelineReady) {
 		GetVisibilityCS();
+		GetCombatLensPS();
+		GetBakeCS(false);
+		GetBakeCS(true);
+	}
 	if (!pipelineReady && !pipelineFailureLogged) {
 		pipelineFailureLogged = true;
 		logger::error("[CameraFX] Shaders failed to compile, leaving screen effects to the game");
@@ -591,6 +640,71 @@ bool CameraFX::EnsureSceneCopy(const D3D11_TEXTURE2D_DESC& a_desc)
 		return false;
 	}
 	return true;
+}
+
+void CameraFX::EnsureLensTextures(bool a_needFrost, float a_deltaTime)
+{
+	auto context = globals::d3d::context;
+	auto bake = [&](eastl::unique_ptr<Texture2D>& a_texture, bool& a_failed, bool a_frost, UINT a_width, UINT a_height, DXGI_FORMAT a_format, const char* a_name) {
+		if (a_texture || a_failed)
+			return;
+		auto* shader = GetBakeCS(a_frost);
+		if (!shader) {
+			a_failed = true;
+			return;
+		}
+
+		D3D11_TEXTURE2D_DESC desc{};
+		desc.Width = a_width;
+		desc.Height = a_height;
+		desc.MipLevels = 1;
+		desc.ArraySize = 1;
+		desc.Format = a_format;
+		desc.SampleDesc = { 1, 0 };
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = a_format;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MipLevels = 1;
+
+		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+		uavDesc.Format = a_format;
+		uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+
+		try {
+			a_texture = eastl::make_unique<Texture2D>(desc, a_name);
+			a_texture->CreateSRV(srvDesc);
+			a_texture->CreateUAV(uavDesc);
+		} catch (const std::exception& e) {
+			logger::error("[CameraFX] Failed to create {} ({}), using the procedural fallback", a_name, e.what());
+			a_texture.reset();
+			a_failed = true;
+			return;
+		}
+
+		ID3D11UnorderedAccessView* uav = a_texture->uav.get();
+		ID3D11UnorderedAccessView* nullUAV = nullptr;
+		context->CSSetShader(shader, nullptr, 0);
+		context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
+		context->Dispatch((a_width + kBakeGroupSize - 1) / kBakeGroupSize, (a_height + kBakeGroupSize - 1) / kBakeGroupSize, 1);
+		context->CSSetUnorderedAccessViews(0, 1, &nullUAV, nullptr);
+	};
+
+	bake(lensDirt, dirtBakeFailed, false, kDirtSize, kDirtSize, DXGI_FORMAT_R8_UNORM, "CameraFX::LensDirt");
+
+	if (a_needFrost) {
+		frostIdleSeconds = 0.0f;
+		bake(frostMask, frostBakeFailed, true, kFrostWidth, kFrostHeight, DXGI_FORMAT_R8G8B8A8_UNORM, "CameraFX::FrostMask");
+	} else if (frostMask) {
+		frostIdleSeconds += a_deltaTime;
+		if (frostIdleSeconds > kFrostIdleSeconds)
+			frostMask.reset();
+	}
+
+	frameData.LensLook.y = frostMask ? 1.0f : 0.0f;
+	frameData.LensLook.z = lensDirt ? 1.0f : 0.0f;
 }
 
 void CameraFX::UpdateThemeClocks(float a_deltaTime)
@@ -775,28 +889,30 @@ void CameraFX::UpdateFrame(float a_deltaTime, bool a_hasDepth)
 
 	const bool lensClear = !weatherState.underwater;
 	const float breathVisible = settings.ColdBreath && combatState.firstPerson && lensClear ? Util::Smoothstep(0.15f, 0.5f, weatherState.breathCold) : 0.0f;
-	frameData.Weather = { lensClear ? weatherState.rain : 0.0f, weatherState.lookUp, weatherState.sheet, weatherState.entryFog };
+	const float extraDrops = lensClear ? std::max(weatherState.sheet * kSwimDropsFromSheet, weatherState.splash) : 0.0f;
+	const float thaw = lensClear ? std::clamp(weatherState.heat * 1.5f, 0.0f, 1.0f) * Util::Smoothstep(kThawStart, 0.3f, frost) : 0.0f;
+	frameData.Weather = { lensClear ? weatherState.rain : 0.0f, weatherState.lookUp, lensClear ? weatherState.sheet : 0.0f, weatherState.entryFog };
 	frameData.Weather2 = { lensClear ? weatherState.condensation : 0.0f, lensClear ? weatherState.ash : 0.0f, lensClear ? weatherState.dust : 0.0f, lensClear ? weatherState.embers : 0.0f };
-	const float heatRipple = settings.HeatRipple ? weatherState.heat : 0.0f;
-	frameData.Weather3 = { lensClear ? std::max(heatRipple, combatState.fire * 0.6f) : 0.0f, breathVisible, combatState.exhaleAge, combatState.exhaleStrength };
+	frameData.Weather3 = { extraDrops, breathVisible, combatState.exhaleAge, combatState.exhaleStrength };
 	windOffset = std::fmod(windOffset + weatherState.wind.x * step, 1000.0f);
 	frameData.Wind = { weatherState.wind.x, windOffset, weatherState.windSpeed, combatState.firstPerson ? 1.0f : 0.0f };
 	frameData.Combat = { combatState.flash, combatState.shock, combatState.fire, combatState.staminaLow };
+	frameData.Combat3 = { combatState.hitU, combatState.hitV, combatState.hitAge, settings.PhotosensitiveSafe ? 1.0f : 0.0f };
+	frameData.Combat4 = { combatState.shockAge, combatState.shockSeed, combatState.shockLasting, combatState.exhaleSeed };
+	frameData.LensLook.x = thaw;
 
 	const uint32_t splatCount = static_cast<uint32_t>(std::min<size_t>(combatState.splats.size(), CameraFXLens::kMaxSplats));
 	for (uint32_t i = 0; i < splatCount; ++i) {
 		const auto& splat = combatState.splats[i];
+		const float life = std::max(splat.life, 0.01f);
 		const float fadeIn = std::clamp(splat.age / 0.08f, 0.0f, 1.0f);
-		const float fadeOut = 1.0f - Util::Smoothstep(0.6f * splat.life, splat.life, splat.age);
+		const float fadeOut = 1.0f - Util::Smoothstep(0.7f * life, life, splat.age);
 		frameData.Splats[i * 2] = { splat.u, splat.v, splat.radius, std::clamp(splat.strength, 0.0f, 1.0f) * fadeIn * fadeOut };
-		frameData.Splats[i * 2 + 1] = { static_cast<float>(splat.type), splat.seed, splat.age, splat.life };
+		frameData.Splats[i * 2 + 1] = { static_cast<float>(splat.type), splat.seed, std::clamp(splat.age / life, 0.0f, 1.0f), splat.angle };
 	}
 	frameData.Combat2 = { combatState.slash, combatState.slashAngle, combatState.flashWarmth, static_cast<float>(splatCount) };
-	const bool breathing = breathVisible > kActiveEpsilon && combatState.exhaleAge < 2.5f;
+	const bool breathing = breathVisible > kActiveEpsilon && combatState.exhaleAge < 2.8f;
 	const bool staminaPulse = combatState.staminaLow > kActiveEpsilon && combatState.exhaleAge < 1.0f;
-	const float overlayTotal = frameData.Weather.x + frameData.Weather.z + frameData.Weather.w + frameData.Weather2.x + frameData.Weather2.y +
-	                           frameData.Weather2.z + frameData.Weather3.x + combatState.slash;
-	const float additiveTotal = frameData.Weather2.w + combatState.flash + combatState.shock + combatState.fire;
 
 	const float themesTotal = frameData.Themes.x + frameData.Themes.y + frameData.Themes.z + frameData.Themes.w;
 	sceneActive = generic.active || themesTotal > kActiveEpsilon;
@@ -808,13 +924,16 @@ void CameraFX::UpdateFrame(float a_deltaTime, bool a_hasDepth)
 		frameData.MoonScreen[0].z = 0.0f;
 		frameData.MoonScreen[1].z = 0.0f;
 	}
-	lensOverlay = frost > kActiveEpsilon || overlayTotal > kActiveEpsilon || splatCount > 0 || breathing || staminaPulse;
-	lensAdditive = lightsActive || additiveTotal > kActiveEpsilon;
-	lensActive = lensOverlay || lensAdditive;
-	lensSamplesScene = frost > kActiveEpsilon || frameData.Weather.x > kActiveEpsilon || frameData.Weather.z > kActiveEpsilon || frameData.Weather.w > kActiveEpsilon ||
-	                   frameData.Weather2.x > kActiveEpsilon || frameData.Weather3.x > kActiveEpsilon || breathing;
+
+	const float weatherOverlay = frost + frameData.Weather.x + frameData.Weather.z + frameData.Weather.w + frameData.Weather2.x + frameData.Weather2.y +
+	                             frameData.Weather2.z + extraDrops + thaw + combatState.slash + combatState.flash + combatState.fire;
+	weatherPass.overlay = weatherOverlay > kActiveEpsilon || breathing || staminaPulse;
+	weatherPass.additive = lightsActive || frameData.Weather2.w + frameData.Weather2.x + combatState.flash + combatState.fire > kActiveEpsilon;
+	const bool discharging = combatState.shock > kActiveEpsilon && combatState.shockAge < 1.0f;
+	combatPass.overlay = splatCount > 0 || discharging || combatState.shockLasting > kActiveEpsilon;
+	combatPass.additive = combatPass.overlay;
+	lensActive = weatherPass.overlay || weatherPass.additive || combatPass.overlay;
 	sceneNeedsMips = generic.blurRadius > kMinBlurRadius || generic.dofStrength > kActiveEpsilon || frameData.Themes.y > kActiveEpsilon;
-	lensNeedsMips = frost > kActiveEpsilon || frameData.Weather.z > kActiveEpsilon || frameData.Weather.w > kActiveEpsilon || frameData.Weather2.x > kActiveEpsilon || breathing;
 }
 
 float CameraFX::GetSceneEncoding(bool a_hdrTarget) const
@@ -874,8 +993,10 @@ void CameraFX::DrawBeforeInterface()
 
 	if (!sceneActive && !lensActive) {
 		idleSeconds += deltaTime;
-		if (idleSeconds > kSceneCopyIdleSeconds)
+		if (idleSeconds > kSceneCopyIdleSeconds) {
 			sceneCopy.reset();
+			frostMask.reset();
+		}
 		return;
 	}
 	idleSeconds = 0.0f;
@@ -886,14 +1007,35 @@ void CameraFX::DrawBeforeInterface()
 	auto& hdr = globals::features::hdrDisplay;
 	const bool pqUILayer = uiLayer && hdr.loaded && hdr.settings.enableHDR;
 	const float uiGain = pqUILayer ? std::pow(std::max(hdr.settings.hdrUIBrightness, 0.01f), 1.0f / 2.2f) : 1.0f;
-	const bool overlayPass = lensTarget && (!pqUILayer || lensOverlay);
-	const bool additivePass = lensTarget && pqUILayer && lensAdditive;
-	const bool linearComposite = encoding > 0.5f && ((overlayPass && !uiLayer) || additivePass);
-	const bool lensReadsScene = (overlayPass && lensSamplesScene) || linearComposite;
-	const bool needsCopy = sceneActive || lensReadsScene;
+
+	struct PassDraw
+	{
+		ID3D11PixelShader* shader = nullptr;
+		bool overlay = false;
+		bool additive = false;
+	};
+	auto plan = [&](const LensPass& a_pass, ID3D11PixelShader* a_shader) {
+		PassDraw draw{ a_shader };
+		if (!lensTarget || !a_shader)
+			return draw;
+		draw.overlay = pqUILayer ? a_pass.overlay : (a_pass.overlay || a_pass.additive);
+		draw.additive = pqUILayer && a_pass.additive;
+		return draw;
+	};
+	const PassDraw weatherDraw = plan(weatherPass, lensPixelShader.get());
+	const PassDraw combatDraw = plan(combatPass, GetCombatLensPS());
+	const bool lensDraws = weatherDraw.overlay || weatherDraw.additive || combatDraw.overlay || combatDraw.additive;
+	const bool needsCopy = sceneActive || lensDraws;
 
 	if (needsCopy && !EnsureSceneCopy(targetDesc))
 		return;
+
+	StateBackup backup(context);
+	auto profiler = globals::profiler;
+	profiler->BeginPass("CameraFX");
+
+	if (lensDraws)
+		EnsureLensTextures(frost > kActiveEpsilon, deltaTime);
 
 	const auto& generic = resolved.generic;
 	const float heightScale = frameData.Resolution.y / kReferenceHeight;
@@ -920,12 +1062,8 @@ void CameraFX::DrawBeforeInterface()
 	const float reverseZ = globals::features::reverseZ.IsActive() ? 1.0f : 0.0f;
 	frameData.DepthParams = { depthSize.x * depthScale.x, depthSize.y * depthScale.y, reverseZ, depthSRV ? 1.0f : 0.0f };
 	const float overlayMode = pqUILayer ? kLensModeUIOverlay : (uiLayer ? kLensModeUI : kLensModeScene);
-	frameData.Output = { overlayPass ? overlayMode : kLensModeSceneAdditive, kContrastPivot, encoding, uiGain };
+	frameData.Output = { overlayMode, kContrastPivot, encoding, uiGain };
 	frameConstants->Update(frameData);
-
-	StateBackup backup(context);
-	auto profiler = globals::profiler;
-	profiler->BeginPass("CameraFX");
 
 	auto copyScene = [&](bool a_mips) {
 		context->OMSetRenderTargets(0, nullptr, nullptr);
@@ -934,9 +1072,8 @@ void CameraFX::DrawBeforeInterface()
 			context->GenerateMips(sceneCopy->srv.get());
 	};
 
-	const bool lensMips = overlayPass && lensNeedsMips;
 	if (needsCopy)
-		copyScene(sceneActive ? sceneNeedsMips : lensMips);
+		copyScene(sceneActive ? sceneNeedsMips : true);
 	else
 		context->OMSetRenderTargets(0, nullptr, nullptr);
 
@@ -977,9 +1114,9 @@ void CameraFX::DrawBeforeInterface()
 	context->GSSetShader(nullptr, nullptr, 0);
 
 	ID3D11Buffer* frameBuffer = frameConstants->CB();
-	ID3D11SamplerState* sampler = linearSampler.get();
+	ID3D11SamplerState* samplers[kLensSamplerCount] = { linearSampler.get(), wrapSampler.get() };
 	context->PSSetConstantBuffers(0, 1, &frameBuffer);
-	context->PSSetSamplers(0, 1, &sampler);
+	context->PSSetSamplers(0, kLensSamplerCount, samplers);
 
 	ID3D11ShaderResourceView* sceneSRV = sceneCopy && needsCopy ? sceneCopy->srv.get() : nullptr;
 	if (sceneActive) {
@@ -992,35 +1129,48 @@ void CameraFX::DrawBeforeInterface()
 		context->Draw(3, 0);
 	}
 
-	if (overlayPass || additivePass) {
-		if (sceneActive && lensReadsScene) {
+	if (lensDraws) {
+		if (sceneActive) {
 			ID3D11ShaderResourceView* nullResources[2] = {};
 			context->PSSetShaderResources(0, 2, nullResources);
-			copyScene(lensMips);
+			copyScene(true);
 		}
-		ID3D11ShaderResourceView* resources[3] = { sceneSRV, depthSRV, visibility ? visibility->srv.get() : nullptr };
-		context->PSSetShaderResources(0, 3, resources);
-		context->PSSetShader(lensPixelShader.get(), nullptr, 0);
+		ID3D11ShaderResourceView* resources[kLensResourceCount] = { sceneSRV, depthSRV, visibility ? visibility->srv.get() : nullptr,
+			lensDirt ? lensDirt->srv.get() : nullptr, frostMask ? frostMask->srv.get() : nullptr };
+		context->PSSetShaderResources(0, kLensResourceCount, resources);
 
-		if (overlayPass) {
-			context->OMSetRenderTargets(1, &lensTarget, nullptr);
-			context->OMSetBlendState(uiLayer ? lensUIBlend.get() : lensSceneBlend.get(), nullptr, 0xFFFFFFFF);
-			context->Draw(3, 0);
-		}
-		if (additivePass) {
-			if (overlayPass) {
-				frameData.Output.x = kLensModeSceneAdditive;
+		float currentMode = overlayMode;
+		auto setMode = [&](float a_mode) {
+			if (currentMode != a_mode) {
+				currentMode = a_mode;
+				frameData.Output.x = a_mode;
 				frameConstants->Update(frameData);
 			}
-			ID3D11RenderTargetView* renderTarget = target.rtv;
-			context->OMSetRenderTargets(1, &renderTarget, nullptr);
-			context->OMSetBlendState(lensSceneBlend.get(), nullptr, 0xFFFFFFFF);
-			context->Draw(3, 0);
-		}
+		};
+		auto drawLens = [&](const PassDraw& a_draw) {
+			if (!a_draw.overlay && !a_draw.additive)
+				return;
+			context->PSSetShader(a_draw.shader, nullptr, 0);
+			if (a_draw.overlay) {
+				setMode(overlayMode);
+				context->OMSetRenderTargets(1, &lensTarget, nullptr);
+				context->OMSetBlendState(uiLayer ? lensUIBlend.get() : lensSceneBlend.get(), nullptr, 0xFFFFFFFF);
+				context->Draw(3, 0);
+			}
+			if (a_draw.additive) {
+				setMode(kLensModeSceneAdditive);
+				ID3D11RenderTargetView* renderTarget = target.rtv;
+				context->OMSetRenderTargets(1, &renderTarget, nullptr);
+				context->OMSetBlendState(lensSceneBlend.get(), nullptr, 0xFFFFFFFF);
+				context->Draw(3, 0);
+			}
+		};
+		drawLens(weatherDraw);
+		drawLens(combatDraw);
 	}
 
-	ID3D11ShaderResourceView* nullResources[3] = {};
-	context->PSSetShaderResources(0, 3, nullResources);
+	ID3D11ShaderResourceView* nullResources[kLensResourceCount] = {};
+	context->PSSetShaderResources(0, kLensResourceCount, nullResources);
 	profiler->EndPass();
 }
 
@@ -1087,7 +1237,7 @@ void CameraFX::DrawSettings()
 		strengthRow(T(TKEY("rain_drops"), "Rain Drops"), &settings.RainDrops, &settings.RainStrength,
 			T(TKEY("rain_drops_tooltip"), "Rain beads and runs on the lens while you are out in it. More lands when you look up; none under a roof."));
 		checkbox(T(TKEY("water_sheet"), "Water After Swimming"), &settings.WaterSheet,
-			T(TKEY("water_sheet_tooltip"), "Surfacing leaves a sheet of water that drains off the lens."));
+			T(TKEY("water_sheet_tooltip"), "Swimming splashes the lens; surfacing or climbing out leaves a sheet of water that drains off it in drops and runs."));
 		strengthRow(T(TKEY("weather_frost"), "Snow and Blizzard Frost"), &settings.WeatherFrost, &settings.WeatherFrostStrength,
 			T(TKEY("weather_frost_tooltip"), "Snowfall frosts the lens edges lightly, blizzards heavily. Melts near fires while Heat Haze is on."));
 		checkbox(T(TKEY("cold_breath"), "Cold Breath"), &settings.ColdBreath,
@@ -1098,8 +1248,6 @@ void CameraFX::DrawSettings()
 			T(TKEY("fog_condensation_tooltip"), "Dense fog beads fine droplets on the lens edges."));
 		strengthRow(T(TKEY("atmosphere"), "Ash, Dust and Embers"), &settings.Atmosphere, &settings.AtmosphereStrength,
 			T(TKEY("atmosphere_tooltip"), "Ash storms settle grey ash on the lens, dry gales blow dust past it and burning skies carry embers."));
-		checkbox(T(TKEY("heat_ripple"), "Heat Ripple"), &settings.HeatRipple,
-			T(TKEY("heat_ripple_tooltip"), "Standing close to a fire makes the bottom of the view ripple. Uses fires found by Heat Haze."));
 		ImGui::TreePop();
 	}
 
@@ -1153,9 +1301,10 @@ void CameraFX::DrawSettings()
 		ImGui::Text(T(TKEY("debug_themes"), "Low health %.2f  Exhaustion %.2f  Hunger %.2f  Poison %.2f"), frameData.Themes.x, frameData.Themes.y, frameData.Themes.z, frameData.Themes.w);
 		const auto& weatherState = weather.Get();
 		const auto& combatState = combat.Get();
-		ImGui::Text(T(TKEY("debug_weather"), "Rain %.2f  Sheet %.2f  Entry fog %.2f  Condensation %.2f"), weatherState.rain, weatherState.sheet, weatherState.entryFog, weatherState.condensation);
+		ImGui::Text(T(TKEY("debug_weather"), "Rain %.2f  Roof exposure %.2f  Sheet %.2f  Splash %.2f  Entry fog %.2f  Condensation %.2f"), weatherState.rain, weatherState.exposure, weatherState.sheet, weatherState.splash, weatherState.entryFog, weatherState.condensation);
+		ImGui::Text(T(TKEY("debug_water_state"), "Underwater %d  Swimming %d  Frost map %d  Dirt map %d"), weatherState.underwater ? 1 : 0, weatherState.swimming ? 1 : 0, frostMask ? 1 : 0, lensDirt ? 1 : 0);
 		ImGui::Text(T(TKEY("debug_atmosphere"), "Ash %.2f  Dust %.2f  Embers %.2f  Heat %.2f  Breath cold %.2f"), weatherState.ash, weatherState.dust, weatherState.embers, weatherState.heat, weatherState.breathCold);
-		ImGui::Text(T(TKEY("debug_combat"), "Splats %zu  Flash %.2f  Shock %.2f  Fire %.2f  Exertion %.2f"), combatState.splats.size(), combatState.flash, combatState.shock, combatState.fire, combatState.exertion);
+		ImGui::Text(T(TKEY("debug_combat"), "Splats %zu  Flash %.2f  Shock %.2f  Lasting shock %.2f  Fire %.2f  Exertion %.2f"), combatState.splats.size(), combatState.flash, combatState.shock, combatState.shockLasting, combatState.fire, combatState.exertion);
 		ImGui::TreePop();
 	}
 }

@@ -109,15 +109,30 @@ namespace CameraFXLens
 		float GetLife(SplatType a_type)
 		{
 			switch (a_type) {
-			case SplatType::kVenom:
-				return 5.0f;
 			case SplatType::kIce:
-				return 4.0f;
+				return 3.5f;
 			case SplatType::kFire:
+				return 1.3f;
 			case SplatType::kGrit:
 				return 3.0f;
 			default:
-				return 6.0f;
+				return 8.0f;
+			}
+		}
+
+		float GetSize(SplatType a_type, float a_strength)
+		{
+			switch (a_type) {
+			case SplatType::kVenom:
+				return 0.14f;
+			case SplatType::kIce:
+				return 0.18f;
+			case SplatType::kFire:
+				return 0.2f;
+			case SplatType::kGrit:
+				return 0.16f;
+			default:
+				return 0.07f + 0.06f * std::clamp(a_strength, 0.0f, 1.0f);
 			}
 		}
 
@@ -322,7 +337,14 @@ namespace CameraFXLens
 
 	void CombatLens::Spawn(const Pending& a_pending, const CombatOptions& a_options)
 	{
-		if (a_pending.flash > 0.0f && a_options.flash) {
+		const bool flashes = a_pending.flash > 0.0f && a_options.flash;
+		const bool slashes = a_pending.slash > 0.0f && a_options.slash;
+		if (flashes || slashes) {
+			state.hitU = a_pending.u;
+			state.hitV = a_pending.v;
+			state.hitAge = 0.0f;
+		}
+		if (flashes) {
 			float amount = a_pending.flash * a_options.flashStrength;
 			if (a_options.photosensitiveSafe) {
 				amount = std::min(amount, kSafeFlashCap);
@@ -335,12 +357,16 @@ namespace CameraFXLens
 			}
 			flashCooldown = kFlashInterval;
 		}
-		if (a_pending.slash > 0.0f && a_options.slash) {
+		if (slashes) {
 			state.slash = a_pending.slash;
 			state.slashAngle = a_pending.slashAngle;
 		}
 		if (a_options.elemental) {
-			state.shock = std::max(state.shock, a_pending.shock);
+			if (a_pending.shock > 0.0f) {
+				state.shock = std::max(state.shock, a_pending.shock);
+				state.shockAge = 0.0f;
+				state.shockSeed = static_cast<float>(++shockCount % 4096u);
+			}
 			state.fire = std::max(state.fire, a_pending.fire);
 			state.frost = std::max(state.frost, a_pending.frost);
 		}
@@ -350,32 +376,35 @@ namespace CameraFXLens
 
 		auto Random = [this]() { return NextRandom(randomState); };
 		const float scale = IsGore(a_pending.type) ? a_options.bloodStrength : 1.0f;
+		const float size = GetSize(a_pending.type, a_pending.strength);
 		for (uint32_t i = 0; i < a_pending.count; ++i) {
 			Splat splat;
 			splat.type = a_pending.type;
+			splat.radius = size * (0.75f + 0.5f * Random()) * (i == 0 ? 1.0f : 0.7f);
 			splat.u = std::clamp(a_pending.u + (Random() - 0.5f) * 0.12f, 0.03f, 0.97f);
 			splat.v = std::clamp(a_pending.v + (Random() - 0.5f) * 0.12f, 0.03f, 0.97f);
 			float du = splat.u - 0.5f;
 			float dv = splat.v - 0.5f;
 			const float distance = std::sqrt(du * du + dv * dv);
-			if (distance < kSafeZone) {
-				if (distance < 1e-3f) {
-					const float angle = Random() * 2.0f * RE::NI_PI;
-					du = std::cos(angle);
-					dv = std::sin(angle);
-				} else {
-					du /= distance;
-					dv /= distance;
-				}
-				const float pushed = kSafeZone + Random() * 0.1f;
+			const float clearance = kSafeZone + splat.radius * 0.5f;
+			if (distance < 1e-3f) {
+				const float angle = Random() * 2.0f * RE::NI_PI;
+				du = std::cos(angle);
+				dv = std::sin(angle);
+			} else {
+				du /= distance;
+				dv /= distance;
+			}
+			if (distance < clearance) {
+				const float pushed = clearance + Random() * 0.1f;
 				splat.u = 0.5f + du * pushed;
 				splat.v = 0.5f + dv * pushed;
 			}
-			splat.radius = (0.035f + 0.035f * Random()) * std::clamp(a_pending.strength, 0.3f, 1.5f) * scale;
-			splat.life = GetLife(splat.type) * (0.8f + 0.4f * Random());
-			splat.seed = Random();
-			splat.strength = std::clamp(a_pending.strength * scale, 0.0f, 1.5f);
-			if (splat.radius <= 0.0f)
+			splat.angle = std::atan2(dv, du) + (Random() - 0.5f) * 0.8f;
+			splat.life = GetLife(splat.type) * (0.85f + 0.3f * Random());
+			splat.seed = Random() * 100.0f;
+			splat.strength = std::clamp(a_pending.strength * scale, 0.0f, 1.0f);
+			if (splat.strength <= 0.01f)
 				continue;
 			if (state.splats.size() >= kMaxSplats)
 				state.splats.erase(state.splats.begin());
@@ -448,6 +477,7 @@ namespace CameraFXLens
 			breathTimer = std::lerp(calm, kWindedBreathPeriod, exertion) * jitter;
 			state.exhaleAge = 0.0f;
 			state.exhaleStrength = 0.55f + 0.45f * exertion;
+			state.exhaleSeed = static_cast<float>(breathCount % 997u);
 		}
 	}
 
@@ -485,6 +515,8 @@ namespace CameraFXLens
 		const float flashDecay = a_options.photosensitiveSafe ? 1.5f : 3.0f;
 		state.flash = std::max(0.0f, state.flash - a_step * flashDecay);
 		state.slash = std::max(0.0f, state.slash - a_step * 2.5f);
+		state.hitAge = std::min(state.hitAge + a_step, 99.0f);
+		state.shockAge = std::min(state.shockAge + a_step, 99.0f);
 
 		scanTimer -= a_delta;
 		if (scanTimer <= 0.0f) {
@@ -492,7 +524,8 @@ namespace CameraFXLens
 			ScanActiveEffects();
 		}
 		const bool elemental = a_options.elemental;
-		state.shock = std::max(std::max(0.0f, state.shock - a_step), elemental ? persistentShock : 0.0f);
+		state.shock = state.shockAge < 1.0f ? state.shock : 0.0f;
+		state.shockLasting = Util::Approach(state.shockLasting, elemental ? persistentShock : 0.0f, 3.0f, 1.5f, a_step);
 		state.fire = std::max(std::max(0.0f, state.fire - a_step * 0.5f), elemental ? persistentFire : 0.0f);
 		state.frost = std::max(std::max(0.0f, state.frost - a_step * 0.2f), elemental ? persistentFrost : 0.0f);
 	}
