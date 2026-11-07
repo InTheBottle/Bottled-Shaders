@@ -51,6 +51,24 @@ namespace Color
 		return color;
 	}
 
+	float3 PBRColorPow(float3 color)
+	{
+#	if defined(EFFECTS11)
+		if (SharedData::enbSettings.Enable)
+			color = pow(abs(color), SharedData::enbSettings.PBRColorPow);
+#	endif
+		return color;
+	}
+
+	float3 UndoPBRColorPow(float3 color)
+	{
+#	if defined(EFFECTS11)
+		if (SharedData::enbSettings.Enable)
+			color = pow(abs(color), rcp(max(SharedData::enbSettings.PBRColorPow, 1e-3)));
+#	endif
+		return color;
+	}
+
 	float3 Albedo(float3 color)
 	{
 		color = EnbColorPow(color);
@@ -58,6 +76,20 @@ namespace Color
 		color = LinearToPBRMaterial(color);
 #	endif
 		return color;
+	}
+
+	float3 PBRAlbedo(float3 color)
+	{
+		return LinearToPBRMaterial(PBRColorPow(color));
+	}
+
+	float3 LandscapeAlbedo(float3 color, float pbrShare)
+	{
+#	if defined(EFFECTS11)
+		if (SharedData::enbSettings.Enable)
+			color = pow(abs(color), lerp(SharedData::enbSettings.ColorPow, SharedData::enbSettings.PBRColorPow, pbrShare));
+#	endif
+		return LinearToPBRMaterial(color);
 	}
 
 	float3 Light(float3 color)

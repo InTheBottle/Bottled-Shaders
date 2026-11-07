@@ -280,7 +280,7 @@ private:
 	static RE::NiPoint3 CalculateVanillaSunDirection(float hour, float sunrise, float sunset);
 
 	/** @brief Angle along the alternate path's arc, 0 at sunrise and pi at sunset. */
-	static float GetAlternateSunPhase(float hour, float sunrise, float sunset) { return DirectX::XM_PI * (hour - sunrise) / (sunset - sunrise); }
+	static float GetAlternateSunPhase(float hour, float sunrise, float sunset);
 
 	/** @brief Unit direction on the alternate path, an arc tilted by sunAngle degrees from the horizon. */
 	static RE::NiPoint3 CalculateAlternateSunDirection(float hour, float sunrise, float sunset, float sunAngle);

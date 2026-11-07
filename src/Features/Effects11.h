@@ -41,7 +41,8 @@ public:
 		float FireIntensity;
 
 		float FireCurve;
-		float pad0[3];
+		float PBRColorPow;
+		float pad0[2];
 
 		float CloudsCurve;
 		float CloudsDesaturation;
@@ -177,6 +178,7 @@ public:
 	struct Settings
 	{
 		bool IgnorePresetParticles = true;
+		float PBRColorPowStrength = 0.0f;
 	} settings;
 
 	bool enableEffect = false;

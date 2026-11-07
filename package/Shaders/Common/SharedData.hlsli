@@ -302,7 +302,8 @@ namespace SharedData
 		float FireIntensity;
 
 		float FireCurve;
-		float3 pad0;
+		float PBRColorPow;
+		float2 pad0;
 
 		float CloudsCurve;
 		float CloudsDesaturation;

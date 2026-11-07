@@ -288,6 +288,7 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 	data.Enable = enableEffect;
 	auto& linearLighting = globals::features::linearLighting;
 	data.ColorPow = linearLighting.IsLinearLightingActive() ? 1.0f : settingManager.GetInterpolatedTimeOfDayValue("ColorPow", "ENVIRONMENT");
+	data.PBRColorPow = std::lerp(1.0f, data.ColorPow, settings.PBRColorPowStrength);
 	if (enableEffect)
 		data.SkyScaleMultiplier = settingManager.GetValue<bool>("DisableWrongSkyMath", "SKY") ? 0.0f : settingManager.GetInterpolatedTimeOfDayValue("GradientIntensity", "SKY");
 
@@ -375,7 +376,8 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	Effects11::Settings,
-	IgnorePresetParticles)
+	IgnorePresetParticles,
+	PBRColorPowStrength)
 
 void Effects11::DrawSettings()
 {
@@ -385,6 +387,7 @@ void Effects11::DrawSettings()
 void Effects11::LoadSettings(json& o_json)
 {
 	settings = o_json;
+	settings.PBRColorPowStrength = std::clamp(settings.PBRColorPowStrength, 0.0f, 1.0f);
 }
 
 void Effects11::SaveSettings(json& o_json)
