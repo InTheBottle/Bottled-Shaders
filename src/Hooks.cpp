@@ -288,6 +288,8 @@ namespace EffectExtensions
 		static void thunk(RE::BSShader* shader, RE::BSRenderPass* pass, uint32_t renderFlags)
 		{
 			func(shader, pass, renderFlags);
+			if (globals::state->currentVertexDescriptor & static_cast<uint32_t>(SIE::ShaderCache::EffectShaderFlags::SkyObject))
+				globals::features::reverseZ.ClearSkyDepthBias();
 			ExternalEmittance::UpdatePermutation(pass);
 			globals::state->permutationData.EffectRadius = pass->geometry->worldBound.radius;
 			if (globals::features::nightEye.loaded)

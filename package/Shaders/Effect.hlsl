@@ -190,7 +190,7 @@ VS_OUTPUT main(VS_INPUT input)
 
 #	if defined(SKY_OBJECT)
 #		ifdef REVERSE_Z
-	float4 skyObjectDepthRow = FrameBuffer::IsReverseProjection(Proj) ? 0.0.xxxx : ViewProj[3];
+	float4 skyObjectDepthRow = FrameBuffer::IsReverseProjection(Proj) ? ViewProj[3] * 2e-9 : ViewProj[3];
 #		else
 	float4 skyObjectDepthRow = ViewProj[3];
 #		endif
