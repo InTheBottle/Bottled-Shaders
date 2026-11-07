@@ -2,6 +2,8 @@
 
 #define SD_INTERPOLATE(member) output.member = patch[0].member * bary.x + patch[1].member * bary.y + patch[2].member * bary.z
 
+static const float PackedSnowDepth = 4.0;
+
 [domain("tri")]
 ControlPoint main(PatchConstants constants, float3 bary : SV_DomainLocation, const OutputPatch<ControlPoint, 3> patch)
 {
@@ -30,6 +32,7 @@ ControlPoint main(PatchConstants constants, float3 bary : SV_DomainLocation, con
 
 	output.WorldPosition.z += displacement;
 	output.PreviousWorldPosition.z += displacement;
+	output.LandBlendWeights2.z = saturate(-field * (1.0 / PackedSnowDepth));
 
 	float2 gradient = 0.0;
 	[branch] if (ActivityAt(windowPosition) > 0.0)

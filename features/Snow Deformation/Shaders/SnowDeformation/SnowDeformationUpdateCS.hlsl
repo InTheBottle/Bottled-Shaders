@@ -10,6 +10,7 @@ StructuredBuffer<int4> TileList : register(t3);
 Texture2D<float> BlanketRaise : register(t4);
 Texture2D<float> FieldBefore : register(t5);
 Texture2D<float> CoarseField : register(t6);
+Texture2D<float4> LandGrid : register(t7);
 SamplerState FieldSampler : register(s1);
 
 RWTexture2D<float> Field : register(u0);
@@ -27,6 +28,19 @@ float RaiseAt(float2 worldPosition)
 	[branch] if (all(inside >= 0) && all(inside < BLANKET_TEXELS - 1))
 		raise = BlanketRaise.SampleLevel(FieldSampler, (cell + 0.5) * (1.0 / BLANKET_TEXELS), 0);
 	return raise;
+}
+
+float RoadAt(float2 worldPosition)
+{
+	float road = 0.0;
+	[branch] if (BlanketShape.y > 0.5)
+	{
+		const float2 cell = worldPosition * (1.0 / BLANKET_CELL);
+		const int2 inside = (int2)floor(cell) - BlanketCell.xy;
+		[branch] if (all(inside >= 0) && all(inside < BLANKET_TEXELS - 1))
+			road = LandGrid.SampleLevel(FieldSampler, (cell + 0.5) * (1.0 / BLANKET_TEXELS), 0).w;
+	}
+	return saturate(road);
 }
 
 groupshared uint gsHits[STAMP_WORDS];
@@ -136,6 +150,7 @@ float StampDistance(float2 delta, float4 stamp, float4 shape)
 	float rimNoise = 0.0;
 	float melt = 0.0;
 	float meltFloor = 0.0;
+	float keep = -1.0;
 	bool noiseReady = false;
 
 	uint word = 0;
@@ -200,7 +215,9 @@ float StampDistance(float2 delta, float4 stamp, float4 shape)
 				raise = RaiseAt(worldPosition);
 			carve = max(raise - (surface.w - 1.0), 0.0);
 		}
-		const float profile = (rim * max(1.0 + Shape.y * rimNoise, 0.0) - stamp.w * press * max(1.0 + Shape.z * churn, 0.0)) * snow - carve * press;
+		if (keep < 0.0)
+			keep = 1.0 - RoadAt(worldPosition);
+		const float profile = ((rim * max(1.0 + Shape.y * rimNoise, 0.0) - stamp.w * press * max(1.0 + Shape.z * churn, 0.0)) * snow - carve * press) * keep;
 		if (abs(profile) > abs(target))
 			target = profile;
 	}

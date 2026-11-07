@@ -33,7 +33,7 @@ float NeighbourHeight(int2 world, float fallback)
 
 		const float2 fromCentre = abs(windowPosition - BlanketFade.xy);
 		const float fade = 1.0 - saturate((max(fromCentre.x, fromCentre.y) - BlanketFade.z) * BlanketFade.w);
-		raise = min(BlanketShape.x * snow, BlanketShape.x * land.z) * fade;
+		raise = min(BlanketShape.x * snow, BlanketShape.x * land.z) * fade * (1.0 - saturate(land.w) * BlanketShape.y);
 	}
 	Blanket[slot] = raise;
 }

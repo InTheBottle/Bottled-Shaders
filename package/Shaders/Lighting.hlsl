@@ -310,7 +310,8 @@ VS_OUTPUT main(VS_INPUT input)
 
 	float2 gridOffset = LandBlendParams.zw - input.Position.xy;
 	vsout.LandBlendWeights2.w = 1 - saturate(0.000375600968 * (9625.59961 - length(gridOffset)));
-	vsout.LandBlendWeights2.xyz = input.LandBlendWeights2.xyz;
+	vsout.LandBlendWeights2.xy = input.LandBlendWeights2.xy;
+	vsout.LandBlendWeights2.z = 0;
 #	elif defined(PROJECTED_UV) && !defined(SKINNED)
 	float3x3 texProjWorld3x3 = float3x3(World[0].xyz, World[1].xyz, World[2].xyz);
 	vsout.TexProj = mul(texProjWorld3x3, TextureProj[2].xyz);
@@ -2702,6 +2703,18 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		endif
 	}
 #	endif  // SNOW_COVER
+
+#	if defined(LANDSCAPE)
+	[branch] if (input.LandBlendWeights2.z > 0.0)
+	{
+		float packedSnow = saturate(input.LandBlendWeights2.z);
+		material.BaseColor *= lerp(1.0, float3(0.86, 0.89, 0.93), packedSnow);
+		material.Roughness *= lerp(1.0, 0.8, packedSnow);
+#		if !defined(TRUE_PBR)
+		material.Shininess *= lerp(1.0, 1.3, packedSnow);
+#		endif
+	}
+#	endif
 
 	float2 uvOriginal_ddx = ddx(uvOriginal);
 	float2 uvOriginal_ddy = ddy(uvOriginal);
