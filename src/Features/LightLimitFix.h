@@ -496,7 +496,7 @@ public:
 		uint LocalShadowResolution = 0;
 		uint LocalShadowSamples = 8;
 		float LocalShadowFilterScale = 1.0f;
-		uint LocalShadowUpdatesPerFrame = 1;
+		uint LocalShadowUpdatesPerFrame = 4;
 
 		// Light attach gate: skips the engine's per-frame attach walk for unchanged dynamic lights.
 		bool SkipRedundantLightAttach = true;
