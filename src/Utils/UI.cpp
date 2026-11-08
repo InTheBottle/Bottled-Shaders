@@ -64,6 +64,17 @@ namespace Util
 	static int g_lastWindowWidth = 0;
 	static int g_lastWindowHeight = 0;
 
+	static constexpr float kGamepadStickPressThreshold = 0.10f;
+
+	static void FilterGamepadStickEvents()
+	{
+		for (auto& event : ImGui::GetCurrentContext()->InputEventsQueue) {
+			if (event.Type != ImGuiInputEventType_Key || event.Key.Key < ImGuiKey_GamepadLStickLeft || event.Key.Key > ImGuiKey_GamepadRStickDown)
+				continue;
+			event.Key.AnalogValue = event.Key.Down ? std::clamp((event.Key.AnalogValue - kGamepadStickPressThreshold) / (1.0f - kGamepadStickPressThreshold), 0.0f, 1.0f) : 0.0f;
+		}
+	}
+
 	void RefreshScreenScale(HWND hwnd, float bufferWidth, float bufferHeight)
 	{
 		RECT rect{};
@@ -89,6 +100,7 @@ namespace Util
 
 		auto& io = ImGui::GetIO();
 		io.DisplaySize = g_displaySize;
+		FilterGamepadStickEvents();
 
 		POINT cursorPos{};
 		if (GetCursorPos(&cursorPos) &&

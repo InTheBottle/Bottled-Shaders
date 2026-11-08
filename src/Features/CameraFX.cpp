@@ -257,6 +257,15 @@ namespace
 		ID3D11UnorderedAccessView* csUAV = nullptr;
 	};
 
+	class IndentScope
+	{
+	public:
+		IndentScope() { ImGui::Indent(); }
+		~IndentScope() { ImGui::Unindent(); }
+		IndentScope(const IndentScope&) = delete;
+		IndentScope& operator=(const IndentScope&) = delete;
+	};
+
 	DXGI_FORMAT GetTypedFormat(DXGI_FORMAT a_format)
 	{
 		switch (a_format) {
@@ -1275,116 +1284,195 @@ void CameraFX::DrawBeforeInterface()
 void CameraFX::DrawSettings()
 {
 	ImGui::Checkbox(T(TKEY("enabled"), "Enabled"), &settings.Enabled);
+	auto featureDisabled = Util::DisableGuard(!settings.Enabled);
 
 	ImGui::Checkbox(T(TKEY("replace_modifiers"), "Replace Imagespace Modifiers"), &settings.ReplaceModifiers);
-	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::TextWrapped("%s", T(TKEY("replace_modifiers_tooltip"), "Draws every game screen effect (damage, fades, spells, survival and more) itself, after upscaling and before the HUD. Off leaves them to the game."));
-
-	auto strengthRow = [](const char* a_label, bool* a_enabled, float* a_strength, const char* a_tooltip) {
-		ImGui::Checkbox(a_label, a_enabled);
-		if (auto _tt = Util::HoverTooltipWrapper())
-			ImGui::TextWrapped("%s", a_tooltip);
-		auto disabled = Util::DisableGuard(!*a_enabled);
-		ImGui::PushID(a_label);
-		ImGui::SliderFloat(T("feature.camera_fx.strength", "Strength"), a_strength, 0.0f, kMaxStrength, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-		ImGui::PopID();
-	};
+	Util::HoverTip(T(TKEY("replace_modifiers_tooltip"), "Draws every game screen effect (damage, fades, spells, survival and more) itself, after upscaling and before the HUD. Off leaves them to the game."));
+	ImGui::Checkbox(T(TKEY("photosensitive_safe"), "Photosensitive Safe"), &settings.PhotosensitiveSafe);
+	Util::HoverTip(T(TKEY("photosensitive_safe_tooltip"), "Caps and spaces out flashes, keeps flicker slow and calms the low health heartbeat."));
 
 	if (ImGui::TreeNodeEx(T(TKEY("themes"), "Themed Effects"), ImGuiTreeNodeFlags_DefaultOpen)) {
-		auto disabled = Util::DisableGuard(!settings.ReplaceModifiers);
-		strengthRow(T(TKEY("cold_frost"), "Cold: Lens Frost"), &settings.ColdFrost, &settings.FrostStrength,
-			T(TKEY("cold_frost_tooltip"), "Survival Mode cold grows frost in from the lens edges instead of the blue blur."));
-		strengthRow(T(TKEY("low_health"), "Low Health: Heartbeat"), &settings.LowHealth, &settings.LowHealthStrength,
-			T(TKEY("low_health_tooltip"), "Low health darkens and reddens the edges in time with a heartbeat that quickens as health drops."));
+		if (!settings.ReplaceModifiers)
+			Util::SettingHint(T(TKEY("themes_need_replace"), "Turn on Replace Imagespace Modifiers to use these."), false);
 		{
-			auto heartbeatDisabled = Util::DisableGuard(!settings.LowHealth);
-			ImGui::Checkbox(T(TKEY("heartbeat_blur"), "Heartbeat Blur"), &settings.HeartbeatBlur);
-			if (auto _tt = Util::HoverTooltipWrapper())
-				ImGui::TextWrapped("%s", T(TKEY("heartbeat_blur_tooltip"), "The edges of the view soften with each heartbeat while health is low."));
+			auto themesDisabled = Util::DisableGuard(!settings.ReplaceModifiers);
+
+			ImGui::Checkbox(T(TKEY("cold_frost"), "Cold: Lens Frost"), &settings.ColdFrost);
+			Util::HoverTip(T(TKEY("cold_frost_tooltip"), "Survival Mode cold grows frost in from the lens edges instead of the blue blur."));
+			{
+				IndentScope indent;
+				auto disabled = Util::DisableGuard(!settings.ColdFrost);
+				Util::PercentageSlider(T(TKEY("frost_strength"), "Frost Strength"), &settings.FrostStrength, 0.0f, 200.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
+			}
+
+			ImGui::Checkbox(T(TKEY("low_health"), "Low Health: Heartbeat"), &settings.LowHealth);
+			Util::HoverTip(T(TKEY("low_health_tooltip"), "Low health darkens and reddens the edges in time with a heartbeat that quickens as health drops."));
+			{
+				IndentScope indent;
+				auto disabled = Util::DisableGuard(!settings.LowHealth);
+				Util::PercentageSlider(T(TKEY("low_health_strength"), "Heartbeat Strength"), &settings.LowHealthStrength, 0.0f, 200.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
+				ImGui::Checkbox(T(TKEY("heartbeat_blur"), "Heartbeat Blur"), &settings.HeartbeatBlur);
+				Util::HoverTip(T(TKEY("heartbeat_blur_tooltip"), "The edges of the view soften with each heartbeat while health is low."));
+			}
+
+			ImGui::Checkbox(T(TKEY("exhaustion"), "Exhaustion: Heavy Eyes"), &settings.Exhaustion);
+			Util::HoverTip(T(TKEY("exhaustion_tooltip"), "Survival Mode exhaustion makes the eyelids droop and blink slowly."));
+			{
+				IndentScope indent;
+				auto disabled = Util::DisableGuard(!settings.Exhaustion);
+				Util::PercentageSlider(T(TKEY("exhaustion_strength"), "Exhaustion Strength"), &settings.ExhaustionStrength, 0.0f, 200.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
+			}
+
+			ImGui::Checkbox(T(TKEY("hunger"), "Hunger: Fading Colour"), &settings.Hunger);
+			Util::HoverTip(T(TKEY("hunger_tooltip"), "Survival Mode hunger drains colour from the view in slow waves."));
+			{
+				IndentScope indent;
+				auto disabled = Util::DisableGuard(!settings.Hunger);
+				Util::PercentageSlider(T(TKEY("hunger_strength"), "Hunger Strength"), &settings.HungerStrength, 0.0f, 200.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
+			}
+
+			ImGui::Checkbox(T(TKEY("poison"), "Poison: Sickly Edges"), &settings.Poison);
+			Util::HoverTip(T(TKEY("poison_tooltip"), "Poison tints the edges green and makes the view sway."));
+			{
+				IndentScope indent;
+				auto disabled = Util::DisableGuard(!settings.Poison);
+				Util::PercentageSlider(T(TKEY("poison_strength"), "Poison Strength"), &settings.PoisonStrength, 0.0f, 200.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
+			}
+
+			ImGui::Checkbox(T(TKEY("transformation"), "Beast Transformation"), &settings.Transformation);
+			Util::HoverTip(T(TKEY("transformation_tooltip"), "Turning into a werewolf or Vampire Lord floods the edges with a pounding, blurred red (or violet) haze on top of the game's own effect."));
+			{
+				IndentScope indent;
+				auto disabled = Util::DisableGuard(!settings.Transformation);
+				Util::PercentageSlider(T(TKEY("transformation_strength"), "Transformation Strength"), &settings.TransformationStrength, 0.0f, 200.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
+			}
 		}
-		strengthRow(T(TKEY("exhaustion"), "Exhaustion: Heavy Eyes"), &settings.Exhaustion, &settings.ExhaustionStrength,
-			T(TKEY("exhaustion_tooltip"), "Survival Mode exhaustion makes the eyelids droop and blink slowly."));
-		strengthRow(T(TKEY("hunger"), "Hunger: Fading Colour"), &settings.Hunger, &settings.HungerStrength,
-			T(TKEY("hunger_tooltip"), "Survival Mode hunger drains colour from the view in slow waves."));
-		strengthRow(T(TKEY("poison"), "Poison: Sickly Edges"), &settings.Poison, &settings.PoisonStrength,
-			T(TKEY("poison_tooltip"), "Poison tints the edges green and makes the view sway."));
-		strengthRow(T(TKEY("transformation"), "Beast Transformation"), &settings.Transformation, &settings.TransformationStrength,
-			T(TKEY("transformation_tooltip"), "Turning into a werewolf or Vampire Lord floods the edges with a pounding, blurred red (or violet) haze on top of the game's own transformation effect."));
 		ImGui::TreePop();
 	}
 
 	if (ImGui::TreeNodeEx(T(TKEY("lens"), "Sun and Moon on the Lens"), ImGuiTreeNodeFlags_DefaultOpen)) {
-		strengthRow(T(TKEY("sun_lens"), "Sun Glare"), &settings.SunLens, &settings.SunLensStrength,
-			T(TKEY("sun_lens_tooltip"), "A low sun in a clear sky veils the lens and lights its dust. Hidden as soon as anything stands between you and the sun."));
+		ImGui::Checkbox(T(TKEY("sun_lens"), "Sun Glare"), &settings.SunLens);
+		Util::HoverTip(T(TKEY("sun_lens_tooltip"), "A low sun in a clear sky veils the lens and lights its dust. Hidden as soon as anything stands between you and the sun."));
 		{
-			auto dirtDisabled = Util::DisableGuard(!settings.SunLens && !settings.MoonLens);
-			ImGui::SliderFloat(T(TKEY("lens_dirt"), "Lens Dirt"), &settings.LensDirt, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-			if (auto _tt = Util::HoverTooltipWrapper())
-				ImGui::TextWrapped("%s", T(TKEY("lens_dirt_tooltip"), "Dust and smudges on the lens that only show against the sun or moon."));
-		}
-		{
+			IndentScope indent;
 			auto disabled = Util::DisableGuard(!settings.SunLens);
+			Util::PercentageSlider(T(TKEY("sun_lens_strength"), "Glare Strength"), &settings.SunLensStrength, 0.0f, 200.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
 			ImGui::SliderFloat(T(TKEY("sun_max_height"), "Sun Height Limit"), &settings.SunMaxHeight, kMinSunMaxHeight, kMaxSunMaxHeight, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-			if (auto _tt = Util::HoverTooltipWrapper())
-				ImGui::TextWrapped("%s", T(TKEY("sun_max_height_tooltip"), "Sun elevation (as a sine) at which the glare has faded out. Lower keeps it to sunrise and sunset."));
+			Util::HoverTip(T(TKEY("sun_max_height_tooltip"), "Sun elevation (as a sine) at which the glare has faded out. Lower keeps it to sunrise and sunset."));
 		}
-		strengthRow(T(TKEY("moon_lens"), "Moon Glow"), &settings.MoonLens, &settings.MoonLensStrength,
-			T(TKEY("moon_lens_tooltip"), "A full or nearly full moon on a clear night lights the lens gently."));
+
+		ImGui::Checkbox(T(TKEY("moon_lens"), "Moon Glow"), &settings.MoonLens);
+		Util::HoverTip(T(TKEY("moon_lens_tooltip"), "A full or nearly full moon on a clear night lights the lens gently."));
+		{
+			IndentScope indent;
+			auto disabled = Util::DisableGuard(!settings.MoonLens);
+			Util::PercentageSlider(T(TKEY("moon_lens_strength"), "Glow Strength"), &settings.MoonLensStrength, 0.0f, 200.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
+		}
+
+		{
+			auto disabled = Util::DisableGuard(!settings.SunLens && !settings.MoonLens);
+			Util::PercentageSlider(T(TKEY("lens_dirt"), "Lens Dirt"), &settings.LensDirt, 0.0f, 100.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
+			Util::HoverTip(T(TKEY("lens_dirt_tooltip"), "Dust and smudges on the lens that only show against the sun or moon."));
+		}
 		ImGui::TreePop();
 	}
 
-	auto checkbox = [](const char* a_label, bool* a_value, const char* a_tooltip) {
-		ImGui::Checkbox(a_label, a_value);
-		if (auto _tt = Util::HoverTooltipWrapper())
-			ImGui::TextWrapped("%s", a_tooltip);
-	};
-
 	if (ImGui::TreeNodeEx(T(TKEY("weather"), "Weather on the Lens"), ImGuiTreeNodeFlags_DefaultOpen)) {
-		strengthRow(T(TKEY("rain_drops"), "Rain Drops"), &settings.RainDrops, &settings.RainStrength,
-			T(TKEY("rain_drops_tooltip"), "Rain beads and runs on the lens while you are out in it. More lands when you look up; none under a roof."));
-		checkbox(T(TKEY("water_sheet"), "Water After Swimming"), &settings.WaterSheet,
-			T(TKEY("water_sheet_tooltip"), "Swimming splashes the lens; surfacing or climbing out leaves a sheet of water that drains off it in drops and runs."));
-		strengthRow(T(TKEY("weather_frost"), "Snow and Blizzard Frost"), &settings.WeatherFrost, &settings.WeatherFrostStrength,
-			T(TKEY("weather_frost_tooltip"), "Snowfall frosts the lens edges lightly, blizzards heavily. Melts near fires while Heat Haze is on."));
-		checkbox(T(TKEY("cold_breath"), "Cold Breath"), &settings.ColdBreath,
-			T(TKEY("cold_breath_tooltip"), "In first person your breath shows as vapour in the cold, faster when you are out of breath."));
-		checkbox(T(TKEY("entry_fog"), "Fogged Lens Indoors"), &settings.EntryFog,
-			T(TKEY("entry_fog_tooltip"), "Stepping into a warm interior from the cold fogs the lens, which clears from the centre."));
-		checkbox(T(TKEY("fog_condensation"), "Fog Condensation"), &settings.FogCondensation,
-			T(TKEY("fog_condensation_tooltip"), "Dense fog beads fine droplets on the lens edges."));
-		strengthRow(T(TKEY("atmosphere"), "Ash, Dust and Embers"), &settings.Atmosphere, &settings.AtmosphereStrength,
-			T(TKEY("atmosphere_tooltip"), "Ash storms settle grey ash on the lens, dry gales blow dust past it and burning skies carry embers."));
+		ImGui::Checkbox(T(TKEY("rain_drops"), "Rain Drops"), &settings.RainDrops);
+		Util::HoverTip(T(TKEY("rain_drops_tooltip"), "Rain beads and runs on the lens while you are out in it. More lands when you look up; none under a roof."));
+		{
+			IndentScope indent;
+			auto disabled = Util::DisableGuard(!settings.RainDrops);
+			Util::PercentageSlider(T(TKEY("rain_strength"), "Rain Strength"), &settings.RainStrength, 0.0f, 200.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
+		}
+
+		ImGui::Checkbox(T(TKEY("weather_frost"), "Snow and Blizzard Frost"), &settings.WeatherFrost);
+		Util::HoverTip(T(TKEY("weather_frost_tooltip"), "Snowfall frosts the lens edges lightly, blizzards heavily. Melts near fires while Heat Haze is on."));
+		{
+			IndentScope indent;
+			auto disabled = Util::DisableGuard(!settings.WeatherFrost);
+			Util::PercentageSlider(T(TKEY("weather_frost_strength"), "Snow Frost Strength"), &settings.WeatherFrostStrength, 0.0f, 200.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
+		}
+
+		ImGui::Checkbox(T(TKEY("atmosphere"), "Ash, Dust and Embers"), &settings.Atmosphere);
+		Util::HoverTip(T(TKEY("atmosphere_tooltip"), "Ash storms settle grey ash on the lens, dry gales blow dust past it and burning skies carry embers."));
+		{
+			IndentScope indent;
+			auto disabled = Util::DisableGuard(!settings.Atmosphere);
+			Util::PercentageSlider(T(TKEY("atmosphere_strength"), "Ash and Dust Strength"), &settings.AtmosphereStrength, 0.0f, 200.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
+		}
+
+		ImGui::Checkbox(T(TKEY("water_sheet"), "Water After Swimming"), &settings.WaterSheet);
+		Util::HoverTip(T(TKEY("water_sheet_tooltip"), "Swimming splashes the lens; surfacing or climbing out leaves a sheet of water that drains off it in drops and runs."));
+		ImGui::Checkbox(T(TKEY("cold_breath"), "Cold Breath"), &settings.ColdBreath);
+		Util::HoverTip(T(TKEY("cold_breath_tooltip"), "In first person your breath shows as vapour in the cold, faster when you are out of breath."));
+		ImGui::Checkbox(T(TKEY("entry_fog"), "Fogged Lens Indoors"), &settings.EntryFog);
+		Util::HoverTip(T(TKEY("entry_fog_tooltip"), "Stepping into a warm interior from the cold fogs the lens, which clears from the centre."));
+		ImGui::Checkbox(T(TKEY("fog_condensation"), "Fog Condensation"), &settings.FogCondensation);
+		Util::HoverTip(T(TKEY("fog_condensation_tooltip"), "Dense fog beads fine droplets on the lens edges."));
 		ImGui::TreePop();
 	}
 
 	if (ImGui::TreeNodeEx(T(TKEY("combat"), "Combat"), ImGuiTreeNodeFlags_DefaultOpen)) {
-		checkbox(T(TKEY("combat_enabled"), "Combat Effects"), &settings.Combat,
-			T(TKEY("combat_enabled_tooltip"), "Lens and camera effects from fighting."));
-		auto disabled = Util::DisableGuard(!settings.Combat);
-		strengthRow(T(TKEY("blood"), "Blood Splatter"), &settings.Blood, &settings.BloodStrength,
-			T(TKEY("blood_tooltip"), "Close hits spray blood (or oil from machines) onto the lens. Ghosts do not bleed."));
-		strengthRow(T(TKEY("blood_blur"), "Blood Blur"), &settings.BloodBlur, &settings.BloodBlurStrength,
-			T(TKEY("blood_blur_tooltip"), "Blood, oil and venom on the lens blur what is behind them, and blood and oil leave a soft smudge around the splash."));
-		checkbox(T(TKEY("elemental"), "Elemental Hits"), &settings.ElementalSplats,
-			T(TKEY("elemental_tooltip"), "Fire scorches, frost freezes, shock crackles and poison spatters the lens; giants and dragons throw up grit."));
-		strengthRow(T(TKEY("impact_flash"), "Impact Flash"), &settings.ImpactFlash, &settings.FlashStrength,
-			T(TKEY("impact_flash_tooltip"), "Heavy hits and spells flash the view briefly."));
-		checkbox(T(TKEY("slash"), "Slash Streaks"), &settings.SlashStreaks,
-			T(TKEY("slash_tooltip"), "Melee hits you take leave a streak across the view from the side they came from."));
-		strengthRow(T(TKEY("hit_shake"), "Hit Shake"), &settings.HitShake, &settings.HitShakeStrength,
-			T(TKEY("hit_shake_tooltip"), "The camera jolts when you are hit, harder from power attacks and big creatures. Uses the game camera, so frame generation stays correct."));
-		strengthRow(T(TKEY("hit_blur"), "Hit Blur"), &settings.HitBlur, &settings.HitBlurStrength,
-			T(TKEY("hit_blur_tooltip"), "Taking a hit briefly smears the view outward from the attacker, harder from power attacks, bashes and big creatures. Blocked hits blur less."));
-		checkbox(T(TKEY("stamina_breath"), "Stamina Breaths"), &settings.StaminaBreath,
-			T(TKEY("stamina_breath_tooltip"), "Low stamina darkens the edges in time with your breathing."));
-		checkbox(T(TKEY("photosensitive_safe"), "Photosensitive Safe"), &settings.PhotosensitiveSafe,
-			T(TKEY("photosensitive_safe_tooltip"), "Caps and spaces out flashes and keeps flicker slow."));
+		ImGui::Checkbox(T(TKEY("combat_enabled"), "Combat Effects"), &settings.Combat);
+		Util::HoverTip(T(TKEY("combat_enabled_tooltip"), "Lens and camera effects from fighting."));
+		{
+			IndentScope combatIndent;
+			auto combatDisabled = Util::DisableGuard(!settings.Combat);
+
+			ImGui::Checkbox(T(TKEY("blood"), "Blood Splatter"), &settings.Blood);
+			Util::HoverTip(T(TKEY("blood_tooltip"), "Close hits spray blood (or oil from machines) onto the lens. Ghosts do not bleed."));
+			{
+				IndentScope indent;
+				auto disabled = Util::DisableGuard(!settings.Blood);
+				Util::PercentageSlider(T(TKEY("blood_strength"), "Blood Strength"), &settings.BloodStrength, 0.0f, 200.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
+			}
+
+			ImGui::Checkbox(T(TKEY("blood_blur"), "Blood Blur"), &settings.BloodBlur);
+			Util::HoverTip(T(TKEY("blood_blur_tooltip"), "Blood, oil and venom on the lens blur what is behind them, and blood and oil leave a soft smudge around the splash."));
+			{
+				IndentScope indent;
+				auto disabled = Util::DisableGuard(!settings.BloodBlur);
+				Util::PercentageSlider(T(TKEY("blood_blur_strength"), "Blood Blur Strength"), &settings.BloodBlurStrength, 0.0f, 200.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
+			}
+
+			ImGui::Checkbox(T(TKEY("impact_flash"), "Impact Flash"), &settings.ImpactFlash);
+			Util::HoverTip(T(TKEY("impact_flash_tooltip"), "Heavy hits and spells flash the view briefly."));
+			{
+				IndentScope indent;
+				auto disabled = Util::DisableGuard(!settings.ImpactFlash);
+				Util::PercentageSlider(T(TKEY("flash_strength"), "Flash Strength"), &settings.FlashStrength, 0.0f, 200.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
+			}
+
+			ImGui::Checkbox(T(TKEY("hit_shake"), "Hit Shake"), &settings.HitShake);
+			Util::HoverTip(T(TKEY("hit_shake_tooltip"), "The camera jolts when you are hit, harder from power attacks and big creatures. Uses the game camera, so frame generation stays correct."));
+			{
+				IndentScope indent;
+				auto disabled = Util::DisableGuard(!settings.HitShake);
+				Util::PercentageSlider(T(TKEY("hit_shake_strength"), "Shake Strength"), &settings.HitShakeStrength, 0.0f, 200.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
+			}
+
+			ImGui::Checkbox(T(TKEY("hit_blur"), "Hit Blur"), &settings.HitBlur);
+			Util::HoverTip(T(TKEY("hit_blur_tooltip"), "Taking a hit briefly smears the view outward from the attacker, harder from power attacks, bashes and big creatures. Blocked hits blur less."));
+			{
+				IndentScope indent;
+				auto disabled = Util::DisableGuard(!settings.HitBlur);
+				Util::PercentageSlider(T(TKEY("hit_blur_strength"), "Hit Blur Strength"), &settings.HitBlurStrength, 0.0f, 200.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp);
+			}
+
+			ImGui::Checkbox(T(TKEY("elemental"), "Elemental Hits"), &settings.ElementalSplats);
+			Util::HoverTip(T(TKEY("elemental_tooltip"), "Fire scorches, frost freezes, shock crackles and poison spatters the lens; giants and dragons throw up grit."));
+			ImGui::Checkbox(T(TKEY("slash"), "Slash Streaks"), &settings.SlashStreaks);
+			Util::HoverTip(T(TKEY("slash_tooltip"), "Melee hits you take leave a streak across the view from the side they came from."));
+			ImGui::Checkbox(T(TKEY("stamina_breath"), "Stamina Breaths"), &settings.StaminaBreath);
+			Util::HoverTip(T(TKEY("stamina_breath_tooltip"), "Low stamina darkens the edges in time with your breathing."));
+		}
 		ImGui::TreePop();
 	}
 
 	if (Util::ShowDebugSections() && ImGui::TreeNodeEx(T(TKEY("debug"), "Debug"), ImGuiTreeNodeFlags_None)) {
 		ImGui::Text(T(TKEY("debug_modifiers"), "Modifiers: %zu"), modifierFrame.captures.size());
-		if (ImGui::BeginTable("##CameraFXModifiers", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+		if (!modifierFrame.captures.empty() && ImGui::BeginTable("##CameraFXModifiers", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
 			ImGui::TableSetupColumn(T(TKEY("debug_form_id"), "FormID"));
 			ImGui::TableSetupColumn(T(TKEY("debug_theme"), "Theme"));
 			ImGui::TableSetupColumn(T(TKEY("strength"), "Strength"));
@@ -1404,18 +1492,19 @@ void CameraFX::DrawSettings()
 			ImGui::EndTable();
 		}
 		const auto& generic = resolved.generic;
-		ImGui::Text(T(TKEY("debug_grade"), "Grade: sat %.2f bright %.2f contrast %.2f"), generic.cinematic.x, generic.cinematic.y, generic.cinematic.z);
-		ImGui::Text(T(TKEY("debug_tint_fade"), "Tint %.2f  Fade %.2f  Blur %.2f  Double vision %.2f"), generic.tint.w, generic.fade.w, generic.blurRadius, generic.doubleVision);
-		ImGui::Text(T(TKEY("debug_radial"), "Radial %.2f  DoF %.2f"), generic.radialStrength, generic.dofStrength);
-		ImGui::Text(T(TKEY("debug_lights"), "Frost %.2f  Sun %.2f  Masser %.2f  Secunda %.2f"), frost, sunAmount, moonAmount[0], moonAmount[1]);
-		ImGui::Text(T(TKEY("debug_themes"), "Low health %.2f  Exhaustion %.2f  Hunger %.2f  Poison %.2f"), frameData.Themes.x, frameData.Themes.y, frameData.Themes.z, frameData.Themes.w);
+		ImGui::TextWrapped(T(TKEY("debug_grade"), "Grade: sat %.2f bright %.2f contrast %.2f"), generic.cinematic.x, generic.cinematic.y, generic.cinematic.z);
+		ImGui::TextWrapped(T(TKEY("debug_tint_fade"), "Tint %.2f  Fade %.2f  Blur %.2f  Double vision %.2f"), generic.tint.w, generic.fade.w, generic.blurRadius, generic.doubleVision);
+		ImGui::TextWrapped(T(TKEY("debug_radial"), "Radial %.2f  DoF %.2f"), generic.radialStrength, generic.dofStrength);
+		ImGui::TextWrapped(T(TKEY("debug_lights"), "Frost %.2f  Sun %.2f  Masser %.2f  Secunda %.2f"), frost, sunAmount, moonAmount[0], moonAmount[1]);
+		ImGui::TextWrapped(T(TKEY("debug_themes"), "Low health %.2f  Exhaustion %.2f  Hunger %.2f  Poison %.2f"), frameData.Themes.x, frameData.Themes.y, frameData.Themes.z, frameData.Themes.w);
+		ImGui::TextWrapped(T(TKEY("debug_heartbeat"), "Health severity %.2f  Heartbeat hold %.2f s"), lowHealthSeverity, lowHealthHoldSeconds);
 		const auto& weatherState = weather.Get();
 		const auto& combatState = combat.Get();
-		ImGui::Text(T(TKEY("debug_weather"), "Rain %.2f  Roof exposure %.2f  Sheet %.2f  Splash %.2f  Entry fog %.2f  Condensation %.2f"), weatherState.rain, weatherState.exposure, weatherState.sheet, weatherState.splash, weatherState.entryFog, weatherState.condensation);
-		ImGui::Text(T(TKEY("debug_water_state"), "Underwater %d  Swimming %d  Frost map %d  Dirt map %d"), weatherState.underwater ? 1 : 0, weatherState.swimming ? 1 : 0, frostMask ? 1 : 0, lensDirt ? 1 : 0);
-		ImGui::Text(T(TKEY("debug_atmosphere"), "Ash %.2f  Dust %.2f  Embers %.2f  Heat %.2f  Breath cold %.2f"), weatherState.ash, weatherState.dust, weatherState.embers, weatherState.heat, weatherState.breathCold);
-		ImGui::Text(T(TKEY("debug_combat"), "Splats %zu  Flash %.2f  Shock %.2f  Lasting shock %.2f  Fire %.2f  Exertion %.2f"), combatState.splats.size(), combatState.flash, combatState.shock, combatState.shockLasting, combatState.fire, combatState.exertion);
-		ImGui::Text(T(TKEY("debug_blur"), "Hit blur %.2f  Transformation %.2f (%s, %.1f s)"), combatState.hitBlur, beastLevel,
+		ImGui::TextWrapped(T(TKEY("debug_weather"), "Rain %.2f  Roof exposure %.2f  Sheet %.2f  Splash %.2f  Entry fog %.2f  Condensation %.2f"), weatherState.rain, weatherState.exposure, weatherState.sheet, weatherState.splash, weatherState.entryFog, weatherState.condensation);
+		ImGui::TextWrapped(T(TKEY("debug_water_state"), "Underwater %d  Swimming %d  Frost map %d  Dirt map %d"), weatherState.underwater ? 1 : 0, weatherState.swimming ? 1 : 0, frostMask ? 1 : 0, lensDirt ? 1 : 0);
+		ImGui::TextWrapped(T(TKEY("debug_atmosphere"), "Ash %.2f  Dust %.2f  Embers %.2f  Heat %.2f  Breath cold %.2f"), weatherState.ash, weatherState.dust, weatherState.embers, weatherState.heat, weatherState.breathCold);
+		ImGui::TextWrapped(T(TKEY("debug_combat"), "Splats %zu  Flash %.2f  Shock %.2f  Lasting shock %.2f  Fire %.2f  Exertion %.2f"), combatState.splats.size(), combatState.flash, combatState.shock, combatState.shockLasting, combatState.fire, combatState.exertion);
+		ImGui::TextWrapped(T(TKEY("debug_blur"), "Hit blur %.2f  Transformation %.2f (%s, %.1f s)"), combatState.hitBlur, beastLevel,
 			CameraFXModifiers::GetThemeName(beastVampire ? Theme::kVampireLord : Theme::kWerewolf), beastAge);
 		ImGui::TreePop();
 	}
