@@ -1199,8 +1199,9 @@ void ApplyOverlay(inout Composite c, float2 uv, float2 q, float edgeR, bool full
 
 		[branch] if (CameraFX::Combat.w > 0.001)
 		{
-			float pulse = exp(-CameraFX::Weather3.z * 3.0);
-			Blend(c, 0.0, CameraFX::Combat.w * pulse * smoothstep(0.4, 1.0, CameraFX::EdgeDistance(uv)) * 0.35);
+			float age = CameraFX::Weather3.z;
+			float pulse = smoothstep(0.0, 0.25, age) * (1.0 - smoothstep(0.35, 1.0, age));
+			Blend(c, 0.0, CameraFX::Combat.w * pulse * smoothstep(0.45, 1.1, CameraFX::EdgeDistance(uv)) * 0.25);
 		}
 	}
 	else

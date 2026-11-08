@@ -8,6 +8,8 @@ namespace CameraFXLens
 {
 	inline constexpr uint32_t kMaxSplats = 24;
 
+	float GetHealthFraction(RE::Actor* a_actor);
+
 	enum class SplatType : uint32_t
 	{
 		kBlood,

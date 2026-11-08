@@ -145,16 +145,16 @@ namespace CameraFXLens
 		{
 			return a_type == SplatType::kBlood || a_type == SplatType::kDarkBlood || a_type == SplatType::kOil;
 		}
+	}
 
-		float GetHealthFraction(RE::Actor* a_actor)
-		{
-			auto* values = a_actor ? a_actor->AsActorValueOwner() : nullptr;
-			if (!values)
-				return 1.0f;
-			const float maximum = values->GetPermanentActorValue(RE::ActorValue::kHealth);
-			const float current = values->GetActorValue(RE::ActorValue::kHealth);
-			return std::isfinite(maximum) && maximum > 1.0f && std::isfinite(current) ? std::clamp(current / maximum, 0.0f, 1.0f) : 1.0f;
-		}
+	float GetHealthFraction(RE::Actor* a_actor)
+	{
+		auto* values = a_actor ? a_actor->AsActorValueOwner() : nullptr;
+		if (!values)
+			return 1.0f;
+		const float maximum = values->GetPermanentActorValue(RE::ActorValue::kHealth);
+		const float current = values->GetActorValue(RE::ActorValue::kHealth);
+		return std::isfinite(maximum) && maximum > 1.0f && std::isfinite(current) ? std::clamp(current / maximum, 0.0f, 1.0f) : 1.0f;
 	}
 
 	void CombatLens::Register()

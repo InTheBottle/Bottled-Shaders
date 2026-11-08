@@ -113,6 +113,27 @@ namespace
 	constexpr float kBeastFallRate = 1.0f;
 	constexpr float kBeastBeatsPerMinute = 110.0f;
 	constexpr float kBeastRestartGap = 0.5f;
+	constexpr float kDefaultLowHealthInterval = 2.0f;
+	constexpr float kDefaultHeartbeatSlow = 0.2f;
+	constexpr float kDefaultHeartbeatFast = 0.1f;
+	constexpr float kLowHealthHoldMargin = 0.25f;
+	constexpr float kLowHealthRecoveryMargin = 0.01f;
+	constexpr float kLowHealthFloor = 0.6f;
+	constexpr float kCalmHeartRate = 64.0f;
+	constexpr float kLowHealthHeartRate = 92.0f;
+	constexpr float kSafeHeartRate = 72.0f;
+
+	float Beat(float a_phase, float a_centre, float a_sharpness)
+	{
+		float offset = a_phase - a_centre;
+		offset -= std::round(offset);
+		return std::exp(-offset * offset * a_sharpness);
+	}
+
+	float ReadSetting(const RE::Setting* a_setting, float a_default, float a_min, float a_max)
+	{
+		return a_setting && a_setting->GetType() == RE::Setting::Type::kFloat ? Util::ClampFinite(a_setting->GetFloat(), a_default, a_min, a_max) : a_default;
+	}
 
 	struct MenuManager_DrawInterfaceStart
 	{
@@ -550,6 +571,12 @@ void CameraFX::DataLoaded()
 	CameraFXModifiers::ResolveForms();
 	CameraFXLens::WeatherLens::ResolveForms();
 	combat.Register();
+
+	lowHealthIntervalSetting = RE::GetINISetting("fLowHealthIModInterval:Display");
+	if (auto* gameSettings = RE::GameSettingCollection::GetSingleton()) {
+		heartbeatSlowSetting = gameSettings->GetSetting("fPlayerHealthHeartbeatSlow");
+		heartbeatFastSetting = gameSettings->GetSetting("fPlayerHealthHeartbeatFast");
+	}
 }
 
 void CameraFX::GameLoaded()
@@ -560,6 +587,8 @@ void CameraFX::GameLoaded()
 	sunAmount = 0.0f;
 	moonAmount = {};
 	themeLevels = {};
+	lowHealthHoldSeconds = 0.0f;
+	lowHealthSeverity = 0.0f;
 	beastAge = 99.0f;
 	beastLevel = 0.0f;
 	beastAbsentSeconds = 99.0f;
@@ -729,10 +758,12 @@ void CameraFX::UpdateThemeClocks(float a_deltaTime)
 	const float lowHealth = std::min(frameData.Themes.x, 1.0f);
 	const float exhaustion = std::min(frameData.Themes.y, 1.0f);
 
-	const float beatsPerMinute = std::lerp(66.0f, 140.0f, lowHealth);
+	float beatsPerMinute = std::lerp(kCalmHeartRate, kLowHealthHeartRate, lowHealthSeverity);
+	if (settings.PhotosensitiveSafe)
+		beatsPerMinute = std::min(beatsPerMinute, kSafeHeartRate);
 	heartPhase = std::fmod(heartPhase + a_deltaTime * beatsPerMinute / 60.0f, 1.0f);
-	auto beat = [](float a_offset) { return std::exp(-a_offset * a_offset * 120.0f); };
-	const float pulse = lowHealth > 0.0f ? std::max(beat(heartPhase), 0.55f * beat(heartPhase - 0.22f)) : 0.0f;
+	const float echo = settings.PhotosensitiveSafe ? 0.0f : 0.35f * Beat(heartPhase, 0.2f, 80.0f);
+	const float pulse = lowHealth > 0.0f ? std::min(Beat(heartPhase, 0.0f, 60.0f) + echo, 1.0f) : 0.0f;
 
 	float eyelid = 0.0f;
 	if (exhaustion > 0.0f) {
@@ -760,13 +791,29 @@ void CameraFX::UpdateThemeClocks(float a_deltaTime)
 	float beastPulse = 0.0f;
 	if (beastLevel > 0.0f) {
 		beastPhase = std::fmod(beastPhase + a_deltaTime * kBeastBeatsPerMinute / 60.0f, 1.0f);
-		beastPulse = std::max(beat(beastPhase), 0.6f * beat(beastPhase - 0.2f));
+		beastPulse = std::max(Beat(beastPhase, 0.0f, 120.0f), 0.6f * Beat(beastPhase, 0.2f, 120.0f));
 	} else {
 		beastPhase = 0.0f;
 	}
 
 	frameData.ThemeParams = { pulse, eyelid, hungerPulse, time };
 	frameData.Transform = { beastLevel, beastVampire ? 1.0f : 0.0f, beastPulse, 0.0f };
+}
+
+float CameraFX::UpdateLowHealth(float a_presence, float a_step)
+{
+	const float slow = ReadSetting(heartbeatSlowSetting, kDefaultHeartbeatSlow, 0.0f, 1.0f);
+	const float fast = std::min(ReadSetting(heartbeatFastSetting, kDefaultHeartbeatFast, 0.0f, 1.0f), slow);
+	const float health = CameraFXLens::GetHealthFraction(RE::PlayerCharacter::GetSingleton());
+	lowHealthSeverity = slow > fast ? 1.0f - std::clamp((health - fast) / (slow - fast), 0.0f, 1.0f) : 1.0f;
+
+	if (a_presence > kActiveEpsilon)
+		lowHealthHoldSeconds = ReadSetting(lowHealthIntervalSetting, kDefaultLowHealthInterval, 0.5f, 10.0f) + kLowHealthHoldMargin;
+	else if (health > slow + kLowHealthRecoveryMargin)
+		lowHealthHoldSeconds = 0.0f;
+	else
+		lowHealthHoldSeconds = std::max(0.0f, lowHealthHoldSeconds - a_step);
+	return lowHealthHoldSeconds > 0.0f ? std::lerp(kLowHealthFloor, 1.0f, lowHealthSeverity) : 0.0f;
 }
 
 void CameraFX::UpdateLights(RE::Sky* a_sky)
@@ -823,6 +870,8 @@ void CameraFX::UpdateFrame(float a_deltaTime, bool a_hasDepth)
 	else
 		modifierFrame.captures.clear();
 	resolved = CameraFXModifiers::Resolve(modifierFrame, GetEnabledThemes(), GetModifierBlend());
+	auto& lowHealthPresence = resolved.themes[static_cast<size_t>(Theme::kLowHealth)];
+	lowHealthPresence = UpdateLowHealth(lowHealthPresence, step);
 
 	auto theme = [&](Theme a_theme, bool a_enabled, float a_strength) {
 		const auto index = static_cast<size_t>(a_theme);

@@ -152,6 +152,7 @@ private:
 	void UpdateFrame(float a_deltaTime, bool a_hasDepth);
 	void UpdateLights(RE::Sky* a_sky);
 	void UpdateThemeClocks(float a_deltaTime);
+	float UpdateLowHealth(float a_presence, float a_step);
 
 	ID3D11VertexShader* GetVS();
 	ID3D11PixelShader* GetScenePS();
@@ -182,6 +183,11 @@ private:
 	float time = 0.0f;
 	float frost = 0.0f;
 	float heartPhase = 0.0f;
+	float lowHealthHoldSeconds = 0.0f;
+	float lowHealthSeverity = 0.0f;
+	RE::Setting* lowHealthIntervalSetting = nullptr;
+	RE::Setting* heartbeatSlowSetting = nullptr;
+	RE::Setting* heartbeatFastSetting = nullptr;
 	float blinkTimer = 0.0f;
 	float blinkAge = 99.0f;
 	float hungerPhase = 0.0f;

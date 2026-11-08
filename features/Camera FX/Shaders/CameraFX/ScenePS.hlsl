@@ -62,7 +62,7 @@ float GetBlurMip(float2 uv)
 	float edge = CameraFX::EdgeDistance(uv);
 	float heartbeat = saturate(CameraFX::Themes.x) * CameraFX::Blurs.y;
 	[branch] if (heartbeat > 0.0)
-		mip = max(mip, smoothstep(0.3, 1.0, edge) * heartbeat * (0.6 + 2.2 * CameraFX::ThemeParams.x));
+		mip = max(mip, smoothstep(0.5, 1.1, edge) * heartbeat * (0.3 + 0.9 * CameraFX::ThemeParams.x));
 
 	float beast = saturate(CameraFX::Transform.x);
 	[branch] if (beast > 0.0)
@@ -102,11 +102,10 @@ float3 ApplyThemes(float3 color, float2 uv)
 	[branch] if (lowHealth > 0.0)
 	{
 		float pulse = CameraFX::ThemeParams.x;
-		float ring = smoothstep(0.35, 1.0, edge);
-		float strength = lowHealth * (0.55 + 0.45 * pulse);
-		color = lerp(color, CameraFX::Luminance(color).xxx, 0.35 * lowHealth);
-		color = lerp(color, color * float3(1.0, 0.18, 0.12) * 0.55, ring * strength);
-		color *= 1.0 - ring * strength * 0.45 - 0.08 * pulse * lowHealth;
+		float strength = smoothstep(0.45, 1.15, edge) * lowHealth * (0.75 + 0.25 * pulse);
+		color = lerp(color, CameraFX::Luminance(color).xxx, 0.15 * lowHealth);
+		color = lerp(color, color * float3(1.0, 0.4, 0.35), strength * 0.55);
+		color *= 1.0 - strength * 0.3;
 	}
 
 	float exhaustion = saturate(CameraFX::Themes.y);
