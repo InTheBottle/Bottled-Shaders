@@ -1062,10 +1062,6 @@ bool UseSkylightingShadowVisibility()
 
 #	include "Common/ShadowSampling.hlsli"
 
-#	if defined(SSS) && defined(SKIN) && defined(DEFERRED)
-#		include "SubsurfaceScattering/Transmission.hlsli"
-#	endif
-
 #	if defined(IBL)
 #		include "IBL/IBL.hlsli"
 #	endif
@@ -3044,20 +3040,6 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	endif
 
 	EvaluateLighting(dirLightContext, material, tbnTr, uvOriginal, uvOriginal_ddx, uvOriginal_ddy, dirLightOutput);
-#	if defined(SSS) && defined(SKIN) && defined(DEFERRED)
-	[branch] if (SubsurfaceScattering::HasSunTransmission())
-	{
-		float sunVisibility = SubsurfaceScattering::GetSunTransmissionVisibility(input.WorldPosition.xyz, vertexNormal.xyz);
-		[branch] if (sunVisibility >= 0.0)
-		{
-			float3 sunTransmittance = SubsurfaceScattering::GetSkinTransmittance(worldNormal.xyz, DirLightDirection) * Color::BRDFScale;
-			sunTransmittance *= sunVisibility * SharedData::subsurfaceScatteringSettings.Transmission.x;
-			dirLightOutput.transmission = min(sunTransmittance * dirLightColor * material.BaseColor, dirLightColor);
-			[branch] if (SharedData::subsurfaceScatteringSettings.TransmissionParams.w > 0.5)
-				dirLightOutput.transmission = float3(0.0, sunVisibility * saturate(dot(DirLightDirection, -worldNormal.xyz) + 0.3), 0.0);
-		}
-	}
-#	endif
 	dirLightOutput.transmission *= dirTransmissionContactShadow;
 #	if defined(WETNESS_EFFECTS)
 	if (waterRoughnessSpecular < 1)

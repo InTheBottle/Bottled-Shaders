@@ -49,15 +49,7 @@ public:
 		uint EnableTranslucentProfile = true;
 		DiffusionProfile TranslucentProfile{ 1.5f, 1.0f, { 0.6f, 0.5f, 0.35f }, { 1.0f, 0.7f, 0.4f } };
 		float4 MeanFreePathTranslucent = { 1.0f, 0.7f, 0.4f, 6.0f };
-		uint EnableTransmission = true;
-		float TransmissionStrength = 1.0f;
-		float TransmissionWrap = 0.3f;
-		float TransmissionSkinThickness = 1.0f;
-		float TransmissionOcclusionDistance = 8.0f;
-		float TransmissionInset = 0.5f;
 	};
-
-	bool debugTransmission = false;
 
 	Settings settings;
 
@@ -81,15 +73,6 @@ public:
 	};
 	STATIC_ASSERT_ALIGNAS_16(BlurCB);
 
-	struct alignas(16) CommonBufferData
-	{
-		float4 Transmission;
-		float4 TransmissionParams;
-	};
-	STATIC_ASSERT_ALIGNAS_16(CommonBufferData);
-
-	CommonBufferData GetCommonBufferData();
-
 	ConstantBuffer* blurCB = nullptr;
 	BlurCB blurCBData{};
 
@@ -97,11 +80,7 @@ public:
 	bool updateKernels = true;
 	bool validMaterials = false;
 
-	winrt::com_ptr<ID3D11ShaderResourceView> sunShadowMap;
-	void CaptureSunShadowMap();
-	ID3D11ShaderResourceView* GetSunShadowMapESRAM() const;
 	void OnSubsurfaceMaterial(bool a_foliage);
-	virtual void Prepass() override;
 
 	Texture2D* blurHorizontalTemp = nullptr;
 	void EnsureBlurHorizontalTemp();
