@@ -47,6 +47,9 @@ namespace CameraFX
 		float4 Combat3;
 		float4 Combat4;
 		float4 LensLook;
+		float4 HitBlur;
+		float4 Blurs;
+		float4 Transform;
 		float4 Splats[MaxSplats * 2];
 	};
 

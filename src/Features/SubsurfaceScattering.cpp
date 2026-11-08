@@ -4,6 +4,7 @@
 #include "Deferred.h"
 #include "ShaderCache.h"
 #include "State.h"
+#include "Utils/MathUtils.h"
 
 #define I18N_KEY_PREFIX "feature.sss."
 
@@ -20,7 +21,19 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	HumanProfile,
 	BurleySamples,
 	MeanFreePathBase,
-	MeanFreePathHuman)
+	MeanFreePathHuman,
+	EnableFoliageProfile,
+	FoliageProfile,
+	MeanFreePathFoliage,
+	EnableTranslucentProfile,
+	TranslucentProfile,
+	MeanFreePathTranslucent,
+	EnableTransmission,
+	TransmissionStrength,
+	TransmissionWrap,
+	TransmissionSkinThickness,
+	TransmissionOcclusionDistance,
+	TransmissionInset)
 
 void SubsurfaceScattering::DrawSettings()
 {
@@ -115,6 +128,68 @@ void SubsurfaceScattering::DrawSettings()
 				}
 				ImGui::TreePop();
 			}
+		}
+
+		ImGui::Spacing();
+		ImGui::Checkbox(T(TKEY("enable_foliage_profile"), "Foliage Profile"), (bool*)&settings.EnableFoliageProfile);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("enable_foliage_profile_tooltip"), "Softens PBR foliage that has subsurface data. Costly on dense leaves."));
+		}
+		ImGui::Checkbox(T(TKEY("enable_translucent_profile"), "Translucent Profile"), (bool*)&settings.EnableTranslucentProfile);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("enable_translucent_profile_tooltip"), "Diffuses light inside thick PBR subsurface materials such as wax, marble or ice."));
+		}
+
+		auto drawExtraProfile = [&](const char* a_label, bool a_enabled, DiffusionProfile& a_profile, float4& a_meanFreePath) {
+			if (!a_enabled || !ImGui::TreeNodeEx(a_label))
+				return;
+			if (settings.SSMode == 0) {
+				ImGui::SliderFloat(T(TKEY("blur_radius"), "Blur Radius"), &a_profile.BlurRadius, 0, 3, "%.2f");
+				ImGui::SliderFloat(T(TKEY("thickness"), "Thickness"), &a_profile.Thickness, 0, 3, "%.2f");
+				updateKernels |= ImGui::ColorEdit3(T(TKEY("strength"), "Strength"), (float*)&a_profile.Strength);
+				updateKernels |= ImGui::ColorEdit3(T(TKEY("falloff"), "Falloff"), (float*)&a_profile.Falloff);
+			} else {
+				ImGui::ColorEdit3(T(TKEY("mean_free_path_color"), "Mean Free Path Color"), (float*)&a_meanFreePath);
+				ImGui::SliderFloat(T(TKEY("mean_free_path_distance"), "Mean Free Path Distance"), &a_meanFreePath.w, 0.01f, 10.0f, "%.2f");
+			}
+			ImGui::TreePop();
+		};
+		drawExtraProfile(T(TKEY("foliage_profile"), "Foliage Profile Settings"), settings.EnableFoliageProfile, settings.FoliageProfile, settings.MeanFreePathFoliage);
+		drawExtraProfile(T(TKEY("translucent_profile"), "Translucent Profile Settings"), settings.EnableTranslucentProfile, settings.TranslucentProfile, settings.MeanFreePathTranslucent);
+
+		ImGui::Spacing();
+		if (ImGui::TreeNodeEx(T(TKEY("transmission"), "Skin Transmission"), ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::Checkbox(T(TKEY("enable_transmission"), "Enable"), (bool*)&settings.EnableTransmission);
+			if (auto _tt = Util::HoverTooltipWrapper()) {
+				ImGui::Text("%s", T(TKEY("enable_transmission_tooltip"), "Sunlight shines through thin skin such as ears and fingers.\nThickness comes from the sun shadow map, so heads and walls block it."));
+			}
+			{
+				auto disabled = Util::DisableGuard(!settings.EnableTransmission);
+				ImGui::SliderFloat(T(TKEY("transmission_strength"), "Strength"), &settings.TransmissionStrength, 0.0f, 10.0f, "%.2f");
+				ImGui::SliderFloat(T(TKEY("transmission_occlusion_distance"), "Occlusion Distance"), &settings.TransmissionOcclusionDistance, 1.0f, 32.0f, "%.1f");
+				if (auto _tt = Util::HoverTooltipWrapper()) {
+					ImGui::Text("%s", T(TKEY("transmission_occlusion_distance_tooltip"), "Material between the sun and the skin, in game units, that fully blocks transmission."));
+				}
+				ImGui::SliderFloat(T(TKEY("transmission_skin_thickness"), "Skin Thickness"), &settings.TransmissionSkinThickness, 0.0f, 3.0f, "%.2f");
+				if (auto _tt = Util::HoverTooltipWrapper()) {
+					ImGui::Text("%s", T(TKEY("transmission_skin_thickness_tooltip"), "Higher is thicker and redder; lower lets more light through."));
+				}
+				ImGui::SliderFloat(T(TKEY("transmission_wrap"), "Wrap"), &settings.TransmissionWrap, 0.0f, 1.0f, "%.2f");
+				if (auto _tt = Util::HoverTooltipWrapper()) {
+					ImGui::Text("%s", T(TKEY("transmission_wrap_tooltip"), "How far transmitted light reaches toward the lit side."));
+				}
+				ImGui::SliderFloat(T(TKEY("transmission_inset"), "Surface Inset"), &settings.TransmissionInset, 0.0f, 4.0f, "%.2f");
+				if (auto _tt = Util::HoverTooltipWrapper()) {
+					ImGui::Text("%s", T(TKEY("transmission_inset_tooltip"), "Moves the occlusion lookup inside the skin to avoid shadow-map acne."));
+				}
+				ImGui::Checkbox(T(TKEY("transmission_debug"), "Show Transmission Mask"), &debugTransmission);
+				if (auto _tt = Util::HoverTooltipWrapper()) {
+					ImGui::Text("%s", T(TKEY("transmission_debug_tooltip"), "Paints skin green where sunlight can pass through. Not saved."));
+				}
+				if (!sunShadowMap)
+					ImGui::TextDisabled("%s", T(TKEY("transmission_no_shadow_map"), "Waiting for the sun shadow map."));
+			}
+			ImGui::TreePop();
 		}
 
 		ImGui::Spacing();
@@ -219,6 +294,9 @@ void SubsurfaceScattering::CalculateKernel(DiffusionProfile& a_profile, Kernel& 
 
 void SubsurfaceScattering::DrawSSS()
 {
+	ID3D11ShaderResourceView* nullShadowMaps[2]{};
+	globals::d3d::context->PSSetShaderResources(47, 2, nullShadowMaps);
+
 	if (!validMaterials)
 		return;
 
@@ -234,15 +312,22 @@ void SubsurfaceScattering::DrawSSS()
 
 		blurCBData.SSSS_FOVY = atan(1.0f / cameraData.projMat.m[0][0]) * 2.0f * (180.0f / 3.14159265359f);
 
-		blurCBData.BaseProfile = { settings.BaseProfile.BlurRadius, settings.BaseProfile.Thickness, 0, 0 };
-		blurCBData.HumanProfile = { settings.HumanProfile.BlurRadius, settings.HumanProfile.Thickness, 0, 0 };
+		auto profileData = [](const DiffusionProfile& a_profile, bool a_enabled) {
+			return float4{ a_profile.BlurRadius, a_profile.Thickness, a_enabled ? 1.0f : 0.0f, 0.0f };
+		};
+		blurCBData.Profiles[kProfileBase] = profileData(settings.BaseProfile, true);
+		blurCBData.Profiles[kProfileHuman] = profileData(settings.HumanProfile, true);
+		blurCBData.Profiles[kProfileFoliage] = profileData(settings.FoliageProfile, settings.EnableFoliageProfile);
+		blurCBData.Profiles[kProfileTranslucent] = profileData(settings.TranslucentProfile, settings.EnableTranslucentProfile);
 
 		blurCBData.BurleySamples = settings.BurleySamples;
 		// Burley always does full albedo removal/reapply; scatter mode only applies to Separable SSS.
 		blurCBData.ScatterMode = (settings.SSMode == 0) ? (uint)std::clamp(settings.ScatterMode, (int)kPreScatter, (int)kPreAndPostScatter) : (uint)kPostScatter;
 
-		blurCBData.MeanFreePathBase = settings.MeanFreePathBase;
-		blurCBData.MeanFreePathHuman = settings.MeanFreePathHuman;
+		blurCBData.MeanFreePath[kProfileBase] = settings.MeanFreePathBase;
+		blurCBData.MeanFreePath[kProfileHuman] = settings.MeanFreePathHuman;
+		blurCBData.MeanFreePath[kProfileFoliage] = settings.MeanFreePathFoliage;
+		blurCBData.MeanFreePath[kProfileTranslucent] = settings.MeanFreePathTranslucent;
 
 		blurCB->Update(blurCBData);
 	}
@@ -423,9 +508,54 @@ void SubsurfaceScattering::Reset()
 
 	if (updateKernels) {
 		updateKernels = false;
-		CalculateKernel(settings.BaseProfile, blurCBData.BaseKernel);
-		CalculateKernel(settings.HumanProfile, blurCBData.HumanKernel);
+		CalculateKernel(settings.BaseProfile, blurCBData.Kernels[kProfileBase]);
+		CalculateKernel(settings.HumanProfile, blurCBData.Kernels[kProfileHuman]);
+		CalculateKernel(settings.FoliageProfile, blurCBData.Kernels[kProfileFoliage]);
+		CalculateKernel(settings.TranslucentProfile, blurCBData.Kernels[kProfileTranslucent]);
 	}
+}
+
+SubsurfaceScattering::CommonBufferData SubsurfaceScattering::GetCommonBufferData()
+{
+	const bool transmission = loaded && settings.EnableTransmission && sunShadowMap && globals::deferred && globals::deferred->directionalShadowLights;
+	CommonBufferData data{};
+	data.Transmission = { transmission ? std::max(settings.TransmissionStrength, 0.0f) : 0.0f, std::clamp(settings.TransmissionWrap, 0.0f, 1.0f),
+		std::max(settings.TransmissionSkinThickness, 0.0f), std::max(settings.TransmissionInset, 0.0f) };
+	data.TransmissionParams = { transmission ? 1.0f : 0.0f, std::max(settings.TransmissionOcclusionDistance, 1.0f), transmission && GetSunShadowMapESRAM() ? 1.0f : 0.0f, debugTransmission ? 1.0f : 0.0f };
+	return data;
+}
+
+ID3D11ShaderResourceView* SubsurfaceScattering::GetSunShadowMapESRAM() const
+{
+	auto renderer = globals::game::renderer;
+	if (!renderer)
+		return nullptr;
+	return renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kVOLUMETRIC_LIGHTING_SHADOWMAPS_ESRAM].depthSRV;
+}
+
+void SubsurfaceScattering::CaptureSunShadowMap()
+{
+	ID3D11ShaderResourceView* srv = nullptr;
+	globals::d3d::context->PSGetShaderResources(4, 1, &srv);
+	sunShadowMap.copy_from(srv);
+	if (srv)
+		srv->Release();
+}
+
+void SubsurfaceScattering::OnSubsurfaceMaterial(bool a_foliage)
+{
+	if (a_foliage ? settings.EnableFoliageProfile : settings.EnableTranslucentProfile)
+		validMaterials = true;
+}
+
+void SubsurfaceScattering::Prepass()
+{
+	ID3D11ShaderResourceView* srvs[2]{};
+	if (settings.EnableTransmission && sunShadowMap) {
+		srvs[0] = sunShadowMap.get();
+		srvs[1] = GetSunShadowMapESRAM();
+	}
+	globals::d3d::context->PSSetShaderResources(47, 2, srvs);
 }
 
 void SubsurfaceScattering::RestoreDefaultSettings()
@@ -438,6 +568,14 @@ void SubsurfaceScattering::LoadSettings(json& o_json)
 {
 	settings = o_json;
 	settings.ScatterMode = std::clamp(settings.ScatterMode, (int)kPreScatter, (int)kPreAndPostScatter);
+	const Settings defaults{};
+	settings.TransmissionStrength = Util::ClampFinite(settings.TransmissionStrength, defaults.TransmissionStrength, 0.0f, 10.0f);
+	settings.TransmissionWrap = Util::ClampFinite(settings.TransmissionWrap, defaults.TransmissionWrap, 0.0f, 1.0f);
+	settings.TransmissionSkinThickness = Util::ClampFinite(settings.TransmissionSkinThickness, defaults.TransmissionSkinThickness, 0.0f, 3.0f);
+	settings.TransmissionOcclusionDistance = Util::ClampFinite(settings.TransmissionOcclusionDistance, defaults.TransmissionOcclusionDistance, 1.0f, 32.0f);
+	settings.TransmissionInset = Util::ClampFinite(settings.TransmissionInset, defaults.TransmissionInset, 0.0f, 4.0f);
+	settings.MeanFreePathFoliage.w = Util::ClampFinite(settings.MeanFreePathFoliage.w, defaults.MeanFreePathFoliage.w, 0.01f, 10.0f);
+	settings.MeanFreePathTranslucent.w = Util::ClampFinite(settings.MeanFreePathTranslucent.w, defaults.MeanFreePathTranslucent.w, 0.01f, 10.0f);
 	updateKernels = true;
 }
 

@@ -31,6 +31,7 @@
 #include "Features/Skylighting.h"
 #include "Features/SnowCover.h"
 #include "Features/SnowDeformation.h"
+#include "Features/SubsurfaceScattering.h"
 #include "Features/TerrainBlending.h"
 #include "Features/TerrainHelper.h"
 #include "Features/Upscaling.h"
@@ -230,6 +231,8 @@ void State::Draw()
 						globals::features::exponentialHeightFog.CaptureDirectionalShadowMap();
 					if (skylighting.loaded)
 						skylighting.CaptureShadowCascadeSRV();
+					if (globals::features::subsurfaceScattering.loaded)
+						globals::features::subsurfaceScattering.CaptureSunShadowMap();
 				}
 			}
 		}

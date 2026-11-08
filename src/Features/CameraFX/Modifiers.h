@@ -13,6 +13,8 @@ namespace CameraFXModifiers
 		kExhaustion,
 		kHunger,
 		kPoison,
+		kWerewolf,
+		kVampireLord,
 		kCount
 	};
 
@@ -23,6 +25,7 @@ namespace CameraFXModifiers
 		RE::FormID formID = 0;
 		Theme theme = Theme::kGeneric;
 		float weight = 1.0f;
+		bool layered = false;
 		float strength = 0.0f;
 		RE::ImageSpaceBaseData::Cinematic multiply{};
 		RE::ImageSpaceBaseData::Cinematic add{};

@@ -657,6 +657,12 @@ namespace SharedData
 		float4 Neutral;
 	};
 
+	struct SubsurfaceScatteringSettings
+	{
+		float4 Transmission;
+		float4 TransmissionParams;
+	};
+
 	cbuffer FeatureData : register(b6)
 	{
 		GrassLightingSettings grassLightingSettings;
@@ -687,6 +693,7 @@ namespace SharedData
 		RainRefractionSettings rainRefractionSettings;
 		NightEyeSettings nightEyeSettings;
 		ProceduralNightSkySettings proceduralNightSkySettings;
+		SubsurfaceScatteringSettings subsurfaceScatteringSettings;
 	};
 
 	Texture2D<float4> DepthTexture : register(t17);

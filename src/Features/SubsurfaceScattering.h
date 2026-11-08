@@ -23,6 +23,15 @@ public:
 		kPreAndPostScatter = 2,
 	};
 
+	enum ProfileIndex : uint32_t
+	{
+		kProfileBase = 0,
+		kProfileHuman = 1,
+		kProfileFoliage = 2,
+		kProfileTranslucent = 3,
+		kProfileCount = 4,
+	};
+
 	struct Settings
 	{
 		uint EnableCharacterLighting = false;
@@ -34,7 +43,21 @@ public:
 		uint BurleySamples = 16;
 		float4 MeanFreePathBase = { 0.56f, 0.56f, 0.56f, 2.67f };
 		float4 MeanFreePathHuman = { 1.0f, 0.37f, 0.3f, 2.67f };
+		uint EnableFoliageProfile = false;
+		DiffusionProfile FoliageProfile{ 0.4f, 1.0f, { 0.3f, 0.45f, 0.2f }, { 0.5f, 0.75f, 0.35f } };
+		float4 MeanFreePathFoliage = { 0.5f, 0.8f, 0.35f, 1.0f };
+		uint EnableTranslucentProfile = true;
+		DiffusionProfile TranslucentProfile{ 1.5f, 1.0f, { 0.6f, 0.5f, 0.35f }, { 1.0f, 0.7f, 0.4f } };
+		float4 MeanFreePathTranslucent = { 1.0f, 0.7f, 0.4f, 6.0f };
+		uint EnableTransmission = true;
+		float TransmissionStrength = 1.0f;
+		float TransmissionWrap = 0.3f;
+		float TransmissionSkinThickness = 1.0f;
+		float TransmissionOcclusionDistance = 8.0f;
+		float TransmissionInset = 0.5f;
 	};
+
+	bool debugTransmission = false;
 
 	Settings settings;
 
@@ -48,18 +71,24 @@ public:
 
 	struct alignas(16) BlurCB
 	{
-		Kernel BaseKernel;
-		Kernel HumanKernel;
-		float4 BaseProfile;
-		float4 HumanProfile;
+		Kernel Kernels[kProfileCount];
+		float4 Profiles[kProfileCount];
+		float4 MeanFreePath[kProfileCount];
 		float SSSS_FOVY;
 		uint BurleySamples;
 		uint ScatterMode;
 		uint pad;
-		float4 MeanFreePathBase;
-		float4 MeanFreePathHuman;
 	};
 	STATIC_ASSERT_ALIGNAS_16(BlurCB);
+
+	struct alignas(16) CommonBufferData
+	{
+		float4 Transmission;
+		float4 TransmissionParams;
+	};
+	STATIC_ASSERT_ALIGNAS_16(CommonBufferData);
+
+	CommonBufferData GetCommonBufferData();
 
 	ConstantBuffer* blurCB = nullptr;
 	BlurCB blurCBData{};
@@ -67,6 +96,12 @@ public:
 	bool validMaterial = true;
 	bool updateKernels = true;
 	bool validMaterials = false;
+
+	winrt::com_ptr<ID3D11ShaderResourceView> sunShadowMap;
+	void CaptureSunShadowMap();
+	ID3D11ShaderResourceView* GetSunShadowMapESRAM() const;
+	void OnSubsurfaceMaterial(bool a_foliage);
+	virtual void Prepass() override;
 
 	Texture2D* blurHorizontalTemp = nullptr;
 	void EnsureBlurHorizontalTemp();

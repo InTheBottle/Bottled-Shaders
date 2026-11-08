@@ -49,7 +49,7 @@ float3 GetScalingFactor(float3 albedo)
 	return 3.5f + 100.f * pow(abs(value), 4);
 }
 
-float4 BurleyNormalizedSS(uint2 DTid, float2 texCoord, float sssAmount, bool humanProfile, float4 originalSceneColor)
+float4 BurleyNormalizedSS(uint2 DTid, float2 texCoord, float sssAmount, uint profile, float4 originalSceneColor)
 {
 	float centerDepth = SharedData::GetScreenDepth(DepthTexture[DTid].x);
 
@@ -62,7 +62,7 @@ float4 BurleyNormalizedSS(uint2 DTid, float2 texCoord, float sssAmount, bool hum
 	float3 surfaceAlbedo = SSSDecodeAlbedo(surfaceAlbedoSample.xyz);
 	float3 originalIrradiance = centerColor.xyz;
 
-	float4 diffuseMeanFreePath = humanProfile ? MeanFreePathHuman : MeanFreePathBase;
+	float4 diffuseMeanFreePath = MeanFreePath[profile];
 	// MFP channels are defined relative to color space primaries; convert to working gamut
 	diffuseMeanFreePath.xyz = Color::LinearSRGBToWorking(diffuseMeanFreePath.xyz);
 	diffuseMeanFreePath.xyz = float3(max(diffuseMeanFreePath.x, 1e-5f), max(diffuseMeanFreePath.y, 1e-5f), max(diffuseMeanFreePath.z, 1e-5f));
@@ -113,7 +113,7 @@ float4 BurleyNormalizedSS(uint2 DTid, float2 texCoord, float sssAmount, bool hum
 		float2 sampleUV = texCoord + uvOffset;
 		float2 clampedUV = FrameBuffer::ClampDynamicResolutionAdjustedScreenPosition(sampleUV, texCoordNonDR);
 		uint2 samplePixcoord = min(uint2(clampedUV * SharedData::BufferDim.xy), uint2(SharedData::BufferDim.xy * FrameBuffer::DynamicResolutionParams1.xy) - 1);
-		float maskSample = MaskTexture[samplePixcoord].x;
+		float maskSample = SSSGetMatchingAmount(MaskTexture[samplePixcoord].xy, profile);
 		bool mask = maskSample > 1e-5f;
 
 		if (!mask)

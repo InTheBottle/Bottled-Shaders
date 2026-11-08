@@ -26,35 +26,27 @@ SamplerState PointSampler : register(s0);
 		return;
 
 	float2 texCoord = (DTid.xy + 0.5) * SharedData::BufferDim.zw;
+	float2 mask = MaskTexture[DTid.xy].xy;
+	uint profile = SSSDecodeProfile(mask.y);
+	float sssAmount = SSSGetAmount(mask, profile);
 
 #if defined(BURLEY)
 
-	float sssAmount = MaskTexture[DTid.xy].x;
-
 	if (sssAmount > 0.0) {
-		bool humanProfile = MaskTexture[DTid.xy].y > 0.0;
-
-		float4 color = BurleyNormalizedSS(DTid.xy, texCoord, sssAmount, humanProfile, SSSRW[DTid.xy]);
+		float4 color = BurleyNormalizedSS(DTid.xy, texCoord, sssAmount, profile, SSSRW[DTid.xy]);
 		SSSRW[DTid.xy] = max(0, color);
 	}
 
 #elif defined(HORIZONTAL)
 
-	float sssAmount = MaskTexture[DTid.xy].x;
-	bool humanProfile = MaskTexture[DTid.xy].y > 0.0;
-
-	float4 color = SSSSBlurCS(texCoord, float2(1.0, 0.0), sssAmount, humanProfile);
+	float4 color = SSSSBlurCS(texCoord, float2(1.0, 0.0), sssAmount, profile);
 	SSSRW[DTid.xy] = max(0, color);
 
 #else
 
-	float sssAmount = MaskTexture[DTid.xy].x;
-
 	if (sssAmount > 0.0) {
-		bool humanProfile = MaskTexture[DTid.xy].y > 0.0;
-
 		float4 originalColor = SSSRW[DTid.xy];
-		float4 color = SSSSBlurCS(texCoord, float2(0.0, 1.0), sssAmount, humanProfile);
+		float4 color = SSSSBlurCS(texCoord, float2(0.0, 1.0), sssAmount, profile);
 		float3 albedo = SSSDecodeAlbedo(AlbedoTexture[DTid.xy].rgb);
 		color.rgb = SSSApplyAlbedo(color.rgb, ColorManagement::SceneToLinear(originalColor.rgb), albedo, ScatterMode);
 		color.rgb = ColorManagement::LinearToScene(color.rgb);

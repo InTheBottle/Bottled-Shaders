@@ -3,8 +3,10 @@
 #include "TruePBR/BSLightingShaderMaterialPBR.h"
 #include "TruePBR/BSLightingShaderMaterialPBRLandscape.h"
 
+#include "Deferred.h"
 #include "Features/InteriorSun.h"
 #include "Features/LinearLighting.h"
+#include "Features/SubsurfaceScattering.h"
 #include "Hooks.h"
 #include "I18n/I18n.h"
 #include "ShaderCache.h"
@@ -1134,6 +1136,9 @@ bool TruePBR::BSLightingShader_SetupMaterial(RE::BSLightingShader* shader, RE::B
 			} else {
 				if (pbrMaterial->pbrFlags.any(PBRFlags::Subsurface)) {
 					shaderFlags.set(PBRShaderFlags::Subsurface);
+					const bool foliage = shaderFlags.any(PBRShaderFlags::Foliage);
+					if ((foliage || !shaderFlags.any(PBRShaderFlags::ThinSurface)) && globals::deferred && globals::deferred->deferredPass && globals::features::subsurfaceScattering.loaded)
+						globals::features::subsurfaceScattering.OnSubsurfaceMaterial(foliage);
 
 					std::array<float, 4> PBRParams2;
 					PBRParams2[0] = pbrMaterial->GetSubsurfaceColor().red;

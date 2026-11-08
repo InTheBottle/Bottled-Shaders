@@ -16,7 +16,9 @@ namespace CameraFXLens
 			kCoolSlash,
 			kCoolShake,
 			kCoolOwnBlood,
-			kCoolGrit
+			kCoolGrit,
+			kCoolBlur,
+			kCoolSpellBlur
 		};
 
 		enum class Element
@@ -38,6 +40,9 @@ namespace CameraFXLens
 		constexpr float kCalmBreathsPerMinute = 14.0f;
 		constexpr float kWindedBreathPeriod = 1.3f;
 		constexpr float kMaxShake = 1.5f;
+		constexpr float kHitBlurDecay = 2.2f;
+		constexpr float kBlurInterval = 0.12f;
+		constexpr float kSpellBlurInterval = 1.0f;
 
 		class HitSink final : public RE::BSTEventSink<RE::TESHitEvent>
 		{
@@ -274,6 +279,21 @@ namespace CameraFXLens
 		hit.v = attackerVisible ? attackerV : 0.35f + Random() * 0.3f;
 
 		const Element element = ClassifySpell(spell);
+		if (options.hitBlur) {
+			float blur = spell ? (element != Element::kNone ? 0.3f : 0.0f) : (bash ? 0.6f : (power ? 0.75f : 0.45f));
+			if (ranged && !spell)
+				blur = 0.3f;
+			if (big)
+				blur = std::max(blur, spell ? 0.5f : 0.85f);
+			if (blocked)
+				blur *= 0.4f;
+			if (blur > 0.0f && Ready(spell ? kCoolSpellBlur : kCoolBlur, spell ? kSpellBlurInterval : kBlurInterval)) {
+				hit.blur = blur;
+				hit.blurU = hit.u;
+				hit.blurV = hit.v;
+			}
+		}
+
 		if (element != Element::kNone && options.elemental && Ready(kCoolElement, 0.2f)) {
 			switch (element) {
 			case Element::kFire:
@@ -308,8 +328,11 @@ namespace CameraFXLens
 			return;
 		}
 
-		if (!weapon || ranged || blocked)
+		if (!weapon || ranged || blocked) {
+			if (hit.blur > 0.0f)
+				Queue(hit);
 			return;
+		}
 
 		if (options.slash && Ready(kCoolSlash, 0.25f)) {
 			const float side = hit.u < 0.5f ? 1.0f : -1.0f;
@@ -360,6 +383,14 @@ namespace CameraFXLens
 		if (slashes) {
 			state.slash = a_pending.slash;
 			state.slashAngle = a_pending.slashAngle;
+		}
+		if (a_pending.blur > 0.0f && a_options.hitBlur) {
+			const float amount = std::clamp(a_pending.blur * a_options.hitBlurStrength, 0.0f, 1.0f);
+			if (amount > state.hitBlur) {
+				state.hitBlur = amount;
+				state.hitBlurU = a_pending.blurU;
+				state.hitBlurV = a_pending.blurV;
+			}
 		}
 		if (a_options.elemental) {
 			if (a_pending.shock > 0.0f) {
@@ -515,6 +546,7 @@ namespace CameraFXLens
 		const float flashDecay = a_options.photosensitiveSafe ? 1.5f : 3.0f;
 		state.flash = std::max(0.0f, state.flash - a_step * flashDecay);
 		state.slash = std::max(0.0f, state.slash - a_step * 2.5f);
+		state.hitBlur = a_options.hitBlur ? std::max(0.0f, state.hitBlur - a_step * kHitBlurDecay) : 0.0f;
 		state.hitAge = std::min(state.hitAge + a_step, 99.0f);
 		state.shockAge = std::min(state.shockAge + a_step, 99.0f);
 

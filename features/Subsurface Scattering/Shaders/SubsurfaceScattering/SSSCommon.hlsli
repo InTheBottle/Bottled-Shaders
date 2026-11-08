@@ -6,22 +6,46 @@
 
 #define SSSS_N_SAMPLES 21
 
+#define SSS_PROFILE_BASE 0
+#define SSS_PROFILE_HUMAN 1
+#define SSS_PROFILE_FOLIAGE 2
+#define SSS_PROFILE_TRANSLUCENT 3
+#define SSS_PROFILE_COUNT 4
+
 #define SSS_SCATTER_MODE_PRE 0
 #define SSS_SCATTER_MODE_POST 1
 #define SSS_SCATTER_MODE_PRE_POST 2
 
 cbuffer PerFrameSSS : register(b1)
 {
-	float4 Kernels[SSSS_N_SAMPLES + SSSS_N_SAMPLES];
-	float4 BaseProfile;
-	float4 HumanProfile;
+	float4 Kernels[SSSS_N_SAMPLES * SSS_PROFILE_COUNT];
+	float4 Profiles[SSS_PROFILE_COUNT];
+	float4 MeanFreePath[SSS_PROFILE_COUNT];
 	float SSSS_FOVY;
 	uint BurleySamples;
 	uint ScatterMode;
 	uint pad;
-	float4 MeanFreePathBase;
-	float4 MeanFreePathHuman;
 };
+
+uint SSSDecodeProfile(float encodedProfile)
+{
+	return min((uint)(max(encodedProfile, 0.0) + 0.5), SSS_PROFILE_COUNT - 1);
+}
+
+float SSSGetAmount(float2 mask, uint profile)
+{
+	return Profiles[profile].z > 0.5 ? saturate(mask.x) : 0.0;
+}
+
+float SSSGetAmount(float2 mask)
+{
+	return SSSGetAmount(mask, SSSDecodeProfile(mask.y));
+}
+
+float SSSGetMatchingAmount(float2 mask, uint profile)
+{
+	return SSSDecodeProfile(mask.y) == profile ? SSSGetAmount(mask, profile) : 0.0;
+}
 
 float3 SSSDecodeAlbedo(float3 encodedAlbedo)
 {

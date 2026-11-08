@@ -22,8 +22,9 @@
 #include "Features/ProceduralSun.h"
 #include "Features/RainRefraction.h"
 #include "Features/Skin.h"
-#include "Features/SnowCover.h"
 #include "Features/Skylighting.h"
+#include "Features/SnowCover.h"
+#include "Features/SubsurfaceScattering.h"
 #include "Features/TerrainBlending.h"
 #include "Features/TerrainShadows.h"
 #include "Features/TerrainVariation.h"
@@ -81,5 +82,6 @@ std::pair<unsigned char*, size_t> GetFeatureBufferData(bool a_inWorld)
 		globals::features::hairBacklighting.settings,
 		globals::features::rainRefraction.GetCommonBufferData(),
 		globals::features::nightEye.GetCommonBufferData(),
-		globals::features::proceduralNightSky.GetCommonBufferData());
+		globals::features::proceduralNightSky.GetCommonBufferData(),
+		globals::features::subsurfaceScattering.GetCommonBufferData());
 }

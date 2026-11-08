@@ -96,7 +96,7 @@ float4 SSSSBlurCS(
 	float2 texcoord,
 	float2 dir,
 	float sssAmount,
-	bool humanProfile)
+	uint profileIndex)
 {
 	// texcoord is in DR-space UVs (coming from DTid / full buffer dim), so it already
 	// addresses the rendered sub-rectangle of the texture. Non-DR UVs are derived for
@@ -113,8 +113,8 @@ float4 SSSSBlurCS(
 	float depthM = DepthTexture.SampleLevel(PointSampler, texcoord, 0).r;
 	depthM = SharedData::GetScreenDepth(depthM);
 
-	float2 profile = humanProfile ? HumanProfile.xy : BaseProfile.xy;
-	uint kernelOffset = humanProfile ? SSSS_N_SAMPLES : 0;
+	float2 profile = Profiles[profileIndex].xy;
+	uint kernelOffset = profileIndex * SSSS_N_SAMPLES;
 
 	// Accumulate center sample, multiplying it with its gaussian weight:
 	float4 colorBlurred = colorM;
@@ -154,6 +154,8 @@ float4 SSSSBlurCS(
 
 		// If the difference in depth is huge, we lerp color back to "colorM":
 		float s = saturate(profile.y * distanceToProjectionWindow * abs(depthM - depth));
+		if (SSSGetMatchingAmount(MaskTexture.SampleLevel(PointSampler, sampleCoord, 0).xy, profileIndex) <= 1e-5)
+			s = 1.0;
 		color = lerp(color, colorM.rgb, s * s);
 
 		// Accumulate:

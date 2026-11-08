@@ -5,6 +5,7 @@ Texture2D<float> DepthTexture : register(t1);
 SamplerState LinearSampler : register(s0);
 
 static const int RadialSteps = 4;
+static const int HitSteps = 8;
 
 float3 SampleScene(float2 uv, float mip)
 {
@@ -57,7 +58,40 @@ float GetBlurMip(float2 uv)
 
 	float exhaustion = saturate(CameraFX::Themes.y);
 	mip = max(mip, exhaustion * (0.6 + 2.4 * CameraFX::ThemeParams.y));
+
+	float edge = CameraFX::EdgeDistance(uv);
+	float heartbeat = saturate(CameraFX::Themes.x) * CameraFX::Blurs.y;
+	[branch] if (heartbeat > 0.0)
+		mip = max(mip, smoothstep(0.3, 1.0, edge) * heartbeat * (0.6 + 2.2 * CameraFX::ThemeParams.x));
+
+	float beast = saturate(CameraFX::Transform.x);
+	[branch] if (beast > 0.0)
+		mip = max(mip, smoothstep(0.2, 1.0, edge) * beast * (1.2 + 2.0 * CameraFX::Transform.z));
+
+	float hit = saturate(CameraFX::HitBlur.x);
+	[branch] if (hit > 0.0)
+		mip = max(mip, hit * (0.4 + 1.6 * smoothstep(0.15, 0.9, edge)));
 	return min(mip, CameraFX::Blur.w);
+}
+
+float3 ApplyHitSmear(float3 color, float2 uv, float mip)
+{
+	float amount = saturate(CameraFX::HitBlur.x);
+	float2 away = uv - CameraFX::HitBlur.yz;
+	float edge = smoothstep(0.1, 0.9, CameraFX::EdgeDistance(uv));
+	float2 delta = away * (amount * (0.35 + 0.65 * edge) * 0.045 / HitSteps);
+	float spacing = length(delta * CameraFX::Resolution.xy);
+	float smearMip = min(max(mip, log2(1.0 + spacing * 0.6)), CameraFX::Blur.w);
+	float2 doubled = CameraFX::Blur.y > 0.0 ? float2(CameraFX::Blur.y, CameraFX::Blur.y * 0.5) : 0.0;
+	float3 sum = color;
+	float total = 1.0;
+	[unroll] for (int i = 1; i <= HitSteps; i++)
+	{
+		float weight = 1.0 - i / (HitSteps + 1.0);
+		sum += SampleScene(uv - delta * i + doubled * ((i & 1) ? 1.0 : -1.0), smearMip) * weight;
+		total += weight;
+	}
+	return sum / total;
 }
 
 float3 ApplyThemes(float3 color, float2 uv)
@@ -102,6 +136,19 @@ float3 ApplyThemes(float3 color, float2 uv)
 		color = lerp(color, color * float3(0.7, 1.0, 0.55) + float3(0.02, 0.05, 0.0), ring * poison * 0.85);
 	}
 
+	float beast = saturate(CameraFX::Transform.x);
+	[branch] if (beast > 0.0)
+	{
+		float pulse = CameraFX::Transform.z;
+		bool vampire = CameraFX::Transform.y > 0.5;
+		float ring = smoothstep(0.25, 1.0, edge);
+		float3 haze = vampire ? float3(0.42, 0.12, 0.3) : float3(0.62, 0.16, 0.05);
+		float luma = CameraFX::Luminance(color);
+		color = lerp(color, luma * haze * 2.2 + haze * 0.04, ring * beast * (0.55 + 0.3 * pulse));
+		color *= 1.0 - ring * beast * (0.3 + 0.25 * pulse);
+		color = lerp(color, luma.xxx, beast * (vampire ? 0.35 : 0.15) * (1.0 - ring));
+	}
+
 	return color;
 }
 
@@ -139,6 +186,9 @@ float4 main(CameraFX::Interpolants input) : SV_Target
 	{
 		color = SampleRadial(sampleUV, blurMip);
 	}
+
+	[branch] if (CameraFX::HitBlur.x > 0.0)
+		color = ApplyHitSmear(color, sampleUV, blurMip);
 
 	color = ApplyThemes(color, uv);
 	color = ApplyGrade(color);

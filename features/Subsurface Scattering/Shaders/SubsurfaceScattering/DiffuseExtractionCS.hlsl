@@ -16,7 +16,7 @@ Texture2D<float4> MaskTexture : register(t2);
 		return;
 
 #if defined(BURLEY)
-	if (!(MaskTexture[DTid.xy].x > 0.0))
+	if (!(SSSGetAmount(MaskTexture[DTid.xy].xy) > 0.0))
 		return;
 #endif
 

@@ -18,9 +18,18 @@ namespace CameraFXModifiers
 			std::string_view plugin;
 			Theme theme;
 			float weight;
+			bool layered = false;
+		};
+
+		struct Classified
+		{
+			Theme theme;
+			float weight;
+			bool layered;
 		};
 
 		constexpr std::string_view kSkyrim = "Skyrim.esm";
+		constexpr std::string_view kDawnguard = "Dawnguard.esm";
 		constexpr std::string_view kSurvival = "ccQDRSSE001-SurvivalMode.esl";
 
 		constexpr Entry kEntries[] = {
@@ -54,6 +63,8 @@ namespace CameraFXModifiers
 			{ 0x00089E, kSurvival, Theme::kHunger, 1.0f },
 			{ 0x00089C, kSurvival, Theme::kHunger, 1.0f },
 			{ 0x000A12, kSurvival, Theme::kHunger, 1.0f },
+			{ 0x048428, kSkyrim, Theme::kWerewolf, 1.0f, true },
+			{ 0x0071D6, kDawnguard, Theme::kVampireLord, 1.0f, true },
 		};
 
 		constexpr float kActivityReference = 0.25f;
@@ -62,7 +73,7 @@ namespace CameraFXModifiers
 
 		std::mutex lock;
 		Frame pending;
-		std::unordered_map<RE::FormID, std::pair<Theme, float>> classification;
+		std::unordered_map<RE::FormID, Classified> classification;
 
 		float Ratio(float a_final, float a_base)
 		{
@@ -76,11 +87,11 @@ namespace CameraFXModifiers
 		if (!dataHandler)
 			return;
 
-		std::unordered_map<RE::FormID, std::pair<Theme, float>> resolved;
+		std::unordered_map<RE::FormID, Classified> resolved;
 		for (const auto& entry : kEntries) {
 			const auto formID = dataHandler->LookupFormID(entry.localID, entry.plugin);
 			if (formID)
-				resolved[formID] = { entry.theme, entry.weight };
+				resolved[formID] = { entry.theme, entry.weight, entry.layered };
 		}
 
 		const std::scoped_lock guard(lock);
@@ -108,8 +119,9 @@ namespace CameraFXModifiers
 
 		const std::scoped_lock guard(lock);
 		if (const auto it = classification.find(capture.formID); it != classification.end()) {
-			capture.theme = it->second.first;
-			capture.weight = it->second.second;
+			capture.theme = it->second.theme;
+			capture.weight = it->second.weight;
+			capture.layered = it->second.layered;
 		}
 		pending.captures.push_back(capture);
 	}
@@ -160,7 +172,8 @@ namespace CameraFXModifiers
 			const auto themeIndex = static_cast<size_t>(capture.theme);
 			if (capture.theme != Theme::kGeneric && a_themesEnabled[themeIndex]) {
 				result.themes[themeIndex] = std::max(result.themes[themeIndex], capture.weight * Util::ClampFinite(capture.strength, 0.0f, 0.0f, 1.0f));
-				continue;
+				if (!capture.layered)
+					continue;
 			}
 
 			const float strength = capture.strength * a_blend.modifiers;
@@ -230,6 +243,10 @@ namespace CameraFXModifiers
 			return T("feature.camera_fx.theme_hunger", "Hunger");
 		case Theme::kPoison:
 			return T("feature.camera_fx.theme_poison", "Poison");
+		case Theme::kWerewolf:
+			return T("feature.camera_fx.theme_werewolf", "Werewolf");
+		case Theme::kVampireLord:
+			return T("feature.camera_fx.theme_vampire_lord", "Vampire Lord");
 		default:
 			return T("feature.camera_fx.theme_generic", "Generic");
 		}

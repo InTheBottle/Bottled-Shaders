@@ -632,6 +632,20 @@ float BloodHeight(float2 p, float2 s, float seed, float progress, float dripSpee
 void ApplyLiquid(inout Composite c, float2 uv, float2 viewUV, float2 p, float2 s, float size, float angle, uint kind, float seed, float progress, float opacity, inout float below)
 {
 	float dripSpeed = kind == SplatOil ? 1.3 : 2.2;
+	float smudge = CameraFX::Blurs.x;
+	float reach = length(p * float2(0.8, 1.0));
+	[branch] if (smudge > 0.001 && reach < 1.0 && c.alpha < 0.62)
+	{
+		float spread = reach * (0.85 + 0.3 * CameraFX::Fbm(p * 1.7 + seed * 5.0, 3));
+		float film = (1.0 - smoothstep(0.25, 0.85, spread)) * opacity * saturate(smudge) * (1.0 - saturate(c.alpha * 1.6));
+		[branch] if (film > 0.002)
+		{
+			float3 smeared = Scene(viewUV, MipForRadius(6.0 + 6.0 * smudge));
+			smeared *= kind == SplatOil ? float3(0.9, 0.88, 0.85) : float3(1.0, 0.86, 0.84);
+			Blend(c, smeared, film * 0.8);
+		}
+	}
+
 	const float e = 0.008;
 	float3 heights = 0.0;
 	[loop] for (uint k = 0; k < 3; k++)
@@ -649,7 +663,8 @@ void ApplyLiquid(inout Composite c, float2 uv, float2 viewUV, float2 p, float2 s
 	float slope = length(gradient);
 
 	float3 tint = kind == SplatBlood ? float3(0.5, 0.025, 0.02) : (kind == SplatDarkBlood ? float3(0.3, 0.02, 0.03) : float3(0.05, 0.045, 0.04));
-	float3 behind = lerp(Scene(viewUV + ToUV(-gradient * 0.0045 * size), 0.0), c.color, saturate(below * 1.6));
+	float smear = MipForRadius(CameraFX::Blurs.x * (3.0 + 12.0 * height));
+	float3 behind = lerp(Scene(viewUV + ToUV(-gradient * 0.0045 * size), smear), c.color, saturate(below * 1.6));
 	float3 fluid = behind * exp(log(max(tint, 0.004)) * height * 1.1) + tint * (0.04 + 0.1 * height);
 	fluid *= 1.0 - saturate(slope * 0.02 - 0.2) * 0.3;
 
@@ -680,7 +695,7 @@ void ApplyVenom(inout Composite c, float2 viewUV, float2 p, float2 s, float size
 	const float3 goo = float3(0.3, 0.5, 0.1);
 	float r = length(p);
 	float2 bulge = p / max(r, 1e-3) * core * (1.0 - r) * 0.012 * size;
-	float3 film = Scene(viewUV - ToUV(bulge), 0.5) * goo * 1.3 + goo * 0.06;
+	float3 film = Scene(viewUV - ToUV(bulge), max(0.5, MipForRadius(CameraFX::Blurs.x * (3.0 + 6.0 * core)))) * goo * 1.3 + goo * 0.06;
 
 	[unroll] for (int layer = 0; layer < 2; layer++)
 	{

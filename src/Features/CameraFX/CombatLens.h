@@ -42,6 +42,8 @@ namespace CameraFXLens
 		bool slash = true;
 		bool shake = true;
 		float shakeStrength = 1.0f;
+		bool hitBlur = true;
+		float hitBlurStrength = 1.0f;
 		bool stamina = true;
 		bool photosensitiveSafe = true;
 	};
@@ -55,6 +57,9 @@ namespace CameraFXLens
 		float hitU = 0.5f;
 		float hitV = 0.5f;
 		float hitAge = 99.0f;
+		float hitBlur = 0.0f;
+		float hitBlurU = 0.5f;
+		float hitBlurV = 0.5f;
 		float shock = 0.0f;
 		float shockAge = 99.0f;
 		float shockSeed = 0.0f;
@@ -93,6 +98,9 @@ namespace CameraFXLens
 			float flashWarmth = 0.0f;
 			float slash = 0.0f;
 			float slashAngle = 0.0f;
+			float blur = 0.0f;
+			float blurU = 0.5f;
+			float blurV = 0.5f;
 			float shock = 0.0f;
 			float fire = 0.0f;
 			float frost = 0.0f;

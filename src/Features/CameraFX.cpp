@@ -27,12 +27,15 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	FrostStrength,
 	LowHealth,
 	LowHealthStrength,
+	HeartbeatBlur,
 	Exhaustion,
 	ExhaustionStrength,
 	Hunger,
 	HungerStrength,
 	Poison,
 	PoisonStrength,
+	Transformation,
+	TransformationStrength,
 	SunLens,
 	SunLensStrength,
 	LensDirt,
@@ -52,12 +55,16 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	Combat,
 	Blood,
 	BloodStrength,
+	BloodBlur,
+	BloodBlurStrength,
 	ElementalSplats,
 	ImpactFlash,
 	FlashStrength,
 	SlashStreaks,
 	HitShake,
 	HitShakeStrength,
+	HitBlur,
+	HitBlurStrength,
 	StaminaBreath,
 	PhotosensitiveSafe)
 
@@ -102,6 +109,10 @@ namespace
 	constexpr UINT kBakeGroupSize = 8;
 	constexpr float kSwimDropsFromSheet = 0.8f;
 	constexpr float kThawStart = 0.05f;
+	constexpr float kBeastRiseRate = 8.0f;
+	constexpr float kBeastFallRate = 1.0f;
+	constexpr float kBeastBeatsPerMinute = 110.0f;
+	constexpr float kBeastRestartGap = 0.5f;
 
 	struct MenuManager_DrawInterfaceStart
 	{
@@ -549,6 +560,10 @@ void CameraFX::GameLoaded()
 	sunAmount = 0.0f;
 	moonAmount = {};
 	themeLevels = {};
+	beastAge = 99.0f;
+	beastLevel = 0.0f;
+	beastAbsentSeconds = 99.0f;
+	beastVampire = false;
 }
 
 bool CameraFX::TakesOverModifiers() const
@@ -566,6 +581,8 @@ std::array<bool, CameraFXModifiers::kThemeCount> CameraFX::GetEnabledThemes() co
 	themes[static_cast<size_t>(Theme::kExhaustion)] = settings.Exhaustion;
 	themes[static_cast<size_t>(Theme::kHunger)] = settings.Hunger;
 	themes[static_cast<size_t>(Theme::kPoison)] = settings.Poison;
+	themes[static_cast<size_t>(Theme::kWerewolf)] = settings.Transformation;
+	themes[static_cast<size_t>(Theme::kVampireLord)] = settings.Transformation;
 	return themes;
 }
 
@@ -740,7 +757,16 @@ void CameraFX::UpdateThemeClocks(float a_deltaTime)
 	hungerPhase = std::fmod(hungerPhase + a_deltaTime * 0.22f, 1.0f);
 	const float hungerPulse = 0.5f - 0.5f * std::cos(2.0f * RE::NI_PI * hungerPhase);
 
+	float beastPulse = 0.0f;
+	if (beastLevel > 0.0f) {
+		beastPhase = std::fmod(beastPhase + a_deltaTime * kBeastBeatsPerMinute / 60.0f, 1.0f);
+		beastPulse = std::max(beat(beastPhase), 0.6f * beat(beastPhase - 0.2f));
+	} else {
+		beastPhase = 0.0f;
+	}
+
 	frameData.ThemeParams = { pulse, eyelid, hungerPulse, time };
+	frameData.Transform = { beastLevel, beastVampire ? 1.0f : 0.0f, beastPulse, 0.0f };
 }
 
 void CameraFX::UpdateLights(RE::Sky* a_sky)
@@ -829,6 +855,8 @@ void CameraFX::UpdateFrame(float a_deltaTime, bool a_hasDepth)
 	combatOptions.slash = settings.SlashStreaks;
 	combatOptions.shake = settings.HitShake;
 	combatOptions.shakeStrength = settings.HitShakeStrength;
+	combatOptions.hitBlur = settings.HitBlur;
+	combatOptions.hitBlurStrength = settings.HitBlurStrength;
 	combatOptions.stamina = settings.StaminaBreath;
 	combatOptions.photosensitiveSafe = settings.PhotosensitiveSafe;
 	combat.Update(step, a_deltaTime, settings.Combat, combatOptions);
@@ -843,6 +871,22 @@ void CameraFX::UpdateFrame(float a_deltaTime, bool a_hasDepth)
 		theme(Theme::kExhaustion, settings.Exhaustion, settings.ExhaustionStrength),
 		theme(Theme::kHunger, settings.Hunger, settings.HungerStrength),
 		theme(Theme::kPoison, settings.Poison, settings.PoisonStrength) };
+
+	const float werewolf = resolved.themes[static_cast<size_t>(Theme::kWerewolf)];
+	const float vampireLord = resolved.themes[static_cast<size_t>(Theme::kVampireLord)];
+	const float beastPresence = std::min(std::max(werewolf, vampireLord), 1.0f);
+	if (beastPresence > kActiveEpsilon) {
+		if (beastAbsentSeconds > kBeastRestartGap)
+			beastAge = 0.0f;
+		beastAbsentSeconds = 0.0f;
+		beastVampire = vampireLord > werewolf;
+	} else {
+		beastAbsentSeconds = std::min(beastAbsentSeconds + step, 99.0f);
+	}
+	beastAge = std::min(beastAge + step, 99.0f);
+	const float beastEnvelope = Util::Smoothstep(0.0f, 0.12f, beastAge) * (0.3f + 0.7f * std::exp(-beastAge * 0.8f)) * (1.0f - Util::Smoothstep(4.0f, 6.0f, beastAge));
+	const float beastTarget = settings.Transformation ? beastPresence * beastEnvelope * settings.TransformationStrength : 0.0f;
+	beastLevel = Util::Approach(beastLevel, beastTarget, kBeastRiseRate, kBeastFallRate, step);
 	UpdateThemeClocks(a_deltaTime);
 
 	auto* sky = globals::game::sky;
@@ -900,6 +944,8 @@ void CameraFX::UpdateFrame(float a_deltaTime, bool a_hasDepth)
 	frameData.Combat3 = { combatState.hitU, combatState.hitV, combatState.hitAge, settings.PhotosensitiveSafe ? 1.0f : 0.0f };
 	frameData.Combat4 = { combatState.shockAge, combatState.shockSeed, combatState.shockLasting, combatState.exhaleSeed };
 	frameData.LensLook.x = thaw;
+	frameData.HitBlur = { combatState.hitBlur, combatState.hitBlurU, combatState.hitBlurV, 0.0f };
+	frameData.Blurs = { settings.BloodBlur ? settings.BloodBlurStrength : 0.0f, settings.HeartbeatBlur ? 1.0f : 0.0f, 0.0f, 0.0f };
 
 	const uint32_t splatCount = static_cast<uint32_t>(std::min<size_t>(combatState.splats.size(), CameraFXLens::kMaxSplats));
 	for (uint32_t i = 0; i < splatCount; ++i) {
@@ -915,7 +961,9 @@ void CameraFX::UpdateFrame(float a_deltaTime, bool a_hasDepth)
 	const bool staminaPulse = combatState.staminaLow > kActiveEpsilon && combatState.exhaleAge < 1.0f;
 
 	const float themesTotal = frameData.Themes.x + frameData.Themes.y + frameData.Themes.z + frameData.Themes.w;
-	sceneActive = generic.active || themesTotal > kActiveEpsilon;
+	const bool hitBlurring = combatState.hitBlur > kActiveEpsilon;
+	const bool transforming = beastLevel > kActiveEpsilon;
+	sceneActive = generic.active || themesTotal > kActiveEpsilon || hitBlurring || transforming;
 	lightsActive = a_hasDepth && ((sunAmount > kActiveEpsilon && frameData.SunScreen.z > 0.0f) || frameData.MoonScreen[0].z > kActiveEpsilon || frameData.MoonScreen[1].z > kActiveEpsilon);
 	if (!lightsActive) {
 		frameData.Lens.y = 0.0f;
@@ -933,7 +981,8 @@ void CameraFX::UpdateFrame(float a_deltaTime, bool a_hasDepth)
 	combatPass.overlay = splatCount > 0 || discharging || combatState.shockLasting > kActiveEpsilon;
 	combatPass.additive = combatPass.overlay;
 	lensActive = weatherPass.overlay || weatherPass.additive || combatPass.overlay;
-	sceneNeedsMips = generic.blurRadius > kMinBlurRadius || generic.dofStrength > kActiveEpsilon || frameData.Themes.y > kActiveEpsilon;
+	sceneNeedsMips = generic.blurRadius > kMinBlurRadius || generic.dofStrength > kActiveEpsilon || frameData.Themes.y > kActiveEpsilon || hitBlurring ||
+	                 transforming || (settings.HeartbeatBlur && frameData.Themes.x > kActiveEpsilon);
 }
 
 float CameraFX::GetSceneEncoding(bool a_hdrTarget) const
@@ -1198,12 +1247,20 @@ void CameraFX::DrawSettings()
 			T(TKEY("cold_frost_tooltip"), "Survival Mode cold grows frost in from the lens edges instead of the blue blur."));
 		strengthRow(T(TKEY("low_health"), "Low Health: Heartbeat"), &settings.LowHealth, &settings.LowHealthStrength,
 			T(TKEY("low_health_tooltip"), "Low health darkens and reddens the edges in time with a heartbeat that quickens as health drops."));
+		{
+			auto heartbeatDisabled = Util::DisableGuard(!settings.LowHealth);
+			ImGui::Checkbox(T(TKEY("heartbeat_blur"), "Heartbeat Blur"), &settings.HeartbeatBlur);
+			if (auto _tt = Util::HoverTooltipWrapper())
+				ImGui::TextWrapped("%s", T(TKEY("heartbeat_blur_tooltip"), "The edges of the view soften with each heartbeat while health is low."));
+		}
 		strengthRow(T(TKEY("exhaustion"), "Exhaustion: Heavy Eyes"), &settings.Exhaustion, &settings.ExhaustionStrength,
 			T(TKEY("exhaustion_tooltip"), "Survival Mode exhaustion makes the eyelids droop and blink slowly."));
 		strengthRow(T(TKEY("hunger"), "Hunger: Fading Colour"), &settings.Hunger, &settings.HungerStrength,
 			T(TKEY("hunger_tooltip"), "Survival Mode hunger drains colour from the view in slow waves."));
 		strengthRow(T(TKEY("poison"), "Poison: Sickly Edges"), &settings.Poison, &settings.PoisonStrength,
 			T(TKEY("poison_tooltip"), "Poison tints the edges green and makes the view sway."));
+		strengthRow(T(TKEY("transformation"), "Beast Transformation"), &settings.Transformation, &settings.TransformationStrength,
+			T(TKEY("transformation_tooltip"), "Turning into a werewolf or Vampire Lord floods the edges with a pounding, blurred red (or violet) haze on top of the game's own transformation effect."));
 		ImGui::TreePop();
 	}
 
@@ -1257,6 +1314,8 @@ void CameraFX::DrawSettings()
 		auto disabled = Util::DisableGuard(!settings.Combat);
 		strengthRow(T(TKEY("blood"), "Blood Splatter"), &settings.Blood, &settings.BloodStrength,
 			T(TKEY("blood_tooltip"), "Close hits spray blood (or oil from machines) onto the lens. Ghosts do not bleed."));
+		strengthRow(T(TKEY("blood_blur"), "Blood Blur"), &settings.BloodBlur, &settings.BloodBlurStrength,
+			T(TKEY("blood_blur_tooltip"), "Blood, oil and venom on the lens blur what is behind them, and blood and oil leave a soft smudge around the splash."));
 		checkbox(T(TKEY("elemental"), "Elemental Hits"), &settings.ElementalSplats,
 			T(TKEY("elemental_tooltip"), "Fire scorches, frost freezes, shock crackles and poison spatters the lens; giants and dragons throw up grit."));
 		strengthRow(T(TKEY("impact_flash"), "Impact Flash"), &settings.ImpactFlash, &settings.FlashStrength,
@@ -1265,6 +1324,8 @@ void CameraFX::DrawSettings()
 			T(TKEY("slash_tooltip"), "Melee hits you take leave a streak across the view from the side they came from."));
 		strengthRow(T(TKEY("hit_shake"), "Hit Shake"), &settings.HitShake, &settings.HitShakeStrength,
 			T(TKEY("hit_shake_tooltip"), "The camera jolts when you are hit, harder from power attacks and big creatures. Uses the game camera, so frame generation stays correct."));
+		strengthRow(T(TKEY("hit_blur"), "Hit Blur"), &settings.HitBlur, &settings.HitBlurStrength,
+			T(TKEY("hit_blur_tooltip"), "Taking a hit briefly smears the view outward from the attacker, harder from power attacks, bashes and big creatures. Blocked hits blur less."));
 		checkbox(T(TKEY("stamina_breath"), "Stamina Breaths"), &settings.StaminaBreath,
 			T(TKEY("stamina_breath_tooltip"), "Low stamina darkens the edges in time with your breathing."));
 		checkbox(T(TKEY("photosensitive_safe"), "Photosensitive Safe"), &settings.PhotosensitiveSafe,
@@ -1305,6 +1366,8 @@ void CameraFX::DrawSettings()
 		ImGui::Text(T(TKEY("debug_water_state"), "Underwater %d  Swimming %d  Frost map %d  Dirt map %d"), weatherState.underwater ? 1 : 0, weatherState.swimming ? 1 : 0, frostMask ? 1 : 0, lensDirt ? 1 : 0);
 		ImGui::Text(T(TKEY("debug_atmosphere"), "Ash %.2f  Dust %.2f  Embers %.2f  Heat %.2f  Breath cold %.2f"), weatherState.ash, weatherState.dust, weatherState.embers, weatherState.heat, weatherState.breathCold);
 		ImGui::Text(T(TKEY("debug_combat"), "Splats %zu  Flash %.2f  Shock %.2f  Lasting shock %.2f  Fire %.2f  Exertion %.2f"), combatState.splats.size(), combatState.flash, combatState.shock, combatState.shockLasting, combatState.fire, combatState.exertion);
+		ImGui::Text(T(TKEY("debug_blur"), "Hit blur %.2f  Transformation %.2f (%s, %.1f s)"), combatState.hitBlur, beastLevel,
+			CameraFXModifiers::GetThemeName(beastVampire ? Theme::kVampireLord : Theme::kWerewolf), beastAge);
 		ImGui::TreePop();
 	}
 }
@@ -1321,6 +1384,7 @@ void CameraFX::LoadSettings(json& o_json)
 	sanitize(settings.ExhaustionStrength, defaults.ExhaustionStrength, 0.0f, kMaxStrength);
 	sanitize(settings.HungerStrength, defaults.HungerStrength, 0.0f, kMaxStrength);
 	sanitize(settings.PoisonStrength, defaults.PoisonStrength, 0.0f, kMaxStrength);
+	sanitize(settings.TransformationStrength, defaults.TransformationStrength, 0.0f, kMaxStrength);
 	sanitize(settings.SunLensStrength, defaults.SunLensStrength, 0.0f, kMaxStrength);
 	sanitize(settings.LensDirt, defaults.LensDirt, 0.0f, 1.0f);
 	sanitize(settings.SunMaxHeight, defaults.SunMaxHeight, kMinSunMaxHeight, kMaxSunMaxHeight);
@@ -1329,8 +1393,10 @@ void CameraFX::LoadSettings(json& o_json)
 	sanitize(settings.WeatherFrostStrength, defaults.WeatherFrostStrength, 0.0f, kMaxStrength);
 	sanitize(settings.AtmosphereStrength, defaults.AtmosphereStrength, 0.0f, kMaxStrength);
 	sanitize(settings.BloodStrength, defaults.BloodStrength, 0.0f, kMaxStrength);
+	sanitize(settings.BloodBlurStrength, defaults.BloodBlurStrength, 0.0f, kMaxStrength);
 	sanitize(settings.FlashStrength, defaults.FlashStrength, 0.0f, kMaxStrength);
 	sanitize(settings.HitShakeStrength, defaults.HitShakeStrength, 0.0f, kMaxStrength);
+	sanitize(settings.HitBlurStrength, defaults.HitBlurStrength, 0.0f, kMaxStrength);
 }
 
 void CameraFX::SaveSettings(json& o_json)
