@@ -102,9 +102,12 @@ namespace SkyScattering
 	float GetBillboardRadius(float3 viewDirection, float3 centerDirection, float halfTan)
 	{
 		float cosAngle = dot(viewDirection, centerDirection);
+		float radius;
 		if (cosAngle <= 1e-3 || halfTan <= 0.0)
-			return 2.0;
-		return (1.0 - cosAngle * cosAngle) / (cosAngle * cosAngle * halfTan * halfTan);
+			radius = 2.0;
+		else
+			radius = (1.0 - cosAngle * cosAngle) / (cosAngle * cosAngle * halfTan * halfTan);
+		return radius;
 	}
 
 	float3 GetMoonGlow(float3 viewDirection, float3 moonDirection, float3 moonColor, float moonHalfTan)

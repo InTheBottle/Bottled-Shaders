@@ -55,10 +55,12 @@ namespace ProceduralLightning
 
 	float GetFogFactor(float distance)
 	{
-		if (FogParams.y <= 0.0)
-			return 0.0;
-		float distanceFactor = saturate(distance * FogParams.y - FogParams.x);
-		return distanceFactor > 0.0 ? min(FogParams.w, exp2(FogParams.z * log2(distanceFactor))) : 0.0;
+		float fog = 0.0;
+		if (FogParams.y > 0.0) {
+			float distanceFactor = saturate(distance * FogParams.y - FogParams.x);
+			fog = distanceFactor > 0.0 ? min(FogParams.w, exp2(FogParams.z * log2(distanceFactor))) : 0.0;
+		}
+		return fog;
 	}
 }
 

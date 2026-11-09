@@ -106,7 +106,7 @@ void ScreenSpaceGI::DrawSettings()
 				recompileFlag = true;
 			}
 			if (auto _tt = Util::HoverTooltipWrapper()) {
-				ImGui::Text("1 Slice, 6 Steps, blur enabled, no GI\n");
+				ImGui::Text("%s", T(TKEY("ao_only_tooltip"), "1 Slice, 6 Steps, blur enabled, no GI"));
 			}
 
 			ImGui::TableNextColumn();
@@ -237,8 +237,8 @@ void ScreenSpaceGI::DrawSettings()
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			std::vector<std::string> tooltipLines = {
 				T(TKEY("depth_fade_range_tooltip"), "Distance range where depth-based effects fade out."),
-				"Near: " + Util::Units::FormatDistance(settings.DepthFadeRange.x),
-				"Far: " + Util::Units::FormatDistance(settings.DepthFadeRange.y)
+				std::string(T(TKEY("depth_fade_near"), "Near")) + ": " + Util::Units::FormatDistance(settings.DepthFadeRange.x),
+				std::string(T(TKEY("depth_fade_far"), "Far")) + ": " + Util::Units::FormatDistance(settings.DepthFadeRange.y)
 			};
 			Util::DrawMultiLineTooltip(tooltipLines);
 		}
@@ -673,6 +673,7 @@ void ScreenSpaceGI::CompileComputeShaders()
 			{ &upsampleCompute, "upsample.cs.hlsl", {} },
 		};
 
+	const bool enableGI = settings.EnableGI;
 	for (auto& info : shaderInfos) {
 		if (settings.ResolutionMode == 1)
 			info.defines.push_back({ "HALF_RES", "" });
@@ -680,7 +681,7 @@ void ScreenSpaceGI::CompileComputeShaders()
 			info.defines.push_back({ "QUARTER_RES", "" });
 		if (settings.EnableTemporalDenoiser)
 			info.defines.push_back({ "TEMPORAL_DENOISER", "" });
-		if (settings.EnableGI)
+		if (enableGI)
 			info.defines.push_back({ "GI", "" });
 		if (settings.EnableExperimentalSpecularGI)
 			info.defines.push_back({ "GI_SPECULAR", "" });
@@ -692,6 +693,7 @@ void ScreenSpaceGI::CompileComputeShaders()
 			info.programPtr->attach(rawPtr);
 	}
 
+	compiledWithGI = enableGI;
 	recompileFlag = false;
 }
 
@@ -734,7 +736,7 @@ void ScreenSpaceGI::UpdateSB()
 		data.GIRadius = settings.GIRadius / data.EffectRadius;
 		data.Thickness = settings.Thickness;
 		data.DepthFadeRange = settings.DepthFadeRange;
-		data.DepthFadeScaleConst = 1 / (settings.DepthFadeRange.y - settings.DepthFadeRange.x);
+		data.DepthFadeScaleConst = 1 / std::max(settings.DepthFadeRange.y - settings.DepthFadeRange.x, 1.0f);
 
 		data.GISaturation = settings.GISaturation;
 		data.GIDistanceCompensation = settings.GIDistanceCompensation;
@@ -798,6 +800,9 @@ void ScreenSpaceGI::DrawSSGI()
 	if (settings.Enabled && settings.EnableExperimentalSpecularGI)
 		EnsureGiSpecularTextures();
 
+	if (settings.Enabled && recompileFlag)
+		ClearShaderCache();
+
 	if (!(settings.Enabled && ShadersOK())) {
 		if (!outputsCleared) {
 			FLOAT clr[4] = { 0.f, 0.f, 0.f, 0.f };
@@ -805,6 +810,7 @@ void ScreenSpaceGI::DrawSSGI()
 			context->ClearUnorderedAccessViewFloat(texIlY[outputIlIdx]->uav.get(), clr);
 			context->ClearUnorderedAccessViewFloat(texIlCoCg[outputIlIdx]->uav.get(), clr);
 			outputsCleared = true;
+			queuedResetHistory = true;
 		}
 		return;
 	}
@@ -837,9 +843,6 @@ void ScreenSpaceGI::DrawSSGI()
 	}
 
 	//////////////////////////////////////////////////////
-
-	if (recompileFlag)
-		ClearShaderCache();
 
 	UpdateSB();
 
@@ -926,7 +929,7 @@ void ScreenSpaceGI::DrawSSGI()
 		// Prefilter radiance texture instead of using GenerateMips for proper dynamic resolution handling.
 		// radianceDisocc wrote mip 0 directly to texRadianceTemp above, so we can bind it
 		// as SRV input here without an intermediate CopySubresourceRegion.
-		if (settings.EnableGI) {
+		if (compiledWithGI) {
 			TracyD3D11Zone(globals::state->tracyCtx, "SSGI - Prefilter Radiance");
 
 			resetViews();
@@ -1031,7 +1034,7 @@ void ScreenSpaceGI::DrawSSGI()
 		context->Dispatch((internalRes[0] + 7u) >> 3, (internalRes[1] + 7u) >> 3, 1);
 		globals::profiler->EndPass();
 
-		if (settings.EnableGI) {
+		if (compiledWithGI) {
 			inputGITexIdx = !inputGITexIdx;
 			lastFrameGITexIdx = inputGITexIdx;
 		}

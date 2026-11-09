@@ -261,6 +261,12 @@ void SubsurfaceScattering::DrawSSS()
 
 	validMaterials = false;
 
+	auto* prepassShader = GetComputeShaderPrepass();
+	auto* firstBlurShader = settings.SSMode == 0 ? GetComputeShaderHorizontalBlur() : GetComputeShaderBurley();
+	auto* secondBlurShader = settings.SSMode == 0 ? GetComputeShaderVerticalBlur() : firstBlurShader;
+	if (!prepassShader || !firstBlurShader || !secondBlurShader)
+		return;
+
 	auto dispatchCount = Util::GetScreenDispatchCount();
 
 	{
@@ -318,8 +324,7 @@ void SubsurfaceScattering::DrawSSS()
 			ID3D11UnorderedAccessView* uav = diffuseNoAlbedoTex->uav.get();
 			context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
 
-			auto shader = GetComputeShaderPrepass();
-			context->CSSetShader(shader, nullptr, 0);
+			context->CSSetShader(prepassShader, nullptr, 0);
 
 			context->Dispatch(dispatchCount.x, dispatchCount.y, 1);
 
@@ -342,8 +347,7 @@ void SubsurfaceScattering::DrawSSS()
 				ID3D11UnorderedAccessView* uav = blurHorizontalTemp->uav.get();
 				context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
 
-				auto shader = GetComputeShaderHorizontalBlur();
-				context->CSSetShader(shader, nullptr, 0);
+				context->CSSetShader(firstBlurShader, nullptr, 0);
 
 				globals::profiler->BeginPass("SubsurfaceScattering::HorizontalBlur");
 				context->Dispatch(dispatchCount.x, dispatchCount.y, 1);
@@ -363,8 +367,7 @@ void SubsurfaceScattering::DrawSSS()
 				ID3D11UnorderedAccessView* uavs[1] = { main.UAV };
 				context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 
-				auto shader = GetComputeShaderVerticalBlur();
-				context->CSSetShader(shader, nullptr, 0);
+				context->CSSetShader(secondBlurShader, nullptr, 0);
 
 				globals::profiler->BeginPass("SubsurfaceScattering::VerticalBlur");
 				context->Dispatch(dispatchCount.x, dispatchCount.y, 1);
@@ -378,8 +381,7 @@ void SubsurfaceScattering::DrawSSS()
 				ID3D11UnorderedAccessView* uavs[1] = { main.UAV };
 				context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 
-				auto shader = GetComputeShaderBurley();
-				context->CSSetShader(shader, nullptr, 0);
+				context->CSSetShader(firstBlurShader, nullptr, 0);
 
 				globals::profiler->BeginPass("SubsurfaceScattering::Burley");
 				context->Dispatch(dispatchCount.x, dispatchCount.y, 1);
@@ -486,8 +488,12 @@ void SubsurfaceScattering::RestoreDefaultSettings()
 void SubsurfaceScattering::LoadSettings(json& o_json)
 {
 	settings = o_json;
+	settings.SSMode = std::clamp(settings.SSMode, 0, 1);
 	settings.ScatterMode = std::clamp(settings.ScatterMode, (int)kPreScatter, (int)kPreAndPostScatter);
+	settings.BurleySamples = std::clamp(settings.BurleySamples, 1u, 64u);
 	const Settings defaults{};
+	settings.MeanFreePathBase.w = Util::ClampFinite(settings.MeanFreePathBase.w, defaults.MeanFreePathBase.w, 0.01f, 10.0f);
+	settings.MeanFreePathHuman.w = Util::ClampFinite(settings.MeanFreePathHuman.w, defaults.MeanFreePathHuman.w, 0.01f, 10.0f);
 	settings.MeanFreePathFoliage.w = Util::ClampFinite(settings.MeanFreePathFoliage.w, defaults.MeanFreePathFoliage.w, 0.01f, 10.0f);
 	settings.MeanFreePathTranslucent.w = Util::ClampFinite(settings.MeanFreePathTranslucent.w, defaults.MeanFreePathTranslucent.w, 0.01f, 10.0f);
 	updateKernels = true;

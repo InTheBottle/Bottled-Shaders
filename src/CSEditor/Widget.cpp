@@ -43,7 +43,12 @@ namespace
 
 void Widget::Save()
 {
-	SaveSettings();
+	try {
+		SaveSettings();
+	} catch (const std::exception& e) {
+		logger::error("{}: Failed to serialize settings: {}", GetEditorID(), e.what());
+		return;
+	}
 	const auto file = GetSaveFilePath();
 
 	// Checked before touching the file so a null document can never replace saved data.
@@ -92,7 +97,7 @@ void Widget::Load(bool showNotification)
 		return;
 	}
 
-	const bool loaded = document && !document->is_null();
+	const bool loaded = document && document->is_object();
 	js = loaded ? std::move(*document) : json();
 	try {
 		LoadSettings();

@@ -53,6 +53,7 @@ public:
 	//////////////////////////////////////////////////////////////////////////////////
 
 	bool recompileFlag = false;
+	bool compiledWithGI = false;
 	uint outputAoIdx = 0;
 	uint outputIlIdx = 0;
 	Texture2D* outputAo = nullptr;
@@ -169,7 +170,7 @@ public:
 	/** @brief Returns the current output SRVs for AO, indirect lighting Y/CoCg, and specular GI (or nullptrs if disabled). */
 	inline auto GetOutputTextures()
 	{
-		return (loaded && settings.Enabled && outputAo) ?
+		return (loaded && settings.Enabled && outputAo && ShadersOK()) ?
 		           std::make_tuple(
 					   outputAo->srv.get(),
 					   texIlY[outputIlIdx]->srv.get(),

@@ -112,9 +112,6 @@ void MotionBlur::RestoreDefaultSettings()
 {
 	// Reset to defaults
 	settings = Settings{};
-	settings.VelocityScale = 300.0f;
-	settings.SampleCount = 8;  // 8 base samples = 16 actual samples
-	settings.ScalePreset = MotionScale::Medium;
 }
 
 void MotionBlur::LoadSettings(json& j)

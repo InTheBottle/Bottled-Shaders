@@ -723,7 +723,7 @@ WaterNormalData GetWaterNormal(PS_INPUT input, float distanceFactor, float norma
 				   max(0.4, normalsDepthFactor),
 			0);
 	flowmapNormal.z =
-		sqrt(1 - flowmapNormal.x * flowmapNormal.x - flowmapNormal.y * flowmapNormal.y);
+		sqrt(saturate(1 - flowmapNormal.x * flowmapNormal.x - flowmapNormal.y * flowmapNormal.y));
 	float2 baseNormalUv = input.TexCoord1.xy;
 #				if defined(WATER_PARALLAX)
 	// Use flowmap-derived parallax offset for base normals
@@ -1191,7 +1191,7 @@ PS_OUTPUT main(PS_INPUT input)
 		lightColorMul = pow(lightColorMul, TransferFunctions::GAME_GAMMA);
 #					endif
 		float LdotN = saturate(dot(lightDirection, normal));
-		float3 lightColor = (Color::PointLight(LightColor[lightIndex].xyz) * pow(LdotN, FresnelRI.z)) * lightColorMul;
+		float3 lightColor = (Color::PointLight(LightColor[lightIndex].xyz) * (FresnelRI.z > 0 ? pow(LdotN, FresnelRI.z) : 1.0)) * lightColorMul;
 		finalColor += lightColor;
 	}
 #				endif
@@ -1275,7 +1275,7 @@ PS_OUTPUT main(PS_INPUT input)
 			float3 H = normalize(normalizedLightDirection - viewDirection);
 			float HdotN = saturate(dot(H, normal));
 
-			float3 lightColor = Color::PointLight(light.color.xyz) * pow(HdotN, FresnelRI.z) * light.fade;
+			float3 lightColor = Color::PointLight(light.color.xyz) * (FresnelRI.z > 0 ? pow(HdotN, FresnelRI.z) : 1.0) * light.fade;
 			specularLighting += lightColor * intensityMultiplier * lightShadow;
 		}
 	}

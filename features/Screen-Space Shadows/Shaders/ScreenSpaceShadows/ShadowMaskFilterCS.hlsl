@@ -1,5 +1,5 @@
 Texture2D<float4> ShadowMask : register(t0);
-#if defined(TERRAIN_BLENDING)
+#if defined(TERRAIN_BLENDING) || defined(REVERSE_Z)
 Texture2D<float> DepthTexture : register(t1);
 #else
 Texture2D<unorm float> DepthTexture : register(t1);

@@ -222,7 +222,7 @@ void TerrainShadows::DrawSettings()
 
 		if (ImGui::TreeNode(T(TKEY("buffer_viewer"), "Buffer Viewer"))) {
 			static float debugRescale = .1f;
-			ImGui::SliderFloat("View Resize", &debugRescale, 0.f, 1.f);
+			ImGui::SliderFloat(T(TKEY("view_resize"), "View Resize"), &debugRescale, 0.f, 1.f);
 
 			if (texShadowHeight) {
 				BUFFER_VIEWER_NODE_BULLET(texShadowHeight, debugRescale)

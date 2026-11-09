@@ -97,7 +97,7 @@ private:
 	using GetWaterSkirtRimQualityFn = int (*)();
 	using ResetWaterSkirtRimQualityFn = void (*)();
 
-	/** @brief True while Exponential Height Fog is loaded, turned on, and not handed off to Effects 11. */
+	/** @brief True while Exponential Height Fog is loaded and turned on. */
 	static bool IsHeightFogActive();
 
 	/** @brief Hands the plugin every value that differs from what it was last given. */

@@ -32,6 +32,8 @@ void Skylighting::LoadSettings(json& o_json)
 	settings.OcclusionDistanceCulling = Util::ClampFinite(settings.OcclusionDistanceCulling, defaults.OcclusionDistanceCulling, 0.f, 1.f);
 	settings.MaxZenith = Util::ClampFinite(settings.MaxZenith, defaults.MaxZenith, 0.f, std::numbers::pi_v<float> / 2.f);
 	settings.OcclusionMinRadius = Util::ClampFinite(settings.OcclusionMinRadius, defaults.OcclusionMinRadius, kEngineMinOccluderRadius, 512.f);
+	settings.MinDiffuseVisibility = Util::ClampFinite(settings.MinDiffuseVisibility, defaults.MinDiffuseVisibility, 0.f, 1.f);
+	settings.MinSpecularVisibility = Util::ClampFinite(settings.MinSpecularVisibility, defaults.MinSpecularVisibility, 0.f, 1.f);
 }
 
 void Skylighting::SaveSettings(json& o_json)

@@ -62,28 +62,28 @@ float GetLightVisibility(float3 position, float3 toLight, float lightDistance, C
 {
 	float3 nearest = ClosestPointOnSegment(position, capsule.A, capsule.B);
 	float selfFade = smoothstep(capsule.Radius * 1.1, capsule.Radius * 2.0, length(nearest - position));
-	if (selfFade <= 0.0)
-		return 1.0;
+	float result = 1.0;
+	if (!(selfFade <= 0.0)) {
+		float3 axis = capsule.B - capsule.A;
+		float3 fromStart = position - capsule.A;
+		float axisDotRay = dot(toLight, axis);
+		float axisLengthSq = dot(axis, axis);
+		float denominator = max(axisLengthSq - axisDotRay * axisDotRay, 1e-3);
+		float along = saturate((dot(fromStart, axis) - dot(fromStart, toLight) * axisDotRay) / denominator);
+		float3 onCapsule = capsule.A + axis * along;
 
-	float3 axis = capsule.B - capsule.A;
-	float3 fromStart = position - capsule.A;
-	float axisDotRay = dot(toLight, axis);
-	float axisLengthSq = dot(axis, axis);
-	float denominator = max(axisLengthSq - axisDotRay * axisDotRay, 1e-3);
-	float along = saturate((dot(fromStart, axis) - dot(fromStart, toLight) * axisDotRay) / denominator);
-	float3 onCapsule = capsule.A + axis * along;
+		float travel = dot(onCapsule - position, toLight);
+		if (!(travel <= 0.0 || travel >= lightDistance)) {
+			float3 offset = onCapsule - (position + toLight * travel);
+			float penumbra = max(travel * PenumbraSlope, 1.0);
+			float visibility = saturate((length(offset) - capsule.Radius + penumbra) / (2.0 * penumbra));
+			visibility = visibility * visibility * (3.0 - 2.0 * visibility);
 
-	float travel = dot(onCapsule - position, toLight);
-	if (travel <= 0.0 || travel >= lightDistance)
-		return 1.0;
-
-	float3 offset = onCapsule - (position + toLight * travel);
-	float penumbra = max(travel * PenumbraSlope, 1.0);
-	float visibility = saturate((length(offset) - capsule.Radius + penumbra) / (2.0 * penumbra));
-	visibility = visibility * visibility * (3.0 - 2.0 * visibility);
-
-	float lengthFade = 1.0 - saturate(travel / MaxShadowLength);
-	return lerp(1.0, visibility, selfFade * lengthFade);
+			float lengthFade = 1.0 - saturate(travel / MaxShadowLength);
+			result = lerp(1.0, visibility, selfFade * lengthFade);
+		}
+	}
+	return result;
 }
 
 [numthreads(8, 8, 1)] void main(uint3 dispatchID : SV_DispatchThreadID) {

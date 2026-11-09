@@ -1576,6 +1576,9 @@ void EditorWindow::LoadSettings()
 			logger::warn("Failed to deserialize editor settings, using defaults: {}", e.what());
 		}
 	}
+	if (!std::isfinite(settings.editorUIScale))
+		settings.editorUIScale = 1.0f;
+	settings.editorUIScale = std::clamp(settings.editorUIScale, ThemeManager::Constants::CSE_UI_SCALE_MIN, ThemeManager::Constants::CSE_UI_SCALE_MAX);
 	m_selectedCategory = settings.selectedCategory;
 	if (m_selectedCategory == "Interior Only") {
 		m_selectedCategory = "Weather";

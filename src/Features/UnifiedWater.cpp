@@ -807,11 +807,13 @@ void UnifiedWater::BSWaterShader_SetupGeometry::thunk(RE::BSShader* waterShader,
 	auto& singleton = globals::features::unifiedWater;
 
 	if (singleton.IsExteriorWorldspaceActive() && singleton.flowmap && pass && pass->geometry) {
+		const int32_t flowmapWidth = std::max(singleton.flowmap->GetWidth(), 1);
+		const int32_t flowmapHeight = std::max(singleton.flowmap->GetHeight(), 1);
 		// ObjectUV.xyz below, xy contains width and height, z contains mesh scale
 		// Previously flowmap size was in x, yz contained flowmap offset for water displacement mesh
-		*singleton.gFlowMapSize = singleton.flowmap->GetWidth();                                            // ObjectUV.x
-		singleton.gDisplacementMeshFlowCellOffset->x = static_cast<float>(singleton.flowmap->GetHeight());  // ObjectUV.y
-		singleton.gDisplacementMeshFlowCellOffset->y = 1.0f - pass->geometry->local.scale;                  // ObjectUV.z (counters 1 - x in SetupGeometry)
+		*singleton.gFlowMapSize = flowmapWidth;                                             // ObjectUV.x
+		singleton.gDisplacementMeshFlowCellOffset->x = static_cast<float>(flowmapHeight);   // ObjectUV.y
+		singleton.gDisplacementMeshFlowCellOffset->y = 1.0f - pass->geometry->local.scale;  // ObjectUV.z (counters 1 - x in SetupGeometry)
 
 		if (const auto prop = pass->geometry->GetGeometryRuntimeData().shaderProperty.get(); prop && prop->GetRTTI() == globals::rtti::BSWaterShaderPropertyRTTI.get()) {
 			const auto waterShaderProp = static_cast<RE::BSWaterShaderProperty*>(prop);
@@ -821,10 +823,10 @@ void UnifiedWater::BSWaterShader_SetupGeometry::thunk(RE::BSShader* waterShader,
 			// xy is world cell flowmap based (0,0 is corner of flow map), zw is world cell
 			// Funky maths here to counter what's being done in SetupGeometry
 			// Previously these values were relative to the 5x5 flow grid centered on the player
-			waterShaderProp->flowX = x + singleton.flowmap->GetOffsetX();                                                                   // CellTexCoordOffset.x
-			waterShaderProp->flowY = y + singleton.flowmap->GetOffsetY() + singleton.flowmap->GetWidth() - singleton.flowmap->GetHeight();  // CellTexCoordOffset.y
-			waterShaderProp->cellX = x;                                                                                                     // CellTexCoordOffset.z
-			waterShaderProp->cellY = y;                                                                                                     // CellTexCoordOffset.w
+			waterShaderProp->flowX = x + singleton.flowmap->GetOffsetX();                                 // CellTexCoordOffset.x
+			waterShaderProp->flowY = y + singleton.flowmap->GetOffsetY() + flowmapWidth - flowmapHeight;  // CellTexCoordOffset.y
+			waterShaderProp->cellX = x;                                                                   // CellTexCoordOffset.z
+			waterShaderProp->cellY = y;                                                                   // CellTexCoordOffset.w
 		}
 	}
 

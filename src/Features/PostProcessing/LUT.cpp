@@ -266,6 +266,16 @@ void LUT::ReadTexture(std::string requestedPath)
 
 		LutType = texLUT2D->desc.Height == 1 ? 0 : 2;
 	}
+
+	if (LutType == 2 && texLUT2D->desc.Width < texLUT2D->desc.Height) {
+		errMsg = I18n::GetSingleton()->Format(
+			"feature.post_processing.lut.invalid_lut_size",
+			{ { "width", std::to_string(texLUT2D->desc.Width) }, { "height", std::to_string(texLUT2D->desc.Height) } },
+			"Invalid LUT size {width}x{height}! A 3D LUT in 2D format must be at least as wide as it is tall.");
+		logger::warn("LUT '{}': {}", requestedPath, errMsg);
+		texLUT2D.reset();
+		LutType = -1;
+	}
 }
 
 void LUT::ClearShaderCache()

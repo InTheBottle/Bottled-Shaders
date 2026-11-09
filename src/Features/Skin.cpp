@@ -269,7 +269,7 @@ Skin::SkinData Skin::GetCommonBufferData()
 	data.skinParams2 = float4(settings.SecondarySpecularStrength, settings.ExtraSkinWetness, settings.F0, settings.BaseColorMultiplier);
 	data.skinDetailParams = float4(settings.SkinDetailTiling, settings.BodyTilingMultiplier, settings.SkinDetailStrength, float(settings.EnableSkinDetail && settings.EnableSkin));
 	data.sssParams = float4(settings.Translucency, std::max(settings.sssWidth, 1e-3f), 0.0f, float(settings.UseSSS));
-	data.fuzzParams = float4(settings.FuzzStrength, settings.FuzzRoughness, settings.FuzzF0, settings.ExtraEdgeRoughness);
+	data.fuzzParams = float4(settings.FuzzStrength, std::max(settings.FuzzRoughness, 0.1f), settings.FuzzF0, settings.ExtraEdgeRoughness);
 	data.physicalParams = float4(settings.PhysicalMainRoughnessMultiplier, settings.PhysicalSecondRoughnessMultiplier, settings.PhysicalSpecularStrength, 0.0f);
 	data.wetParams = settings.WetParams;
 	return data;

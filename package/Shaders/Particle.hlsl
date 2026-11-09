@@ -339,12 +339,12 @@ bool GetLightCluster(float3 positionWS, out uint lightOffset, out uint lightCoun
 
 	float3 viewPosition = FrameBuffer::WorldToView(positionWS);
 	uint clusterIndex = 0;
-	if (!LightLimitFix::GetClusterIndex(FrameBuffer::ViewToUV(viewPosition), viewPosition.z, clusterIndex))
-		return false;
-
-	lightOffset = LightLimitFix::lightGrid[clusterIndex].offset;
-	lightCount = LightLimitFix::lightGrid[clusterIndex].lightCount;
-	return true;
+	const bool found = LightLimitFix::GetClusterIndex(FrameBuffer::ViewToUV(viewPosition), viewPosition.z, clusterIndex);
+	if (found) {
+		lightOffset = LightLimitFix::lightGrid[clusterIndex].offset;
+		lightCount = LightLimitFix::lightGrid[clusterIndex].lightCount;
+	}
+	return found;
 }
 
 float GetPointLightIntensity(LightLimitFix::Light light, float3 positionWS, out float3 lightDirection)
@@ -355,11 +355,12 @@ float GetPointLightIntensity(LightLimitFix::Light light, float3 positionWS, out 
 
 	float intensity = LightLimitFix::GetAttenuation(lightDist, light);
 	intensity *= light.fade;
-	if (intensity < 1e-5)
-		return 0.0;
-
-	[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow)
-		intensity *= LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, positionWS, FrameBuffer::CameraPosAdjust.xyz, lightDirection, false, 0.0);
+	if (intensity >= 1e-5) {
+		[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow)
+			intensity *= LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, positionWS, FrameBuffer::CameraPosAdjust.xyz, lightDirection, false, 0.0);
+	} else {
+		intensity = 0.0;
+	}
 
 	return intensity;
 }

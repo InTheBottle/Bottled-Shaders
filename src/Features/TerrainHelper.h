@@ -39,6 +39,7 @@ public:
 	std::unordered_map<uint32_t, ExtendedSlots> extendedSlots;
 	std::unordered_map<uint32_t, std::vector<RE::BSGeometry*>> extendedSlotUsers;
 	std::unordered_map<RE::BSGeometry*, uint32_t> extendedSlotGeometries;
+	std::vector<ExtendedSlots> retiredSlots;
 	RE::BGSTextureSet* defaultLandTexture;
 	bool enabled = false;
 

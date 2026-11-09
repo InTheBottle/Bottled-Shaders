@@ -3,7 +3,6 @@
 #include <imgui.h>
 
 #include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
-#include "Effects11.h"
 #include "ExponentialHeightFog.h"
 #include "Globals.h"
 #include "I18n/I18n.h"
@@ -209,7 +208,7 @@ bool HorizonFix::IsHeightFogActive()
 	// The fog's own shader-side switch, minus the flat world map (HorizonFix hides its far water
 	// there anyway, so following it would only toggle the band back and forth)
 	const auto& fog = globals::features::exponentialHeightFog;
-	return fog.loaded && fog.settings.enabled && !globals::features::effects11.OwnsFeature(E11Handoff::Feature::HeightFog);
+	return fog.loaded && fog.settings.enabled;
 }
 
 void HorizonFix::SyncPlugin()

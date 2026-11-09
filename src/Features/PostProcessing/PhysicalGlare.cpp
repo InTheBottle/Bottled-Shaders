@@ -564,6 +564,7 @@ void PhysicalGlare::CompileComputeShaders()
 PhysicalGlare::Settings PhysicalGlare::GetEffectiveSettings() const
 {
 	Settings effective = settings;
+	effective.EyelashCount = std::clamp(effective.EyelashCount, 0, 80);
 	// Lens mode only: a human pupil is not a camera aperture.
 	if (const auto* cam = owner ? owner->GetActivePhysicalCameraState() : nullptr) {
 		if (effective.ApertureMode == 0) {

@@ -693,6 +693,7 @@ void ColorGrading::LoadSettings(json& o_json)
 		settings = o_json;
 		auto& spaces = getAvailableColorSpaces();
 		settings.processColorSpace = std::clamp(settings.processColorSpace, 0, static_cast<int>(spaces.size()) - 1);
+		settings.logType = std::min(settings.logType, 2u);
 		settings.gameModifierBlend = std::isfinite(settings.gameModifierBlend) ? std::clamp(settings.gameModifierBlend, 0.f, 1.f) : 1.f;
 
 		auto& tonemappers = TonemapperInfo::GetTonemappers();
@@ -1021,6 +1022,8 @@ void ColorGrading::Draw(TextureInfo& inout_tex)
 	if (!AllShadersReady({ &gradingPS }) || !AllShadersReady({ &lutgenCS }))
 		return;
 	if (!owner || !owner->GetFullscreenVS())
+		return;
+	if (state->GetTonemapOwner() != State::TonemapOwner::kPostProcessing)
 		return;
 
 	globals::profiler->BeginPass("PostProcessing::ColorGrading");

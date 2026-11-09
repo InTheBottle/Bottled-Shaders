@@ -35,6 +35,8 @@ void InteriorSun::DrawSettings()
 void InteriorSun::LoadSettings(json& o_json)
 {
 	settings = o_json;
+	if (!std::isfinite(settings.InteriorShadowDistance) || settings.InteriorShadowDistance <= 0.0f)
+		settings.InteriorShadowDistance = Settings{}.InteriorShadowDistance;
 	if (gInteriorShadowDistance)
 		*gInteriorShadowDistance = settings.InteriorShadowDistance;
 }

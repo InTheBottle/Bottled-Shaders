@@ -501,7 +501,7 @@ void HDRDisplay::DrawSettings()
 			currentPeakNits = settings.hdrPeakNits;
 		}
 
-		ImGui::SliderInt(T(TKEY("paper_white_nits"), "Paper White (nits)"), reinterpret_cast<int*>(&currentPaperWhite), 80, 500);
+		ImGui::SliderInt(T(TKEY("paper_white_nits"), "Paper White (nits)"), reinterpret_cast<int*>(&currentPaperWhite), 80, 500, "%d", ImGuiSliderFlags_AlwaysClamp);
 		{
 			std::lock_guard<std::mutex> lock(settingsMutex);
 			if (currentPaperWhite >= settings.hdrPeakNits) {
@@ -523,7 +523,7 @@ void HDRDisplay::DrawSettings()
 		int displayedPeakNits = static_cast<int>(std::min(currentPeakNits, peakSliderMax));
 		// Logarithmic spreads the common 600-1000 nit range across more of the native slider
 		if (ImGui::SliderInt(T(TKEY("peak_brightness_nits"), "Peak Brightness (nits)"), &displayedPeakNits, kHdrPeakNitsMin, peakSliderMax, "%d",
-				autoHDRActive ? ImGuiSliderFlags_None : ImGuiSliderFlags_Logarithmic))
+				ImGuiSliderFlags_AlwaysClamp | (autoHDRActive ? ImGuiSliderFlags_None : ImGuiSliderFlags_Logarithmic)))
 			currentPeakNits = static_cast<uint>(displayedPeakNits);
 		{
 			std::lock_guard<std::mutex> lock(settingsMutex);
@@ -559,7 +559,7 @@ void HDRDisplay::DrawSettings()
 			float oldUIBrightness = settings.hdrUIBrightness;
 			float currentUIBrightness = settings.hdrUIBrightness;
 
-			ImGui::SliderFloat(T(TKEY("ui_brightness_multiplier"), "UI Brightness Multiplier"), &currentUIBrightness, 0.5f, 5.0f, "%.2fx");
+			ImGui::SliderFloat(T(TKEY("ui_brightness_multiplier"), "UI Brightness Multiplier"), &currentUIBrightness, 0.5f, 5.0f, "%.2fx", ImGuiSliderFlags_AlwaysClamp);
 			if (oldUIBrightness != currentUIBrightness) {
 				settings.hdrUIBrightness = currentUIBrightness;
 				UpdateHDRData();
@@ -590,8 +590,7 @@ void HDRDisplay::LoadSettings(json& o_json)
 	settings = o_json;
 	settings.hdrPeakNits = std::clamp(settings.hdrPeakNits, kHdrPeakNitsMin, kHdrPeakNitsMax);
 	settings.hdrPaperWhite = std::clamp(settings.hdrPaperWhite, 80u, settings.hdrPeakNits - 1);
-	if (!std::isfinite(settings.hdrUIBrightness))
-		settings.hdrUIBrightness = 1.0f;
+	settings.hdrUIBrightness = std::isfinite(settings.hdrUIBrightness) ? std::clamp(settings.hdrUIBrightness, 0.5f, 5.0f) : 1.0f;
 
 	// Defer auto-detection to SetupResources where the swap chain is available.
 	// DetectHDR() needs globals::d3d::swapChain which isn't valid during early plugin init.
@@ -612,11 +611,17 @@ void HDRDisplay::LoadSettings(json& o_json)
 void HDRDisplay::RestoreDefaultSettings()
 {
 	bool hdrMonitor = DetectHDR();
+	std::lock_guard<std::mutex> lock(settingsMutex);
+	const bool oldEnableHDR = settings.enableHDR;
 	settings.enableHDR = hdrMonitor;
 	settings.hdrPaperWhite = 203;
 	settings.hdrPeakNits = 1000;
 	settings.hdrUIBrightness = 1.0f;
 	settings.dontShowHDRWarning = false;
+	if (settings.enableHDR != oldEnableHDR) {
+		UpdateHDRData();
+		UpdateSwapChainColorSpace();
+	}
 }
 
 void HDRDisplay::PreCreateRenderTargets()

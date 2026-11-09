@@ -789,6 +789,7 @@ void CSEditor::RenderCoreWeatherDetails(bool showInteractiveElements, bool showS
 	if (auto sky = globals::game::sky) {
 		if (sky->mode.get() == RE::Sky::Mode::kFull) {
 			if (showInteractiveElements) {
+				EnsureWeatherListLoaded();
 				// Same picker as the editor's Weather Picker window (combo, filter chips, reset, transition).
 				WeatherPickerWindow::GetSingleton()->DrawContents();
 			}

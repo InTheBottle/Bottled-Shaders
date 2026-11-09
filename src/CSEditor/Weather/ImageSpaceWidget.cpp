@@ -157,8 +157,11 @@ void ImageSpaceWidget::DrawWidget()
 void ImageSpaceWidget::LoadSettings()
 {
 	LoadSavedSettings([this] {
-		if (const auto saved = js.find("Settings"); saved != js.end() && saved->is_object())
-			settings = *saved;
+		if (const auto saved = js.find("Settings"); saved != js.end() && saved->is_object()) {
+			json merged = vanillaSettings;
+			merged.update(*saved, true);
+			settings = merged.get<Settings>();
+		}
 	});
 }
 

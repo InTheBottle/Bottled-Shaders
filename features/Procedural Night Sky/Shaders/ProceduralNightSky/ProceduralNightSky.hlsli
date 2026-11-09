@@ -56,9 +56,8 @@ namespace ProceduralNightSky
 	float2 ToOctahedron(float3 direction)
 	{
 		direction /= abs(direction.x) + abs(direction.y) + abs(direction.z);
-		if (direction.z >= 0.0)
-			return direction.xy;
-		return (1.0 - abs(direction.yx)) * float2(direction.x >= 0.0 ? 1.0 : -1.0, direction.y >= 0.0 ? 1.0 : -1.0);
+		float2 folded = (1.0 - abs(direction.yx)) * float2(direction.x >= 0.0 ? 1.0 : -1.0, direction.y >= 0.0 ? 1.0 : -1.0);
+		return direction.z >= 0.0 ? direction.xy : folded;
 	}
 
 	float3 StarLayer(float2 uv, float cells, float density, float baseRadius, float pixelAngle, float twinkle, float timer)
@@ -66,24 +65,24 @@ namespace ProceduralNightSky
 		float2 grid = uv * cells;
 		float2 cell = floor(grid);
 		float pick = Hash12(cell);
-		if (pick > density)
-			return 0.0;
+		float3 star = 0.0;
+		if (pick <= density) {
+			float2 seed = Hash22(cell);
+			float radius = min(max(baseRadius, pixelAngle * cells * 0.9), MaxStarRadius);
+			float2 offset = frac(grid) - 0.5 - (seed - 0.5) * (0.9 - 2.0 * MaxStarRadius);
+			float falloff = saturate(1.0 - length(offset) / radius);
+			if (falloff > 0.0) {
+				float rank = 1.0 - pick / density;
+				float magnitude = rank * rank * rank * rank;
+				float flicker = 1.0 + twinkle * sin(timer * (1.5 + 4.0 * seed.y) + seed.x * 6.2831853);
+				float area = baseRadius * baseRadius / (radius * radius);
 
-		float2 seed = Hash22(cell);
-		float radius = min(max(baseRadius, pixelAngle * cells * 0.9), MaxStarRadius);
-		float2 offset = frac(grid) - 0.5 - (seed - 0.5) * (0.9 - 2.0 * MaxStarRadius);
-		float falloff = saturate(1.0 - length(offset) / radius);
-		if (falloff <= 0.0)
-			return 0.0;
-
-		float rank = 1.0 - pick / density;
-		float magnitude = rank * rank * rank * rank;
-		float flicker = 1.0 + twinkle * sin(timer * (1.5 + 4.0 * seed.y) + seed.x * 6.2831853);
-		float area = baseRadius * baseRadius / (radius * radius);
-
-		float colorPick = Hash12(cell + float2(123.4, 567.8));
-		float3 color = colorPick > 0.8 ? float3(0.6, 0.8, 1.0) : (colorPick < 0.2 ? float3(1.0, 0.9, 0.7) : float3(1.0, 1.0, 1.0));
-		return color * (pow(falloff, 6.0) * 2.5 + falloff * falloff * 0.5) * magnitude * flicker * area;
+				float colorPick = Hash12(cell + float2(123.4, 567.8));
+				float3 color = colorPick > 0.8 ? float3(0.6, 0.8, 1.0) : (colorPick < 0.2 ? float3(1.0, 0.9, 0.7) : float3(1.0, 1.0, 1.0));
+				star = color * (pow(falloff, 6.0) * 2.5 + falloff * falloff * 0.5) * magnitude * flicker * area;
+			}
+		}
+		return star;
 	}
 
 	float3 Stars(float3 direction, float pixelAngle, float twinkle, float timer)
@@ -154,11 +153,12 @@ namespace ProceduralNightSky
 	{
 		emitted = max(emitted, 0.0);
 		float peak = max(emitted.x, max(emitted.y, emitted.z));
-		if (peak <= 0.0)
-			return 0.0;
-
-		float alpha = clamp(peak / max(radianceLimit, 1.0), 1.0 / 256.0, 1.0);
-		return float4(emitted / alpha, alpha);
+		float4 result = 0.0;
+		if (peak > 0.0) {
+			float alpha = clamp(peak / max(radianceLimit, 1.0), 1.0 / 256.0, 1.0);
+			result = float4(emitted / alpha, alpha);
+		}
+		return result;
 	}
 
 	float3 EvaluateAurora(float3 view, float dither)

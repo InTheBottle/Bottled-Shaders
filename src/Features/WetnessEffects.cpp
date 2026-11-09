@@ -935,12 +935,22 @@ WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 
 	data.Time = static_cast<float>(static_cast<double>(rainTimer) / 1000000.0);
 
+	const Settings defaults{};
+	auto positive = [](float a_value, float a_fallback) {
+		return std::isfinite(a_value) && a_value > 0.0f ? a_value : a_fallback;
+	};
+	const float raindropGridSize = positive(settings.RaindropGridSize, defaults.RaindropGridSize);
+	const float raindropInterval = positive(settings.RaindropInterval, defaults.RaindropInterval);
+
 	data.settings = settings;
 	data.settings.MaxShoreWetness = settings.EnableWetnessEffects ? settings.MaxShoreWetness : 0.0f;
 	data.settings.RaindropChance *= data.Raining * data.Raining;
-	data.settings.RaindropGridSize = 1.0f / settings.RaindropGridSize;
-	data.settings.RaindropInterval = 1.0f / settings.RaindropInterval;
-	data.settings.RippleLifetime = settings.RaindropInterval / settings.RippleLifetime;
+	data.settings.RaindropGridSize = 1.0f / raindropGridSize;
+	data.settings.RaindropInterval = 1.0f / raindropInterval;
+	data.settings.RippleLifetime = raindropInterval / positive(settings.RippleLifetime, defaults.RippleLifetime);
+	data.settings.SplashesLifetime = positive(settings.SplashesLifetime, defaults.SplashesLifetime);
+	data.settings.PuddleRadius = positive(settings.PuddleRadius, defaults.PuddleRadius);
+	data.settings.PuddleMaxAngle = positive(settings.PuddleMaxAngle, defaults.PuddleMaxAngle);
 
 	lastPerFrame = data;
 	return data;

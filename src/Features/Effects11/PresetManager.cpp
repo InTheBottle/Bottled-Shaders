@@ -1,12 +1,26 @@
 #include "PresetManager.h"
 
 #include "EffectManager.h"
+#include "I18n/I18n.h"
 #include "Presets/UnifiedPresetCatalog.h"
 #include "SettingManager.h"
 #include "Utils/FileSystem.h"
 
 #include <algorithm>
 #include <format>
+
+namespace
+{
+	bool IsCodePagePath(const std::filesystem::path& a_path)
+	{
+		try {
+			[[maybe_unused]] const auto narrow = std::filesystem::absolute(a_path).string();
+			return true;
+		} catch (const std::exception&) {
+			return false;
+		}
+	}
+}
 
 PresetManager& PresetManager::GetSingleton()
 {
@@ -63,15 +77,15 @@ bool PresetManager::ValidateLibraryPreset(const std::filesystem::path& presetRoo
 	const auto seriesPath = presetRoot / kEnbSeriesDirName;
 
 	if (!std::filesystem::exists(iniPath)) {
-		outReason = std::format("Missing {}", kEnbSeriesIniName);
+		outReason = T("feature.effects11.preset_missing_ini", "Missing enbseries.ini");
 		return false;
 	}
 	if (!std::filesystem::is_directory(seriesPath)) {
-		outReason = std::format("Missing {} folder", kEnbSeriesDirName);
+		outReason = T("feature.effects11.preset_missing_folder", "Missing enbseries folder");
 		return false;
 	}
 	if (!std::filesystem::exists(seriesPath / kRequiredEffectFile)) {
-		outReason = std::format("Missing required {}", kRequiredEffectFile);
+		outReason = T("feature.effects11.preset_missing_effect", "Missing required enbeffect.fx");
 		return false;
 	}
 	return true;
@@ -128,6 +142,10 @@ void PresetManager::ScanLibraryDirectory(const std::filesystem::path& relativePa
 		info.isLegacy = false;
 		info.isUnifiedPack = unifiedPacks;
 		info.valid = ValidateLibraryPreset(libraryRoot, info.invalidReason);
+		if (info.valid && !IsCodePagePath(libraryRoot)) {
+			info.valid = false;
+			info.invalidReason = T("feature.effects11.preset_path_unsupported", "The folder path has characters the system code page cannot represent");
+		}
 		out.push_back(std::move(info));
 	}
 }

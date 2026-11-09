@@ -258,6 +258,8 @@ void CODBloom::Draw(TextureInfo& inout_tex)
 	// upsample (ROP blend accumulates into the destination mip)
 	globals::profiler->BeginPass("PostProcessing::CODBloom::Upsample");
 	pass.SetShaders(vs, upsamplePS.get());
+	srvs.fill(nullptr);
+	context->PSSetShaderResources(0, (uint)srvs.size(), srvs.data());
 	for (int i = usedMips - 2; i >= 1; i--) {
 		cbData.UpsampleMult = 1.f;
 		if (i == s_BloomMips - 2)

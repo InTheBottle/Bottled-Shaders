@@ -309,7 +309,12 @@ namespace ENBExtender
 						if (q1 != std::string::npos && q2 != std::string::npos && comma != std::string::npos) {
 							std::string defName = args.substr(comma + 1);
 							Trim(defName);
-							bool exists = std::filesystem::exists(enbseriesPath / args.substr(q1 + 1, q2 - q1 - 1));
+							bool exists = false;
+							try {
+								exists = std::filesystem::exists(enbseriesPath / args.substr(q1 + 1, q2 - q1 - 1));
+							} catch (const std::exception& e) {
+								logger::warn("[ENBEXTENDER] #pragma exists could not check '{}': {}", args.substr(q1 + 1, q2 - q1 - 1), e.what());
+							}
 							result += "#define " + defName + (exists ? " 1" : " 0") + "\n";
 							continue;
 						}
@@ -1045,11 +1050,20 @@ namespace ENBExtender
 							nameView.remove_prefix(1);
 						includeName = std::string(nameView);
 
+						std::filesystem::path includeRelative;
+						try {
+							includeRelative = includeName;
+						} catch (const std::exception& e) {
+							logger::warn("[ENBEXTENDER] Invalid include name '{}': {}", includeName, e.what());
+							result += "\n";
+							continue;
+						}
+
 						std::filesystem::path inclPath;
 						bool found = false;
 						auto baseCanonical = std::filesystem::weakly_canonical(basePath);
 						for (auto& dir : includeDirs) {
-							auto candidate = std::filesystem::weakly_canonical(dir / includeName);
+							auto candidate = std::filesystem::weakly_canonical(dir / includeRelative);
 							auto [baseEnd, _] = std::mismatch(baseCanonical.begin(), baseCanonical.end(), candidate.begin(), candidate.end());
 							if (baseEnd != baseCanonical.end())
 								continue;
@@ -1060,7 +1074,7 @@ namespace ENBExtender
 							}
 						}
 						if (!found) {
-							auto candidate = std::filesystem::weakly_canonical(basePath / includeName);
+							auto candidate = std::filesystem::weakly_canonical(basePath / includeRelative);
 							auto [baseEnd, _] = std::mismatch(baseCanonical.begin(), baseCanonical.end(), candidate.begin(), candidate.end());
 							if (baseEnd != baseCanonical.end()) {
 								result += "\n";
@@ -1134,12 +1148,20 @@ namespace ENBExtender
 		while (!name.empty() && (name.front() == '/' || name.front() == '\\'))
 			name.remove_prefix(1);
 
+		std::filesystem::path includeRelative;
+		try {
+			includeRelative = name;
+		} catch (const std::exception& e) {
+			logger::warn("[ENBEXTENDER] Invalid include name '{}': {}", std::string(name), e.what());
+			return E_FAIL;
+		}
+
 		std::filesystem::path fullPath;
 		bool found = false;
 
 		auto baseCanonical = std::filesystem::weakly_canonical(basePath);
 		for (auto& dir : includeDirs) {
-			auto candidate = std::filesystem::weakly_canonical(dir / name);
+			auto candidate = std::filesystem::weakly_canonical(dir / includeRelative);
 			auto [baseEnd, _] = std::mismatch(baseCanonical.begin(), baseCanonical.end(), candidate.begin(), candidate.end());
 			if (baseEnd != baseCanonical.end())
 				continue;
@@ -1151,7 +1173,7 @@ namespace ENBExtender
 		}
 
 		if (!found) {
-			auto candidate = std::filesystem::weakly_canonical(basePath / name);
+			auto candidate = std::filesystem::weakly_canonical(basePath / includeRelative);
 			auto [baseEnd, _] = std::mismatch(baseCanonical.begin(), baseCanonical.end(), candidate.begin(), candidate.end());
 			if (baseEnd != baseCanonical.end()) {
 				logger::warn("[ENBEXTENDER] Include path escapes base directory: '{}'", std::string(name));

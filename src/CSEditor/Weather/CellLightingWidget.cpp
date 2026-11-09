@@ -321,7 +321,10 @@ void CellLightingWidget::LoadFromGameSettings()
 void CellLightingWidget::SaveSettings()
 {
 	ForEachSavedField(settings, [this](const char* section, const char* key, const auto& field) {
-		(section ? js[section] : js)[key] = field;
+		auto& node = section ? js[section] : js;
+		if (!node.is_object())
+			node = json::object();
+		node[key] = field;
 	});
 	originalSettings = settings;
 }

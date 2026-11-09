@@ -258,9 +258,9 @@ void Upscaling::DrawSettings()
 	if (upscaleMethod == UpscaleMethod::kDLSS) {
 		float2 screenSize{ (float)globals::game::graphicsState->screenWidth, (float)globals::game::graphicsState->screenHeight };
 		if (screenSize.x > streamline.MAX_RESOLUTION || screenSize.y > streamline.MAX_RESOLUTION) {
-			Util::Text::Warning("Warning: Requested resolution %.0f x %.0f exceeds maximum supported resolution %d x %d for DLSS.",
+			Util::Text::Warning(T(TKEY("dlss_resolution_exceeds_max"), "Warning: Requested resolution %.0f x %.0f exceeds maximum supported resolution %d x %d for DLSS."),
 				screenSize.x, screenSize.y, streamline.MAX_RESOLUTION, streamline.MAX_RESOLUTION);
-			Util::Text::Warning("DLSS will not function. Lower your resolution or select a different upscaling method.");
+			Util::Text::Warning("%s", T(TKEY("dlss_resolution_unusable"), "DLSS will not function. Lower your resolution or select a different upscaling method."));
 		}
 	}
 
@@ -305,7 +305,7 @@ void Upscaling::DrawSettings()
 		}
 
 		if (upscaleMethod == UpscaleMethod::kFSR) {
-			ImGui::SliderFloat(T(TKEY("sharpness"), "Sharpness"), &settings.sharpnessFSR, 0.0f, 1.0f, "%.1f");
+			ImGui::SliderFloat(T(TKEY("sharpness"), "Sharpness"), &settings.sharpnessFSR, 0.0f, 1.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
 			// Hidden entirely on ineligible GPUs so it can't be toggled somewhere it silently no-ops.
 			if (fidelityFX.IsRuntimeFsr4AutoEligible()) {
 				ImGui::Checkbox(T(TKEY("fsr4_runtime_enable"), "Use Runtime FSR4"), &settings.fsr4RuntimeEnable);
@@ -328,7 +328,7 @@ void Upscaling::DrawSettings()
 			}
 
 			if (settings.sharpnessEnabledDLSS)
-				ImGui::SliderFloat(T(TKEY("sharpness"), "Sharpness"), &settings.sharpnessDLSS, 0.0f, 1.0f, "%.1f");
+				ImGui::SliderFloat(T(TKEY("sharpness"), "Sharpness"), &settings.sharpnessDLSS, 0.0f, 1.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
 
 			const char* presets[] = {
 				T(TKEY("dlss_model_preset_default"), "Default"),
@@ -495,7 +495,11 @@ void Upscaling::DrawSettings()
 
 	if (ImGui::TreeNodeEx(T(TKEY("backend_diagnostics"), "Backend Diagnostics"))) {
 		// Streamline log level selection
-		const char* logLevels[] = { "Off", "Default", "Verbose" };
+		const char* logLevels[] = {
+			T(TKEY("streamline_log_off"), "Off"),
+			T(TKEY("streamline_log_default"), "Default"),
+			T(TKEY("streamline_log_verbose"), "Verbose")
+		};
 		int logLevelIdx = static_cast<int>(settings.streamlineLogLevel);
 		if (ImGui::Combo(T(TKEY("streamline_logging"), "Streamline Logging"), &logLevelIdx, logLevels, IM_ARRAYSIZE(logLevels))) {
 			settings.streamlineLogLevel = static_cast<uint>(logLevelIdx);
@@ -506,8 +510,8 @@ void Upscaling::DrawSettings()
 		}
 
 		ImGui::Separator();
-		Util::DrawDllVersionTable("AMD FidelityFX DLLs (click to open folder)", FidelityFX::PluginDir, FidelityFX::dllVersions, "ffx_dll_versions");
-		Util::DrawDllVersionTable("NVIDIA Streamline DLLs (click to open folder)", Streamline::PluginDir, Streamline::dllVersions, "sl_dll_versions");
+		Util::DrawDllVersionTable(T(TKEY("ffx_dll_versions"), "AMD FidelityFX DLLs (click to open folder)"), FidelityFX::PluginDir, FidelityFX::dllVersions, "ffx_dll_versions");
+		Util::DrawDllVersionTable(T(TKEY("sl_dll_versions"), "NVIDIA Streamline DLLs (click to open folder)"), Streamline::PluginDir, Streamline::dllVersions, "sl_dll_versions");
 		ImGui::TreePop();
 	}
 }
@@ -558,6 +562,8 @@ void Upscaling::LoadSettings(json& o_json)
 		logger::warn("[Upscaling] Loaded presetDLSS {} out of range, resetting to 0 (Default)", settings.presetDLSS);
 		settings.presetDLSS = 0;
 	}
+	for (float* sharpness : { &settings.sharpnessFSR, &settings.sharpnessDLSS })
+		*sharpness = std::isfinite(*sharpness) ? std::clamp(*sharpness, 0.0f, 1.0f) : 0.0f;
 	const float originalReflexFPSLimit = settings.reflexFPSLimit;
 	if (!std::isfinite(settings.reflexFPSLimit)) {
 		settings.reflexFPSLimit = 60.0f;
@@ -1407,7 +1413,8 @@ double Upscaling::GetRefreshRate(HWND a_window)
 						// get the refresh rate
 						UINT numerator = p.targetInfo.refreshRate.Numerator;
 						UINT denominator = p.targetInfo.refreshRate.Denominator;
-						return (double)numerator / (double)denominator;
+						if (numerator && denominator)
+							return (double)numerator / (double)denominator;
 					}
 				}
 			}

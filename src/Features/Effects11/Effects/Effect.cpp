@@ -671,10 +671,18 @@ ID3D11ShaderResourceView* Effect::LoadTextureFromFile(const std::string& filenam
 	if (cacheIt != customTextureCache.end())
 		return cacheIt->second.get();
 
-	std::filesystem::path filepath = PresetManager::GetSingleton().GetENBSeriesPath() / filename;
+	std::filesystem::path name;
+	try {
+		name = filename;
+	} catch (const std::exception& e) {
+		logger::error("[EFFECTS11] Invalid texture file name '{}': {}", filename, e.what());
+		return nullptr;
+	}
+
+	std::filesystem::path filepath = PresetManager::GetSingleton().GetENBSeriesPath() / name;
 	std::error_code ec;
 	if (!std::filesystem::exists(filepath, ec)) {
-		const auto gameRootPath = std::filesystem::absolute(filename, ec);
+		const auto gameRootPath = std::filesystem::absolute(name, ec);
 		if (!ec && std::filesystem::exists(gameRootPath, ec))
 			filepath = gameRootPath;
 	}

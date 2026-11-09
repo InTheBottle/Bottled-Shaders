@@ -182,7 +182,7 @@ void LightLimitFix::DrawSettings()
 	ImGui::Spacing();
 
 	if (ImGui::TreeNodeEx(T(TKEY("statistics"), "Statistics"), ImGuiTreeNodeFlags_DefaultOpen)) {
-		ImGui::Text(std::format("Clustered Light Count : {}", lightCount).c_str());
+		ImGui::Text("%s", std::vformat(T(TKEY("clustered_light_count"), "Clustered Light Count : {}"), std::make_format_args(lightCount)).c_str());
 		ImGui::Text("%s", std::vformat(T(TKEY("particle_light_count"), "Particle Lights : {}"), std::make_format_args(particleLightCount)).c_str());
 		if (IsLocalShadowsEnabled()) {
 			ImGui::Text("%s", std::vformat(T(TKEY("shadow_casters_stats"), "Shadow Casters : {} tracked, {} cached, {} rendered this frame"),
@@ -207,7 +207,7 @@ void LightLimitFix::DrawSettings()
 	}
 
 	{
-		static const char* comboOptions[] = { "Light Limit", "Strict Lights Count", "Clustered Lights Count", "Shadow Mask" };
+		const char* comboOptions[] = { T(TKEY("lights_vis_mode_light_limit"), "Light Limit"), T(TKEY("lights_vis_mode_strict_count"), "Strict Lights Count"), T(TKEY("lights_vis_mode_clustered_count"), "Clustered Lights Count"), T(TKEY("lights_vis_mode_shadow_mask"), "Shadow Mask") };
 		ImGui::Combo(T(TKEY("lights_vis_mode"), "Lights Visualisation Mode"), (int*)&settings.LightsVisualisationMode, comboOptions, 4);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T(TKEY("lights_vis_mode_tooltip"),

@@ -76,28 +76,26 @@ cbuffer PerGeometry : register(b2)
 /** @brief Fraction of the sun's neighbourhood showing sky, since the vanilla sun query quad sees gaps between distant ridges. */
 float GetSunGlareVisibility()
 {
-	// Scene depth belongs to the main view, not the reflection camera
-	if (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection)
-		return 1.0;
-
+	float visibility = 1.0;
 	float4 sunPositionCS = mul(FrameBuffer::CameraViewProj, float4(SharedData::SunDirection.xyz, 0.0));
-	if (sunPositionCS.w <= 0.0)
-		return 1.0;
-
-	float2 sunUV = sunPositionCS.xy / sunPositionCS.w * float2(0.5, -0.5) + 0.5;
-	uint visibleSamples = 0;
-	[unroll] for (uint i = 0; i < FlareOcclusion::SampleCount; i++)
-	{
-		float2 sampleUV = sunUV + FlareOcclusion::GetSampleOffset(i);
-		float sampleDepth = SharedData::GetDepth(sampleUV);
+	// Scene depth belongs to the main view, not the reflection camera
+	if (!(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection) && sunPositionCS.w > 0.0) {
+		float2 sunUV = sunPositionCS.xy / sunPositionCS.w * float2(0.5, -0.5) + 0.5;
+		uint visibleSamples = 0;
+		[unroll] for (uint i = 0; i < FlareOcclusion::SampleCount; i++)
+		{
+			float2 sampleUV = sunUV + FlareOcclusion::GetSampleOffset(i);
+			float sampleDepth = SharedData::GetDepth(sampleUV);
 #		ifdef REVERSE_Z
-		bool isSky = FrameBuffer::IsReverseProjection() ? sampleDepth <= 0.0 : sampleDepth >= 1.0;
+			bool isSky = FrameBuffer::IsReverseProjection() ? sampleDepth <= 0.0 : sampleDepth >= 1.0;
 #		else
-		bool isSky = sampleDepth >= 1.0;
+			bool isSky = sampleDepth >= 1.0;
 #		endif
-		visibleSamples += isSky;
+			visibleSamples += isSky;
+		}
+		visibility = FlareOcclusion::GetVisibility(visibleSamples);
 	}
-	return FlareOcclusion::GetVisibility(visibleSamples);
+	return visibility;
 }
 #	endif
 

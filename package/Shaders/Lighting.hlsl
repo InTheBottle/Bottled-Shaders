@@ -2320,6 +2320,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 				coatWorldNormal = normalize(mul(tbn, TransformNormal(sampledCoatProperties.xyz)));
 			}
 		}
+		material.CoatRoughness = clamp(material.CoatRoughness, PBR::Constants::MinRoughness, PBR::Constants::MaxRoughness);
 		material.CoatStrength = lerp(material.CoatStrength, 0, projectedMaterialWeight);
 	}
 

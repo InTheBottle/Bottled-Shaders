@@ -137,7 +137,7 @@ void ABTestingManager::DrawSettingsUI()
 {
 	auto& performanceOverlay = globals::features::performanceOverlay;
 
-	if (ImGui::SliderInt("A/B Test Interval", reinterpret_cast<int*>(&testInterval), 0, 10)) {
+	if (ImGui::SliderInt("A/B Test Interval", reinterpret_cast<int*>(&testInterval), 0, 10, "%d", ImGuiSliderFlags_AlwaysClamp)) {
 		bool overlayWasEnabled = performanceOverlay.settings.ShowInOverlay;
 		if (testInterval == 0) {
 			Disable();
@@ -209,6 +209,8 @@ std::vector<SettingsDiffEntry> ABTestingManager::GetConfigDiffEntries(float epsi
 
 void ABTestingManager::ClearCachedSnapshots()
 {
+	if (abTestingEnabled)
+		return;
 	try {
 		testConfigSnapshot.clear();
 		userConfigSnapshot.clear();

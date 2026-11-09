@@ -26,23 +26,23 @@ inline const char* HiZStatusToString(HiZStatus status)
 {
 	switch (status) {
 	case HiZStatus::Init:
-		return "Initializing";
+		return T("feature.hiz_occlusion.status_init", "Initializing");
 	case HiZStatus::CompilingShaders:
-		return "Compiling Shaders";
+		return T("feature.hiz_occlusion.status_compiling_shaders", "Compiling Shaders");
 	case HiZStatus::ShadersReady:
-		return "Shaders Ready";
+		return T("feature.hiz_occlusion.status_shaders_ready", "Shaders Ready");
 	case HiZStatus::ResourcesReady:
-		return "Resources Ready";
+		return T("feature.hiz_occlusion.status_resources_ready", "Resources Ready");
 	case HiZStatus::Running:
-		return "Running";
+		return T("feature.hiz_occlusion.status_running", "Running");
 	case HiZStatus::ValidationFailed:
-		return "Validation Failed";
+		return T("feature.hiz_occlusion.status_validation_failed", "Validation Failed");
 	case HiZStatus::Unsupported:
-		return "Unsupported Game Version";
+		return T("feature.hiz_occlusion.status_unsupported", "Unsupported Game Version");
 	case HiZStatus::Error:
-		return "Error";
+		return T("feature.hiz_occlusion.status_error", "Error");
 	default:
-		return "Unknown";
+		return T("feature.hiz_occlusion.status_unknown", "Unknown");
 	}
 }
 
@@ -51,6 +51,7 @@ struct HiZOcclusion : OverlayFeature
 	virtual ~HiZOcclusion();
 
 	virtual inline std::string GetName() override { return "HiZ Occlusion Culling"; }
+	virtual std::string GetDisplayName() override { return T("feature.hiz_occlusion.name", "HiZ Occlusion Culling"); }
 	virtual inline std::string GetShortName() override { return "HiZOcclusion"; }
 	virtual inline std::string_view GetShaderDefineName() override { return "HIZ_OCCLUSION"; }
 	virtual std::string_view GetCategory() const override { return FeatureCategories::kDisplay; }

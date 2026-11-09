@@ -194,7 +194,7 @@ void DrawBounds(uint geometryIndex, uint result, float2 uvMin, float2 uvMax, flo
 		return;
 
 	uint toggleBits = uint(overlayColorToggles.x);
-	float4 color;
+	float4 color = 0;
 	if (result == RESULT_VISIBLE && (toggleBits & 1)) {
 		color = float4(0, 1, 0, 1);
 	} else if (result == RESULT_UNDECIDED && (toggleBits & 2)) {

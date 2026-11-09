@@ -51,9 +51,12 @@ float UpsampleScattering(float2 fullResPixel, float fullResDepth)
 float ApplyDensity(float visibility)
 {
 	float density = SharedData::enbSettings.VolumetricRaysDensity;
-	if (density >= 1.0)
-		return pow(visibility, density);
-	return 1.0 - pow(1.0 - visibility, rcp(max(density, 0.001)));
+	float result;
+	if (density < 1.0)
+		result = 1.0 - pow(1.0 - visibility, rcp(max(density, 0.001)));
+	else
+		result = pow(visibility, density);
+	return result;
 }
 
 float4 main(VS_OUTPUT_POST input) : SV_Target0

@@ -254,11 +254,6 @@ void IBL::Prepass()
 		globals::profiler->BeginPass("ImageBasedLighting::SkyDiffuseIBL");
 		context->Dispatch(1, 1, 1);
 		globals::profiler->EndPass();
-
-		if (auroraCS) {
-			ID3D11Buffer* noBuffers[2]{ nullptr, nullptr };
-			context->CSSetConstantBuffers(5, 2, noBuffers);
-		}
 	}
 
 	// Reset

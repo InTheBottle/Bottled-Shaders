@@ -1987,6 +1987,11 @@ void PerformanceOverlay::UpdateGraphValues()
 	state.frameTimeHistory.Resize(settings.FrameHistorySize);
 	state.postFGFrameTimeHistory.Resize(settings.FrameHistorySize);
 
+	if (state.frequency == 0) {
+		REX::W32::QueryPerformanceFrequency(&state.frequency);
+		REX::W32::QueryPerformanceCounter(&state.lastFrameCounter);
+	}
+
 	// Calculate counter deltas
 	REX::W32::QueryPerformanceCounter(&state.currentFrameCounter);
 	int64_t elapsedCounter = state.currentFrameCounter - state.lastFrameCounter;

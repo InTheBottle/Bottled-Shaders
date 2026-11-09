@@ -428,18 +428,19 @@ void WeatherWidget::LoadSettings()
 			}
 
 			// Attempt to load settings from JSON
-			settings = patched;
+			Settings loaded = settings;
+			patched.get_to(loaded);
 
 			// Validate that critical fields were loaded correctly
-			if (js.contains("weatherProperties") && settings.weatherProperties.empty() && !js["weatherProperties"].empty()) {
+			if (js.contains("weatherProperties") && loaded.weatherProperties.empty() && !js["weatherProperties"].empty()) {
 				logger::warn("Weather {}: weatherProperties loaded but appears empty, reverting to vanilla values", GetEditorID());
 				hadErrors = true;
 			}
-			if (js.contains("weatherColors") && settings.weatherColors.empty() && !js["weatherColors"].empty()) {
+			if (js.contains("weatherColors") && loaded.weatherColors.empty() && !js["weatherColors"].empty()) {
 				logger::warn("Weather {}: weatherColors loaded but appears empty, reverting to vanilla values", GetEditorID());
 				hadErrors = true;
 			}
-			if (js.contains("fogProperties") && settings.fogProperties.empty() && !js["fogProperties"].empty()) {
+			if (js.contains("fogProperties") && loaded.fogProperties.empty() && !js["fogProperties"].empty()) {
 				logger::warn("Weather {}: fogProperties loaded but appears empty, reverting to vanilla values", GetEditorID());
 				hadErrors = true;
 			}
@@ -452,6 +453,7 @@ void WeatherWidget::LoadSettings()
 					std::vformat(T(TKEY("values_failed_to_load"), "Some values failed to load for {}"), std::make_format_args(editorId)),
 					Util::Colors::GetError());
 			} else {
+				settings = std::move(loaded);
 				logger::info("Weather {}: Loaded settings - {} weather properties, {} colors, {} fog properties",
 					GetEditorID(),
 					settings.weatherProperties.size(),

@@ -42,16 +42,17 @@ public:
 	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
 	{
 		return std::make_pair(
-			"True PBR replaces Skyrim's legacy material system with physically-based rendering. "
-			"Mod authors can supply PBR texture sets (roughness, metallic, displacement, etc.) "
-			"that are interpreted in a physically correct BRDF, producing realistic surface "
-			"response to lighting across all weather and time-of-day conditions.",
+			std::string(T("feature.true_pbr.description",
+				"True PBR replaces Skyrim's legacy material system with physically-based rendering. "
+				"Mod authors can supply PBR texture sets (roughness, metallic, displacement, etc.) "
+				"that are interpreted in a physically correct BRDF, producing realistic surface "
+				"response to lighting across all weather and time-of-day conditions.")),
 			std::vector<std::string>{
-				"Physically-based BRDF (energy-conserving specular & diffuse)",
-				"Roughness, metallic, and displacement map support",
-				"Clearcoat, subsurface scattering, and fuzz layers",
-				"Procedural glint rendering for sparkle effects",
-				"Full landscape and decal PBR support" });
+				T("feature.true_pbr.key_feature_1", "Physically-based BRDF (energy-conserving specular & diffuse)"),
+				T("feature.true_pbr.key_feature_2", "Roughness, metallic, and displacement map support"),
+				T("feature.true_pbr.key_feature_3", "Clearcoat, subsurface scattering, and fuzz layers"),
+				T("feature.true_pbr.key_feature_4", "Procedural glint rendering for sparkle effects"),
+				T("feature.true_pbr.key_feature_5", "Full landscape and decal PBR support") });
 	}
 
 	/** @brief Draws the ImGui settings UI for PBR texture sets and material objects. */

@@ -138,48 +138,48 @@ float Fern(float2 d, float2 direction, float fernLength, float seed)
 	float2 normal = float2(-direction.y, direction.x);
 	float u = dot(d, direction);
 	float v = dot(d, normal);
-	if (u < -0.01 || u > fernLength + 0.01 || abs(v) > fernLength * 0.5)
-		return 0.0;
+	float value = 0.0;
+	if (u >= -0.01 && u <= fernLength + 0.01 && abs(v) <= fernLength * 0.5) {
+		float t = saturate(u / fernLength);
+		float bow = (CameraFX::ValueNoise(float2(u * 22.0, seed * 7.0)) - 0.5) * 0.012 + sin(u * 8.0 + seed * 5.0) * 0.005;
+		v -= bow * t;
+		float stemWidth = 0.0026 * (1.0 - 0.7 * t) + 0.0006;
+		float tipFade = 1.0 - smoothstep(0.82, 1.0, t);
+		value = exp(-v * v / (stemWidth * stemWidth)) * tipFade;
 
-	float t = saturate(u / fernLength);
-	float bow = (CameraFX::ValueNoise(float2(u * 22.0, seed * 7.0)) - 0.5) * 0.012 + sin(u * 8.0 + seed * 5.0) * 0.005;
-	v -= bow * t;
-	float stemWidth = 0.0026 * (1.0 - 0.7 * t) + 0.0006;
-	float tipFade = 1.0 - smoothstep(0.82, 1.0, t);
-	float value = exp(-v * v / (stemWidth * stemWidth)) * tipFade;
-
-	float spacing = 0.0075 + 0.0045 * CameraFX::Hash12(float2(seed, 2.9));
-	float angle = 0.85 + 0.25 * CameraFX::Hash12(float2(seed, 5.3));
-	float ca = cos(angle);
-	float sa = sin(angle);
-	float last = floor(u / spacing);
-	[loop] for (int j = 0; j < 7; j++)
-	{
-		float k = last - j;
-		if (k < 1.0)
-			break;
-		float origin = k * spacing;
-		float progress = origin / fernLength;
-		[unroll] for (int side = 0; side < 2; side++)
+		float spacing = 0.0075 + 0.0045 * CameraFX::Hash12(float2(seed, 2.9));
+		float angle = 0.85 + 0.25 * CameraFX::Hash12(float2(seed, 5.3));
+		float ca = cos(angle);
+		float sa = sin(angle);
+		float last = floor(u / spacing);
+		[loop] for (int j = 0; j < 7; j++)
 		{
-			float mirror = side == 0 ? 1.0 : -1.0;
-			float reach = (fernLength - origin) * (0.28 + 0.2 * CameraFX::Hash12(float2(k + mirror * 0.5, seed))) * (1.0 - 0.35 * progress);
-			float2 rel = float2(u - origin, v * mirror);
-			float along = rel.x * ca + rel.y * sa;
-			float across = rel.y * ca - rel.x * sa;
-			if (along < 0.0 || along > reach)
-				continue;
-			float s = along / max(reach, 1e-4);
-			float width = stemWidth * 0.6 * (1.0 - s) + 0.0004;
-			float branch = exp(-across * across / (width * width)) * 0.85;
-			float barbSpacing = 0.0022;
-			float barbOrigin = floor(along / barbSpacing) * barbSpacing;
-			float2 barbRel = float2(along - barbOrigin, abs(across));
-			float barbAlong = barbRel.x * 0.6 + barbRel.y * 0.8;
-			float barbAcross = barbRel.y * 0.6 - barbRel.x * 0.8;
-			float barbReach = width * 3.5 * (1.0 - s);
-			float barb = barbAlong > 0.0 && barbAlong < barbReach ? exp(-barbAcross * barbAcross / (width * width * 0.25)) * 0.5 : 0.0;
-			value = max(value, max(branch, barb) * tipFade);
+			float k = last - j;
+			if (k < 1.0)
+				break;
+			float origin = k * spacing;
+			float progress = origin / fernLength;
+			[unroll] for (int side = 0; side < 2; side++)
+			{
+				float mirror = side == 0 ? 1.0 : -1.0;
+				float reach = (fernLength - origin) * (0.28 + 0.2 * CameraFX::Hash12(float2(k + mirror * 0.5, seed))) * (1.0 - 0.35 * progress);
+				float2 rel = float2(u - origin, v * mirror);
+				float along = rel.x * ca + rel.y * sa;
+				float across = rel.y * ca - rel.x * sa;
+				if (along < 0.0 || along > reach)
+					continue;
+				float s = along / max(reach, 1e-4);
+				float width = stemWidth * 0.6 * (1.0 - s) + 0.0004;
+				float branch = exp(-across * across / (width * width)) * 0.85;
+				float barbSpacing = 0.0022;
+				float barbOrigin = floor(along / barbSpacing) * barbSpacing;
+				float2 barbRel = float2(along - barbOrigin, abs(across));
+				float barbAlong = barbRel.x * 0.6 + barbRel.y * 0.8;
+				float barbAcross = barbRel.y * 0.6 - barbRel.x * 0.8;
+				float barbReach = width * 3.5 * (1.0 - s);
+				float barb = barbAlong > 0.0 && barbAlong < barbReach ? exp(-barbAcross * barbAcross / (width * width * 0.25)) * 0.5 : 0.0;
+				value = max(value, max(branch, barb) * tipFade);
+			}
 		}
 	}
 	return value;

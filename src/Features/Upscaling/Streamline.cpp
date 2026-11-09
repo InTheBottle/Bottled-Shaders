@@ -389,7 +389,9 @@ bool Streamline::CheckFrameConstants(sl::ViewportHandle p_viewport)
 	slConstants.motionVectorsJittered = sl::Boolean::eFalse;
 
 	if (SL_FAILED(res, slSetConstants(slConstants, *frameToken, p_viewport))) {
-		logger::error("[Streamline] Could not set constants");
+		static Util::OnceFlag constantsErrorLogged;
+		if (constantsErrorLogged.First())
+			logger::error("[Streamline] Could not set constants: {}", magic_enum::enum_name(res));
 		return false;
 	}
 
@@ -494,7 +496,9 @@ void Streamline::SetDLSSOptions(sl::ViewportHandle p_viewport, uint32_t width)
 	dlssOptions.sharpness = 0.0f;
 
 	if (SL_FAILED(result, slDLSSSetOptions(p_viewport, dlssOptions))) {
-		logger::critical("[Streamline] Could not enable DLSS");
+		static Util::OnceFlag optionsErrorLogged;
+		if (optionsErrorLogged.First())
+			logger::critical("[Streamline] Could not enable DLSS: {}", magic_enum::enum_name(result));
 	}
 }
 

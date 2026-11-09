@@ -7,6 +7,7 @@
 #include "Effects11/SettingManager.h"
 
 #include "Deferred.h"
+#include "DynamicCubemaps.h"
 #include "I18n/I18n.h"
 #include "Menu.h"
 #include "ShaderCache.h"
@@ -237,7 +238,7 @@ RainRefraction::PerFrame RainRefraction::GetCommonBufferData()
 		data.MotionBluriness = std::clamp(settingManager.GetInterpolatedTimeOfDayValue("MotionBluriness", "RAIN"), 0.0f, kMaxRefractionBlur);
 		data.Brightness = std::max(settingManager.GetInterpolatedTimeOfDayValue("Brightness", "RAIN"), 0.0f);
 	}
-	data.Enable = data.Enable && GetRaindropSRV() && alphaBlendState;
+	data.Enable = data.Enable && GetRaindropSRV() && alphaBlendState && globals::features::dynamicCubemaps.loaded;
 	const auto& footprint = IsManagedByENB() && presetRaindrops.srv ? presetRaindrops.footprint : defaultRaindrops.footprint;
 	data.TextureBounds = float4{ footprint.uvBounds[0], footprint.uvBounds[1], footprint.uvBounds[2], footprint.uvBounds[3] };
 	data.TextureRadiusScale = float2{ footprint.radiusScale[0], footprint.radiusScale[1] };

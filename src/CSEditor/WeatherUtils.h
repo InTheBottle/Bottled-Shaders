@@ -637,12 +637,14 @@ namespace WeatherUtils
 					                             std::format("{} (0x{:08X})", editorID, form->GetFormID()) :
 					                             editorID;
 					bool isSelected = (currentForm == form);
+					ImGui::PushID(form);
 					if (ImGui::Selectable(comboLabel.c_str(), isSelected)) {
 						currentForm = form;
 						changed = true;
 					}
 					if (isSelected)
 						ImGui::SetItemDefaultFocus();
+					ImGui::PopID();
 				});
 				ImGui::EndCombo();
 			}

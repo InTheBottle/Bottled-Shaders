@@ -631,55 +631,52 @@ uint GetEffectClass()
 	const bool grayscaleToColor = Permutation::PixelShaderDescriptor & Permutation::EffectFlags::GrayscaleToColor;
 	const bool grayscaleToAlpha = Permutation::PixelShaderDescriptor & Permutation::EffectFlags::GrayscaleToAlpha;
 
+	uint effectClass = EffectClass::None;
 	if (Permutation::VertexShaderDescriptor & Permutation::EffectFlags::SkyObject) {
 #		if defined(ADDBLEND)
 #			if defined(SOFT)
-		return grayscaleToColor && grayscaleToAlpha ? EffectClass::Fire : EffectClass::LightSprite;
+		effectClass = grayscaleToColor && grayscaleToAlpha ? EffectClass::Fire : EffectClass::LightSprite;
 #			elif defined(PARTICLES) && defined(TEXCOORD_INDEX) && defined(INDEXED_TEXTURE)
-		return EffectClass::Fire;
+		effectClass = EffectClass::Fire;
 #			else
-		return EffectClass::LightSprite;
+		effectClass = EffectClass::LightSprite;
 #			endif
-#		else
-		return EffectClass::None;
 #		endif
-	}
-
-#		if defined(MULTBLEND) || defined(MULTBLEND_DECAL) || defined(MEMBRANE) || defined(BLOOD) || defined(PROJECTED_UV)
-	return EffectClass::None;
-#		else
+	} else {
+#		if !defined(MULTBLEND) && !defined(MULTBLEND_DECAL) && !defined(MEMBRANE) && !defined(BLOOD) && !defined(PROJECTED_UV)
 #			if defined(TEXTURE)
-	const bool plainTexture = !grayscaleToColor && !grayscaleToAlpha && !(Permutation::PixelShaderDescriptor & Permutation::EffectFlags::IgnoreTexAlpha);
+		const bool plainTexture = !grayscaleToColor && !grayscaleToAlpha && !(Permutation::PixelShaderDescriptor & Permutation::EffectFlags::IgnoreTexAlpha);
 #			else
-	const bool plainTexture = false;
+		const bool plainTexture = false;
 #			endif
 
 #			if defined(LIGHTING)
-#				if defined(ADDBLEND) && !defined(SOFT)
-	return EffectClass::None;
-#				else
-	return plainTexture ? EffectClass::Particle : EffectClass::None;
+#				if !defined(ADDBLEND) || defined(SOFT)
+		effectClass = plainTexture ? EffectClass::Particle : EffectClass::None;
 #				endif
 #			else
-	if (grayscaleToColor && grayscaleToAlpha)
-		return EffectClass::Fire;
+		if (grayscaleToColor && grayscaleToAlpha)
+			effectClass = EffectClass::Fire;
 #				if defined(ADDBLEND)
 #					if defined(SOFT)
-	return plainTexture ? EffectClass::LightSprite : EffectClass::None;
+		else
+			effectClass = plainTexture ? EffectClass::LightSprite : EffectClass::None;
 #					else
-	return plainTexture ? EffectClass::Fire : EffectClass::None;
+		else
+			effectClass = plainTexture ? EffectClass::Fire : EffectClass::None;
 #					endif
 #				elif defined(SOFT)
 #					if !defined(IS_VOLUMETRIC_FOG)
-	if (grayscaleToAlpha && !grayscaleToColor)
-		return EffectClass::Fire;
+		else if (grayscaleToAlpha && !grayscaleToColor)
+			effectClass = EffectClass::Fire;
 #					endif
-	return plainTexture ? EffectClass::Particle : EffectClass::None;
-#				else
-	return EffectClass::None;
+		else
+			effectClass = plainTexture ? EffectClass::Particle : EffectClass::None;
 #				endif
 #			endif
 #		endif
+	}
+	return effectClass;
 }
 #	endif
 

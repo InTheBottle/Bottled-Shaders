@@ -686,7 +686,7 @@ void DoF::Draw(TextureInfo& inout_tex)
 		.FNumber = fNumber,
 		.FarPlaneMaxBlur = renderSettings.FarPlaneMaxBlur,
 		.NearPlaneMaxBlur = nearBlur,
-		.BlurQuality = renderSettings.BlurQuality,
+		.BlurQuality = std::clamp(renderSettings.BlurQuality, 2.0f, 30.0f),
 		.NearFarDistanceCompensation = renderSettings.NearFarDistanceCompensation,
 		.BokehBusyFactor = renderSettings.BokehBusyFactor,
 		.HighlightBoost = renderSettings.HighlightBoost,
