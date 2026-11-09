@@ -951,7 +951,6 @@ void State::Save()
 	if (Util::FileHelpers::WriteJsonAtomically(configPath, settings, 1, "config")) {
 		logger::info("Saving settings to {}", configPath);
 		MarkSettingsSaved();
-		globals::features::upscaling.WriteGameIniSettings();
 	}
 }
 

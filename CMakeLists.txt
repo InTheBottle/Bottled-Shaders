@@ -2,15 +2,6 @@ cmake_minimum_required(VERSION 4.2)
 
 set(VCPKG_BUILD_TYPE release CACHE STRING "")
 
-if(
-    NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/AntiLag2-SDK/ffx_antilag2_dx12.h"
-)
-    message(
-        FATAL_ERROR
-        "Anti-Lag 2 SDK submodule is missing. Run: git submodule update --init extern/AntiLag2-SDK"
-    )
-endif()
-
 # devbench bridge — declared before project() so the vcpkg toolchain (loaded at project())
 # sees the manifest-feature selection. The devbench-api dependency lives behind the
 # `devbench-bridge` vcpkg feature, so -DDEVBENCH_BRIDGE=OFF actually drops it (not just the
@@ -203,12 +194,6 @@ target_include_directories(
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE SK_HDR_PNG_COMMUNITY_SHADERS)
-
-target_include_directories(
-    ${PROJECT_NAME}
-    SYSTEM
-    PRIVATE "${CMAKE_SOURCE_DIR}/extern/AntiLag2-SDK"
-)
 
 target_link_libraries(
     ${PROJECT_NAME}
@@ -679,7 +664,6 @@ install(
     PATTERN "Tests" EXCLUDE
 )
 include(FeaturePackaging)
-include(FidelityFX-Runtime)
 # Icon fonts + licenses live under src/Menu/Icons/glyphs; deploy under Icons/glyphs (not Fonts).
 # CONFIGURE_DEPENDS picks up new TTFs / LICENSE files without editing this list.
 set(CS_ICON_FONT_SRC_DIR "${CMAKE_SOURCE_DIR}/src/Menu/Icons/glyphs")
@@ -781,7 +765,6 @@ if(AUTO_PLUGIN_DEPLOYMENT OR AIO_ZIP_TO_DIST)
     foreach(_fpath IN LISTS FEATURE_PATHS)
         file(APPEND "${_feature_paths_file}" "${_fpath}\n")
     endforeach()
-    file(APPEND "${_feature_paths_file}" "${FFX_RUNTIME_FEATURE_ROOT}\n")
 
     # Ensure SKSE/Plugins dir exists
     # Note: DLL and PDB are copied via POST_BUILD command to avoid race conditions
@@ -943,7 +926,7 @@ if(AUTO_PLUGIN_DEPLOYMENT OR AIO_ZIP_TO_DIST)
     set(_shader_copy_cmds)
 
     set(_feature_shader_paths_file "${CMAKE_CURRENT_BINARY_DIR}/feature_shader_paths.txt")
-    file(WRITE "${_feature_shader_paths_file}" "${FFX_RUNTIME_SHADER_ROOT}\n")
+    file(WRITE "${_feature_shader_paths_file}" "")
     foreach(_fpath IN LISTS FEATURE_PATHS)
         if(EXISTS "${_fpath}/Shaders")
             file(APPEND "${_feature_shader_paths_file}" "${_fpath}/Shaders\n")
@@ -963,7 +946,6 @@ if(AUTO_PLUGIN_DEPLOYMENT OR AIO_ZIP_TO_DIST)
     )
 
     append_copy_if_different(_shader_copy_cmds _package_shaders "${CMAKE_SOURCE_DIR}/package/Shaders" "${AIO_DIR}/Shaders")
-    append_copy_if_different(_shader_copy_cmds FFX_RUNTIME_FILES "${FFX_RUNTIME_SHADER_ROOT}" "${AIO_DIR}/Shaders")
 
     # feature shader folders
     set(_all_feature_shader_files)
@@ -988,7 +970,6 @@ if(AUTO_PLUGIN_DEPLOYMENT OR AIO_ZIP_TO_DIST)
         COMMAND ${CMAKE_COMMAND} -E touch copy_shaders.stamp
         DEPENDS
             ${HLSL_FILES}
-            ${FFX_RUNTIME_FILES}
             ${_package_shaders}
             ${_all_feature_shader_files}
             ${CMAKE_SOURCE_DIR}/cmake/CleanupStaleEntries.cmake
@@ -1483,7 +1464,7 @@ if(TARGET PREPARE_AIO)
 else()
     add_custom_command(
         OUTPUT ${AIO_DIR}/SKSE/Plugins/${PROJECT_NAME}.dll
-        DEPENDS ${PROJECT_NAME} ${CORE_SOURCES} ${FFX_RUNTIME_FILES}
+        DEPENDS ${PROJECT_NAME} ${CORE_SOURCES}
         COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --config $<CONFIG> --prefix ${AIO_DIR}
         COMMENT "Installing to AIO folder"
     )
@@ -1547,7 +1528,7 @@ else()
     endif()
     add_custom_command(
         OUTPUT ${AIO_PACKAGE}
-        DEPENDS ${PROJECT_NAME} ${CORE_SOURCES} ${FFX_RUNTIME_FILES}
+        DEPENDS ${PROJECT_NAME} ${CORE_SOURCES}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${AIO_DIR}
         COMMAND
             ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --config $<CONFIG>

@@ -67,11 +67,7 @@ groupshared float2 TileMotion[DILATE_TILE * DILATE_TILE];
 			float neighborDepth = TileDepth[neighborIndex];
 
 			// Take neighbor if it's longer AND closer
-#ifdef REVERSE_Z
-			if (neighborDepth > depth) {
-#else
 			if (neighborDepth < depth) {
-#endif
 				float2 neighborMotionVector = TileMotion[neighborIndex];
 
 				// Square motion vector for length
@@ -89,14 +85,12 @@ groupshared float2 TileMotion[DILATE_TILE * DILATE_TILE];
 #endif
 
 #if defined(DEPTH_OUTPUT)
-	// FSR and the D3D11/D3D12 runtime bridge require a typed depth format.
+	// Copy depth as R32_FLOAT so FSR DX11 backend receives a typed format.
+	// The raw depth resource is R24G8_TYPELESS which maps to FFX_SURFACE_FORMAT_UNKNOWN.
 	DepthOutput[dispatchID.xy] = DepthMask[dispatchID.xy];
 #endif
 
 	float reactiveMask = taaMask.x * 0.1 + taaMask.y;
-#if defined(FSR)
-	reactiveMask = min(reactiveMask, 0.9);
-#endif
 	ReactiveMask[dispatchID.xy] = reactiveMask;
 
 	TransparencyCompositionMask[dispatchID.xy] = transparencyCompositionMask;

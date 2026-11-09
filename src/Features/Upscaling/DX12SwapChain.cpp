@@ -1,71 +1,16 @@
 #include "DX12SwapChain.h"
 
 #include <FidelityFX/api/include/dx12/ffx_api_dx12.hpp>
-#include <algorithm>
 #include <dxgi1_6.h>
-#include <utility>
 
 #include "../HDRDisplay.h"
 #include "../ScreenshotFeature.h"
 #include "../Upscaling.h"
 #include "FidelityFX.h"
-#include "Hooks.h"
 #include "Streamline.h"
-#include "Utils/D3D.h"
-
-DX12SwapChain::~DX12SwapChain()
-{
-	(void)antiLag2Context.release();
-}
-
-/** @brief Initializes Anti-Lag on the persistent D3D12 device and records driver availability. */
-void DX12SwapChain::InitializeAntiLag2()
-{
-	const HRESULT hr = CS::AntiLag2::InitializeContext(antiLag2Context, d3d12Device.get(), AMD::AntiLag2DX12::Initialize);
-	logger::info("[AntiLag2] Initialize hr=0x{:08X} available={}", static_cast<unsigned int>(hr), hr == S_OK);
-}
-
-/** @brief Applies session-enabled Anti-Lag latency reduction before input with FPS limiting disabled. */
-void DX12SwapChain::UpdateAntiLag2BeforeInput()
-{
-	if (!antiLag2Context)
-		return;
-	const HRESULT hr = CS::AntiLag2::Update(antiLag2Context.get(), true);
-	antiLag2Enabled = antiLag2Context->m_enabled;
-	if (FAILED(hr) && !std::exchange(antiLag2UpdateFailureLogged, true))
-		logger::warn("[AntiLag2] Update failed: {}", DX::com_exception(hr).what());
-}
-
-/** @brief Publishes the Anti-Lag context and enabled state through the FSR swap-chain handshake. */
-void DX12SwapChain::PublishAntiLag2SwapChainData()
-{
-	struct AntiLag2Data
-	{
-		AMD::AntiLag2DX12::Context* context;
-		bool enabled;
-	};
-	const AntiLag2Data data{ antiLag2Context.get(), antiLag2Enabled };
-	static constexpr GUID kFfxAntiLag2Data = { 0x5083ae5b, 0x8070, 0x4fca, { 0x8e, 0xe5, 0x35, 0x82, 0xdd, 0x36, 0x7d, 0x13 } };
-	const HRESULT hr = swapChain->SetPrivateData(kFfxAntiLag2Data, sizeof(data), &data);
-	if (FAILED(hr) && !std::exchange(antiLag2PrivateDataFailureLogged, true))
-		logger::warn("[AntiLag2] FFX private-data handshake failed: {}", DX::com_exception(hr).what());
-}
-
-/** @brief Marks rendering completion for Anti-Lag before the swap chain presents. */
-void DX12SwapChain::MarkAntiLag2EndOfFrame()
-{
-	if (!antiLag2Enabled)
-		return;
-	const HRESULT hr = AMD::AntiLag2DX12::MarkEndOfFrameRendering(antiLag2Context.get());
-	if (FAILED(hr) && !std::exchange(antiLag2MarkFailureLogged, true))
-		logger::warn("[AntiLag2] End-of-frame marker failed: {}", DX::com_exception(hr).what());
-}
 
 void DX12SwapChain::CreateD3D12Device(IDXGIAdapter* a_adapter)
 {
-	if (d3d12Device)
-		return;
-
 	DX::ThrowIfFailed(D3D12CreateDevice(a_adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&d3d12Device)));
 
 	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
@@ -75,9 +20,8 @@ void DX12SwapChain::CreateD3D12Device(IDXGIAdapter* a_adapter)
 	queueDesc.NodeMask = 0;
 
 	DX::ThrowIfFailed(d3d12Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&commandQueue)));
-	commandQueue->SetName(L"DX12SwapChain::CommandQueue");
 
-	for (UINT i = 0; i < kMaxBackBuffers; i++) {
+	for (int i = 0; i < 2; i++) {
 		DX::ThrowIfFailed(d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocators[i])));
 		DX::ThrowIfFailed(d3d12Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocators[i].get(), nullptr, IID_PPV_ARGS(&commandLists[i])));
 		commandLists[i]->Close();
@@ -87,7 +31,6 @@ void DX12SwapChain::CreateD3D12Device(IDXGIAdapter* a_adapter)
 void DX12SwapChain::CreateSwapChain(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC a_swapChainDesc)
 {
 	CreateD3D12Device(adapter);
-	InitializeAntiLag2();
 
 	winrt::com_ptr<IDXGIFactory4> dxgiFactory;
 	DX::ThrowIfFailed(adapter->GetParent(IID_PPV_ARGS(dxgiFactory.put())));
@@ -122,7 +65,6 @@ void DX12SwapChain::CreateSwapChain(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC 
 	swapChainDesc.Format = negotiatedFormat;
 	swapChainDesc.SampleDesc.Count = 1;
 	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-	backBufferCount = 2;
 	swapChainDesc.BufferCount = 2;
 	swapChainDesc.SwapEffect = a_swapChainDesc.SwapEffect;
 	swapChainDesc.Flags = a_swapChainDesc.Flags;
@@ -156,30 +98,17 @@ void DX12SwapChain::CreateSwapChain(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC 
 	fidelityFX.SetupFrameGeneration();
 }
 
-namespace
-{
-	struct AntiLag2SwapChainProxy final : DXGISwapChainProxy
-	{
-		using DXGISwapChainProxy::DXGISwapChainProxy;
-		HRESULT STDMETHODCALLTYPE Present(UINT syncInterval, UINT flags) override
-		{
-			return globals::features::upscaling.dx12SwapChain.PresentWithAntiLag2(syncInterval, flags);
-		}
-	};
-}
-
 void DX12SwapChain::CreateInterop()
 {
-	interopFence.Create(d3d12Device.get(), d3d11Device.get(), "DX12SwapChain::InteropFence");
+	HANDLE sharedFenceHandle;
+	DX::ThrowIfFailed(d3d12Device->CreateFence(0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&d3d12Fence)));
+	DX::ThrowIfFailed(d3d12Device->CreateSharedHandle(d3d12Fence.get(), nullptr, GENERIC_ALL, nullptr, &sharedFenceHandle));
+	DX::ThrowIfFailed(d3d11Device->OpenSharedFence(sharedFenceHandle, IID_PPV_ARGS(&d3d11Fence)));
+	CloseHandle(sharedFenceHandle);
+
+	swapChainProxy = new DXGISwapChainProxy(swapChain);
 
 	RecreateWrappedResources(swapChainDesc);
-	if (antiLag2Context && !CS::AntiLag2::InstallInputHook(antiLag2Context, Hooks::InstallBeforeInputPoll)) {
-		logger::warn("[AntiLag2] Input hook installation failed; leaving Anti-Lag disabled");
-	}
-	if (antiLag2Context) {
-		swapChainProxy = new AntiLag2SwapChainProxy(swapChain);
-	} else
-		swapChainProxy = new DXGISwapChainProxy(swapChain);
 }
 
 void DX12SwapChain::RecreateWrappedResources(const DXGI_SWAP_CHAIN_DESC1& desc)
@@ -196,18 +125,16 @@ void DX12SwapChain::RecreateWrappedResources(const DXGI_SWAP_CHAIN_DESC1& desc)
 
 	// Build both replacements before releasing the active resources so a failed
 	// allocation cannot leave the proxy with only half of its interop textures.
-	auto newSwapChainBuffer = std::make_unique<WrappedResource>(texDesc11, d3d11Device.get(), d3d12Device.get(), "DX12SwapChain::SwapChainBuffer");
+	auto newSwapChainBuffer = std::make_unique<WrappedResource>(texDesc11, d3d11Device.get(), d3d12Device.get());
 
 	// UI buffer uses R8G8B8A8_UNORM - vanilla UI is SDR and 8-bit precision
 	texDesc11.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	auto newUiBuffer = std::make_unique<WrappedResource>(texDesc11, d3d11Device.get(), d3d12Device.get(), "DX12SwapChain::UIBuffer");
+	auto newUiBuffer = std::make_unique<WrappedResource>(texDesc11, d3d11Device.get(), d3d12Device.get());
 
 	delete swapChainBufferWrapped;
 	delete uiBufferWrapped;
 	swapChainBufferWrapped = newSwapChainBuffer.release();
 	uiBufferWrapped = newUiBuffer.release();
-
-	globals::features::upscaling.frameGenerationPrepared = false;
 
 	const float clearColor[4]{};
 	d3d11Context->ClearRenderTargetView(swapChainBufferWrapped->rtv, clearColor);
@@ -249,46 +176,31 @@ HRESULT DX12SwapChain::ResizeBuffers(UINT bufferCount, UINT width, UINT height, 
 	if (!swapChain)
 		return DXGI_ERROR_INVALID_CALL;
 
-	// FidelityFX's frame-generation swap-chain stores the supplied value verbatim
-	// and uses it as its replacement-buffer count, so zero (DXGI's "preserve")
-	// would leave it with no valid source resource at the next Present. The caller's
-	// count describes its own D3D11 chain, not this one, so the chain keeps its own.
-	const UINT effectiveBufferCount = backBufferCount;
-	if (bufferCount && bufferCount != backBufferCount) {
-		static bool loggedCountOverride = false;
-		if (!loggedCountOverride) {
-			loggedCountOverride = true;
-			logger::info("[DX12SwapChain] ResizeBuffers requested {} buffers; keeping {}", bufferCount, backBufferCount);
-		}
+	// DXGI defines zero as "preserve the current buffer count". FidelityFX's
+	// frame-generation swap-chain stores the supplied value verbatim and uses it
+	// as its replacement-buffer count, so forwarding zero leaves it with no valid
+	// source resource at the next Present.
+	const UINT effectiveBufferCount = bufferCount ? bufferCount : swapChainDesc.BufferCount;
+	if (!bufferCount)
+		logger::warn("[FidelityFX] Normalized ResizeBuffers count from 0 to {} to preserve replacement buffers", effectiveBufferCount);
+	if (effectiveBufferCount != 2) {
+		logger::error("[DX12SwapChain] Rejected unsupported resize buffer count {} (CS requires 2)", effectiveBufferCount);
+		return DXGI_ERROR_UNSUPPORTED;
 	}
 
 	// These references are to FidelityFX replacement buffers. They must not keep
 	// the old generation alive across the provider's resize, and must be refreshed
 	// before CS records another copy.
-	for (UINT i = 0; i < backBufferCount; i++) {
-		swapChainBuffers[i] = nullptr;
-	}
+	swapChainBuffers[0] = nullptr;
+	swapChainBuffers[1] = nullptr;
 	const HRESULT result = swapChain->ResizeBuffers(effectiveBufferCount, width, height, format, flags);
-	if (FAILED(result)) {
-		// The resize didn't take effect, so the pre-resize buffers should still be
-		// valid (unless the device itself is gone, in which case this also fails
-		// and Present's null guard below is the last line of defense).
-		for (UINT i = 0; i < backBufferCount; i++) {
-			swapChain->GetBuffer(i, IID_PPV_ARGS(swapChainBuffers[i].put()));
-		}
+	if (FAILED(result))
 		return result;
-	}
 
 	DXGI_SWAP_CHAIN_DESC1 resizedDesc{};
 	const HRESULT descResult = swapChain->GetDesc1(&resizedDesc);
-	if (FAILED(descResult)) {
-		// The resize itself succeeded; only the desc query failed. Re-fetch the
-		// (already resized) buffers so Present isn't left with nulls.
-		for (UINT i = 0; i < backBufferCount; i++) {
-			swapChain->GetBuffer(i, IID_PPV_ARGS(swapChainBuffers[i].put()));
-		}
+	if (FAILED(descResult))
 		return descResult;
-	}
 
 	const bool wrappedResourcesChanged = resizedDesc.Width != swapChainDesc.Width ||
 	                                     resizedDesc.Height != swapChainDesc.Height ||
@@ -297,15 +209,13 @@ HRESULT DX12SwapChain::ResizeBuffers(UINT bufferCount, UINT width, UINT height, 
 		RecreateWrappedResources(resizedDesc);
 	swapChainDesc = resizedDesc;
 
-	for (UINT i = 0; i < backBufferCount; i++) {
-		DX::ThrowIfFailed(swapChain->GetBuffer(i, IID_PPV_ARGS(swapChainBuffers[i].put())));
-	}
+	DX::ThrowIfFailed(swapChain->GetBuffer(0, IID_PPV_ARGS(swapChainBuffers[0].put())));
+	DX::ThrowIfFailed(swapChain->GetBuffer(1, IID_PPV_ARGS(swapChainBuffers[1].put())));
 	frameIndex = swapChain->GetCurrentBackBufferIndex();
 	return S_OK;
 }
 
-template <bool WithAntiLag2>
-HRESULT DX12SwapChain::PresentImpl(UINT SyncInterval, UINT Flags)
+HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 {
 	auto& upscaling = globals::features::upscaling;
 
@@ -322,20 +232,13 @@ HRESULT DX12SwapChain::PresentImpl(UINT SyncInterval, UINT Flags)
 	bool isHDR = hdr && hdr->settings.enableHDR;
 
 	// Wait for D3D11 to finish (includes ApplyHDR scene encoding AND UIBrightnessCS)
-	const uint64_t d3d11SignalValue = interopFence.Next();
-	DX::ThrowIfFailed(d3d11Context->Signal(interopFence.fence11.get(), d3d11SignalValue));
-	d3d11Context->Flush();
-	DX::ThrowIfFailed(commandQueue->Wait(interopFence.fence12.get(), d3d11SignalValue));
-
-	// Null only after a resize failure severe enough that even the pre-resize
-	// buffers couldn't be re-fetched (e.g. device removed) -- skip this frame's
-	// copy/present rather than pass a null resource to D3D12.
-	if (!swapChainBuffers[frameIndex])
-		return DXGI_ERROR_DEVICE_REMOVED;
+	fenceValue++;
+	DX::ThrowIfFailed(d3d11Context->Signal(d3d11Fence.get(), fenceValue));
+	DX::ThrowIfFailed(commandQueue->Wait(d3d12Fence.get(), fenceValue));
 
 	// New frame, reset
 	if (frameFenceValues[frameIndex])
-		DX::ThrowIfFailed(interopFence.fence12->SetEventOnCompletion(frameFenceValues[frameIndex], nullptr));
+		DX::ThrowIfFailed(d3d12Fence->SetEventOnCompletion(frameFenceValues[frameIndex], nullptr));
 	DX::ThrowIfFailed(commandAllocators[frameIndex]->Reset());
 	DX::ThrowIfFailed(commandLists[frameIndex]->Reset(commandAllocators[frameIndex].get(), nullptr));
 
@@ -362,26 +265,21 @@ HRESULT DX12SwapChain::PresentImpl(UINT SyncInterval, UINT Flags)
 		}
 	}
 
-	if constexpr (WithAntiLag2)
-		PublishAntiLag2SwapChainData();
 	upscaling.fidelityFX.Present(upscaling.ShouldUseFrameGenerationThisFrame(), isHDR);
 
 	DX::ThrowIfFailed(commandLists[frameIndex]->Close());
 
 	ID3D12CommandList* commandListsToExecute[] = { commandLists[frameIndex].get() };
 	commandQueue->ExecuteCommandLists(1, commandListsToExecute);
-	if constexpr (WithAntiLag2)
-		MarkAntiLag2EndOfFrame();
 
 	// Present the frame
 	DX::ThrowIfFailed(swapChain->Present(SyncInterval, Flags));
-	upscaling.worldCameraFrameValid = false;
 
 	// Wait for D3D12 to finish
-	const uint64_t d3d12SignalValue = interopFence.Next();
-	DX::ThrowIfFailed(commandQueue->Signal(interopFence.fence12.get(), d3d12SignalValue));
-	frameFenceValues[frameIndex] = d3d12SignalValue;
-	DX::ThrowIfFailed(d3d11Context->Wait(interopFence.fence11.get(), d3d12SignalValue));
+	fenceValue++;
+	DX::ThrowIfFailed(commandQueue->Signal(d3d12Fence.get(), fenceValue));
+	frameFenceValues[frameIndex] = fenceValue;
+	DX::ThrowIfFailed(d3d11Context->Wait(d3d11Fence.get(), fenceValue));
 
 	// Update the frame index
 	frameIndex = swapChain->GetCurrentBackBufferIndex();
@@ -393,22 +291,10 @@ HRESULT DX12SwapChain::PresentImpl(UINT SyncInterval, UINT Flags)
 	if (SyncInterval == 0)
 		upscaling.FrameLimiter();
 
-	// Main_PostProcessing::thunk doesn't run on loading-screen frames, so its own
-	// per-frame reset can't clear a stale true left over from the last gameplay
-	// frame; reset here too so frame-gen doesn't interpolate through a transition.
+	// The next frame decides frame generation again in Main_PostProcessing.
 	upscaling.frameGenerationPrepared = false;
 
 	return S_OK;
-}
-
-HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
-{
-	return PresentImpl<false>(SyncInterval, Flags);
-}
-
-HRESULT DX12SwapChain::PresentWithAntiLag2(UINT SyncInterval, UINT Flags)
-{
-	return PresentImpl<true>(SyncInterval, Flags);
 }
 
 HRESULT DX12SwapChain::GetDevice(REFIID uuid, void** ppDevice)
@@ -428,46 +314,22 @@ HANDLE DX12SwapChain::GetFrameLatencyWaitableObject()
 	return swapChain->GetFrameLatencyWaitableObject();
 }
 
-WrappedResource::WrappedResource(D3D11_TEXTURE2D_DESC a_texDesc, ID3D11Device5* a_d3d11Device, ID3D12Device* a_d3d12Device, const std::string& a_name)
+WrappedResource::WrappedResource(D3D11_TEXTURE2D_DESC a_texDesc, ID3D11Device5* a_d3d11Device, ID3D12Device* a_d3d12Device)
 {
 	// Create D3D11 shared texture directly instead of wrapping D3D12 resource
 	a_texDesc.MiscFlags |= D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
-	auto throwIfFailed = [&](HRESULT a_result, const char* a_operation) {
-		if (FAILED(a_result)) {
-			logger::error(
-				"[DX12SwapChain] Wrapped resource '{}' {} failed: HRESULT 0x{:08X}, dimensions {}x{}, format {}, bind flags 0x{:X}, misc flags 0x{:X}",
-				a_name.empty() ? "<unnamed>" : a_name.c_str(),
-				a_operation,
-				static_cast<uint32_t>(a_result),
-				a_texDesc.Width,
-				a_texDesc.Height,
-				static_cast<uint32_t>(a_texDesc.Format),
-				a_texDesc.BindFlags,
-				a_texDesc.MiscFlags);
-		}
-		DX::ThrowIfFailed(a_result);
-	};
-
-	// The raw members are assigned only at the end: a throw before those detaches would
-	// leak them, since a partially constructed object runs no destructor.
-	winrt::com_ptr<ID3D11Texture2D> texture11;
-	throwIfFailed(a_d3d11Device->CreateTexture2D(&a_texDesc, nullptr, texture11.put()), "CreateTexture2D");
-	if (!a_name.empty())
-		Util::SetResourceName(texture11.get(), "%s", a_name.c_str());
+	DX::ThrowIfFailed(a_d3d11Device->CreateTexture2D(&a_texDesc, nullptr, &resource11));
 
 	// Get shared handle from D3D11 texture to enable D3D12 access
 	winrt::com_ptr<IDXGIResource1> dxgiResource;
-	throwIfFailed(texture11->QueryInterface(IID_PPV_ARGS(dxgiResource.put())), "QueryInterface(IDXGIResource1)");
-	winrt::handle sharedHandle;
-	throwIfFailed(dxgiResource->CreateSharedHandle(nullptr, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, nullptr, sharedHandle.put()), "CreateSharedHandle");
+	DX::ThrowIfFailed(resource11->QueryInterface(IID_PPV_ARGS(dxgiResource.put())));
+	HANDLE sharedHandle = nullptr;
+	DX::ThrowIfFailed(dxgiResource->CreateSharedHandle(nullptr, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, nullptr, &sharedHandle));
 
 	// Open the shared D3D11 texture as D3D12 resource
-	winrt::com_ptr<ID3D12Resource> resource12;
-	throwIfFailed(a_d3d12Device->OpenSharedHandle(sharedHandle.get(), IID_PPV_ARGS(resource12.put())), "OpenSharedHandle");
-	if (!a_name.empty())
-		resource12->SetName(winrt::to_hstring(a_name).c_str());
+	DX::ThrowIfFailed(a_d3d12Device->OpenSharedHandle(sharedHandle, IID_PPV_ARGS(resource.put())));
+	CloseHandle(sharedHandle);
 
-	winrt::com_ptr<ID3D11ShaderResourceView> srv11;
 	if (a_texDesc.BindFlags & D3D11_BIND_SHADER_RESOURCE) {
 		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 		srvDesc.Format = a_texDesc.Format;
@@ -475,12 +337,9 @@ WrappedResource::WrappedResource(D3D11_TEXTURE2D_DESC a_texDesc, ID3D11Device5* 
 		srvDesc.Texture2D.MostDetailedMip = 0;
 		srvDesc.Texture2D.MipLevels = 1;
 
-		throwIfFailed(a_d3d11Device->CreateShaderResourceView(texture11.get(), &srvDesc, srv11.put()), "CreateShaderResourceView");
-		if (!a_name.empty())
-			Util::SetResourceName(srv11.get(), "%s SRV", a_name.c_str());
+		DX::ThrowIfFailed(a_d3d11Device->CreateShaderResourceView(resource11, &srvDesc, &srv));
 	}
 
-	winrt::com_ptr<ID3D11UnorderedAccessView> uav11;
 	if (a_texDesc.BindFlags & D3D11_BIND_UNORDERED_ACCESS) {
 		if (a_texDesc.ArraySize > 1) {
 			D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
@@ -489,35 +348,24 @@ WrappedResource::WrappedResource(D3D11_TEXTURE2D_DESC a_texDesc, ID3D11Device5* 
 			uavDesc.Texture2DArray.FirstArraySlice = 0;
 			uavDesc.Texture2DArray.ArraySize = a_texDesc.ArraySize;
 
-			throwIfFailed(a_d3d11Device->CreateUnorderedAccessView(texture11.get(), &uavDesc, uav11.put()), "CreateUnorderedAccessView");
+			DX::ThrowIfFailed(a_d3d11Device->CreateUnorderedAccessView(resource11, &uavDesc, &uav));
 		} else {
 			D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
 			uavDesc.Format = a_texDesc.Format;
 			uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
 			uavDesc.Texture2D.MipSlice = 0;
 
-			throwIfFailed(a_d3d11Device->CreateUnorderedAccessView(texture11.get(), &uavDesc, uav11.put()), "CreateUnorderedAccessView");
+			DX::ThrowIfFailed(a_d3d11Device->CreateUnorderedAccessView(resource11, &uavDesc, &uav));
 		}
-		if (!a_name.empty())
-			Util::SetResourceName(uav11.get(), "%s UAV", a_name.c_str());
 	}
 
-	winrt::com_ptr<ID3D11RenderTargetView> rtv11;
 	if (a_texDesc.BindFlags & D3D11_BIND_RENDER_TARGET) {
 		D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
 		rtvDesc.Format = a_texDesc.Format;
 		rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
 		rtvDesc.Texture2D.MipSlice = 0;
-		throwIfFailed(a_d3d11Device->CreateRenderTargetView(texture11.get(), &rtvDesc, rtv11.put()), "CreateRenderTargetView");
-		if (!a_name.empty())
-			Util::SetResourceName(rtv11.get(), "%s RTV", a_name.c_str());
+		DX::ThrowIfFailed(a_d3d11Device->CreateRenderTargetView(resource11, &rtvDesc, &rtv));
 	}
-
-	resource11 = texture11.detach();
-	srv = srv11.detach();
-	uav = uav11.detach();
-	rtv = rtv11.detach();
-	resource = std::move(resource12);
 }
 
 WrappedResource::~WrappedResource()
@@ -539,54 +387,6 @@ WrappedResource::~WrappedResource()
 		rtv = nullptr;
 	}
 	// resource (winrt::com_ptr) will be automatically released
-}
-
-void SharedFence::Create(ID3D12Device* a_device12, ID3D11Device5* a_device11, const char* a_name)
-{
-	DX::ThrowIfFailed(a_device12->CreateFence(0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&fence12)));
-	winrt::handle sharedHandle;
-	DX::ThrowIfFailed(a_device12->CreateSharedHandle(fence12.get(), nullptr, GENERIC_ALL, nullptr, sharedHandle.put()));
-	DX::ThrowIfFailed(a_device11->OpenSharedFence(sharedHandle.get(), IID_PPV_ARGS(&fence11)));
-
-	fence12->SetName(winrt::to_hstring(a_name).c_str());
-	Util::SetResourceName(fence11.get(), "%s", a_name);
-}
-
-SharedFence::WaitOutcome SharedFence::CpuWaitOutcome(uint64_t a_value, DWORD a_timeoutMs, DWORD* a_error) const
-{
-	const auto failed = [a_error](DWORD a_lastError) {
-		if (a_error)
-			*a_error = a_lastError;
-		return WaitOutcome::kFailed;
-	};
-	if (!fence12 || a_value == 0)
-		return WaitOutcome::kComplete;
-	if (fence12->GetCompletedValue() >= a_value)
-		return WaitOutcome::kComplete;
-
-	winrt::handle fenceEvent(CreateEventW(nullptr, FALSE, FALSE, nullptr));
-	if (!fenceEvent)
-		return failed(GetLastError());
-	if (const HRESULT registration = fence12->SetEventOnCompletion(a_value, fenceEvent.get()); FAILED(registration))
-		return failed(static_cast<DWORD>(registration));
-
-	winrt::com_ptr<ID3D12Device> device12;
-	DWORD waitedMs = 0;
-	while (waitedMs < a_timeoutMs) {
-		const DWORD sliceMs = std::min<DWORD>(kRemovalPollMs, a_timeoutMs - waitedMs);
-		const DWORD waitResult = WaitForSingleObject(fenceEvent.get(), sliceMs);
-		if (waitResult == WAIT_OBJECT_0)
-			return WaitOutcome::kComplete;
-		if (waitResult != WAIT_TIMEOUT)
-			return failed(GetLastError());
-		waitedMs += sliceMs;
-		if (!device12)
-			fence12->GetDevice(IID_PPV_ARGS(&device12));
-		if (device12 && FAILED(device12->GetDeviceRemovedReason()))
-			return WaitOutcome::kFailed;
-	}
-
-	return WaitOutcome::kTimeout;
 }
 
 DXGISwapChainProxy::DXGISwapChainProxy(IDXGISwapChain4* a_swapChain)
@@ -736,10 +536,10 @@ void DX12SwapChain::CreateSharedResources()
 	D3D11_TEXTURE2D_DESC texDesc{};
 	main.texture->GetDesc(&texDesc);
 	texDesc.Format = DXGI_FORMAT_R32_FLOAT;
-	depthBufferShared12 = new WrappedResource(texDesc, d3d11Device.get(), d3d12Device.get(), "DX12SwapChain::DepthBufferShared");
+	depthBufferShared12 = new WrappedResource(texDesc, d3d11Device.get(), d3d12Device.get());
 
 	// Create motion vector buffer
 	auto& motionVector = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMOTION_VECTOR];
 	motionVector.texture->GetDesc(&texDesc);
-	motionVectorBufferShared12 = new WrappedResource(texDesc, d3d11Device.get(), d3d12Device.get(), "DX12SwapChain::MotionVectorBufferShared");
+	motionVectorBufferShared12 = new WrappedResource(texDesc, d3d11Device.get(), d3d12Device.get());
 }

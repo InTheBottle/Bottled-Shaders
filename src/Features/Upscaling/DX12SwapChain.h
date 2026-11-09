@@ -6,21 +6,15 @@
 #include <wrl\client.h>
 #include <wrl\wrappers\corewrappers.h>
 
-#include "antilag2sdk.h"
-#include <cstdint>
 #include <d3d11_4.h>
 #include <d3d12.h>
-#include <memory>
-#include <string>
 
 #include <directx/d3dx12.h>
 
 class WrappedResource
 {
 public:
-	// a_name follows Util::SetResourceName's "Feature::Name" convention; views get " SRV"/
-	// " UAV"/" RTV" suffixes. Pass empty to leave resources unnamed.
-	WrappedResource(D3D11_TEXTURE2D_DESC a_texDesc, ID3D11Device5* a_d3d11Device, ID3D12Device* a_d3d12Device, const std::string& a_name = {});
+	WrappedResource(D3D11_TEXTURE2D_DESC a_texDesc, ID3D11Device5* a_d3d11Device, ID3D12Device* a_d3d12Device);
 	~WrappedResource();
 
 	ID3D11Texture2D* resource11 = nullptr;
@@ -28,44 +22,6 @@ public:
 	ID3D11UnorderedAccessView* uav = nullptr;
 	ID3D11RenderTargetView* rtv = nullptr;
 	winrt::com_ptr<ID3D12Resource> resource;
-};
-
-/** @brief D3D12 fence shared into D3D11; value is the last value handed out by Next(). */
-struct SharedFence
-{
-	static constexpr DWORD kRemovalPollMs = 100;
-	/** @brief CPU bound for one fence value; a wedged GPU must not hang the render thread. */
-	static constexpr DWORD kFenceTimeoutMs = 5000;
-	winrt::com_ptr<ID3D12Fence> fence12;
-	winrt::com_ptr<ID3D11Fence> fence11;
-	uint64_t value = 0;
-
-	/** @brief Returns the next value to signal, advancing the monotonic counter. */
-	uint64_t Next() { return ++value; }
-	/** @brief Releases both fence interfaces and returns the counter to zero. */
-	void Reset()
-	{
-		fence12 = nullptr;
-		fence11 = nullptr;
-		value = 0;
-	}
-	/** @brief Outcome of a bounded CPU wait, so a caller can tell a slow GPU from a broken wait. */
-	enum class WaitOutcome : uint8_t
-	{
-		kComplete,  ///< The fence reached the value.
-		kTimeout,   ///< The fence did not reach the value within the bound.
-		kFailed     ///< The wait itself failed: no event, no completion registration, or WAIT_FAILED.
-	};
-
-	/** @brief Creates and names the fence; throws on failure without leaking the NT handle. */
-	void Create(ID3D12Device* a_device12, ID3D11Device5* a_device11, const char* a_name);
-	/** @brief Waits on the CPU up to a_timeoutMs, polling device removal via fence12's own device.
-	 *  Trivially kComplete when the fence is unset or a_value is 0 (nothing to wait for).
-	 *  @param a_error Receives the error behind a kFailed outcome: the Win32 error from the wait,
-	 *         or the HRESULT a failed completion registration returned; may be null. */
-	WaitOutcome CpuWaitOutcome(uint64_t a_value, DWORD a_timeoutMs, DWORD* a_error = nullptr) const;
-	/** @brief True only when the fence reached a_value inside the bound. */
-	bool CpuWait(uint64_t a_value, DWORD a_timeoutMs) const { return CpuWaitOutcome(a_value, a_timeoutMs) == WaitOutcome::kComplete; }
 };
 
 struct DXGISwapChainProxy : IDXGISwapChain
@@ -90,16 +46,16 @@ public:
 	virtual HRESULT STDMETHODCALLTYPE GetDevice(_In_ REFIID riid, _COM_Outptr_ void** ppDevice) override;
 
 	/****IDXGISwapChain****/
-	virtual HRESULT STDMETHODCALLTYPE Present(UINT SyncInterval, UINT Flags) override;
-	virtual HRESULT STDMETHODCALLTYPE GetBuffer(UINT Buffer, _In_ REFIID riid, _COM_Outptr_ void** ppSurface) override;
-	virtual HRESULT STDMETHODCALLTYPE SetFullscreenState(BOOL Fullscreen, _In_opt_ IDXGIOutput* pTarget) override;
-	virtual HRESULT STDMETHODCALLTYPE GetFullscreenState(_Out_opt_ BOOL* pFullscreen, _COM_Outptr_opt_result_maybenull_ IDXGIOutput** ppTarget) override;
-	virtual HRESULT STDMETHODCALLTYPE GetDesc(_Out_ DXGI_SWAP_CHAIN_DESC* pDesc) override;
-	virtual HRESULT STDMETHODCALLTYPE ResizeBuffers(UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags) override;
-	virtual HRESULT STDMETHODCALLTYPE ResizeTarget(_In_ const DXGI_MODE_DESC* pNewTargetParameters) override;
-	virtual HRESULT STDMETHODCALLTYPE GetContainingOutput(_COM_Outptr_ IDXGIOutput** ppOutput) override;
-	virtual HRESULT STDMETHODCALLTYPE GetFrameStatistics(_Out_ DXGI_FRAME_STATISTICS* pStats) override;
-	virtual HRESULT STDMETHODCALLTYPE GetLastPresentCount(_Out_ UINT* pLastPresentCount) override;
+	virtual HRESULT STDMETHODCALLTYPE Present(UINT SyncInterval, UINT Flags);
+	virtual HRESULT STDMETHODCALLTYPE GetBuffer(UINT Buffer, _In_ REFIID riid, _COM_Outptr_ void** ppSurface);
+	virtual HRESULT STDMETHODCALLTYPE SetFullscreenState(BOOL Fullscreen, _In_opt_ IDXGIOutput* pTarget);
+	virtual HRESULT STDMETHODCALLTYPE GetFullscreenState(_Out_opt_ BOOL* pFullscreen, _COM_Outptr_opt_result_maybenull_ IDXGIOutput** ppTarget);
+	virtual HRESULT STDMETHODCALLTYPE GetDesc(_Out_ DXGI_SWAP_CHAIN_DESC* pDesc);
+	virtual HRESULT STDMETHODCALLTYPE ResizeBuffers(UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags);
+	virtual HRESULT STDMETHODCALLTYPE ResizeTarget(_In_ const DXGI_MODE_DESC* pNewTargetParameters);
+	virtual HRESULT STDMETHODCALLTYPE GetContainingOutput(_COM_Outptr_ IDXGIOutput** ppOutput);
+	virtual HRESULT STDMETHODCALLTYPE GetFrameStatistics(_Out_ DXGI_FRAME_STATISTICS* pStats);
+	virtual HRESULT STDMETHODCALLTYPE GetLastPresentCount(_Out_ UINT* pLastPresentCount);
 };
 
 class DX12SwapChain
@@ -107,11 +63,8 @@ class DX12SwapChain
 public:
 	winrt::com_ptr<ID3D12Device> d3d12Device;
 	winrt::com_ptr<ID3D12CommandQueue> commandQueue;
-
-	static constexpr UINT kMaxBackBuffers = 2;
-
-	winrt::com_ptr<ID3D12CommandAllocator> commandAllocators[kMaxBackBuffers];
-	winrt::com_ptr<ID3D12GraphicsCommandList4> commandLists[kMaxBackBuffers];
+	winrt::com_ptr<ID3D12CommandAllocator> commandAllocators[2];
+	winrt::com_ptr<ID3D12GraphicsCommandList4> commandLists[2];
 
 	IDXGISwapChain4* swapChain;
 
@@ -127,13 +80,15 @@ public:
 	winrt::com_ptr<ID3D11Device5> d3d11Device;
 	winrt::com_ptr<ID3D11DeviceContext4> d3d11Context;
 
-	SharedFence interopFence;
+	winrt::com_ptr<ID3D11Fence> d3d11Fence;
+	winrt::com_ptr<ID3D12Fence> d3d12Fence;
 
-	winrt::com_ptr<ID3D12Resource> swapChainBuffers[kMaxBackBuffers];
+	winrt::com_ptr<ID3D12Resource> swapChainBuffers[2];
 
 	UINT frameIndex = 0;
+	UINT64 fenceValue = 0;
 
-	UINT64 frameFenceValues[kMaxBackBuffers] = {};
+	UINT64 frameFenceValues[2] = { 0, 0 };
 
 	LARGE_INTEGER qpf;
 
@@ -141,34 +96,19 @@ public:
 
 	DXGISwapChainProxy* swapChainProxy = nullptr;
 
-	// Actual buffer count the live swap chain was created/resized with (<= kMaxBackBuffers).
-	UINT backBufferCount = 2;
-
-	/** @brief Runs only at DLL detach, after the FFX and driver DLLs; leaves the Anti-Lag context to process teardown. */
-	~DX12SwapChain();
-	/** @brief Updates the installed Anti-Lag session before input with FPS limiting disabled. */
-	void UpdateAntiLag2BeforeInput();
-	/** @brief Reports whether the installed session's driver state has Anti-Lag enabled. */
-	bool IsAntiLag2Active() const { return antiLag2Context && antiLag2Enabled; }
-
 	void CreateD3D12Device(IDXGIAdapter* a_adapter);
 	void CreateSwapChain(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC swapChainDesc);
 
 	void CreateInterop();
-	/** @brief (Re)creates the D3D11/D3D12-shared swap-chain and UI buffer textures at (re)size time. */
 	void RecreateWrappedResources(const DXGI_SWAP_CHAIN_DESC1& desc);
 
 	DXGISwapChainProxy* GetSwapChainProxy();
 	void SetD3D11Device(ID3D11Device* a_d3d11Device);
 	void SetD3D11DeviceContext(ID3D11DeviceContext* a_d3d11Context);
 
-	/** @brief IDXGISwapChain::GetBuffer equivalent for the wrapped D3D11 swap-chain buffer. Only buffer index 0 is supported. */
 	HRESULT GetBuffer(UINT buffer, REFIID riid, void** ppSurface);
-	/** @brief IDXGISwapChain::ResizeBuffers equivalent; always resizes with the chain's own backBufferCount, whatever count is requested. */
 	HRESULT ResizeBuffers(UINT bufferCount, UINT width, UINT height, DXGI_FORMAT format, UINT flags);
 	HRESULT Present(UINT SyncInterval, UINT Flags);
-	/** @brief Presents through the session-enabled Anti-Lag path. */
-	HRESULT PresentWithAntiLag2(UINT SyncInterval, UINT Flags);
 	HRESULT GetDevice(_In_ REFIID riid, _COM_Outptr_ void** ppDevice);
 	HANDLE GetFrameLatencyWaitableObject();
 
@@ -189,21 +129,4 @@ public:
 
 	// D3D12 interop resource management
 	void CreateSharedResources();
-
-private:
-	std::unique_ptr<AMD::AntiLag2DX12::Context> antiLag2Context;
-	bool antiLag2Enabled = false;
-	bool antiLag2UpdateFailureLogged = false;
-	bool antiLag2MarkFailureLogged = false;
-	bool antiLag2PrivateDataFailureLogged = false;
-
-	/** @brief Initializes the Anti-Lag driver interface on the presentation device. */
-	void InitializeAntiLag2();
-	/** @brief Shares presentation logic while compiling Anti-Lag calls out of the ordinary path. */
-	template <bool WithAntiLag2>
-	HRESULT PresentImpl(UINT SyncInterval, UINT Flags);
-	/** @brief Publishes the Anti-Lag context required by the FSR swap chain. */
-	void PublishAntiLag2SwapChainData();
-	/** @brief Signals the end of rendering to Anti-Lag before presentation. */
-	void MarkAntiLag2EndOfFrame();
 };

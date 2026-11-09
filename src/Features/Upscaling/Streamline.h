@@ -30,8 +30,7 @@ public:
 	/** @brief Returns the short identifier used for logging. */
 	inline std::string GetShortName() { return "Streamline"; }
 
-	static constexpr UINT kNvidiaVendorId = 0x10DE;
-
+	bool enabledAtBoot = false;
 	bool initialized = false;
 	bool triedInitialization = false;
 
@@ -88,8 +87,6 @@ public:
 	};
 	ReflexOptionsCache reflexOptionsCache{};
 	uint32_t lastReflexSleepFrame = UINT32_MAX;
-	uint32_t lastConstantsFrame = UINT32_MAX;
-	bool constantsResetPending = false;
 
 	/**
 	 * @brief Executes DLSS evaluation for a single viewport with the given resources.
@@ -104,7 +101,7 @@ public:
 	 * @param extentOut Output resolution extent.
 	 * @param outputWidth Target output width for DLSS options.
 	 */
-	bool EvaluateDLSS(sl::ViewportHandle vp,
+	void EvaluateDLSS(sl::ViewportHandle vp,
 		ID3D11Resource* colorIn, ID3D11Resource* colorOut, ID3D11Resource* depth,
 		ID3D11Resource* mvec, ID3D11Resource* reactiveMask, ID3D11Resource* transparencyMask,
 		const sl::Extent& extentIn, const sl::Extent& extentOut, uint32_t outputWidth);
@@ -121,14 +118,8 @@ public:
 	 */
 	void CheckFeatures(IDXGIAdapter* a_adapter);
 
-	static bool IsSmoothMotionEnabledForProfile();
-
 	/** @brief Binds DLSS and Reflex feature functions after the D3D device is created. */
 	void PostDevice();
-
-	bool BindFeatureFunction(sl::Feature a_feature, const char* a_functionName, void*& a_function);
-	void RequestFeatureLoad(sl::Feature a_feature, const char* a_featureName);
-	void BindReflexAndPCL(bool a_reflexSupported, bool a_pclSupported);
 
 	/** @brief Acquires a new frame token from Streamline for the current frame. */
 	bool EnsureFrameToken();
@@ -160,7 +151,7 @@ public:
 	 * @param a_transparencyCompositionMask Mask for transparency handling.
 	 * @param a_motionVectors Per-pixel motion vectors for temporal reprojection.
 	 */
-	bool Upscale(ID3D11Resource* a_upscalingTexture, ID3D11Resource* a_reactiveMask, ID3D11Resource* a_transparencyCompositionMask, ID3D11Resource* a_motionVectors);
+	void Upscale(ID3D11Resource* a_upscalingTexture, ID3D11Resource* a_reactiveMask, ID3D11Resource* a_transparencyCompositionMask, ID3D11Resource* a_motionVectors);
 	/** @brief Updates Reflex latency reduction state and performs the Reflex sleep call. */
 	void UpdateReflex();
 

@@ -566,13 +566,15 @@ bool CameraFX::EnsurePipeline()
 	return pipelineReady;
 }
 
+void CameraFX::Load()
+{
+	stl::detour_thunk<MenuManager_DrawInterfaceStart>(REL::RelocationID(79947, 82084));
+	logger::info("[CameraFX] Installed interface hook");
+}
+
 void CameraFX::PostPostLoad()
 {
 	ImageSpaceModifiers::Install();
-	if (!globals::features::upscaling.loaded && !globals::features::hdrDisplay.loaded) {
-		stl::detour_thunk<MenuManager_DrawInterfaceStart>(REL::RelocationID(79947, 82084));
-		logger::info("[CameraFX] Installed interface hook");
-	}
 }
 
 void CameraFX::DataLoaded()

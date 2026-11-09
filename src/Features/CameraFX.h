@@ -120,6 +120,7 @@ struct CameraFX : Feature
 
 	virtual void SetupResources() override;
 	virtual void ClearShaderCache() override;
+	virtual void Load() override;
 	virtual void PostPostLoad() override;
 	virtual void DataLoaded() override;
 	virtual void GameLoaded() override;
