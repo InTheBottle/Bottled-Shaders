@@ -912,10 +912,11 @@ void Effects11Editor::DrawCategory(const std::string& a_category, const char* a_
 	}
 
 	if (a_category == "ENVIRONMENT") {
-		if (ImGui::SliderFloat(T(TKEY("pbr_color_pow"), "ColorPow on PBR"), &globals::features::effects11.settings.PBRColorPowStrength, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
+		if (ImGui::SliderFloat(T(TKEY("pbr_color_pow"), "ColorPow on PBR Metals"), &globals::features::effects11.settings.PBRColorPowStrength, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
 			globals::menu->MarkUnsavedChanges();
 		Util::AddTooltip(T(TKEY("pbr_color_pow_tip"),
-			"How much of the preset's ColorPow reaches PBR materials. 0 = PBR keeps its authored colours, 1 = same as vanilla materials.\n"
+			"How much of the preset's ColorPow reaches the reflection colour of metallic PBR materials. 0 = metals keep their authored colours, 1 = same as every other material.\n"
+			"Other PBR materials always follow the preset's ColorPow.\n"
 			"Saved with Community Shaders' Save Settings, not with the preset."));
 	}
 

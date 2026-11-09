@@ -59,7 +59,6 @@ namespace LandscapeLayers
 					landRMAOS = float4(1 - landNormalAlpha, 0, 1, 0);                                                                                              \
 				}                                                                                                                                                  \
 				blendedRMAOS += landRMAOS * weight;                                                                                                                \
-				blendedPBRWeight += LandscapeLayers::PbrTileUsesFullPBR(TILE) ? weight : 0.0;                                                                      \
 				blendedRGB += landColorRGB * weight;                                                                                                               \
 				blendedAlpha += landAlpha * weight;                                                                                                                \
 				blendedNormalRGB += landNormalRGB * weight;                                                                                                        \

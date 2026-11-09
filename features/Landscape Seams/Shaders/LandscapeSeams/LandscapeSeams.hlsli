@@ -129,7 +129,6 @@ namespace LandscapeSeams
 				landRMAOS = float4(1 - landNormalAlpha, 0, 1, 0);                                                                                                                          \
 			}                                                                                                                                                                              \
 			blendedRMAOS += landRMAOS * weight;                                                                                                                                            \
-			blendedPBRWeight += LandscapeSeams::HasFlag(LandscapeSeams::FlagPbr, INDEX) ? weight : 0.0;                                                                                    \
 			blendedRGB += landColorRGB * weight;                                                                                                                                           \
 			blendedAlpha += landAlpha * weight;                                                                                                                                            \
 			blendedNormalRGB += landNormalRGB * weight;                                                                                                                                    \

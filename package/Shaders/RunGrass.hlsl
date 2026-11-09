@@ -479,7 +479,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 {
 	PS_OUTPUT psout = (PS_OUTPUT)0;
 	float4 baseColor = TexBaseSampler.SampleBias(SampBaseSampler, input.TexCoord.xy, SharedData::MipBias);
-	baseColor.xyz = Color::PBRAlbedo(ColorManagement::DiffuseToWorking(baseColor.xyz, true));
+	baseColor.xyz = Color::Albedo(ColorManagement::DiffuseToWorking(baseColor.xyz, true));
 
 #			if defined(RENDER_DEPTH)
 	float diffuseAlpha = input.Fade * baseColor.w;
@@ -554,18 +554,18 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float vertexAO = max(max(vertexColor.r, vertexColor.g), vertexColor.b);
 	vertexColor = Color::LinearSRGBToWorking(vertexColor / max(vertexAO, EPSILON_DIVISION));
 	material.BaseColor = Color::LinearToPBRMaterial(Color::PBRMaterialToLinear(baseColor.xyz) * vertexColor);
-	material.F0 = lerp(saturate(rawRMAOS.w), Color::UndoPBRColorPow(material.BaseColor), material.Metallic);
+	material.F0 = lerp(saturate(rawRMAOS.w), Color::PBRColorPow(Color::UndoEnbColorPow(material.BaseColor)), material.Metallic);
 	material.BaseColor *= 1 - material.Metallic;
 	material.Thickness = 1.0f;
 	[branch] if ((PBRFlags & PBR::Flags::Subsurface) != 0)
 	{
-		material.SubsurfaceColor = Color::PBRColorPow(PBRParams2.xyz);
+		material.SubsurfaceColor = Color::EnbColorPow(PBRParams2.xyz);
 		material.Thickness = PBRParams2.w;
 		material.SubsurfaceBalance = PBRParams4.x;
 		[branch] if (pbrDetail && (PBRFlags & PBR::Flags::HasFeatureTexture0) != 0)
 		{
 			float4 subsurface = TexSubsurfaceSampler.Sample(SampSubsurfaceSampler, input.TexCoord.xy);
-			material.SubsurfaceColor *= Color::PBRAlbedo(Color::LinearSRGBToWorking(subsurface.xyz));
+			material.SubsurfaceColor *= Color::Albedo(Color::LinearSRGBToWorking(subsurface.xyz));
 			material.Thickness *= subsurface.w;
 		}
 		else
