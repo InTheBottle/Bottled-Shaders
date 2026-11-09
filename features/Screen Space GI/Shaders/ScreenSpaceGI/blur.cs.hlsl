@@ -13,10 +13,12 @@ Texture2D<half4> srcNormalRoughness : register(t1);
 Texture2D<unorm float> srcAccumFrames : register(t2);  // maybe half-res
 Texture2D<float4> srcIlY : register(t3);               // maybe half-res
 Texture2D<float2> srcIlCoCg : register(t4);            // maybe half-res
+Texture2D<unorm float> srcAo : register(t5);           // maybe half-res
 
 RWTexture2D<unorm float> outAccumFrames : register(u0);
 RWTexture2D<float4> outIlY : register(u1);
 RWTexture2D<float2> outIlCoCg : register(u2);
+RWTexture2D<unorm float> outAo : register(u3);
 
 // samples = 8, min distance = 0.5, average samples on radius = 2
 static const float3 g_Poisson8[8] = {
@@ -116,15 +118,16 @@ float2x2 getRotationMatrix(float noise)
 	halfAngle *= 1 - lerp(0, 0.8, sqrt(saturate(accumFrames * 255 / (float)MaxAccumFrames)));
 #endif
 
-	const float4 ilY = srcIlY[dtid];
-	const float2 ilCoCg = srcIlCoCg[dtid];
-
-	float4 ySum = ilY;
-	float2 coCgSum = ilCoCg;
+#ifdef GI
+	float4 ySum = srcIlY[dtid];
+	float2 coCgSum = srcIlCoCg[dtid];
+#endif
 #if defined(TEMPORAL_DENOISER)
 	float fSum = accumFrames;
 #endif
 	float wSum = 1;
+	float aoSum = srcAo[dtid];
+	float aoWSum = 1;
 	for (uint i = 0; i < numSamples; i++) {
 		float w = GaussianWeight(g_Poisson8[i].z);
 
@@ -151,21 +154,27 @@ float2x2 getRotationMatrix(float noise)
 		// normal weight
 		w *= 1 - saturate(FastMath::acosFast4(saturate(dot(normalSample, normal))) / halfAngle);
 
+		aoSum += srcAo.SampleLevel(samplerPointClamp, uvSample * OUT_FRAME_SCALE, 0) * w;
+		aoWSum += w;
+
 		w = max(w, 0.01);
 
-		if (w > 1e-8) {
-			ySum += srcIlY.SampleLevel(samplerPointClamp, uvSample * OUT_FRAME_SCALE, 0) * w;
-			coCgSum += srcIlCoCg.SampleLevel(samplerPointClamp, uvSample * OUT_FRAME_SCALE, 0) * w;
-#if defined(TEMPORAL_DENOISER)
-			fSum += srcAccumFrames.SampleLevel(samplerPointClamp, uvSample * OUT_FRAME_SCALE, 0) * w;
+#ifdef GI
+		ySum += srcIlY.SampleLevel(samplerPointClamp, uvSample * OUT_FRAME_SCALE, 0) * w;
+		coCgSum += srcIlCoCg.SampleLevel(samplerPointClamp, uvSample * OUT_FRAME_SCALE, 0) * w;
 #endif
-			wSum += w;
-		}
+#if defined(TEMPORAL_DENOISER)
+		fSum += srcAccumFrames.SampleLevel(samplerPointClamp, uvSample * OUT_FRAME_SCALE, 0) * w;
+#endif
+		wSum += w;
 	}
 
+#ifdef GI
 	outIlY[dtid] = ySum / wSum;
 	outIlCoCg[dtid] = coCgSum / wSum;
+#endif
 #if defined(TEMPORAL_DENOISER)
 	outAccumFrames[dtid] = fSum / wSum;
 #endif
+	outAo[dtid] = aoSum / aoWSum;
 }

@@ -346,6 +346,7 @@ void ScreenSpaceGI::DrawSettings()
 		BUFFER_VIEWER_NODE(texRadiance, debugRescale)
 		BUFFER_VIEWER_NODE(texAo[0], debugRescale)
 		BUFFER_VIEWER_NODE(texAo[1], debugRescale)
+		BUFFER_VIEWER_NODE(texAoBlur, debugRescale)
 		BUFFER_VIEWER_NODE(texIlY[0], debugRescale)
 		BUFFER_VIEWER_NODE(texIlY[1], debugRescale)
 		BUFFER_VIEWER_NODE(texIlCoCg[0], debugRescale)
@@ -556,6 +557,12 @@ void ScreenSpaceGI::SetupResources()
 			texAo[1] = eastl::make_unique<Texture2D>(texDesc, "SSGI::AO[1]");
 			texAo[1]->CreateSRV(srvDesc);
 			texAo[1]->CreateUAV(uavDesc);
+
+			texAoBlur = eastl::make_unique<Texture2D>(texDesc, "SSGI::AOBlur");
+			texAoBlur->CreateSRV(srvDesc);
+			texAoBlur->CreateUAV(uavDesc);
+
+			outputAo = texAo[0].get();
 		}
 
 		srvDesc.Format = uavDesc.Format = texDesc.Format = DXGI_FORMAT_R8_UNORM;
@@ -794,7 +801,7 @@ void ScreenSpaceGI::DrawSSGI()
 	if (!(settings.Enabled && ShadersOK())) {
 		if (!outputsCleared) {
 			FLOAT clr[4] = { 0.f, 0.f, 0.f, 0.f };
-			context->ClearUnorderedAccessViewFloat(texAo[outputAoIdx]->uav.get(), clr);
+			context->ClearUnorderedAccessViewFloat(outputAo->uav.get(), clr);
 			context->ClearUnorderedAccessViewFloat(texIlY[outputIlIdx]->uav.get(), clr);
 			context->ClearUnorderedAccessViewFloat(texIlCoCg[outputIlIdx]->uav.get(), clr);
 			outputsCleared = true;
@@ -998,6 +1005,8 @@ void ScreenSpaceGI::DrawSSGI()
 		lastFrameAoTexIdx = inputAoTexIdx;
 	}
 
+	Texture2D* aoResult = texAo[inputAoTexIdx].get();
+
 	// blur
 	if (settings.EnableBlur) {
 		TracyD3D11Zone(globals::state->tracyCtx, "SSGI - Diffuse Blur");
@@ -1008,10 +1017,12 @@ void ScreenSpaceGI::DrawSSGI()
 		srvs.at(2) = texAccumFrames[lastFrameAccumTexIdx]->srv.get();
 		srvs.at(3) = texIlY[inputGITexIdx]->srv.get();
 		srvs.at(4) = texIlCoCg[inputGITexIdx]->srv.get();
+		srvs.at(5) = aoResult->srv.get();
 
 		uavs.at(0) = texAccumFrames[!lastFrameAccumTexIdx]->uav.get();
 		uavs.at(1) = texIlY[!inputGITexIdx]->uav.get();
 		uavs.at(2) = texIlCoCg[!inputGITexIdx]->uav.get();
+		uavs.at(3) = texAoBlur->uav.get();
 
 		context->CSSetShaderResources(0, (uint)srvs.size(), srvs.data());
 		context->CSSetUnorderedAccessViews(0, (uint)uavs.size(), uavs.data(), nullptr);
@@ -1020,16 +1031,19 @@ void ScreenSpaceGI::DrawSSGI()
 		context->Dispatch((internalRes[0] + 7u) >> 3, (internalRes[1] + 7u) >> 3, 1);
 		globals::profiler->EndPass();
 
-		inputGITexIdx = !inputGITexIdx;
-		lastFrameGITexIdx = inputGITexIdx;
+		if (settings.EnableGI) {
+			inputGITexIdx = !inputGITexIdx;
+			lastFrameGITexIdx = inputGITexIdx;
+		}
 		lastFrameAccumTexIdx = !lastFrameAccumTexIdx;
+		aoResult = texAoBlur.get();
 	}
 
 	// upsample
 	if (settings.ResolutionMode != 0) {
 		resetViews();
 		srvs.at(0) = texWorkingDepth->srv.get();
-		srvs.at(1) = texAo[inputAoTexIdx]->srv.get();
+		srvs.at(1) = aoResult->srv.get();
 		srvs.at(2) = texIlY[inputGITexIdx]->srv.get();
 		srvs.at(3) = texIlCoCg[inputGITexIdx]->srv.get();
 		srvs.at(4) = GiSpecularSRV(inputAoTexIdx);
@@ -1048,10 +1062,12 @@ void ScreenSpaceGI::DrawSSGI()
 
 		inputAoTexIdx = !inputAoTexIdx;
 		inputGITexIdx = !inputGITexIdx;
+		aoResult = texAo[inputAoTexIdx].get();
 	}
 
 	outputAoIdx = inputAoTexIdx;
 	outputIlIdx = inputGITexIdx;
+	outputAo = aoResult;
 
 	// cleanup
 	resetViews();

@@ -55,6 +55,7 @@ public:
 	bool recompileFlag = false;
 	uint outputAoIdx = 0;
 	uint outputIlIdx = 0;
+	Texture2D* outputAo = nullptr;
 	bool outputsCleared = false;
 
 	// Loading screen radiance decays at only 1/MaxAccumFrames per frame, bleeding the old scene
@@ -156,6 +157,7 @@ public:
 	winrt::com_ptr<ID3D11UnorderedAccessView> uavNormal[5] = { nullptr };
 	eastl::unique_ptr<Texture2D> texAccumFrames[2] = { nullptr };
 	eastl::unique_ptr<Texture2D> texAo[2] = { nullptr };
+	eastl::unique_ptr<Texture2D> texAoBlur = nullptr;
 	eastl::unique_ptr<Texture2D> texIlY[2] = { nullptr };
 	eastl::unique_ptr<Texture2D> texIlCoCg[2] = { nullptr };
 	eastl::unique_ptr<Texture2D> texGiSpecular[2] = { nullptr };
@@ -167,9 +169,9 @@ public:
 	/** @brief Returns the current output SRVs for AO, indirect lighting Y/CoCg, and specular GI (or nullptrs if disabled). */
 	inline auto GetOutputTextures()
 	{
-		return (loaded && settings.Enabled) ?
+		return (loaded && settings.Enabled && outputAo) ?
 		           std::make_tuple(
-					   texAo[outputAoIdx]->srv.get(),
+					   outputAo->srv.get(),
 					   texIlY[outputIlIdx]->srv.get(),
 					   texIlCoCg[outputIlIdx]->srv.get(),
 					   GiSpecularSRV(outputAoIdx)) :

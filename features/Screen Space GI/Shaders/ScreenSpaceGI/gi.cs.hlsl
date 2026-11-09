@@ -131,6 +131,7 @@ void CalculateGI(
 		viewspaceNormal = -viewspaceNormal;
 
 	float visibility = 0;
+	float visibilityWeight = 0;
 	float visibilitySpecular = 0;
 	float4 radianceY = 0;
 	float2 radianceCoCg = 0;
@@ -157,7 +158,9 @@ void CalculateGI(
 
 		float3 projectedNormalVec = viewspaceNormal - axisVec * dot(viewspaceNormal, axisVec);
 		// 1/length(v) == rsqrt(dot(v,v)). max() guards against a zero-length projection.
-		float rcpProjectedNormalVecLength = rsqrt(max(dot(projectedNormalVec, projectedNormalVec), EPSILON_LENGTH_SQ));
+		float projectedNormalVecLengthSq = max(dot(projectedNormalVec, projectedNormalVec), EPSILON_LENGTH_SQ);
+		float rcpProjectedNormalVecLength = rsqrt(projectedNormalVecLengthSq);
+		float projectedNormalVecLength = projectedNormalVecLengthSq * rcpProjectedNormalVecLength;
 		float signNorm = sign(dot(orthoDirectionVec, projectedNormalVec));
 		float cosNorm = saturate(dot(projectedNormalVec, viewVec) * rcpProjectedNormalVecLength);
 
@@ -296,7 +299,8 @@ void CalculateGI(
 			}
 		}
 
-		visibility += countbits(bitmask) * 0.03125;
+		visibility += projectedNormalVecLength * countbits(bitmask) * 0.03125;
+		visibilityWeight += projectedNormalVecLength;
 
 #if defined(GI) && defined(GI_SPECULAR)
 		visibilitySpecular += countbits(bitmaskGISpecular) * 0.03125;
@@ -305,7 +309,7 @@ void CalculateGI(
 
 	float depthFade = GetDepthFade(viewspaceZ);
 
-	visibility *= rcpNumSlices;
+	visibility /= max(visibilityWeight, EPSILON_DIVISION);
 	visibility = lerp(saturate(visibility), 0, depthFade);
 	visibility = 1 - pow(abs(1 - visibility), AOPower);
 
