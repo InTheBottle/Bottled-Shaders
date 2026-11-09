@@ -6,6 +6,7 @@
 #include "ShaderCache.h"
 #include "State.h"
 #include "Utils/D3D.h"
+#include "Utils/FileSystem.h"
 #include "Utils/Game.h"
 #include "Utils/UI.h"
 
@@ -154,7 +155,7 @@ namespace
 		std::filesystem::directory_iterator it(std::filesystem::path(a_folder), error);
 		for (const std::filesystem::directory_iterator end; !error && it != end; it.increment(error)) {
 			std::error_code fileError;
-			if (it->is_regular_file(fileError) && ToLower(it->path().extension().string()) == a_extension)
+			if (it->is_regular_file(fileError) && ToLower(Util::PathHelpers::ToUtf8(it->path().extension())) == a_extension)
 				files.push_back(it->path());
 		}
 		std::ranges::sort(files);
@@ -230,19 +231,19 @@ void DetailMaps::LoadSets()
 	for (const auto& path : ListFiles(SetsPath, ".dds")) {
 		DirectX::ScratchImage image;
 		if (FAILED(DirectX::LoadFromDDSFile(path.c_str(), DirectX::DDS_FLAGS_NONE, nullptr, image))) {
-			ruleErrors.push_back(std::format("{}: {}", path.filename().string(), T(TKEY("set_load_failed"), "could not be loaded")));
+			ruleErrors.push_back(std::format("{}: {}", Util::PathHelpers::ToUtf8(path.filename()), T(TKEY("set_load_failed"), "could not be loaded")));
 			continue;
 		}
 
 		const auto& metadata = image.GetMetadata();
 		if (metadata.dimension != DirectX::TEX_DIMENSION_TEXTURE2D || metadata.arraySize != 1 || metadata.IsCubemap()) {
-			ruleErrors.push_back(std::format("{}: {}", path.filename().string(), T(TKEY("set_not_2d"), "is not a plain 2D texture")));
+			ruleErrors.push_back(std::format("{}: {}", Util::PathHelpers::ToUtf8(path.filename()), T(TKEY("set_not_2d"), "is not a plain 2D texture")));
 			continue;
 		}
 
-		Set set{ ToLower(path.stem().string()), nullptr };
+		Set set{ ToLower(Util::PathHelpers::ToUtf8(path.stem())), nullptr };
 		if (FAILED(DirectX::CreateShaderResourceView(device, image.GetImages(), image.GetImageCount(), metadata, set.view.put()))) {
-			ruleErrors.push_back(std::format("{}: {}", path.filename().string(), T(TKEY("set_create_failed"), "could not be created on the GPU")));
+			ruleErrors.push_back(std::format("{}: {}", Util::PathHelpers::ToUtf8(path.filename()), T(TKEY("set_create_failed"), "could not be created on the GPU")));
 			continue;
 		}
 
@@ -262,7 +263,7 @@ void DetailMaps::LoadRules()
 
 	const auto files = ListFiles(RulesPath, ".json");
 	for (size_t fileIndex = 0; fileIndex < files.size(); ++fileIndex) {
-		const auto fileName = files[fileIndex].filename().string();
+		const auto fileName = Util::PathHelpers::ToUtf8(files[fileIndex].filename());
 		json data;
 		try {
 			std::ifstream stream(files[fileIndex]);
