@@ -1,0 +1,118 @@
+name: "Neural Rendering: Prerelease Retention"
+
+# Intentionally callable only by the Neural Rendering release workflow.
+# Scheduled workflows run on the default branch, not PR/NeuralRendering.
+on:
+  workflow_call:
+    inputs:
+      newest_tag:
+        description: "Neural Rendering release that was just published"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  prune:
+    name: Keep daily (30 days) and monthly snapshots
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Fetch all releases (including paginated history)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/${GH_REPO}/releases?per_page=100" > releases.json
+
+      - name: Calculate safe retention plan
+        env:
+          NEWEST_TAG: ${{ inputs.newest_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from datetime import datetime, timedelta, timezone
+          from pathlib import Path
+          import json
+          import os
+          import re
+          import sys
+
+          pattern = re.compile(r"nr-v\d+\.\d+\.\d+-[a-f0-9]{12}\Z")
+          newest_tag = os.environ["NEWEST_TAG"]
+          if not pattern.fullmatch(newest_tag):
+              sys.exit(f"Unexpected newest tag {newest_tag!r}; refusing cleanup")
+
+          pages = json.loads(Path("releases.json").read_text(encoding="utf-8"))
+          if not isinstance(pages, list) or any(not isinstance(p, list) for p in pages):
+              sys.exit("Unexpected release-list API response; refusing cleanup")
+
+          releases = []
+          seen_tags = set()
+          for page in pages:
+              for release in page:
+                  tag = release.get("tag_name", "")
+                  if not pattern.fullmatch(tag) or release.get("draft") or not release.get("prerelease"):
+                      continue
+                  timestamp = release.get("published_at")
+                  if not timestamp:
+                      continue  # Unknown publication date: never delete it
+                  if tag in seen_tags:
+                      sys.exit(f"Duplicate release tag {tag}; refusing cleanup")
+                  seen_tags.add(tag)
+                  published = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                  if published.tzinfo is None:
+                      sys.exit(f"Unzoned publication time for {tag}; refusing cleanup")
+                  releases.append((published.astimezone(timezone.utc), tag))
+
+          if newest_tag not in seen_tags:
+              sys.exit("Newly published release was not found in the API response; refusing cleanup")
+
+          # Exactly one most recently published prerelease per UTC date for the
+          # last 30 calendar days (today included), then one per older UTC month.
+          cutoff_date = datetime.now(timezone.utc).date() - timedelta(days=29)
+          releases.sort(reverse=True)
+          buckets = set()
+          keep = {newest_tag}  # Never delete the release which invoked cleanup.
+          delete = []
+          for published, tag in releases:
+              date = published.date()
+              bucket = ("daily", date.isoformat()) if date >= cutoff_date else ("monthly", date.strftime("%Y-%m"))
+              if bucket not in buckets:
+                  buckets.add(bucket)
+                  keep.add(tag)
+              elif tag not in keep:
+                  delete.append(tag)
+
+          Path("delete-tags.txt").write_text("".join(t + "\n" for t in delete), encoding="utf-8")
+          summary = (
+              f"### Neural Rendering prerelease retention\n\n"
+              f"- Latest 30 UTC calendar days: newest release per day\n"
+              f"- Earlier dates: newest release per UTC calendar month\n"
+              f"- Retained: **{len(keep)}** releases\n"
+              f"- To delete: **{len(delete)}** releases\n"
+              f"- Protected newest tag: `{newest_tag}`\n"
+          )
+          print(summary)
+          if os.getenv("GITHUB_STEP_SUMMARY"):
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+                  f.write(summary)
+          PY
+
+      - name: Delete only superseded Neural Rendering prereleases and tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] || continue
+            echo "Deleting superseded Neural Rendering prerelease: $tag"
+            gh release delete "$tag" --yes --cleanup-tag
+          done < delete-tags.txt
