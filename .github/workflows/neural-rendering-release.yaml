@@ -1,0 +1,93 @@
+name: "Neural Rendering: Automatic Prerelease"
+
+on:
+  push:
+    branches:
+      - "PR/NeuralRendering"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: neural-rendering-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and validate
+    uses: ./.github/workflows/_shared-build.yaml
+    with:
+      ref: ${{ github.sha }}
+      repository: ${{ github.repository }}
+      run-cpp: true
+      run-shader-validation: true
+      cmake-preset: ALL
+
+  publish:
+    name: Publish Neural Rendering prerelease
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      created: ${{ steps.publish.outputs.created }}
+      release_tag: ${{ steps.publish.outputs.release_tag }}
+    steps:
+      - name: Download AIO package
+        uses: actions/download-artifact@v7
+        with:
+          name: dist-artifacts
+          path: dist/
+
+      - name: Publish GitHub prerelease
+        id: publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+          BUILD_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$BUILD_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Missing or invalid CMake build version: $BUILD_VERSION"
+            exit 1
+          fi
+          short_sha="${COMMIT_SHA:0:12}"
+          tag="nr-v${BUILD_VERSION}-${short_sha}"
+
+          shopt -s nullglob
+          assets=(dist/CommunityShaders_AIO-*.7z dist/CommunityShaders_AIO-*.zip)
+          if (( ${#assets[@]} == 0 )); then
+            echo "::error::No CommunityShaders AIO package found in dist/"
+            exit 1
+          fi
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release already exists: https://github.com/${GH_REPO}/releases/tag/${tag}"
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          printf 'Automated Neural Rendering preview from `PR/NeuralRendering`.\n\nCommit: `%s`\nCMake version: `%s`\n' \
+            "$COMMIT_SHA" "$BUILD_VERSION" > release-notes.md
+
+          gh release create "$tag" "${assets[@]}" \
+            --target "$COMMIT_SHA" \
+            --title "Neural Rendering v${BUILD_VERSION} (${short_sha})" \
+            --notes-file release-notes.md \
+            --prerelease \
+            --latest=false
+
+          echo "created=true" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$tag" >> "$GITHUB_OUTPUT"
+
+  retention:
+    name: Apply daily/monthly release retention
+    needs: publish
+    if: ${{ needs.publish.outputs.created == 'true' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/neural-rendering-retention.yaml
+    with:
+      newest_tag: ${{ needs.publish.outputs.release_tag }}
