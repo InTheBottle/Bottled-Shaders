@@ -57,9 +57,10 @@ jobs:
           tag="nr-v${BUILD_VERSION}-${short_sha}"
 
           shopt -s nullglob
-          assets=(dist/CommunityShaders_AIO-*.7z dist/CommunityShaders_AIO-*.zip)
+          assets=(dist/BottledShaders_AIO-*.7z dist/BottledShaders_AIO-*.zip)
           if (( ${#assets[@]} == 0 )); then
-            echo "::error::No CommunityShaders AIO package found in dist/"
+            echo "::error::No BottledShaders AIO package found in dist/"
+            find dist/ -maxdepth 2 -type f -print
             exit 1
           fi
 
