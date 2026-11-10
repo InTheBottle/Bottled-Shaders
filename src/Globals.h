@@ -9,7 +9,6 @@ struct VolumetricShadows;
 struct ExtendedMaterials;
 struct GrassCollision;
 struct GrassLighting;
-struct FoliageLighting;
 struct GrassOptimizations;
 struct HairSpecular;
 struct HiZOcclusion;
@@ -48,19 +47,27 @@ struct ScreenshotFeature;
 struct Skin;
 struct SnowCover;
 struct FootstepParticles;
+struct ProceduralLightning;
+struct ProceduralNightSky;
+struct HeatHaze;
+struct CameraFX;
+struct CapsuleShadows;
 struct NeuralRendering;
 struct HairBacklighting;
+struct NightEye;
 struct FurShells;
+struct DetailMaps;
 struct LandscapeSeams;
 struct SnowDeformation;
+struct SceneManager;
 
 class State;
 class Deferred;
 struct TruePBR;
+struct DeveloperTools;
 class RenderDoc;
 class RemoteControl;
 class Menu;
-class WeatherManager;
 class SceneSettingsManager;
 
 namespace SIE
@@ -112,7 +119,6 @@ namespace globals
 		extern ExtendedMaterials extendedMaterials;
 		extern GrassCollision grassCollision;
 		extern GrassLighting grassLighting;
-		extern FoliageLighting foliageLighting;
 		extern GrassOptimizations grassOptimizations;
 		extern HairSpecular hairSpecular;
 		extern HiZOcclusion hiZOcclusion;
@@ -143,6 +149,8 @@ namespace globals
 		extern Upscaling upscaling;
 		extern HDRDisplay hdrDisplay;
 		extern Effects11 effects11;
+		extern DeveloperTools developerTools;
+		// Developer Tools components, not features: driven by developerTools.
 		extern RenderDoc renderDoc;
 		extern RemoteControl remoteControl;
 		extern ScreenshotFeature screenshotFeature;
@@ -153,11 +161,19 @@ namespace globals
 		extern Skin skin;
 		extern SnowCover snowCover;
 		extern FootstepParticles footstepParticles;
+		extern ProceduralLightning proceduralLightning;
+		extern ProceduralNightSky proceduralNightSky;
+		extern HeatHaze heatHaze;
+		extern CameraFX cameraFX;
+		extern CapsuleShadows capsuleShadows;
 		extern NeuralRendering neuralRendering;
 		extern HairBacklighting hairBacklighting;
+		extern NightEye nightEye;
 		extern FurShells furShells;
+		extern DetailMaps detailMaps;
 		extern LandscapeSeams landscapeSeams;
 		extern SnowDeformation snowDeformation;
+		extern SceneManager sceneManager;
 
 	}
 
@@ -274,7 +290,6 @@ namespace globals
 	extern Menu* menu;
 	extern SIE::ShaderCache* shaderCache;
 	extern Profiler* profiler;
-	extern WeatherManager* weatherManager;
 	extern SceneSettingsManager* sceneSettingsManager;
 
 	/** @brief Initializes core singletons (ShaderCache, State, Menu, Deferred). Called once at plugin load. */

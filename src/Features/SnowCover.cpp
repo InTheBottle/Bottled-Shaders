@@ -27,6 +27,26 @@ void copyString(const std::string& input, char* dst, size_t dst_size)
 	dst[dst_size - 1] = '\0';
 }
 
+static bool IsObjectLODTree(const char* a_name, const RE::BSShaderProperty* a_property)
+{
+	if (!a_name)
+		return false;
+	if (_strnicmp(a_name, "treepassthru", 12) == 0)
+		return true;
+	if (!a_property || !a_property->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kTwoSided))
+		return false;
+
+	std::string_view name(a_name);
+	constexpr std::string_view largeRef = "-LargeRef";
+	if (name.size() > largeRef.size() && _strnicmp(name.data() + name.size() - largeRef.size(), largeRef.data(), largeRef.size()) == 0)
+		name.remove_suffix(largeRef.size());
+	for (const std::string_view category : { "obj"sv, "objHD"sv, "objpassthru"sv }) {
+		if (name.size() == category.size() && _strnicmp(name.data(), category.data(), name.size()) == 0)
+			return true;
+	}
+	return false;
+}
+
 void SnowCover::DrawSettings()
 {
 	ImGui::Checkbox("Enable Nicer Foliage", (bool*)&settings.EnableExpensiveFoliage);
@@ -496,12 +516,13 @@ void SnowCover::ReleaseTextures()
 
 void SnowCover::Reload()
 {
+	const char* currentWorldspace = GetWorldspace();
+	if (last_worldspace == currentWorldspace)
+		return;
 	std::ifstream fileStream;
 	std::filesystem::path path;
 	try {
-		std::string curr_worldspace = GetWorldspace();
-		if (curr_worldspace == last_worldspace)
-			return;
+		std::string curr_worldspace = currentWorldspace;
 		last_worldspace = curr_worldspace;
 		ResetWorldConfig();
 		ReleaseTextures();
@@ -1055,8 +1076,18 @@ void SnowCover::BSLightingShader_Setup(RE::BSRenderPass* a_pass)
 	auto name = a_pass->geometry->name.c_str();
 	// Hash once per pass; fnv_hash dereferences unguarded and BSFixedString::c_str() can be null.
 	const uint64_t nameHash = name ? FormIdParser::fnv_hash(name) : 0;
-	if ((a_pass->geometry->HasAnimation() || (userData && ((userData->GetObjectReference() && userData->GetObjectReference()->IsBoundAnimObject()) || userData->CanBeMoved()))) && !(name && whitelist.contains(nameHash))) {
-		if (settings.AffectHavok && userData && userData->formType != RE::FormType::ActorCharacter && userData->CanBeMoved())
+	static const RE::BSFixedString bsxKey{ "BSX" };
+	const auto* bsxFlags = a_pass->geometry->GetExtraData<RE::BSXFlags>(bsxKey);
+	const bool hasAnimation = bsxFlags && (bsxFlags->value & 2) != 0;
+	auto* baseObject = userData ? userData->GetObjectReference() : nullptr;
+	int canBeMoved = -1;
+	const auto movable = [&]() {
+		if (canBeMoved < 0)
+			canBeMoved = userData->CanBeMoved() ? 1 : 0;
+		return canBeMoved == 1;
+	};
+	if ((hasAnimation || (userData && ((baseObject && baseObject->IsBoundAnimObject()) || movable()))) && !(name && whitelist.contains(nameHash))) {
+		if (settings.AffectHavok && userData && userData->formType != RE::FormType::ActorCharacter && movable())
 			state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::NoSnow;
 		else
 			state->permutationData.ExtraShaderDescriptor |= (uint)State::ExtraShaderDescriptors::NoSnow;
@@ -1076,7 +1107,7 @@ void SnowCover::BSLightingShader_Setup(RE::BSRenderPass* a_pass)
 	else
 		state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::SnowRooftop;
 
-	if (name && _strnicmp(name, "treepassthru", 12) == 0)
+	if (!userData && IsObjectLODTree(name, a_pass->shaderProperty))
 		state->permutationData.ExtraShaderDescriptor |= (uint)State::ExtraShaderDescriptors::SnowLODTree;
 	else
 		state->permutationData.ExtraShaderDescriptor &= ~(uint)State::ExtraShaderDescriptors::SnowLODTree;
@@ -1153,24 +1184,28 @@ void SnowCover::DataLoaded()
 	logger::info("[Snow Cover] Survival Mode region conditions now read ground snow");
 }
 
+float SnowCover::GetEnvironmentSnowAmount(const RE::NiPoint3& a_position)
+{
+	if (!snowMapCpuPath.empty())
+		LoadSnowMapCpu();
+	float map = 0.5f;
+	if (const auto* image = snowMapCpu.GetImage(0, 0, 0)) {
+		const float2 uv = float2(a_position.x, a_position.y) * wsettings.mapScale + wsettings.mapOffset;
+		const auto x = static_cast<size_t>(std::clamp(uv.x, 0.0f, 1.0f) * (image->width - 1) + 0.5f);
+		const auto y = static_cast<size_t>(std::clamp(uv.y, 0.0f, 1.0f) * (image->height - 1) + 0.5f);
+		map = image->pixels[y * image->rowPitch + x] / 255.0f;
+	}
+	return (a_position.z - settings.SnowHeightOffset + (map - 0.5f) * wsettings.mapZscale + perFrame.SeasonalAltitude) / std::max(wsettings.BlendSmoothness, 1.0f);
+}
+
 void SnowCover::UpdateSurvival()
 {
 	float amount = 0.0f;
 	if (survivalEnabled && survivalGlobal && wsettings.EnableSnowCover) {
-		if (!snowMapCpuPath.empty())
-			LoadSnowMapCpu();
 		auto* player = RE::PlayerCharacter::GetSingleton();
 		auto* tes = RE::TES::GetSingleton();
 		if (player && tes && !tes->interiorCell && !globals::state->isLoadingMenuOpen) {
-			const auto p = player->GetPosition();
-			float map = 0.5f;
-			if (const auto* image = snowMapCpu.GetImage(0, 0, 0)) {
-				const float2 uv = float2(p.x, p.y) * wsettings.mapScale + wsettings.mapOffset;
-				const auto x = static_cast<size_t>(std::clamp(uv.x, 0.0f, 1.0f) * (image->width - 1) + 0.5f);
-				const auto y = static_cast<size_t>(std::clamp(uv.y, 0.0f, 1.0f) * (image->height - 1) + 0.5f);
-				map = image->pixels[y * image->rowPitch + x] / 255.0f;
-			}
-			const float env = (p.z - settings.SnowHeightOffset + (map - 0.5f) * wsettings.mapZscale + perFrame.SeasonalAltitude) / std::max(wsettings.BlendSmoothness, 1.0f);
+			const float env = GetEnvironmentSnowAmount(player->GetPosition());
 			const float snowTime = perFrame.TimeSnowing;
 			const float weather = snowTime * snowTime * snowTime * std::max(500.0f, perFrame.SnowingDensity) / 500.0f;
 			amount = std::clamp(std::max(env, weather), 0.0f, 1.0f);

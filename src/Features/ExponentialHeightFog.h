@@ -41,8 +41,6 @@ public:
 	virtual void LoadSettings(json& o_json) override;
 	virtual void SaveSettings(json& o_json) override;
 
-	/** @brief Registers all fog parameters as weather-interpolatable variables. */
-	void RegisterWeatherVariables() override;
 	/** @brief Captures the current directional shadow map SRV for use in volumetric fog light scattering. */
 	void CaptureDirectionalShadowMap();
 
@@ -108,6 +106,7 @@ public:
 		float distanceHazeMaxOpacity = 0.0f;
 		float distanceHazeStartDistance = 15000.0f;
 		float distanceHazeFadeDistance = 60000.0f;
+		float4 originalFogColorOverride = { 1.0f, 1.0f, 1.0f, 0.0f };  // rgb = replaces the weather fog colour, a = blend amount
 	} settings;
 	STATIC_ASSERT_ALIGNAS_16(Settings);
 	static_assert(offsetof(Settings, volumetricFogNoiseVelocity) == 224);
@@ -115,12 +114,13 @@ public:
 	static_assert(offsetof(Settings, vanillaFogNearColor) == 272);
 	static_assert(offsetof(Settings, fogLightingInfluence) == 304);
 	static_assert(offsetof(Settings, distanceHazeMaxOpacity) == 308);
-	static_assert(sizeof(Settings) == 320);
+	static_assert(offsetof(Settings, originalFogColorOverride) == 320);
+	static_assert(sizeof(Settings) == 336);
 
 	Settings GetCommonBufferData() const;
 
 private:
-	void DrawGeneralSettings();
+	void DrawHeightFogSettings();
 	void DrawVolumetricSettings();
 
 	Settings previousFogSettings = {};
@@ -150,8 +150,8 @@ private:
 	ID3D11ShaderResourceView* UpdateEngineLocalShadowData();
 	ID3D11ComputeShader* GetMaterialSetupCS();
 	ID3D11ComputeShader* GetFarMaterialSetupCS();
-	ID3D11ComputeShader* GetConservativeDepthCS();
-	ID3D11ComputeShader* GetFarConservativeDepthCS();
+	ID3D11ComputeShader* GetConservativeDepthCS(bool a_groupReduce);
+	ID3D11ComputeShader* GetFarConservativeDepthCS(bool a_groupReduce);
 	ID3D11ComputeShader* GetLightScatteringCS();
 	ID3D11ComputeShader* GetFarLightScatteringCS();
 	ID3D11ComputeShader* GetIntegrationCS();
@@ -180,6 +180,8 @@ private:
 	ID3D11ComputeShader* farMaterialSetupCS = nullptr;
 	ID3D11ComputeShader* conservativeDepthCS = nullptr;
 	ID3D11ComputeShader* farConservativeDepthCS = nullptr;
+	ID3D11ComputeShader* conservativeDepthGroupCS = nullptr;
+	ID3D11ComputeShader* farConservativeDepthGroupCS = nullptr;
 	ID3D11ComputeShader* lightScatteringCS = nullptr;
 	ID3D11ComputeShader* farLightScatteringCS = nullptr;
 	ID3D11ComputeShader* integrationCS = nullptr;

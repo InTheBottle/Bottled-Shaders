@@ -3,11 +3,13 @@
 #include "EngineFixes/AlphaGeometryGroupCeilingFix.h"
 #include "EngineFixes/CullPoolExhaustionFix.h"
 #include "EngineFixes/EffectShaderNoDecalsFix.h"
+#include "EngineFixes/EmptyOverlayCullFix.h"
 #include "EngineFixes/LODBlendRingFix.h"
+#include "EngineFixes/LightListSearchFix.h"
 #include "EngineFixes/ShadowmapCascadeCullingFix.h"
 #include "EngineFixes/ShadowmapCascadeRasterizerFix.h"
-#include "EngineFixes/SunShadowMaskFix.h"
 #include "EngineFixes/SunOcclusionPollFix.h"
+#include "EngineFixes/SunShadowMaskFix.h"
 #include "EngineFixes/WaterReflectionCubemapFix.h"
 
 const std::vector<EngineFix*>& EngineFix::GetOnPostPostLoadFixesList()
@@ -15,6 +17,8 @@ const std::vector<EngineFix*>& EngineFix::GetOnPostPostLoadFixesList()
 	static AlphaGeometryGroupCeilingFix alphaGeometryGroupCeilingFix;
 	static CullPoolExhaustionFix cullPoolExhaustionFix;
 	static EffectShaderNoDecalsFix effectShaderNoDecalsFix;
+	static EmptyOverlayCullFix emptyOverlayCullFix;
+	static LightListSearchFix lightListSearchFix;
 	static ShadowmapCascadeCullingFix shadowmapCascadeCullingFix;
 	static ShadowmapRasterizerFix shadowmapRasterizerFix;
 	static SunShadowMaskFix sunShadowMaskFix;
@@ -25,7 +29,9 @@ const std::vector<EngineFix*>& EngineFix::GetOnPostPostLoadFixesList()
 		&alphaGeometryGroupCeilingFix,
 		&cullPoolExhaustionFix,
 		&effectShaderNoDecalsFix,
+		&emptyOverlayCullFix,
 		&LODBlendRingFix::GetInstance(),
+		&lightListSearchFix,
 		&shadowmapCascadeCullingFix,
 		&shadowmapRasterizerFix,
 		&sunShadowMaskFix,

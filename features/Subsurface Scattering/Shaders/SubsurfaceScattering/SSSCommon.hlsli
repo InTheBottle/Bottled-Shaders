@@ -1,9 +1,16 @@
 #ifndef SSS_COMMON_HLSLI
 #define SSS_COMMON_HLSLI
 
+#include "Common/ColorManagement.hlsli"
 #include "Common/Math.hlsli"
 
 #define SSSS_N_SAMPLES 21
+
+#define SSS_PROFILE_BASE 0
+#define SSS_PROFILE_HUMAN 1
+#define SSS_PROFILE_FOLIAGE 2
+#define SSS_PROFILE_TRANSLUCENT 3
+#define SSS_PROFILE_COUNT 4
 
 #define SSS_SCATTER_MODE_PRE 0
 #define SSS_SCATTER_MODE_POST 1
@@ -11,21 +18,39 @@
 
 cbuffer PerFrameSSS : register(b1)
 {
-	float4 Kernels[SSSS_N_SAMPLES + SSSS_N_SAMPLES];
-	float4 BaseProfile;
-	float4 HumanProfile;
+	float4 Kernels[SSSS_N_SAMPLES * SSS_PROFILE_COUNT];
+	float4 Profiles[SSS_PROFILE_COUNT];
+	float4 MeanFreePath[SSS_PROFILE_COUNT];
 	float SSSS_FOVY;
 	uint BurleySamples;
 	uint ScatterMode;
 	uint pad;
-	float4 MeanFreePathBase;
-	float4 MeanFreePathHuman;
 };
+
+uint SSSDecodeProfile(float encodedProfile)
+{
+	return min((uint)(max(encodedProfile, 0.0) + 0.5), SSS_PROFILE_COUNT - 1);
+}
+
+float SSSGetAmount(float2 mask, uint profile)
+{
+	return Profiles[profile].z > 0.5 ? saturate(mask.x) : 0.0;
+}
+
+float SSSGetAmount(float2 mask)
+{
+	return SSSGetAmount(mask, SSSDecodeProfile(mask.y));
+}
+
+float SSSGetMatchingAmount(float2 mask, uint profile)
+{
+	return SSSDecodeProfile(mask.y) == profile ? SSSGetAmount(mask, profile) : 0.0;
+}
 
 float3 SSSDecodeAlbedo(float3 encodedAlbedo)
 {
 	float3 albedo = encodedAlbedo / Color::PBRLightingScale;
-	return max(Color::IrradianceToLinear(albedo), 0.0f);
+	return max(ColorManagement::SceneToLinear(albedo), 0.0f);
 }
 
 float3 SSSGetAlbedoFactor(float3 albedo, uint mode)
@@ -41,7 +66,7 @@ float3 SSSGetAlbedoParticipation(float3 albedo)
 	// continuously instead of changing semantics at one quantized UNORM code.
 	// The threshold is converted to the same linear domain as albedo so non-linear
 	// lighting retains its previous effective cutoff.
-	float threshold = Color::IrradianceToLinear(EPSILON_SSS_ALBEDO);
+	float threshold = ColorManagement::SceneToLinear(EPSILON_SSS_ALBEDO);
 	return smoothstep(threshold, threshold * 4.0f, albedo);
 }
 

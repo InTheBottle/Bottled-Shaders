@@ -17,6 +17,7 @@ enum class HiZStatus : uint8_t
 	ResourcesReady,    // All resources initialized and valid
 	Running,           // Actively processing occlusion tests
 	ValidationFailed,  // Resource validation failed
+	Unsupported,       // Culling hook not installed on this game version
 	Error              // Error state - check statusMessage for details
 };
 
@@ -25,21 +26,23 @@ inline const char* HiZStatusToString(HiZStatus status)
 {
 	switch (status) {
 	case HiZStatus::Init:
-		return "Initializing";
+		return T("feature.hiz_occlusion.status_init", "Initializing");
 	case HiZStatus::CompilingShaders:
-		return "Compiling Shaders";
+		return T("feature.hiz_occlusion.status_compiling_shaders", "Compiling Shaders");
 	case HiZStatus::ShadersReady:
-		return "Shaders Ready";
+		return T("feature.hiz_occlusion.status_shaders_ready", "Shaders Ready");
 	case HiZStatus::ResourcesReady:
-		return "Resources Ready";
+		return T("feature.hiz_occlusion.status_resources_ready", "Resources Ready");
 	case HiZStatus::Running:
-		return "Running";
+		return T("feature.hiz_occlusion.status_running", "Running");
 	case HiZStatus::ValidationFailed:
-		return "Validation Failed";
+		return T("feature.hiz_occlusion.status_validation_failed", "Validation Failed");
+	case HiZStatus::Unsupported:
+		return T("feature.hiz_occlusion.status_unsupported", "Unsupported Game Version");
 	case HiZStatus::Error:
-		return "Error";
+		return T("feature.hiz_occlusion.status_error", "Error");
 	default:
-		return "Unknown";
+		return T("feature.hiz_occlusion.status_unknown", "Unknown");
 	}
 }
 
@@ -48,6 +51,7 @@ struct HiZOcclusion : OverlayFeature
 	virtual ~HiZOcclusion();
 
 	virtual inline std::string GetName() override { return "HiZ Occlusion Culling"; }
+	virtual std::string GetDisplayName() override { return T("feature.hiz_occlusion.name", "HiZ Occlusion Culling"); }
 	virtual inline std::string GetShortName() override { return "HiZOcclusion"; }
 	virtual inline std::string_view GetShaderDefineName() override { return "HIZ_OCCLUSION"; }
 	virtual std::string_view GetCategory() const override { return FeatureCategories::kDisplay; }
@@ -98,6 +102,7 @@ struct HiZOcclusion : OverlayFeature
 	std::string statusMessage;           // Detailed error/info message for debugging
 	bool resourcesSetup = false;         // whether resources have been initialized
 	bool resourcesValid = false;         // whether current resources are valid and safe to use
+	bool cullingHookInstalled = false;   // set by Hooks; the registration hook is skipped on VR
 
 	// Per-frame tracking to verify build/draw order and availability
 	uint32_t lastBuiltFrame = 0;           // frame index when the pyramid was last built
@@ -156,9 +161,10 @@ struct HiZOcclusion : OverlayFeature
 
 	// Shaders for building the Hi-Z pyramid
 	ID3D11ComputeShader* hiZBuildLevel0CS = nullptr;  // depth -> mip 0
-	ID3D11ComputeShader* hiZDownsampleCS = nullptr;   // mip n -> mip n+1 (farthest-depth reduction)
-	ID3D11ComputeShader* hiZTestCS = nullptr;         // GPU-based occlusion testing (production, no debug overlay)
-	ID3D11ComputeShader* hiZTestCSDebug = nullptr;    // GPU-based occlusion testing (with debug overlay)
+	ID3D11ComputeShader* hiZBuildMip01CS = nullptr;
+	ID3D11ComputeShader* hiZDownsampleCS = nullptr;  // mip n -> mip n+1 (farthest-depth reduction)
+	ID3D11ComputeShader* hiZTestCS = nullptr;        // GPU-based occlusion testing (production, no debug overlay)
+	ID3D11ComputeShader* hiZTestCSDebug = nullptr;   // GPU-based occlusion testing (with debug overlay)
 
 	// GPU culling resources
 	ID3D11Buffer* geometryBoundsBuffer = nullptr;  // Input: geometry bounding spheres
@@ -223,6 +229,9 @@ struct HiZOcclusion : OverlayFeature
 	static const char* GetRenderModeName(uint32_t renderMode);
 	static bool IsMainViewRegistration(uint32_t renderMode, const RE::BSGraphics::BSShaderAccumulator* accum);
 	void CaptureSunShadowDirection(const RE::NiCamera* camera);
+	bool IsCollectingStats() const;
+
+	std::atomic<uint32_t> statsDrawnFrame{ 0 };
 
 	std::array<std::atomic<float>, 3> sunShadowDirection{};
 	std::atomic<bool> sunShadowDirectionCaptured = false;
@@ -346,8 +355,8 @@ struct HiZOcclusion : OverlayFeature
 
 	struct OcclusionTracker
 	{
-		std::unordered_map<RE::BSGeometry*, RE::NiPointer<RE::BSGeometry>> occluded;
-		std::unordered_map<RE::BSGeometry*, uint32_t> counts;
+		ankerl::unordered_dense::map<RE::BSGeometry*, RE::NiPointer<RE::BSGeometry>> occluded;
+		ankerl::unordered_dense::map<RE::BSGeometry*, uint32_t> counts;
 	};
 
 	struct AsyncReadbackState
@@ -381,7 +390,7 @@ struct HiZOcclusion : OverlayFeature
 	// Geometry batch for GPU culling
 	std::vector<RE::NiPointer<RE::BSGeometry>> pendingGeometry;
 	std::vector<uint8_t> pendingPasses;
-	std::unordered_map<RE::BSGeometry*, size_t> pendingGeometryIndex;
+	ankerl::unordered_dense::map<RE::BSGeometry*, size_t> pendingGeometryIndex;
 	std::vector<TestEntry> geometryBounds;
 
 	DirectX::XMFLOAT3 lastEyePosition = {};

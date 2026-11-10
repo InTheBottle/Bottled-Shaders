@@ -8,8 +8,6 @@
     },
     "cs_editor.actions": "Acties",
     "cs_editor.active": "Actief:",
-    "cs_editor.active_click_pause": "Actief - klik om te pauzeren",
-    "cs_editor.add": "Toevoegen",
     "cs_editor.add_new_marker": "Voeg een nieuwe marker toe",
     "cs_editor.apply": "Toepassen",
     "cs_editor.apply_changes": "Pas veranderingen toe op het spel",
@@ -30,7 +28,5 @@
     "feature.exp_height_fog.vanilla_fog": "Vanillamist",
     "feature.exp_height_fog.vanilla_strength": "Sterkte van weersmist",
     "feature.exp_height_fog.volumetric_extinction_scale": "Extinctieschaal",
-    "feature.exp_height_fog.volumetric_extinction_scale_tooltip": "Schaalt de mistdichtheid bij het volgen van vanillamist, ook wanneer volumetrische mist is uitgeschakeld. In de handmatige modus heeft dit alleen invloed op volumetrische mist.",
-    "common.active": "Actief",
-    "common.inactive": "Inactief"
+    "feature.exp_height_fog.volumetric_extinction_scale_tooltip": "Schaalt de mistdichtheid bij het volgen van vanillamist, ook wanneer volumetrische mist is uitgeschakeld. In de handmatige modus heeft dit alleen invloed op volumetrische mist."
 }

@@ -367,6 +367,18 @@ namespace LightLimitFix
 		return 1.0 - occlusion * SharedData::lightLimitFixSettings.ContactShadowStrength * strengthScale;
 	}
 
+	float3 GetVisibleSurfacePositionFromDepth(float3 viewPosition, float visibleDepth)
+	{
+		[flatten] if (visibleDepth > CONTACT_SHADOW_FIRST_PERSON_MAX_DEPTH && visibleDepth < viewPosition.z)
+			viewPosition *= visibleDepth / viewPosition.z;
+		return viewPosition;
+	}
+
+	float3 GetVisibleSurfacePosition(float3 viewPosition, float2 pixelPosition)
+	{
+		return GetVisibleSurfacePositionFromDepth(viewPosition, SharedData::GetScreenDepth(SharedData::DepthTexture.Load(int3(pixelPosition, 0)).x));
+	}
+
 	uint GetContactShadowSteps(float viewDepth, out float strengthScale)
 	{
 		uint steps = 0;

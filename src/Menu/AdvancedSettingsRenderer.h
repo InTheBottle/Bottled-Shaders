@@ -1,17 +1,18 @@
 #pragma once
 
-#include <functional>
-#include <string>
+#include "Menu/SettingsSections.h"
 
-// Forward declaration
-class Menu;
+#include <functional>
+#include <span>
+#include <string>
 
 /**
  * @brief Renders the Advanced Settings page of the in-game menu.
  *
  * Provides tabbed sections for developer tools, shader debugging, logging
  * configuration, disable-at-boot toggles, profiling statistics, A/B testing
- * controls, and one sub-tab per Utility-category feature.
+ * controls, and one sub-tab per Utility-category feature. The compiler controls
+ * are drawn on the General page's Shaders tab.
  */
 class AdvancedSettingsRenderer
 {
@@ -38,11 +39,32 @@ public:
 	 */
 	static void RequestUtilityTab(const std::string& featureShortName);
 
+	/** @brief Searchable setting labels of the sections drawn here. */
+	static std::span<const SettingsSearchEntry> GetSearchIndex();
+
+	/** @brief Compiler thread counts and Dump Shaders, drawn on the General page's Shaders tab. */
+	static void RenderCompilerSection();
+	/** @brief Log level, shader defines, and the log and ini dump buttons. */
+	static void RenderLoggingSection();
+	/** @brief Shader replacement toggles and the shader blocking switch. */
+	static void RenderShaderDebugSection();
+	/** @brief The shaders used in recent frames, with the blocked shader's details; a row click blocks that shader. */
+	static void RenderActiveShadersSection();
+	/** @brief Developer mode, file watcher, compiler flags and build statistics. */
+	static void RenderDeveloperSection();
+	/** @brief A/B testing controls. */
+	static void RenderTestingSection();
+
+	/**
+	 * @brief Puts the player in a known test scene: fast, invulnerable, no collision, time paused at noon, in Whiterun
+	 * under a forced weather. Does nothing unless a game is loaded and a menu is open (the console needs both).
+	 */
+	static void RunTestConditions();
+
+	/** @brief Tooltip for the Test Conditions button, listing the console commands it runs. */
+	static const char* GetTestConditionsTooltip();
+
 private:
 	static void RenderUtilityFeatureTabs();
-	static void RenderLoggingSection();
-	static void RenderShaderDebugSection();
 	static void RenderDisableAtBootSection(const std::function<void()>& drawDisableAtBootSettings);
-	static void RenderDeveloperSection();
-	static void RenderTestingSection();
 };

@@ -1,0 +1,21 @@
+{
+    "source": "https://ambientcg.com",
+    "license": "CC0-1.0",
+    "resolution": "1K",
+    "highpassFraction": 0.0625,
+    "targets": {
+        "albedoLogStd": 0.12,
+        "roughnessStd": 0.06,
+        "slopeRms": 0.3
+    },
+    "sets": [
+        { "name": "stone", "asset": "Rock050", "albedo": 1.0, "roughness": 1.0, "normal": 1.2 },
+        { "name": "wood", "asset": "Wood058", "albedo": 0.8, "roughness": 1.0, "normal": 0.6 },
+        { "name": "leather", "asset": "Leather030", "albedo": 0.6, "roughness": 1.0, "normal": 0.7 },
+        { "name": "metal", "asset": "Metal050C", "albedo": 0.5, "roughness": 1.6, "normal": 0.4 },
+        { "name": "fabric", "asset": "Fabric030", "albedo": 0.8, "roughness": 0.8, "normal": 0.9 },
+        { "name": "plaster", "asset": "Plaster001", "albedo": 0.6, "roughness": 0.8, "normal": 0.8, "highpassFraction": 0.03 },
+        { "name": "bark", "asset": "Bark012", "albedo": 1.0, "roughness": 1.0, "normal": 1.3 },
+        { "name": "generic", "asset": "Concrete040", "albedo": 0.7, "roughness": 0.8, "normal": 0.7 }
+    ]
+}

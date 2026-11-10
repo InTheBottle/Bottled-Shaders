@@ -5,6 +5,7 @@
 #include "ShaderCache.h"
 #include "State.h"
 #include "Utils/D3D.h"
+#include "Utils/Logging.h"
 #include "Utils/MathUtils.h"
 #include "Utils/SphericalHarmonics.h"
 #include "Utils/VersionedRelocation.h"
@@ -31,6 +32,8 @@ void Skylighting::LoadSettings(json& o_json)
 	settings.OcclusionDistanceCulling = Util::ClampFinite(settings.OcclusionDistanceCulling, defaults.OcclusionDistanceCulling, 0.f, 1.f);
 	settings.MaxZenith = Util::ClampFinite(settings.MaxZenith, defaults.MaxZenith, 0.f, std::numbers::pi_v<float> / 2.f);
 	settings.OcclusionMinRadius = Util::ClampFinite(settings.OcclusionMinRadius, defaults.OcclusionMinRadius, kEngineMinOccluderRadius, 512.f);
+	settings.MinDiffuseVisibility = Util::ClampFinite(settings.MinDiffuseVisibility, defaults.MinDiffuseVisibility, 0.f, 1.f);
+	settings.MinSpecularVisibility = Util::ClampFinite(settings.MinSpecularVisibility, defaults.MinSpecularVisibility, 0.f, 1.f);
 }
 
 void Skylighting::SaveSettings(json& o_json)
@@ -70,7 +73,7 @@ void Skylighting::DrawSettings()
 
 	ImGui::Separator();
 
-	if (ImGui::Button(T(TKEY("rebuild"), "Rebuild Skylighting")))
+	if (Util::Button(T(TKEY("rebuild"), "Rebuild Skylighting")))
 		ResetSkylighting();
 
 	if (auto _tt = Util::HoverTooltipWrapper())
@@ -444,8 +447,8 @@ RE::BSShaderProperty::RenderPassArray* Skylighting::BSLightingShaderProperty_Get
 	}
 
 	const bool validOccluder = property->flags.any(kZBufferWrite) &&
-		property->flags.none(kRefraction, kTempRefraction, kLODLandscape, kEyeReflect, kDecal, kDynamicDecal) &&
-		(skylighting.inOcclusion || property->flags.none(kMultiTextureLandscape, kNoLODLandBlend));
+	                           property->flags.none(kRefraction, kTempRefraction, kLODLandscape, kEyeReflect, kDecal, kDynamicDecal) &&
+	                           (skylighting.inOcclusion || property->flags.none(kMultiTextureLandscape, kNoLODLandBlend));
 	float minOccluderRadius = skylighting.inOcclusion ? skylighting.settings.OcclusionMinRadius : kEngineMinOccluderRadius;
 	if (skylighting.inOcclusion && skylighting.settings.OcclusionDistanceCulling > 0.f) {
 		const float distance = geometry->worldBound.center.GetDistance(skylighting.occlusionEyePosition);
@@ -785,8 +788,8 @@ RE::BSBatchRenderer::GeometryGroup* Skylighting::BSShaderAccumulator_StartGroupi
 	// The engine allocates from this pool without a bounds check; callers already handle a null group
 	static REL::Relocation<std::uint32_t*> poolCount{ REL::RelocationID(528319, 415271) };
 	if (*poolCount >= poolCapacity) {
-		static bool warned = false;
-		if (!std::exchange(warned, true))
+		static Util::OnceFlag warned;
+		if (warned.First())
 			logger::warn("[SKYLIGHTING] Alpha group pool full, extra ordered geometry renders unsorted");
 		return nullptr;
 	}

@@ -1,4 +1,4 @@
-#include "Common/Color.hlsli"
+#include "Common/ColorManagement.hlsli"
 #include "Common/FrameBuffer.hlsli"
 #include "Common/GBuffer.hlsli"
 #include "Common/Math.hlsli"
@@ -271,17 +271,17 @@ void PlanFootstep(FootstepParticles::FootstepEvent footstep)
 		remaining -= count;
 	}
 
-	float3 fallbackColor = Color::Diffuse(GetSurfaceColor(surface));
+	float3 fallbackColor = Color::Albedo(ColorManagement::DiffuseToWorking(GetSurfaceColor(surface)));
 	float sampleWeight = saturate(coverage * 3.0);
 	float3 groundColor = lerp(fallbackColor, sampledColor, sampleWeight);
-	float3 snowColor = Color::Diffuse(GetSurfaceColor(FootstepParticles::SurfaceSnow));
+	float3 snowColor = Color::Albedo(ColorManagement::DiffuseToWorking(GetSurfaceColor(FootstepParticles::SurfaceSnow)));
 	if (surface == FootstepParticles::SurfaceIce)
-		snowColor = Color::Diffuse(GetSurfaceColor(FootstepParticles::SurfaceIce));
+		snowColor = Color::Albedo(ColorManagement::DiffuseToWorking(GetSurfaceColor(FootstepParticles::SurfaceIce)));
 	snowColor = lerp(snowColor, max(sampledColor, snowColor * 0.8), sampleWeight * 0.35);
 
 	gsGroundColor = groundColor;
 	gsSnowColor = snowColor;
-	gsWaterColor = lerp(Color::Diffuse(float3(0.80, 0.83, 0.86)), groundColor, 0.3 * (1.0 - puddle));
+	gsWaterColor = lerp(Color::Albedo(ColorManagement::DiffuseToWorking(float3(0.80, 0.83, 0.86))), groundColor, 0.3 * (1.0 - puddle));
 	gsSnowWeight = snowWeight;
 	gsWetness = wetness;
 }
@@ -352,7 +352,7 @@ void PlanWade(FootstepParticles::FootstepEvent footstep)
 		remaining -= count;
 	}
 
-	float3 snowColor = Color::Diffuse(GetSurfaceColor(FootstepParticles::SurfaceSnow));
+	float3 snowColor = Color::Albedo(ColorManagement::DiffuseToWorking(GetSurfaceColor(FootstepParticles::SurfaceSnow)));
 	snowColor = lerp(snowColor, max(sampledColor, snowColor * 0.8), saturate(coverage * 3.0) * 0.35);
 
 	gsGroundColor = snowColor;
@@ -361,6 +361,21 @@ void PlanWade(FootstepParticles::FootstepEvent footstep)
 	gsSnowWeight = 1.0;
 	gsWetness = wetness;
 	gsSurfaceZ = surfaceZ;
+}
+
+void PlanBreath(FootstepParticles::FootstepEvent footstep)
+{
+	[unroll] for (uint i = 0; i < FootstepParticles::TypeCount; i++)
+		gsCounts[i] = 0;
+	gsCounts[FootstepParticles::TypeBreath] = min(footstep.SlotCount, FootstepParticles::SlotsPerEvent);
+
+	float3 vapor = Color::Albedo(ColorManagement::DiffuseToWorking(float3(0.86, 0.88, 0.9)));
+	gsGroundColor = vapor;
+	gsSnowColor = vapor;
+	gsWaterColor = vapor;
+	gsSnowWeight = 0.0;
+	gsWetness = 0.0;
+	gsSurfaceZ = footstep.Position.z;
 }
 
 uint ResolveType(uint localIndex, out bool alive)
@@ -387,10 +402,13 @@ uint ResolveType(uint localIndex, out bool alive)
 
 	FootstepParticles::FootstepEvent footstep = Events[eventIndex];
 	bool wade = (footstep.Flags & FootstepParticles::EventFlagWade) != 0;
+	bool breath = (footstep.Flags & FootstepParticles::EventFlagBreath) != 0;
 
 	if (localIndex == 0) {
 		if (wade)
 			PlanWade(footstep);
+		else if (breath)
+			PlanBreath(footstep);
 		else
 			PlanFootstep(footstep);
 	}
@@ -406,7 +424,7 @@ uint ResolveType(uint localIndex, out bool alive)
 	bool alive;
 	uint type = ResolveType(localIndex, alive);
 	if (!alive) {
-		if (!wade)
+		if (!wade && !breath)
 			Particles[slot] = particle;
 		return;
 	}
@@ -440,7 +458,15 @@ uint ResolveType(uint localIndex, out bool alive)
 	float groundZ = footstep.Position.z;
 	uint flags = 0;
 
-	if (wade) {
+	if (breath) {
+		position = footstep.Position + float3(radial * r1 * 0.8, r2 - 0.5) * scale;
+		velocity = float3(footstep.Velocity.xy * 0.6 + footstep.Forward * lerp(18.0, 46.0, r3) + radial * lerp(2.0, 8.0, r4), lerp(-8.0, 2.0, r5));
+		size = lerp(1.0, 1.8, r6) * scale;
+		growth = lerp(2.6, 3.8, r7);
+		lifetime = lerp(0.9, 1.6, r1);
+		opacity = lerp(0.08, 0.14, r2) * strength;
+		groundZ = footstep.Position.z - 64.0 * scale;
+	} else if (wade) {
 		position = float3(footstep.Position.xy + radial * r1 * 4.0 * scale, gsSurfaceZ + lerp(0.0, 3.0, r7) * scale);
 		velocity = float3(footstep.Velocity.xy * 0.12, 0.0);
 		color = gsSnowColor;

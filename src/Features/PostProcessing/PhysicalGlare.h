@@ -48,27 +48,27 @@ struct PhysicalGlare : public PostProcessFeature
 	struct Settings
 	{
 		// --- Core ---
-		float ThresholdEV = 6.0f;  // Brightness threshold in EV100 (exp2(EV100 - 3) → linear luminance). Paper: 0.9 linear ≈ 2.85 EV100.
-		float Intensity = 0.25f;
+		float ThresholdEV = 8.0f;  // Brightness threshold in EV100 (exp2(EV100 - 3) → linear luminance). Paper: 0.9 linear ≈ 2.85 EV100.
+		float Intensity = 0.1f;
 		int ApertureMode = 0;  // 0 = Lens (N-polygon), 1 = Pupil (circle)
 		int ApertureBlades = 6;
 		float ApertureRotation = 0.f;
 		float ScatterStrength = 1.f;
 		float AdaptSpeed = 3.f;
-		int FFTResolution = 512;
-		float FresnelExponent = 30.f;
+		int FFTResolution = 1024;
+		float FresnelExponent = 0.f;
 		float ChromaticSpread = 1.f;
 		float FStop = 2.8f;               // F-number (e.g. F2.8). ApertureSize = 1.0 / FStop.
 		float SphericalAberration = 0.f;  // Seidel r^4 wavefront error from lens curvature
 		float KernelScale = 1.0f;         // Scale of the convolution kernel (0.01-1.0). Smaller = more concentrated glare.
 
 		// --- PSF shaping ---
-		float PSFSharpness = 0.45f;    // pow() exponent (paper Table 3.9: 0.45). Higher = concentrated.
+		float PSFSharpness = 0.49f;    // pow() exponent (paper Table 3.9: 0.45). Higher = concentrated.
 		float PSFNoiseFloor = 0.001f;  // noise floor (paper: 0.001). Higher = cleaner wings.
-		float PaddingRatio = 0.1f;     // Zero-padding per side. 0.25=paper(50% effective), 0.1=80%, 0=100%.
+		float PaddingRatio = 0.25f;    // Zero-padding per side. 0.25=paper(50% effective), 0.1=80%, 0=100%.
 
 		// --- Eye mode ---
-		bool EnableEyelashes = false;
+		bool EnableEyelashes = true;
 		int EyelashCount = 40;
 		float EyelashLength = 0.4f;
 		float EyelashCurvature = 0.3f;
@@ -76,7 +76,7 @@ struct PhysicalGlare : public PostProcessFeature
 		float ParticleSize = 1.5f;
 		int GratingCount = 200;
 		float GratingStrength = 0.5f;
-		float TearFilmStrength = 0.f;
+		float TearFilmStrength = 0.78f;
 		float TearFilmSpeed = 2.f;
 		int TearFilmComplexity = 8;
 		int SutureBranches = 3;
@@ -87,14 +87,14 @@ struct PhysicalGlare : public PostProcessFeature
 		float StarburstIrregularity = 0.3f;
 
 		// --- Lens mode ---
-		int DustCount = 100;
-		float DustSize = 1.5f;
+		int DustCount = 295;
+		float DustSize = 2.4f;
 		int BladeRoughnessFreq = 20;
 		float BladeRoughnessAmp = 0.3f;
-		int ScratchCount = 5;
-		float ScratchOpacity = 0.3f;
-		float ScratchLength = 0.8f;
-		float ScratchWidth = 1.5f;
+		int ScratchCount = 4;
+		float ScratchOpacity = 0.31f;
+		float ScratchLength = 0.79f;
+		float ScratchWidth = 2.f;
 	} settings;
 
 	struct alignas(16) GlareCB
@@ -202,8 +202,6 @@ struct PhysicalGlare : public PostProcessFeature
 	winrt::com_ptr<ID3D11ComputeShader> apertureCS = nullptr;
 	winrt::com_ptr<ID3D11ComputeShader> tearFilmCS = nullptr;
 	winrt::com_ptr<ID3D11ComputeShader> psfCS = nullptr;
-	// Resolution-specialised FFT shaders avoid launching inactive threads at
-	// 128/256/512 while retaining the 1024-thread path for the maximum size.
 	static constexpr uint FFT_VARIANT_COUNT = 4;
 	std::array<winrt::com_ptr<ID3D11ComputeShader>, FFT_VARIANT_COUNT> fftRowCS = {};
 	std::array<winrt::com_ptr<ID3D11ComputeShader>, FFT_VARIANT_COUNT> fftColCS = {};
@@ -276,15 +274,14 @@ struct PhysicalGlare : public PostProcessFeature
 
 	virtual void Draw(TextureInfo&) override;
 
-	virtual inline void Reset() override
-	{
-		psfDirty = true;
-		apertureDirty = true;
-	}
-
 private:
 	void DispatchFFT(ID3D11ComputeShader* shader, Texture2D* input, Texture2D* output, uint resolution);
-	void GeneratePSF();
-	bool NeedsPSFRegeneration() const;
-	bool NeedsApertureRegeneration() const;
+	void GeneratePSF(const Settings& a_effective);
+	bool NeedsPSFRegeneration(const Settings& a_effective) const;
+	bool NeedsApertureRegeneration(const Settings& a_effective) const;
+
+	/// Saved settings with the lens aperture (F-stop, blades, rotation) replaced
+	/// by the Cinematic Camera values while it is active and Lens mode is
+	/// selected. Pupil/Eye mode keeps its own aperture model.
+	[[nodiscard]] Settings GetEffectiveSettings() const;
 };

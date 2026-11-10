@@ -1,4 +1,5 @@
 #include "BokehResources.h"
+#include "I18n/I18n.h"
 #include "Util.h"
 
 #include <DirectXTex.h>
@@ -203,9 +204,7 @@ bool BokehResources::BuildShapeSamples(const DirectX::ScratchImage& image, int i
 	}
 
 	auto bufferName = std::format("BokehResources::ShapeSamples{}", index);
-	shapeSampleBuffers[index] = eastl::make_unique<StructuredBuffer>(
-		StructuredBufferDesc<ShapeSample>((uint64_t)GATHER_SAMPLE_COUNT, false, true), GATHER_SAMPLE_COUNT, bufferName.c_str());
-	shapeSampleBuffers[index]->CreateSRV();
+	shapeSampleBuffers[index] = eastl::make_unique<ConstantBuffer>(ConstantBufferDesc<decltype(samples)>(false), bufferName.c_str());
 	shapeSampleBuffers[index]->Update(samples.data(), sizeof(samples));
 	const float apertureArea = 4.0f * coverageSum / float(source->width * source->height);
 	shapeSampleRadiusScales[index] = std::clamp(
@@ -254,11 +253,11 @@ ID3D11ShaderResourceView* BokehResources::GetShapeSRV(int shapeIndex) const
 	return texBokehShapes[shapeIndex]->srv.get();
 }
 
-ID3D11ShaderResourceView* BokehResources::GetShapeSampleSRV(int shapeIndex) const
+ID3D11Buffer* BokehResources::GetShapeSampleCB(int shapeIndex) const
 {
 	if (shapeIndex < 0 || shapeIndex >= MAX_SHAPES || !shapeSampleBuffers[shapeIndex])
 		return nullptr;
-	return shapeSampleBuffers[shapeIndex]->SRV();
+	return shapeSampleBuffers[shapeIndex]->CB();
 }
 
 float BokehResources::GetShapeSampleRadiusScale(int shapeIndex) const
@@ -278,11 +277,27 @@ float BokehResources::GetShapeSampleMaxRadius(int shapeIndex) const
 const char* BokehResources::GetShapeName(int index) const
 {
 	if (index < 0 || index >= MAX_SHAPES)
-		return "Unknown";
-	if (index < NUM_BUILTIN_SHAPES)
-		return builtinShapeNames[index].c_str();
+		return T("feature.post_processing.do_f.bokeh_shape_unknown", "Unknown");
+	if (index < NUM_BUILTIN_SHAPES) {
+		switch (index) {
+		case 0:
+			return T("feature.post_processing.do_f.bokeh_shape_heart", "Heart");
+		case 1:
+			return T("feature.post_processing.do_f.bokeh_shape_hexagon", "Hexagon");
+		case 2:
+			return T("feature.post_processing.do_f.bokeh_shape_fringy_soft", "Fringy Soft");
+		case 3:
+			return T("feature.post_processing.do_f.bokeh_shape_hex_fringy_soft", "Hex Fringy Soft");
+		case 4:
+			return T("feature.post_processing.do_f.bokeh_shape_star", "Star");
+		case 5:
+			return T("feature.post_processing.do_f.bokeh_shape_square", "Square");
+		default:
+			return T("feature.post_processing.do_f.bokeh_shape_unknown", "Unknown");
+		}
+	}
 	int customIdx = index - NUM_BUILTIN_SHAPES;
 	if (customIdx < MAX_CUSTOM_SHAPES && !customShapeNames[customIdx].empty())
 		return customShapeNames[customIdx].c_str();
-	return "Empty Slot";
+	return T("feature.post_processing.do_f.bokeh_shape_empty_slot", "Empty Slot");
 }

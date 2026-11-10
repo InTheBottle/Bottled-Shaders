@@ -34,8 +34,6 @@ float4 main(FullscreenTriangleVSOutput input) : SV_Target
 {
 	uint2 tid = uint2(input.Position.xy);
 
-	// .z is only written by the 3D branch; the 2D branches leave it unread, but fxc still
-	// flags the partially initialised vector (X4000).
 	uint3 dims = 0;
 	[branch] if (LutType == 3)
 		TexLut3D.GetDimensions(dims.x, dims.y, dims.z);

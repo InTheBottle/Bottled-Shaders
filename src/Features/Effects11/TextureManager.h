@@ -26,6 +26,9 @@ public:
 
 	static TextureManager& GetSingleton();
 
+	/** @brief Creates a named texture with render-target and shader views. */
+	static Texture CreateTexture(uint32_t width, uint32_t height, DXGI_FORMAT format, const std::string& debugName);
+
 	void Initialize();
 	Texture* GetCommonTexture(const std::string& name);
 	Texture* FindCommonTexture(const std::string& name);
@@ -33,9 +36,10 @@ public:
 	void SwapTextures(const std::string& name1, const std::string& name2);
 
 	// Downsampled texture methods
-	void UpdateDownsampledTexture(ID3D11ShaderResourceView* source);
+	void UpdateDownsampledTexture(ID3D11ShaderResourceView* source, bool a_generateMips);
 	ID3D11ShaderResourceView* GetDownsampleTexture() const;
 	ID3D11ShaderResourceView* GetDownsampleTextureBlurry() const;
+	ID3D11SamplerState* GetLinearSampler() const { return linearSampler.get(); }
 
 	// Frame-based state access
 	uint32_t GetTextureSwap() const { return textureSwap; }
@@ -43,9 +47,8 @@ public:
 
 private:
 	void CreateDownsampleResources();
-	static Texture CreateTexture(uint32_t width, uint32_t height, DXGI_FORMAT format, const std::string& debugName);
 	static DownsampleTexture CreateDownsampleTexture(DXGI_FORMAT format);
-	void DownsampleToFixed(ID3D11ShaderResourceView* source, DownsampleTexture& texture);
+	void DownsampleToFixed(ID3D11ShaderResourceView* source, DownsampleTexture& texture, bool a_generateMips);
 
 	std::unordered_map<std::string, Texture> commonTextureCache;
 

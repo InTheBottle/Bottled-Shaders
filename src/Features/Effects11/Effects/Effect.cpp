@@ -6,6 +6,7 @@
 #include <DirectXTex.h>
 
 #include "../ENBExtender.h"
+#include "../IniSerialization.h"
 #include "../PresetManager.h"
 #include "../TextureManager.h"
 #include "Features/Effects11/SettingsPatches.h"
@@ -250,7 +251,7 @@ void Effect::Save()
 
 		switch (uiVar.type) {
 		case UIVariableType::Float:
-			value = std::to_string(useBase ? uiVar.baseFloatValue : uiVar.floatValue);
+			value = Effects11Util::Ini::FormatFloat(useBase ? uiVar.baseFloatValue : uiVar.floatValue);
 			break;
 		case UIVariableType::Int:
 			value = std::to_string(uiVar.intValue);
@@ -267,22 +268,16 @@ void Effect::Save()
 				                                                                                                          4;
 				for (int i = 0; i < numComponents; ++i) {
 					std::string compKey = iniKey + suffixes[i];
-					std::string compValue = std::to_string(vectorValue[i]);
+					std::string compValue = Effects11Util::Ini::FormatFloat(vectorValue[i]);
 					BOOL compResult = WritePrivateProfileStringA(section.c_str(), compKey.c_str(), compValue.c_str(), iniPath.string().c_str());
 					if (!compResult)
 						logger::warn("[EFFECTS11] Failed to write key '{}' to ini file '{}'", compKey, iniPath.string());
 				}
 				continue;
 			} else {
-				std::ostringstream oss;
 				int numComponents = (uiVar.type == UIVariableType::Float2) ? 2 : (uiVar.type == UIVariableType::Float3) ? 3 :
 				                                                                                                          4;
-
-				std::copy(vectorValue, vectorValue + numComponents - 1,
-					std::ostream_iterator<float>(oss, ", "));
-				oss << vectorValue[numComponents - 1];
-
-				value = oss.str();
+				value = Effects11Util::Ini::FormatFloatList({ vectorValue, static_cast<size_t>(numComponents) });
 			}
 			break;
 		}
@@ -615,6 +610,30 @@ Effect::TechniqueSequenceResult Effect::ExecuteTechniqueSequence(const std::stri
 	return { wroteChain, targetInOutput, targetInTemp };
 }
 
+void Effect::ExecuteTechniquesOnto(const std::string& a_baseTechniqueName, ID3D11ShaderResourceView* a_input, ID3D11RenderTargetView* a_target, ID3D11BlendState* a_blendState)
+{
+	if (!IsCompiled() || !effect)
+		return;
+
+	auto sequenceIt = techniques.find(a_baseTechniqueName);
+	if (sequenceIt == techniques.end())
+		return;
+
+	SetShaderResourceVariable("TextureColor", a_input);
+
+	auto context = globals::d3d::context;
+	uint32_t passOffset = 0;
+	for (auto& techniqueInfo : sequenceIt->second) {
+		if (!techniqueInfo.technique || !IsTechniqueEnabled(techniqueInfo))
+			continue;
+
+		const bool ownTarget = !techniqueInfo.renderTargetName.empty();
+		context->OMSetBlendState(ownTarget ? nullptr : a_blendState, nullptr, 0xFFFFFFFF);
+		RenderPasses(techniqueInfo.technique.get(), ownTarget ? GetRenderTargetView(techniqueInfo.renderTargetName, a_target) : a_target, passOffset);
+		passOffset += techniqueInfo.passCount;
+	}
+}
+
 bool Effect::ExecuteTechnique(const std::string& techniqueName, TextureManager::Texture& output)
 {
 	if (!IsCompiled() || !effect)
@@ -652,10 +671,18 @@ ID3D11ShaderResourceView* Effect::LoadTextureFromFile(const std::string& filenam
 	if (cacheIt != customTextureCache.end())
 		return cacheIt->second.get();
 
-	std::filesystem::path filepath = PresetManager::GetSingleton().GetENBSeriesPath() / filename;
+	std::filesystem::path name;
+	try {
+		name = filename;
+	} catch (const std::exception& e) {
+		logger::error("[EFFECTS11] Invalid texture file name '{}': {}", filename, e.what());
+		return nullptr;
+	}
+
+	std::filesystem::path filepath = PresetManager::GetSingleton().GetENBSeriesPath() / name;
 	std::error_code ec;
 	if (!std::filesystem::exists(filepath, ec)) {
-		const auto gameRootPath = std::filesystem::absolute(filename, ec);
+		const auto gameRootPath = std::filesystem::absolute(name, ec);
 		if (!ec && std::filesystem::exists(gameRootPath, ec))
 			filepath = gameRootPath;
 	}
@@ -679,6 +706,11 @@ ID3D11ShaderResourceView* Effect::LoadTextureFromFile(const std::string& filenam
 		logger::error("[EFFECTS11] Failed to load texture file: {} (HRESULT: 0x{:08X})", filepath.string(), static_cast<uint32_t>(hr));
 		return nullptr;
 	}
+
+	winrt::com_ptr<ID3D11Resource> textureResource;
+	srv->GetResource(textureResource.put());
+	Util::SetResourceName(textureResource.get(), "Effects11::%s", filename.c_str());
+	Util::SetResourceName(srv.get(), "Effects11::%s SRV", filename.c_str());
 
 	customTextureCache[filename] = srv;
 	return srv.get();
@@ -1187,30 +1219,7 @@ bool Effect::SetVectorVariable(const std::string& variableName, const void* data
 
 TextureManager::Texture Effect::CreateTexture(uint32_t width, uint32_t height, DXGI_FORMAT format, const std::string& debugName)
 {
-	auto device = globals::d3d::device;
-
-	D3D11_TEXTURE2D_DESC texDesc = {};
-	texDesc.Width = width;
-	texDesc.Height = height;
-	texDesc.MipLevels = 1;
-	texDesc.ArraySize = 1;
-	texDesc.Format = format;
-	texDesc.SampleDesc.Count = 1;
-	texDesc.Usage = D3D11_USAGE_DEFAULT;
-	texDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-
-	TextureManager::Texture texture{};
-	DX::ThrowIfFailed(device->CreateTexture2D(&texDesc, nullptr, texture.texture.put()));
-	DX::ThrowIfFailed(device->CreateRenderTargetView(texture.texture.get(), nullptr, texture.rtv.put()));
-	DX::ThrowIfFailed(device->CreateShaderResourceView(texture.texture.get(), nullptr, texture.srv.put()));
-
-	if (!debugName.empty()) {
-		Util::SetResourceName(texture.texture.get(), (debugName).c_str());
-		Util::SetResourceName(texture.rtv.get(), (debugName + " RTV").c_str());
-		Util::SetResourceName(texture.srv.get(), (debugName + " SRV").c_str());
-	}
-
-	return texture;
+	return TextureManager::CreateTexture(width, height, format, debugName);
 }
 
 std::string Effect::GetSelectedTechnique() const
@@ -1301,10 +1310,6 @@ void Effect::RenderPasses(ID3DX11EffectTechnique* technique, ID3D11RenderTargetV
 
 	if (outputWidth == 0 || outputHeight == 0)
 		return;
-
-	float aspect = static_cast<float>(outputWidth) / static_cast<float>(outputHeight);
-	float screenSize[4] = { static_cast<float>(outputWidth), 1.0f / outputWidth, aspect, 1.0f / aspect };
-	SetVectorVariable("ScreenSize", screenSize, sizeof(screenSize));
 
 	D3D11_VIEWPORT viewport = {};
 	viewport.Width = static_cast<float>(outputWidth);

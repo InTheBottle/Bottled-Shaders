@@ -5,16 +5,25 @@
 #include <Tracy/TracyD3D11.hpp>
 
 #include <Buffer.h>
+#include <array>
 #include <atomic>
+#include <d3d11_1.h>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <optional>
+#include <span>
+#include <string_view>
 
 using json = nlohmann::json;
 
+#include "SharedData.h"
 #include <FeatureBuffer.h>
 
 #include <Hooks.h>
 #include <mutex>
+#include <unordered_map>
+
+struct Feature;
 
 class State
 {
@@ -48,6 +57,8 @@ public:
 
 	bool updateShader = true;
 	bool settingCustomShader = false;
+	RE::BSGraphics::VertexShader* customVertexShader = nullptr;
+	RE::BSGraphics::PixelShader* customPixelShader = nullptr;
 	RE::BSShader* currentShader = nullptr;
 	std::string adapterDescription = "";
 
@@ -67,19 +78,12 @@ public:
 	// Frame time tracking per shader type (in milliseconds)
 	float frameTimePerType[RE::BSShader::Type::Total + 1];        ///< Per-type frame time in milliseconds.
 	float smoothFrameTimePerType[RE::BSShader::Type::Total + 1];  ///< EMA-smoothed per-type frame time in milliseconds.
+	float smoothPresentTimeMs = 0.0f;                             ///< EMA-smoothed CPU time blocked in Present, in milliseconds.
 
 	// Timing state for per-type frame time tracking using QueryPerformanceCounter
 	LARGE_INTEGER frameTimingFrequency;
 	LARGE_INTEGER frameStartTime;
 	bool frameTimingActive = false;
-
-	enum ConfigMode
-	{
-		DEFAULT,
-		USER,
-		TEST,
-		THEME
-	};
 
 	/** @brief Per-draw-call hook: updates feature state, constant buffers, and overlay. */
 	void Draw();
@@ -87,6 +91,9 @@ public:
 	void Debug();
 	/** @brief Per-frame reset: advances timer, caches menu state, resets descriptors and frame counters. */
 	void Reset();
+
+	/** @brief Selects sphere-normal lighting and the TruePBR material for the next grass draw. */
+	void SetGrassFlags(bool sphereNormal, bool pbr);
 	/** @brief One-time post-D3D setup: creates resources, probes GPU caps, initializes features. */
 	void Setup();
 
@@ -97,11 +104,11 @@ public:
 	 * coexist: Effects11 skips the whole pass, while Post Processing relies on it running
 	 * so ISHDR can take its passthrough branch. Exactly one owner is resolved per frame.
 	 */
-	enum class TonemapOwner
+	enum class TonemapOwner : uint
 	{
-		kVanilla,         ///< Vanilla ISHDR tonemap runs unmodified.
-		kPostProcessing,  ///< Post Processing pipeline drives tonemapping.
-		kEffects11        ///< Effects11 (ENB-compatible) replaces the pass entirely.
+		kVanilla = 0,         ///< Vanilla ISHDR tonemap runs unmodified.
+		kPostProcessing = 1,  ///< Post Processing pipeline drives tonemapping.
+		kEffects11 = 2        ///< Effects11 (ENB-compatible) replaces the pass entirely.
 	};
 
 	/**
@@ -124,16 +131,18 @@ public:
 	bool HandlePostProcessing(RE::RENDER_TARGET a_input, RE::RENDER_TARGET a_output);
 
 	/**
-	 * @brief Loads settings from disk (default, then user, then overrides).
-	 * @param a_configMode Which config file to load.
+	 * @brief Loads settings: the code's defaults, then enabled Baseline packs, then the user's edits
+	 *        from SettingsUser.json.
 	 * @param a_allowReload If true, retries once after a parse error.
 	 */
-	void Load(ConfigMode a_configMode = ConfigMode::USER, bool a_allowReload = true);
+	void Load(bool a_allowReload = true);
+	/** @brief Writes the user's edits and the core settings to SettingsUser.json. */
+	void Save();
 	/**
-	 * @brief Persists current settings to the config file for the given mode.
-	 * @param a_configMode Which config file to write.
+	 * @brief Writes every feature's code defaults to FeatureDefaults.json, for reference.
+	 * @return The written file, or an empty path if the write failed.
 	 */
-	void Save(ConfigMode a_configMode = ConfigMode::USER);
+	std::filesystem::path DumpFeatureDefaults() const;
 
 	/**
 	 * @brief Serializes all settings to a JSON object (in-memory, no disk I/O).
@@ -145,6 +154,111 @@ public:
 	 * @param i_json Input JSON object to read from.
 	 */
 	void LoadFromJson(nlohmann::json& i_json);
+
+	/**
+	 * @brief Recombines defaults and the enabled Baseline packs under every loaded feature, keeping the
+	 *        user's edits on top. Call after the set of Baseline packs, or their files, changes.
+	 */
+	void ReapplySettingsLayers();
+
+	/**
+	 * @brief Clears the user's edits to one feature, so it shows what defaults and Baseline packs give it.
+	 * @param feature A loaded feature.
+	 */
+	void RestoreFeatureLayers(Feature* feature);
+
+	/** @brief Loaded features whose user edits change settings a Baseline pack also sets. */
+	std::vector<Feature*> FindEditsUnderPack(const std::string& packId);
+
+	/** @brief Drops the user's edits to every setting a Baseline pack sets, so the pack shows as authored. */
+	void ClearEditsUnderPack(const std::string& packId);
+
+	/**
+	 * @brief Whether the user's edits to a feature override settings an enabled Baseline pack sets.
+	 * @details Cached per feature; InvalidateEditsUnderBaselines marks the answer stale after an edit.
+	 */
+	bool HasEditsUnderBaselines(Feature* feature);
+
+	/**
+	 * @brief Forgets the cached HasEditsUnderBaselines and HasUserEdits answers for one feature, or every
+	 *        feature when null. Call after anything rewrites a feature's settings or its base.
+	 */
+	void InvalidateEditsUnderBaselines(Feature* feature = nullptr);
+
+	/**
+	 * @brief Whether a feature's settings differ from defaults with the enabled Baseline packs applied: the
+	 *        edits Restore Defaults clears. Saving does not change the answer.
+	 * @details Cached per feature; InvalidateEditsUnderBaselines marks the answer stale.
+	 */
+	bool HasUserEdits(Feature* feature);
+
+	/**
+	 * @brief The edits HasUserEdits answers for: the parts of a feature's settings that differ from GetFeatureBase.
+	 * @details Not cached; meant for an on-demand listing rather than every frame.
+	 * @return An empty object when the feature has none.
+	 */
+	nlohmann::json GetUserEdits(Feature* feature);
+
+	/** @brief Fills the HasUserEdits cache for every loaded feature under one scene layer suspension. */
+	void PrimeUserEdits();
+
+	/** @brief Bumped whenever a cached HasUserEdits answer may have changed, so callers can tell when to recount. */
+	std::uint64_t GetUserEditsRevision() const { return userEditsRevision; }
+
+	/** @brief Drops the user's edits to every setting an enabled Baseline pack sets on one feature. */
+	void ClearFeatureEditsUnderBaselines(Feature* feature);
+
+	/** @brief Notes that feature settings were edited, so the main menu's Save shows them as unsaved. */
+	void MarkSettingsChanged() { settingsChanged = true; }
+
+	/**
+	 * @brief Marks the settings changed if a feature's settings now differ from what was last saved or
+	 *        loaded. For actions ImGui does not flag as edits, such as a button that resets or applies a preset.
+	 */
+	void CheckFeatureSettingsChanged(Feature* feature);
+
+	/** @brief Re-checks the sections that are not feature settings (Menu, General, ...) against the last save or
+	 *  load. Cheap enough to call on any frame the main menu edited something. */
+	void CheckCoreSettingsChanged();
+
+	/** @brief Core settings, as JSON pointers into the user config, that save themselves when the menu closes and
+	 *  never count as unsaved. */
+	static constexpr std::array<std::string_view, 5> SELF_SAVING_SETTINGS = {
+		"/Menu/RecentFeatures", "/Menu/LastSettingsSection", "/Menu/FeatureListSort", "/Menu/SkipConstraintWarning",
+		"/Menu/SkipClearCacheConfirmation"
+	};
+
+	/**
+	 * @brief Saves the named core settings that differ from the last save in one write, without a full Save.
+	 * @param paths JSON pointers into the user config naming core settings, e.g. "/Menu/RecentFeatures".
+	 * @return True when nothing differed or the write succeeded.
+	 */
+	bool SaveCoreSettings(std::span<const std::string_view> paths);
+
+	/**
+	 * @brief A feature's settings in the layers beneath the user's edits: defaults with the enabled Baseline packs applied.
+	 * @param featureName The feature's GetName().
+	 * @return Null when the feature has no settings layers.
+	 */
+	const nlohmann::json* GetFeatureBase(const std::string& featureName) const
+	{
+		const auto found = featureBases.find(featureName);
+		return found != featureBases.end() ? &found->second : nullptr;
+	}
+
+	/**
+	 * @brief A feature's code defaults, captured on the first load before any settings layer applies.
+	 * @param featureName The feature's GetName().
+	 * @return Null before the first load or when the feature has no settings.
+	 */
+	const nlohmann::json* GetFeatureDefaults(const std::string& featureName) const
+	{
+		const auto found = defaultSettings.find(featureName);
+		return found != defaultSettings.end() && found->is_object() ? &*found : nullptr;
+	}
+
+	/** @brief True when the user config has changes not yet saved. */
+	bool HasUnsavedChanges() const { return settingsChanged || coreSettingsChanged; }
 
 	/** @brief Loads the active theme preset from the menu settings. */
 	void LoadTheme();
@@ -218,6 +332,16 @@ public:
 	 */
 	void ModifyShaderLookup(const RE::BSShader& a_shader, uint& a_vertexDescriptor, uint& a_pixelDescriptor, bool a_forceDeferred = false);
 
+	/**
+	 * @brief Pixel descriptor bits a shader type reads at runtime although they also take part in the lookup.
+	 * @param a_shader Shader whose descriptor is being uploaded.
+	 */
+	[[nodiscard]] static uint32_t GetRuntimePixelBits(const RE::BSShader& a_shader);
+
+	/** @brief Whether perf events reach a consumer: an attached capture tool, a connected Tracy client, or an Nsight Perf pass. */
+	[[nodiscard]] bool PerfEventsConsumed() const;
+	/** @brief Whether Frame Annotations' per-draw events are worth building: the setting is on and consumed. */
+	[[nodiscard]] bool AnnotateDraws() const { return frameAnnotations && PerfEventsConsumed(); }
 	/** @brief Opens a named GPU performance event (D3D annotation + Tracy zone). */
 	void BeginPerfEvent(std::string_view title);
 	/** @brief Closes the most recent GPU performance event. */
@@ -269,8 +393,11 @@ public:
 		uint liteDescriptor = 0;
 		ID3D11PixelShader* full = nullptr;
 		ID3D11PixelShader* lite = nullptr;
+		ID3D11PixelShader* detail = nullptr;
+		ID3D11PixelShader* bound = nullptr;
 		bool resolved = false;
-		bool liteBound = false;
+		bool detailEligible = false;
+		bool detailResolved = false;
 	};
 	LightingVariantState lightingVariant;
 	float waterGridTop = 0.0f;
@@ -291,7 +418,6 @@ public:
 		IsEye = 1 << 7,
 		NoSnow = 1 << 8,
 		NoFoliageTint = 1 << 9,
-		IsAurora = 1 << 10,
 		IsMoon = 1 << 11,
 		NoSkyScattering = 1 << 12,
 		// Humanoid (ActorTypeNPC) geometry, set by NeuralRendering::SetupGeometryCategory.
@@ -300,6 +426,14 @@ public:
 		IsHair = 1u << 30,
 		SnowRooftop = 1 << 13,
 		SnowLODTree = 1 << 14,
+		SourceAlphaBlend = 1 << 15,
+		NightEyeEyeshine = 1 << 16,
+		NightEyeMask = 1 << 17,
+		NightEyeActor = 1 << 18,
+		NightEyeEnemy = 1 << 19,
+		NightEyeAlly = 1 << 20,
+		ProjectedTextureIsSRGB = 1 << 21,
+		GrassPBR = 1 << 22,
 	};
 
 	/** @brief Bitflags describing extra feature-specific properties related to terrain displacement and material models. */
@@ -367,11 +501,6 @@ public:
 	 */
 	void UpdateSkyShaderPermutation(RE::BSRenderPass* a_pass);
 	/**
-	 * @brief Flags effect shader passes that draw the aurora (sky objects under the sky's aurora root).
-	 * @param a_pass The render pass to inspect.
-	 */
-	void UpdateEffectShaderPermutation(RE::BSRenderPass* a_pass);
-	/**
 	 * @brief Checks whether directional shadows are available for the current scene.
 	 * @returns true if directional shadows are present, false otherwise.
 	 */
@@ -385,48 +514,26 @@ public:
 		uint ExtraFeatureDescriptor;
 
 		float EffectRadius;
-		float3 pad0;
+		uint BaseTextureIsWorking;
+		uint RenderToUI;
+		// Model-space height of the grass mesh being drawn, for root-to-tip canopy occlusion.
+		float GrassCanopyHeight;
 
 		bool operator==(const PermutationCB& other) const
 		{
-			return VertexShaderDescriptor == other.VertexShaderDescriptor && PixelShaderDescriptor == other.PixelShaderDescriptor &&
+			return VertexShaderDescriptor == other.VertexShaderDescriptor &&
+			       PixelShaderDescriptor == other.PixelShaderDescriptor &&
 			       ExtraShaderDescriptor == other.ExtraShaderDescriptor &&
-			       ExtraFeatureDescriptor == other.ExtraFeatureDescriptor && EffectRadius == other.EffectRadius;
+			       ExtraFeatureDescriptor == other.ExtraFeatureDescriptor &&
+			       EffectRadius == other.EffectRadius && BaseTextureIsWorking == other.BaseTextureIsWorking && RenderToUI == other.RenderToUI &&
+			       GrassCanopyHeight == other.GrassCanopyHeight;
 		}
 	};
 	STATIC_ASSERT_ALIGNAS_16(PermutationCB);
 
 	std::unique_ptr<ConstantBuffer> permutationCB;
 
-	struct alignas(16) SharedDataCB
-	{
-		float4 WaterData[25];
-		float4 DirLightDirection;
-		float4 DirLightColor;
-		float4 SunDirection;
-		float4 SunColor;
-		float4 MasserDirection;
-		float4 MasserColor;
-		float4 SecundaDirection;
-		float4 SecundaColor;
-		float4 CameraData;
-		float4 BufferDim;
-		float Timer;
-		uint FrameCount;
-		uint FrameCountAlwaysActive;
-		uint InInterior;
-		uint HasDirectionalShadows;
-		uint InMapMenu;
-		uint HideSky;
-		float MipBias;
-		float WaterSystemHeight;  // TES::GetWaterHeight in camera-relative Z; -NI_INFINITY when no water body found
-		float3 pad0;
-		float4 AmbientSHR;
-		float4 AmbientSHG;
-		float4 AmbientSHB;
-		float4 HDRData;  // xyz + menu scene encoding in w — see HDRDisplay::GetSharedDataHDR
-	};
-	STATIC_ASSERT_ALIGNAS_16(SharedDataCB);
+	using SharedDataCB = ::SharedDataCB;
 
 	std::unique_ptr<ConstantBuffer> sharedDataCB;
 	std::unique_ptr<ConstantBuffer> featureDataCB;
@@ -435,6 +542,11 @@ public:
 	PermutationCB permutationDataPrevious{};
 
 	Util::FrameChecker frameChecker;
+	/// Resets the Active Shaders counts once per frame; separate from frameChecker, which only ticks while the performance overlay shows.
+	Util::FrameChecker shaderTrackingFrameChecker;
+	void RequestHistoryReset() { historyResetFrame = frameCount + 1u; }
+	bool ShouldResetHistory() const { return frameCount == historyResetFrame; }
+
 	uint frameCount = 0;
 	// Thread-safe mirror of frameCount maintained by the render thread.
 	// Off-thread readers (MCP listener, future telemetry) must read this
@@ -450,6 +562,8 @@ public:
 	bool SetFeatureDisabled(const std::string& featureName, bool isDisabled);
 	bool IsFeatureDisabled(const std::string& featureName);
 	std::unordered_map<std::string, bool>& GetDisabledFeatures();
+	void SetFeatureFavorite(const std::string& featureName, bool isFavorite);
+	bool IsFeatureFavorite(const std::string& featureName);
 
 	bool useFrameAnnotations = false;
 
@@ -507,6 +621,7 @@ public:
 	}
 
 	std::unordered_map<std::string, bool> disabledFeatures;
+	std::unordered_map<std::string, bool> favoriteFeatures;
 	std::mutex m_mutex;
 
 	inline ~State()
@@ -518,6 +633,45 @@ public:
 	}
 
 private:
-	std::shared_ptr<REX::W32::ID3DUserDefinedAnnotation> pPerf;
+	/// The code's defaults, captured on the first load; the bottom settings layer.
+	nlohmann::json defaultSettings;
+	/// Per feature (keyed by GetName()): defaults with the enabled Baseline packs applied. The user's
+	/// edits are what a feature's settings differ from this by.
+	std::unordered_map<std::string, nlohmann::json> featureBases;
+	/// Per feature: the cached HasEditsUnderBaselines answer.
+	std::unordered_map<std::string, bool> editsUnderBaselines;
+	/// Per feature: the cached HasUserEdits answer.
+	std::unordered_map<std::string, bool> userEdits;
+	/// See GetUserEditsRevision().
+	std::uint64_t userEditsRevision = 0;
+	/// Per feature: the edits SettingsUser.json holds, kept for features that are not loaded so a save
+	/// carries them over untouched.
+	std::unordered_map<std::string, nlohmann::json> userFeatureEdits;
+
+	/** @brief Defaults with the enabled Baseline packs applied, for one feature. */
+	nlohmann::json BuildFeatureBase(Feature* feature);
+	/** @brief The part of a feature's settings that differs from its base: the user's edits. */
+	nlohmann::json DiffFromFeatureBase(const std::string& featureName, const nlohmann::json& current) const;
+	/** @brief Replaces each feature's full settings in a config with only the user's edits to it. */
+	void KeepOnlyUserEdits(nlohmann::json& settings);
+
+	/** @brief Writes the sections that are not feature settings; the caller holds m_mutex. */
+	void SaveCoreToJson(nlohmann::json& settings);
+	/** @brief What SaveCoreToJson writes, to tell whether those sections changed. */
+	nlohmann::json CaptureCoreSettings();
+	/** @brief Clears the unsaved state after the user config was written or read. */
+	void MarkSettingsSaved();
+	/** @brief Drops a feature's edits to the settings packData sets, so those show the pack's values.
+	 *  The caller holds a SceneLayerGuard. */
+	void DropEditsUnder(Feature* feature, const nlohmann::json& packData);
+
+	bool settingsChanged = false;
+	bool coreSettingsChanged = false;
+	/// The core sections as last saved or loaded; partial saves patch it.
+	nlohmann::json savedCore;
+
+	std::optional<TonemapOwner> tonemapOwner;
+	uint historyResetFrame = UINT_MAX;
+	winrt::com_ptr<ID3DUserDefinedAnnotation> pPerf;
 	std::mutex statsMutex;
 };

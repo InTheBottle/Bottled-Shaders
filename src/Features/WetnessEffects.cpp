@@ -1,5 +1,5 @@
 #include "WetnessEffects.h"
-#include "CSEditor.h"
+#include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
 #include "I18n/I18n.h"
 #include "Menu.h"
 #include "ShaderCache.h"
@@ -14,7 +14,6 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	MaxRainWetness,
 	MaxPuddleWetness,
 	MaxShoreWetness,
-	GrassWetnessRoughness,
 	ShoreRange,
 	PuddleRadius,
 	PuddleMaxAngle,
@@ -37,7 +36,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	RippleStrength,
 	RippleRadius,
 	RippleBreadth,
-	RippleLifetime)
+	RippleLifetime,
+	TopDownVisibility)
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	WetnessEffects::DebugSettings,
@@ -470,16 +470,16 @@ void WetnessEffects::DrawSettings()
 		if (ImGui::IsItemDeactivatedAfterEdit())
 			DetectCurrentPreset();
 
-		ImGui::SliderFloat(T(TKEY("grass_wet_roughness"), "Grass Wet Roughness"), &settings.GrassWetnessRoughness, 0.05f, 0.5f, "%.2f");
-		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("grass_wet_roughness_tooltip"), "Roughness wet grass blades fall to in rain. Lower values give a sharper, wetter sheen."));
-		}
-
 		ImGui::SliderFloat(T(TKEY("puddle_wetness"), "Puddle Wetness"), &settings.MaxPuddleWetness, 0.0f, 6.0f);
 		if (ImGui::IsItemDeactivatedAfterEdit())
 			DetectCurrentPreset();
 
 		ImGui::SliderFloat(T(TKEY("shore_wetness"), "Shore Wetness"), &settings.MaxShoreWetness, 0.0f, 1.0f);
+
+		ImGui::SliderFloat(T(TKEY("top_down_visibility"), "Top-Down Visibility"), &settings.TopDownVisibility, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("top_down_visibility_tooltip"), "Darkens standing water and shows ripple rings when looking straight down.\nSet to 0 for reflection-only ripples and the original darkening."));
+		}
 		ImGui::TreePop();
 	}
 
@@ -627,20 +627,12 @@ void WetnessEffects::DrawSettings()
 		ImGui::TreePop();
 	}
 
-	ImGui::Spacing();
-	ImGui::Spacing();
-	auto& csEditor = globals::features::csEditor;
-	if (csEditor.loaded) {
-		if (ImGui::SmallButton(T(TKEY("open_weather_picker"), "Open Weather Picker"))) {
-			// Navigate to the replacement feature in the menu
-			Menu::GetSingleton()->SelectFeatureMenu(csEditor.GetShortName());
-		}
-		if (auto _tt = Util::HoverTooltipWrapper()) {
-			ImGui::Text("%s", T(TKEY("open_weather_picker_tooltip"), "Open the Weather Picker in CS Utility"));
-		}
-	}
+	// The debug overrides have no scene-context meaning, so hide them while a Scene Manager replica is
+	// borrowing this panel to author overrides.
+	if (SceneWidgetInterceptor::IsArmed())
+		return;
 
-	if (ImGui::TreeNodeEx(T(TKEY("debug"), "Debug"), ImGuiTreeNodeFlags_DefaultOpen)) {
+	if (Util::ShowDebugSections() && ImGui::TreeNodeEx(T(TKEY("debug"), "Debug"), ImGuiTreeNodeFlags_DefaultOpen)) {
 		ImGui::Checkbox(T(TKEY("enable_wetness_override"), "Enable Wetness Override"), &debugSettings.EnableWetnessOverride);
 		ImGui::Checkbox(T(TKEY("enable_puddle_override"), "Enable Puddle Override"), &debugSettings.EnablePuddleOverride);
 		ImGui::Checkbox(T(TKEY("enable_rain_override"), "Enable Rain Override"), &debugSettings.EnableRainOverride);
@@ -854,7 +846,7 @@ void WetnessEffects::Reset()
 {
 	// Not in GetCommonBufferData: the feature buffer is rebuilt several times per frame (see Deferred).
 	if (globals::game::ui && !globals::game::ui->GameIsPaused())
-		rainTimer += (size_t)(RE::GetSecondsSinceLastFrame() * 1000);  // BSTimer::delta is always 0 for some reason
+		rainTimer += (size_t)(RE::GetSecondsSinceLastFrame() * 1000000);  // BSTimer::delta is always 0 for some reason
 }
 
 WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
@@ -941,14 +933,24 @@ WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 		}
 	}
 
-	data.Time = rainTimer / 1000.f;
+	data.Time = static_cast<float>(static_cast<double>(rainTimer) / 1000000.0);
+
+	const Settings defaults{};
+	auto positive = [](float a_value, float a_fallback) {
+		return std::isfinite(a_value) && a_value > 0.0f ? a_value : a_fallback;
+	};
+	const float raindropGridSize = positive(settings.RaindropGridSize, defaults.RaindropGridSize);
+	const float raindropInterval = positive(settings.RaindropInterval, defaults.RaindropInterval);
 
 	data.settings = settings;
 	data.settings.MaxShoreWetness = settings.EnableWetnessEffects ? settings.MaxShoreWetness : 0.0f;
 	data.settings.RaindropChance *= data.Raining * data.Raining;
-	data.settings.RaindropGridSize = 1.0f / settings.RaindropGridSize;
-	data.settings.RaindropInterval = 1.0f / settings.RaindropInterval;
-	data.settings.RippleLifetime = settings.RaindropInterval / settings.RippleLifetime;
+	data.settings.RaindropGridSize = 1.0f / raindropGridSize;
+	data.settings.RaindropInterval = 1.0f / raindropInterval;
+	data.settings.RippleLifetime = raindropInterval / positive(settings.RippleLifetime, defaults.RippleLifetime);
+	data.settings.SplashesLifetime = positive(settings.SplashesLifetime, defaults.SplashesLifetime);
+	data.settings.PuddleRadius = positive(settings.PuddleRadius, defaults.PuddleRadius);
+	data.settings.PuddleMaxAngle = positive(settings.PuddleMaxAngle, defaults.PuddleMaxAngle);
 
 	lastPerFrame = data;
 	return data;

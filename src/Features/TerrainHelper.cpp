@@ -101,6 +101,8 @@ bool TerrainHelper::TESObjectLAND_SetupMaterial(RE::TESObjectLAND* land)
 		{
 			const std::unique_lock lock(extendedSlotsMutex);
 			std::swap(extendedSlots[hashKey], slot);
+			if (std::ranges::any_of(slot.parallax, [](const RE::NiSourceTexturePtr& a_texture) { return a_texture != nullptr; }))
+				retiredSlots.push_back(std::move(slot));
 			auto [registered, isNew] = extendedSlotGeometries.try_emplace(geometry, hashKey);
 			if (isNew) {
 				geometry->IncRefCount();
@@ -148,10 +150,13 @@ void TerrainHelper::Reset()
 {
 	std::vector<RE::BSGeometry*> released;
 	std::vector<ExtendedSlots> releasedSlots;
+	std::vector<ExtendedSlots> retired;
 	{
 		const std::unique_lock lock(extendedSlotsMutex, std::try_to_lock);
 		if (!lock.owns_lock())
 			return;
+
+		retired.swap(retiredSlots);
 
 		for (auto it = extendedSlotUsers.begin(); it != extendedSlotUsers.end();) {
 			std::erase_if(it->second, [&](RE::BSGeometry* a_geometry) {
@@ -175,7 +180,17 @@ void TerrainHelper::Reset()
 		}
 	}
 
-	if (!releasedSlots.empty())
+	bool retiredTextureFreed = false;
+	for (auto& retiredSlot : retired) {
+		for (auto& texture : retiredSlot.parallax) {
+			if (texture) {
+				retiredTextureFreed |= texture->GetRefCount() == 1;
+				texture.reset();
+			}
+		}
+	}
+
+	if (!releasedSlots.empty() || retiredTextureFreed)
 		thExtendedRendererState.Clear();
 
 	for (auto* geometry : released)
@@ -225,17 +240,15 @@ void TerrainHelper::BSLightingShader_SetupMaterial(RE::BSLightingShaderMaterialB
 		return;
 	}
 
-	ExtendedSlots materialBase;
-	{
-		const std::shared_lock lock(extendedSlotsMutex);
+	// Read the slots in place under the shared lock: copying them would add and release a reference per texture on every draw.
+	const std::shared_lock lock(extendedSlotsMutex);
 
-		const auto it = extendedSlots.find(material->hashKey);
-		if (it == extendedSlots.end()) {
-			// hash does not exists
-			return;
-		}
-		materialBase = it->second;
+	const auto it = extendedSlots.find(material->hashKey);
+	if (it == extendedSlots.end()) {
+		// hash does not exists
+		return;
 	}
+	const auto& materialBase = it->second;
 
 	const auto state = globals::state;
 	const auto& stateData = globals::game::graphicsState->GetRuntimeData();

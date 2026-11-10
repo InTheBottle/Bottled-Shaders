@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <array>
-#include <filesystem>
 
 namespace
 {
@@ -90,9 +89,8 @@ ImageSpaceWidget::~ImageSpaceWidget()
 void ImageSpaceWidget::DrawWidget()
 {
 	WeatherUtils::SetCurrentWidget(this);
-	auto editorWindow = EditorWindow::GetSingleton();
 
-	if (BeginWidgetWindow()) {
+	if (BeginWidgetWindow(false, true, false, nullptr, "##ImageSpaceSearch")) {
 		DrawWidgetHeader("##ImageSpaceSearch", false, true);
 		DrawSearchDropdown();
 	}
@@ -149,9 +147,7 @@ void ImageSpaceWidget::DrawWidget()
 
 			PropertyDrawer::EndTable();
 
-			if (changed && editorWindow->settings.autoApplyChanges) {
-				ApplyChanges();
-			}
+			AutoApply(changed);
 		}
 	}
 	EndScrollableContent();
@@ -160,31 +156,19 @@ void ImageSpaceWidget::DrawWidget()
 
 void ImageSpaceWidget::LoadSettings()
 {
-	try {
-		if (!js.empty() && js.contains("Settings") && js["Settings"].is_object()) {
-			settings = js["Settings"];
-		} else {
-			settings = vanillaSettings;
+	LoadSavedSettings([this] {
+		if (const auto saved = js.find("Settings"); saved != js.end() && saved->is_object()) {
+			json merged = vanillaSettings;
+			merged.update(*saved, true);
+			settings = merged.get<Settings>();
 		}
-	} catch (const std::exception& e) {
-		logger::error("Failed to load ImageSpace settings for {}: {}", GetEditorID(), e.what());
-		settings = vanillaSettings;
-	}
-	originalSettings = settings;
-	ApplyChanges();
+	});
 }
 
 void ImageSpaceWidget::SaveSettings()
 {
 	js["Settings"] = settings;
 	originalSettings = settings;
-}
-
-json ImageSpaceWidget::CaptureUndoSnapshot() const
-{
-	json snapshot;
-	snapshot["Settings"] = settings;
-	return snapshot;
 }
 
 void ImageSpaceWidget::SetImageSpaceValues()
@@ -263,17 +247,6 @@ void ImageSpaceWidget::LoadFromGameSettings()
 void ImageSpaceWidget::ApplyChanges()
 {
 	SetImageSpaceValues();
-}
-
-void ImageSpaceWidget::RevertChanges()
-{
-	settings = vanillaSettings;
-	ApplyChanges();
-}
-
-bool ImageSpaceWidget::HasUnsavedChanges() const
-{
-	return !(settings == originalSettings);
 }
 
 std::vector<Widget::SearchResult> ImageSpaceWidget::CollectSearchableSettings() const

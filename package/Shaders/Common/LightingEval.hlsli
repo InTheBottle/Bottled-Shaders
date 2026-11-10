@@ -3,9 +3,12 @@
 #include "Common/LightingCommon.hlsli"
 
 #include "Common/BRDF.hlsli"
+#include "Common/ColorManagement.hlsli"
 #include "Common/Math.hlsli"
 #if defined(TRUE_PBR)
 #	include "Common/PBR.hlsli"
+#elif defined(GRASS_LIGHTING)
+#	include "Common/PBRMath.hlsli"
 #endif
 #if defined(HAIR) && defined(HAIR_BACKLIGHTING)
 #	include "HairBacklighting/HairBacklighting.hlsli"
@@ -27,6 +30,7 @@ DirectContext CreateDirectLightingContext(float3 worldNormal, float3 vertexNorma
 	context.detailedShadow = detailedShadow;
 	context.softShadow = softShadow;
 #if defined(TRUE_PBR)
+	context.backTransmissionVisibility = 1.0f;
 	context.coatWorldNormal = normalize(coatWorldNormal);
 	context.coatViewDir = normalize(coatViewDir);
 	context.coatLightDir = normalize(coatLightDir);
@@ -90,7 +94,7 @@ float3 VanillaSpecular(DirectContext context, float shininess, bool specular, fl
 	float sparkleColor = ProcessSparkleColor(sparkleColor1) + ProcessSparkleColor(sparkleColor2) + ProcessSparkleColor(sparkleColor3);
 	float VdotN = dot(V, N);
 	V += N * -(2 * VdotN);
-	float sparkleMultiplier = exp2(SparkleParams.w * log2(saturate(dot(V, -L)))) * (SparkleParams.z * sparkleColor);
+	float sparkleMultiplier = (SparkleParams.w > 0 ? exp2(SparkleParams.w * log2(saturate(dot(V, -L)))) : 1.0) * (SparkleParams.z * sparkleColor);
 	sparkleMultiplier = sparkleMultiplier >= 0.5 ? 1 : 0;
 	lightColorMultiplier += sparkleMultiplier * HdotN;
 #endif
@@ -124,7 +128,7 @@ void EvaluateLighting(DirectContext context, MaterialProperties material, float3
 #	if defined(HAIR) && defined(HAIR_BACKLIGHTING)
 	HairBacklighting::AddDirectLight(lightingOutput, context, tbnTr[2], material.BaseColor);
 #	endif
-#else
+#elif defined(LIGHTING)
 #	if defined(CS_HAIR_SHADING)
 	if (SharedData::hairSpecularSettings.Enabled) {
 		Hair::GetHairDirectLight(lightingOutput, context, material, tbnTr, uv);
@@ -143,13 +147,13 @@ void EvaluateLighting(DirectContext context, MaterialProperties material, float3
 #		if !defined(DEFERRED)
 		const float NdotL = dot(context.worldNormal, context.lightDir);
 		if (HasSoftLighting())
-			lightingOutput.diffuse += softLightColor * GetSoftLightMultiplier(NdotL) * material.rimSoftLightColor * Color::VanillaNormalization();
+			lightingOutput.diffuse += softLightColor * GetSoftLightMultiplier(NdotL) * material.rimSoftLightColor * Color::BRDFScale;
 
 		if (HasRimLighting())
-			lightingOutput.diffuse += softLightColor * GetRimLightMultiplier(context.lightDir, context.viewDir, context.worldNormal) * material.rimSoftLightColor * Color::VanillaNormalization();
+			lightingOutput.diffuse += softLightColor * GetRimLightMultiplier(context.lightDir, context.viewDir, context.worldNormal) * material.rimSoftLightColor * Color::BRDFScale;
 
 		if (HasBackLighting())
-			lightingOutput.diffuse += softLightColor * saturate(-NdotL) * material.backLightColor * Color::VanillaNormalization();
+			lightingOutput.diffuse += softLightColor * saturate(-NdotL) * material.backLightColor * Color::BRDFScale;
 #		endif
 		return;
 	}
@@ -157,24 +161,18 @@ void EvaluateLighting(DirectContext context, MaterialProperties material, float3
 	const float NdotL = dot(context.worldNormal, context.lightDir);
 	float3 diffuseLightColor = context.lightColor * context.detailedShadow;
 	float3 softLightColor = context.lightColor * context.softShadow;
-	lightingOutput.diffuse = saturate(NdotL) * diffuseLightColor * Color::VanillaNormalization();
-#	if defined(TREE_ANIM)
-	[branch] if (SharedData::foliageLightingSettings.EnableFoliageScattering != 0)
-	{
-		lightingOutput.transmission += material.BaseColor * GetFoliageTransmission(NdotL, dot(context.viewDir, context.lightDir)) * diffuseLightColor * Color::VanillaNormalization();
-	}
-#	endif
+	lightingOutput.diffuse = saturate(NdotL) * diffuseLightColor * Color::BRDFScale;
 #	if defined(HAIR) && defined(HAIR_BACKLIGHTING)
 	HairBacklighting::AddDirectLight(lightingOutput, context, tbnTr[2], material.BaseColor);
 #	endif
 	if (HasSoftLighting())
-		lightingOutput.diffuse += softLightColor * GetSoftLightMultiplier(NdotL) * material.rimSoftLightColor * Color::VanillaNormalization();
+		lightingOutput.diffuse += softLightColor * GetSoftLightMultiplier(NdotL) * material.rimSoftLightColor * Color::BRDFScale;
 
 	if (HasRimLighting())
-		lightingOutput.diffuse += softLightColor * GetRimLightMultiplier(context.lightDir, context.viewDir, context.worldNormal) * material.rimSoftLightColor * Color::VanillaNormalization();
+		lightingOutput.diffuse += softLightColor * GetRimLightMultiplier(context.lightDir, context.viewDir, context.worldNormal) * material.rimSoftLightColor * Color::BRDFScale;
 
 	if (HasBackLighting())
-		lightingOutput.diffuse += softLightColor * saturate(-NdotL) * material.backLightColor * Color::VanillaNormalization();
+		lightingOutput.diffuse += softLightColor * saturate(-NdotL) * material.backLightColor * Color::BRDFScale;
 
 #	if defined(VANILLA_FRESNEL)
 	if (SharedData::vanillaFresnelSettings.Enable && SharedData::vanillaFresnelSettings.EnableGGX) {
@@ -186,11 +184,12 @@ void EvaluateLighting(DirectContext context, MaterialProperties material, float3
 	}
 #	endif
 
-	lightingOutput.specular = VanillaSpecular(context, material.Shininess, HasSpecular(), uv, uv_ddx, uv_ddy) * material.SpecularColor * material.Glossiness * diffuseLightColor * Color::VanillaNormalization();
+	lightingOutput.specular = VanillaSpecular(context, material.Shininess, HasSpecular(), uv, uv_ddx, uv_ddy) * material.SpecularColor * material.Glossiness * diffuseLightColor * Color::BRDFScale;
 #endif
 }
 
-void GetIndirectLobeWeights(out IndirectLobeWeights lobeWeights, IndirectContext context, MaterialProperties material, float2 uv)
+void GetIndirectLobeWeights(out IndirectLobeWeights lobeWeights, IndirectContext context, MaterialProperties material,
+	float2 uv)
 {
 	lobeWeights = (IndirectLobeWeights)0;
 #if defined(TRUE_PBR)
@@ -225,9 +224,9 @@ void GetIndirectLobeWeights(out IndirectLobeWeights lobeWeights, IndirectContext
 }
 
 #if defined(WETNESS_EFFECTS)
-void EvaluateWetnessLighting(float3 wetnessNormal, DirectContext context, float roughness, inout DirectLightingOutput lightingOutput)
+void EvaluateWetnessLighting(float3 wetnessNormal, DirectContext context, float roughness, float filmRoughness, inout DirectLightingOutput lightingOutput)
 {
-	const float wetnessStrength = saturate(1 - roughness);
+	const float wetnessStrength = saturate(1 - filmRoughness);
 #	if defined(TRUE_PBR)
 	const float3 lightColor = context.coatLightColor;
 #	else
@@ -261,6 +260,10 @@ void EvaluateWetnessLighting(float3 wetnessNormal, DirectContext context, float 
 
 	lightingOutput.diffuse *= 1 - wetnessF;
 	lightingOutput.specular *= 1 - wetnessF;
+#	if defined(TRUE_PBR)
+	if (PBR::IsThinSurfaceMaterial(PBRFlags))
+		lightingOutput.transmission *= 1 - wetnessF;
+#	endif
 	lightingOutput.specular += wetnessSpecular;
 }
 
@@ -280,8 +283,54 @@ float3 GetWetnessIndirectLobeWeights(inout IndirectLobeWeights lobeWeights, floa
 
 	lobeWeights.diffuse *= 1 - specularLobeWeight;
 	lobeWeights.specular *= 1 - specularLobeWeight;
+#	if defined(TRUE_PBR)
+	if (PBR::IsThinSurfaceMaterial(PBRFlags)) {
+		lobeWeights.frontTransmission *= 1 - specularLobeWeight;
+		lobeWeights.backTransmission *= 1 - specularLobeWeight;
+	}
+#	endif
 
 	return specularLobeWeight;
 }
 #endif
+
+// Only PBR materials and grass have thin surfaces.
+#if defined(TRUE_PBR) || defined(GRASS_LIGHTING)
+// Foliage passes its own opacity to treat sky occluders as canopy. Other thin surfaces pass 1 for opaque occluders.
+float3 GetThinSurfaceTransmissionLighting(float3 ambientColor, float3 transmissionWeight, float3 transmissionNormal,
+	float3 worldPosition, float vertexAO, float skyOccluderOpacity, out float3 transmittedAmbientColor
+#	if defined(IBL) && defined(LIGHTING)
+	,
+	SamplerState iblSampler, bool useStaticIBL
+#	endif
+#	if defined(SKYLIGHTING)
+	,
+	sh2 skylightingSH
+#	endif
+)
+{
+#	if defined(IBL)
+	if (SharedData::iblSettings.EnableIBL) {
+#		if defined(LIGHTING)
+		if (useStaticIBL)
+			ambientColor = ImageBasedLighting::GetStaticDiffuseIBL(transmissionNormal, iblSampler);
+		else
+#		endif
+			ambientColor = ImageBasedLighting::GetDiffuseIBL(ambientColor, -transmissionNormal);
+	}
+#	endif
+	transmittedAmbientColor = transmissionWeight * ambientColor;
+	float3 diffuseColor = transmittedAmbientColor;
+#	if defined(SKYLIGHTING)
+	// The ordinary diffuse helper biases downward normals upward. Subsurface needs the requested hemisphere.
+	float skylightingDiffuse = SharedData::InInterior ? 1.0f :
+	                                                    saturate(Skylighting::EvaluateDiffuse(skylightingSH, transmissionNormal, Skylighting::GetFadeOutFactor(worldPosition)) /
+																 max(vertexAO, EPSILON_DIVISION));
+	skylightingDiffuse = PBR::GetFoliageShadowVisibility(skylightingDiffuse, skyOccluderOpacity);
+	Skylighting::ApplySkylighting(diffuseColor, transmittedAmbientColor, transmissionWeight, skylightingDiffuse);
+#	endif
+	return diffuseColor;
+}
+#endif
+
 #endif

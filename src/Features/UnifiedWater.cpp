@@ -110,14 +110,20 @@ namespace
 		func(&object);
 	}
 
-	/** @brief Removes @p entry from @p entries when the array holds its last reference, as TESWaterSystem::RemoveWater does. */
+	/**
+	 * @brief Removes @p entry from @p entries when the array holds its last reference, as TESWaterSystem::RemoveWater does.
+	 * @param firstNew Size of @p entries before the tile's AddWater; entries from this index on were created by it and are always removed.
+	 */
 	template <class Entry>
-	void RemoveOrphanedEntry(RE::BSTArray<RE::NiPointer<Entry>>& entries, const Entry* entry)
+	void RemoveOrphanedEntry(RE::BSTArray<RE::NiPointer<Entry>>& entries, const Entry* entry, std::uint32_t firstNew)
 	{
-		if (!entry || entry->GetRefCount() != 1)
+		if (!entry)
 			return;
 		const auto it = std::ranges::find_if(entries, [&](const auto& candidate) { return candidate.get() == entry; });
 		if (it == entries.end())
+			return;
+		// A tile-created entry points at the tile's material, so a transient reference from another thread must not keep it listed past the tile
+		if (static_cast<std::uint32_t>(it - entries.begin()) < firstNew && entry->GetRefCount() != 1)
 			return;
 		RE::NiPointer<RE::NiRefObject> released{ it->get() };
 		QueueDeferredRelease(released);
@@ -127,13 +133,13 @@ namespace
 
 void UnifiedWater::DrawSettings()
 {
-	if (ImGui::TreeNodeEx(T(TKEY("debug"), "Debug"), ImGuiTreeNodeFlags_DefaultOpen)) {
-		if (ImGui::Button(T(TKEY("regenerate_flowmap"), "Regenerate Flowmap")) && flowmap) {
+	if (Util::ShowDebugSections() && ImGui::TreeNodeEx(T(TKEY("debug"), "Debug"), ImGuiTreeNodeFlags_DefaultOpen)) {
+		if (Util::Button(T(TKEY("regenerate_flowmap"), "Regenerate Flowmap")) && flowmap) {
 			if (flowmap->RegenerateAndLoadFlowmap())
 				SetFlowmapTex();
 		}
 
-		if (ImGui::Button(T(TKEY("regenerate_caches"), "Regenerate Caches")) && waterCache)
+		if (Util::Button(T(TKEY("regenerate_caches"), "Regenerate Caches")) && waterCache)
 			waterCache->RegenerateCaches();
 
 		ImGui::TreePop();
@@ -717,6 +723,8 @@ void UnifiedWater::BGSTerrainBlock_Attach::thunk(RE::BGSTerrainBlock* block)
 		{
 			// Held across AddWater so no other thread can reuse this tile's reflection or normals, which keep raw pointers to its material
 			RE::BSSpinLockGuard guard(waterSystem->lock);
+			const auto firstNewReflection = waterSystem->waterReflections.size();
+			const auto firstNewNormals = waterSystem->waterNormals.size();
 			waterSystem->AddWater(shape, instruction->form.ptr, instruction->waterHeight, nullptr, true, false);
 
 			// Remove from WaterSystem, will manage it ourselves
@@ -724,8 +732,8 @@ void UnifiedWater::BGSTerrainBlock_Attach::thunk(RE::BGSTerrainBlock* block)
 				const auto reflections = waterSystem->waterObjects.back()->reflections.get();
 				const auto normals = waterSystem->waterObjects.back()->normals.get();
 				waterSystem->waterObjects.pop_back();
-				RemoveOrphanedEntry(waterSystem->waterReflections, reflections);
-				RemoveOrphanedEntry(waterSystem->waterNormals, normals);
+				RemoveOrphanedEntry(waterSystem->waterReflections, reflections, firstNewReflection);
+				RemoveOrphanedEntry(waterSystem->waterNormals, normals, firstNewNormals);
 			}
 		}
 
@@ -799,11 +807,13 @@ void UnifiedWater::BSWaterShader_SetupGeometry::thunk(RE::BSShader* waterShader,
 	auto& singleton = globals::features::unifiedWater;
 
 	if (singleton.IsExteriorWorldspaceActive() && singleton.flowmap && pass && pass->geometry) {
+		const int32_t flowmapWidth = std::max(singleton.flowmap->GetWidth(), 1);
+		const int32_t flowmapHeight = std::max(singleton.flowmap->GetHeight(), 1);
 		// ObjectUV.xyz below, xy contains width and height, z contains mesh scale
 		// Previously flowmap size was in x, yz contained flowmap offset for water displacement mesh
-		*singleton.gFlowMapSize = singleton.flowmap->GetWidth();                                            // ObjectUV.x
-		singleton.gDisplacementMeshFlowCellOffset->x = static_cast<float>(singleton.flowmap->GetHeight());  // ObjectUV.y
-		singleton.gDisplacementMeshFlowCellOffset->y = 1.0f - pass->geometry->local.scale;                  // ObjectUV.z (counters 1 - x in SetupGeometry)
+		*singleton.gFlowMapSize = flowmapWidth;                                             // ObjectUV.x
+		singleton.gDisplacementMeshFlowCellOffset->x = static_cast<float>(flowmapHeight);   // ObjectUV.y
+		singleton.gDisplacementMeshFlowCellOffset->y = 1.0f - pass->geometry->local.scale;  // ObjectUV.z (counters 1 - x in SetupGeometry)
 
 		if (const auto prop = pass->geometry->GetGeometryRuntimeData().shaderProperty.get(); prop && prop->GetRTTI() == globals::rtti::BSWaterShaderPropertyRTTI.get()) {
 			const auto waterShaderProp = static_cast<RE::BSWaterShaderProperty*>(prop);
@@ -813,10 +823,10 @@ void UnifiedWater::BSWaterShader_SetupGeometry::thunk(RE::BSShader* waterShader,
 			// xy is world cell flowmap based (0,0 is corner of flow map), zw is world cell
 			// Funky maths here to counter what's being done in SetupGeometry
 			// Previously these values were relative to the 5x5 flow grid centered on the player
-			waterShaderProp->flowX = x + singleton.flowmap->GetOffsetX();                                                                   // CellTexCoordOffset.x
-			waterShaderProp->flowY = y + singleton.flowmap->GetOffsetY() + singleton.flowmap->GetWidth() - singleton.flowmap->GetHeight();  // CellTexCoordOffset.y
-			waterShaderProp->cellX = x;                                                                                                     // CellTexCoordOffset.z
-			waterShaderProp->cellY = y;                                                                                                     // CellTexCoordOffset.w
+			waterShaderProp->flowX = x + singleton.flowmap->GetOffsetX();                                 // CellTexCoordOffset.x
+			waterShaderProp->flowY = y + singleton.flowmap->GetOffsetY() + flowmapWidth - flowmapHeight;  // CellTexCoordOffset.y
+			waterShaderProp->cellX = x;                                                                   // CellTexCoordOffset.z
+			waterShaderProp->cellY = y;                                                                   // CellTexCoordOffset.w
 		}
 	}
 

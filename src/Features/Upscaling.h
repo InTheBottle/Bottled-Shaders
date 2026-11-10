@@ -48,8 +48,6 @@ public:
 		kDLSS
 	};
 
-	static constexpr uint32_t kFsr4RuntimeSelectionSchemaVersion = 1;
-
 	struct Settings
 	{
 		uint upscaleMethod = (uint)UpscaleMethod::kDLSS;
@@ -69,25 +67,9 @@ public:
 		bool reflexUseMarkersToOptimize = false;
 		bool reflexUseFPSLimit = false;
 		float reflexFPSLimit = 60.0f;
-
-		// Opt in to AMD's runtime FSR4 upscaler DLL on eligible AMD hardware instead of the
-		// host-linked FSR3 SDK; falls back to FSR3 on any failure.
-		bool fsr4RuntimeEnable = false;
-
-		// Tracks whether fsr4RuntimeEnable has been auto-migrated for the detected adapter.
-		// Defaults to current so a fresh config needs no migration; LoadSettings resets it to
-		// 0 when absent from JSON so pre-existing configs run the migration once.
-		uint32_t fsr4RuntimeSelectionSchemaVersion = kFsr4RuntimeSelectionSchemaVersion;
 	};
 
 	Settings settings;
-
-	// fsr4RuntimeEnable requires a restart: CreateUpscalingTextureResources (which allocates
-	// runtimeFsrDepthTexture) only runs on an upscale-method change, so a mid-session flip
-	// could otherwise select the runtime provider with no typed depth texture to feed it.
-	// Latched in SetupResources, after the D3D device hook has run the adapter probe and the
-	// one-shot migration -- LoadSettings is too early for both.
-	bool fsr4RuntimeEnableBoot = false;
 
 	struct JitterCB
 	{
@@ -113,9 +95,6 @@ public:
 	// Set by Main_PostProcessing when frame-generation inputs were copied; cleared after Present.
 	bool frameGenerationPrepared = false;
 
-	globals::FrameBufferCache worldCameraFrame{};
-	bool worldCameraFrameValid = false;
-
 	// Timing and scaling
 	double refreshRate = 0.0f;
 	float2 resolutionScale = { 1.0f, 1.0f };
@@ -133,7 +112,6 @@ public:
 	// Feature interface overrides
 	virtual void DrawSettings() override;
 	virtual void SaveSettings(json& o_json) override;
-	void WriteGameIniSettings();
 	virtual void LoadSettings(json& o_json) override;
 	virtual void RestoreDefaultSettings() override;
 	virtual void DataLoaded() override;
@@ -149,15 +127,11 @@ public:
 
 	UpscaleMethod GetUpscaleMethod() const;
 
-	void CaptureWorldCamera();
-	const globals::FrameBufferCache& GetConstantsCamera() const;
-
 	void CheckResources(UpscaleMethod a_upscalemethod);
 	void CreateUpscalingTextureResources(UpscaleMethod a_upscalemethod);
 	void DestroyUpscalingTextureResources(UpscaleMethod a_upscalemethod);
 
-	winrt::com_ptr<ID3D11ComputeShader> encodeTexturesCS[4];          // One for each UpscaleMethod (kNONE, kTAA, kFSR, kDLSS)
-	winrt::com_ptr<ID3D11ComputeShader> encodeTexturesCSDepthOutput;  // FSR: converts R24G8_TYPELESS depth to R32_FLOAT
+	winrt::com_ptr<ID3D11ComputeShader> encodeTexturesCS[4];  // One for each UpscaleMethod (kNONE, kTAA, kFSR, kDLSS)
 	ID3D11ComputeShader* GetEncodeTexturesCS();
 
 	winrt::com_ptr<ID3D11PixelShader> depthRefractionUpscalePS;
@@ -186,13 +160,12 @@ public:
 	Texture2D* transparencyCompositionMaskTexture = nullptr;
 	Texture2D* motionVectorCopyTexture = nullptr;
 	Texture2D* sharpenerTexture = nullptr;
-	Texture2D* runtimeFsrDepthTexture = nullptr;
 
 	virtual void ClearShaderCache() override;
 
 	// Static instances instead of singletons
 	static inline Streamline streamline;
-	static inline FidelityFX fidelityFX;  ///< AMD FSR frame generation
+	static inline FidelityFX fidelityFX;  ///< Only for frame generation
 	static inline DX12SwapChain dx12SwapChain;
 	static inline RCAS rcas;  ///< Standalone RCAS sharpening for DLSS
 
@@ -207,7 +180,12 @@ public:
 	bool previousUpscalingWasActive = false;
 	bool depthUpscaleUseWideKernel = false;
 
-	/** @brief Requests a DLSS history reset alongside Neural Rendering; consumed by Streamline frame constants. */
+	/**
+	 * Set by MenuOpenCloseEventHandler when LoadingMenu closes (cell/worldspace transitions,
+	 * initial load). Consumed at the start of Upscale() to force a one-frame DLSS feature
+	 * rebuild. Neural Rendering also sets it to reset DLSS history on the same frame as its
+	 * model; Streamline frame constants consume that request.
+	 */
 	std::atomic<bool> pendingDLSSReset{ false };
 
 	/** @brief Copies depth and motion vectors for frame generation; returns false if its shaders or shared buffers are unavailable. */
@@ -223,7 +201,7 @@ public:
 	 */
 	void ApplySharpening();
 
-	static void TimerSleepQPC(int64_t targetQPC);
+	static void TimerSleepQPC(int64_t targetQPC, int64_t frequency);
 
 	void FrameLimiter();
 
@@ -232,7 +210,6 @@ public:
 	// Unified interface methods - external code should use these instead of direct access
 	void LoadUpscalingSDKs();  // Loads all SDKs at once
 	HANDLE GetFrameLatencyWaitableObject() const;
-	float GetFrameTime() const;
 
 	// Backend interface methods
 	bool IsBackendInitialized() const;
@@ -285,5 +262,12 @@ private:
 	{
 		static void thunk();
 		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	class MenuOpenCloseEventHandler : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+	{
+	public:
+		virtual RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override;
+		static bool Register();
 	};
 };

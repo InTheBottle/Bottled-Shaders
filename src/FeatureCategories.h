@@ -31,4 +31,9 @@ namespace FeatureCategories
 		kPostProcessing,
 		kOther,
 	};
+
+	/** @brief Upstream's names for the categories regrouped above. */
+	inline constexpr std::string_view kSky = kSkyAndWeather;
+	inline constexpr std::string_view kGrass = kGrassAndFoliage;
+	inline constexpr auto& kMenuOrder = kOrdered;
 }

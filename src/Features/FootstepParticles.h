@@ -16,7 +16,8 @@ struct FootstepParticles : Feature
 				T("feature.footstep_particles.key_feature_2", "Snow powder and clumps on snowy ground, including Snow Cover snow"),
 				T("feature.footstep_particles.key_feature_3", "Water splashes in rain puddles from Wetness Effects"),
 				T("feature.footstep_particles.key_feature_4", "GPU simulated, tinted by the ground and lit by the scene"),
-				T("feature.footstep_particles.key_feature_5", "Snow poofs from legs ploughing through the Snow Deformation blanket") } };
+				T("feature.footstep_particles.key_feature_5", "Snow poofs from legs ploughing through the Snow Deformation blanket"),
+				T("feature.footstep_particles.key_feature_6", "Visible breath for the living in snowy weather and above the snow line") } };
 	}
 
 	enum class Surface : uint32_t
@@ -45,6 +46,7 @@ struct FootstepParticles : Feature
 		float SnowIntensity = 1.0f;
 		float SplashIntensity = 1.0f;
 		float WadeIntensity = 1.0f;
+		float BreathIntensity = 1.0f;
 		float ParticleSize = 1.0f;
 		float Lifetime = 1.0f;
 		float Opacity = 1.0f;
@@ -138,6 +140,15 @@ private:
 		uint32_t frame = 0;
 	};
 
+	struct ActorBreath
+	{
+		float timer = 0.0f;
+		float exhale = 0.0f;
+		float emit = 0.0f;
+		uint32_t frame = 0;
+		bool breathes = false;
+	};
+
 	struct DebugInfo
 	{
 		uint32_t eventsThisSecond = 0;
@@ -153,6 +164,8 @@ private:
 	void BuildEvents(const RE::NiPoint3& a_cameraPosition);
 	bool BuildEvent(const PendingFootstep& a_pending, const RE::NiPoint3& a_cameraPosition, FootstepEvent& a_event);
 	void BuildWadeEvents(const RE::NiPoint3& a_cameraPosition, float a_deltaTime);
+	void BuildBreathEvents(const RE::NiPoint3& a_cameraPosition, float a_deltaTime);
+	void UpdateActorBreath(RE::Actor* a_actor, const RE::NiPoint3& a_cameraPosition, float a_deltaTime);
 	uint32_t ReserveSlots(uint32_t a_count);
 	FrameData BuildFrameData(float a_deltaTime, uint32_t a_eventCount) const;
 	void Dispatch(float a_deltaTime, bool a_clear);
@@ -167,6 +180,7 @@ private:
 	std::vector<PendingFootstep> pendingFootsteps;
 	std::vector<FootstepEvent> frameEvents;
 	std::unordered_map<RE::FormID, WadeTravel> wadeTravel;
+	std::unordered_map<RE::FormID, ActorBreath> actorBreath;
 	bool testBurstQueued = false;
 
 	eastl::unique_ptr<Buffer> particleBuffer;

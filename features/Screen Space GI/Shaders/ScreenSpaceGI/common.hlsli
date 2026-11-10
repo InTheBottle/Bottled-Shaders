@@ -34,7 +34,7 @@ cbuffer SSGICB : register(b1)
 	float2 FrameDim;
 	float2 RcpFrameDim;
 
-	uint FrameIndex;
+	float pad0;
 
 	uint NumSlices;
 	uint NumSteps;
@@ -50,7 +50,7 @@ cbuffer SSGICB : register(b1)
 	float GISaturation;
 	float GIDistanceCompensation;
 	float GICompensationMaxDist;
-	float pad1;
+	float SpecularStrength;
 
 	float AOPower;
 	float GIStrength;

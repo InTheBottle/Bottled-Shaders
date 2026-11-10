@@ -49,14 +49,13 @@ PS_OUTPUT main(PS_INPUT input)
 	uint visibleSamples = 0;
 	[unroll] for (uint i = 0; i < FlareOcclusion::SampleCount; i++)
 	{
-		// Off-screen taps count as visible, matching the sun glare
 		float2 sampleUV = light.xy + FlareOcclusion::GetSampleOffset(i);
 		float sceneDepth = DepthTex.Sample(DepthSampler, FrameBuffer::GetDynamicResolutionAdjustedScreenPosition(sampleUV)).x;
 #	ifdef REVERSE_Z
 		if (FrameBuffer::IsReverseProjection())
 			sceneDepth = 1.0 - sceneDepth;
 #	endif
-		visibleSamples += FrameBuffer::IsOutsideFrame(sampleUV) || sceneDepth >= light.z;
+		visibleSamples += sceneDepth >= light.z;
 	}
 	psout.Visibility = FlareOcclusion::GetVisibility(visibleSamples);
 	return psout;

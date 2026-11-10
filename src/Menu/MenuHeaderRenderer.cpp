@@ -32,29 +32,44 @@ namespace
 	/** @brief Draws the bottle logo followed by the product title on one line. */
 	TitleRowMetrics RenderTitleRow()
 	{
-		auto title = std::format("{} {}", Plugin::DISPLAY_NAME, Util::GetFormattedVersion(Plugin::VERSION));
-
-		MenuFonts::FontRoleGuard titleFont(Menu::FontRole::Title);
-
-		const float fontSize = ImGui::GetFontSize();
-		const float logoHeight = fontSize * kLogoHeightRatio;
-		const float logoWidth = logoHeight * Util::Icons::kBottleAspect;
-		const float gap = fontSize * kLogoTextGapRatio;
-		const float rowHeight = ImMax(logoHeight, ImGui::GetTextLineHeight());
+		const auto versionStr = Util::GetFormattedVersion(Plugin::VERSION);
+		const auto title = std::format("{} {}", Plugin::DISPLAY_NAME, versionStr);
+		const bool showBuildTag = Plugin::BUILD_DESCRIBE != std::format("v{}", versionStr);
 
 		const ImVec2 origin = ImGui::GetCursorScreenPos();
-		Util::Icons::DrawBottle(ImGui::GetWindowDrawList(),
-			ImVec2(origin.x, origin.y + (rowHeight - logoHeight) * 0.5f),
-			logoHeight,
-			ImGui::GetColorU32(ImGuiCol_Text));
+		TitleRowMetrics metrics{};
+		{
+			MenuFonts::FontRoleGuard titleFont(Menu::FontRole::Title);
 
-		ImGui::SetCursorScreenPos(ImVec2(origin.x + logoWidth + gap, origin.y + (rowHeight - ImGui::GetTextLineHeight()) * 0.5f));
-		ImGui::TextUnformatted(title.c_str());
+			const float fontSize = ImGui::GetFontSize();
+			const float logoHeight = fontSize * kLogoHeightRatio;
+			const float logoWidth = logoHeight * Util::Icons::kBottleAspect;
+			const float gap = fontSize * kLogoTextGapRatio;
+			const float rowHeight = ImMax(logoHeight, ImGui::GetTextLineHeight());
 
-		ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + rowHeight));
+			Util::Icons::DrawBottle(ImGui::GetWindowDrawList(),
+				ImVec2(origin.x, origin.y + (rowHeight - logoHeight) * 0.5f),
+				logoHeight,
+				ImGui::GetColorU32(ImGuiCol_Text));
+
+			ImGui::SetCursorScreenPos(ImVec2(origin.x + logoWidth + gap, origin.y + (rowHeight - ImGui::GetTextLineHeight()) * 0.5f));
+			ImGui::TextUnformatted(title.c_str());
+
+			metrics = { logoWidth + gap + ImGui::CalcTextSize(title.c_str()).x, rowHeight };
+		}
+
+		if (showBuildTag) {
+			const auto buildTag = Util::GetBuildLabel();
+			const float spacing = ImGui::GetStyle().ItemSpacing.x;
+			ImGui::SetCursorScreenPos(ImVec2(origin.x + metrics.width + spacing, origin.y + (metrics.height - ImGui::GetTextLineHeight()) * 0.5f));
+			ImGui::TextDisabled("%s", buildTag.c_str());
+			metrics.width += spacing + ImGui::CalcTextSize(buildTag.c_str()).x;
+		}
+
+		ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + metrics.height));
 		ImGui::Dummy(ImVec2(0.0f, 0.0f));
 
-		return { logoWidth + gap + ImGui::CalcTextSize(title.c_str()).x, rowHeight };
+		return metrics;
 	}
 
 	float IconLabelButtonWidth(const char* label)
@@ -75,7 +90,7 @@ namespace
 
 		ImGui::SameLine();
 		if (Util::Icons::IconButton("##CloseMenu", Util::Icons::Kind::Close))
-			menu->IsEnabled = false;
+			menu->Close();
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text("%s", T("menu.close_tooltip", "Close the menu (Esc)."));
 	}
@@ -171,7 +186,7 @@ void MenuHeaderRenderer::RenderHeader(bool isDocked)
 
 	place(IconLabelButtonWidth(revertLabel), style.ItemSpacing.x);
 	if (Util::Icons::Button(revertLabel, Util::Icons::Kind::Reload))
-		globals::state->Load();
+		Util::RequestRestoreSavedSettingsConfirmation();
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::Text("%s", T("menu.revert_settings_tooltip", "Discard unsaved changes and reload your saved settings."));
 
@@ -240,7 +255,7 @@ void MenuHeaderRenderer::RenderStatusBar()
 		const auto text = i18n->Format("menu.status.shaders_failed", { { "count", std::to_string(failed) } }, "{count} failed");
 		Util::Text::Error("%s", text.c_str());
 		ImGui::SameLine();
-		if (ImGui::Button(shaderCache->IsHideErrors() ? T("menu.status.show_error", "Show Error") : T("menu.status.hide_error", "Hide Error")))
+		if (Util::Button(shaderCache->IsHideErrors() ? T("menu.status.show_error", "Show Error") : T("menu.status.hide_error", "Hide Error")))
 			shaderCache->ToggleErrorMessages();
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T("menu.toggle_error_message_tooltip",

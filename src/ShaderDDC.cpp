@@ -288,7 +288,7 @@ namespace ShaderDDC
 		path = std::format(L"{}/{}/{}{}", kRoot, a_group, ToHex(std::span<const uint8_t>(keyDigest->data(), 16)), a_extension);
 	}
 
-	ID3DBlob* Entry::Load() const
+	winrt::com_ptr<ID3DBlob> Entry::Load() const
 	{
 		if (path.empty())
 			return nullptr;
@@ -324,7 +324,7 @@ namespace ShaderDDC
 		FILETIME now{};
 		GetSystemTimeAsFileTime(&now);
 		SetFileTime(file.get(), nullptr, nullptr, &now);
-		return blob.detach();
+		return blob;
 	}
 
 	bool Entry::Store(ID3DBlob* a_blob) const

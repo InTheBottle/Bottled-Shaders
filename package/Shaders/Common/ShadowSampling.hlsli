@@ -1,7 +1,7 @@
 #ifndef __SHADOW_SAMPLING_DEPENDENCY_HLSL__
 #define __SHADOW_SAMPLING_DEPENDENCY_HLSL__
 
-#include "Common/Color.hlsli"
+#include "Common/ColorManagement.hlsli"
 #include "Common/Math.hlsli"
 #include "Common/Random.hlsli"
 #include "Common/SharedData.hlsli"
@@ -39,7 +39,6 @@ StructuredBuffer<DirectionalShadowLightData> DirectionalShadowLights : register(
 
 namespace ShadowSampling
 {
-	static const float MinDirectionalLightMultiplier = 1e-5;
 	static const float3 LightingSampleNormal = float3(0, 0, 1);
 	static const float3 ImageBasedLightingNormal = float3(0, 0, -1);
 
@@ -48,8 +47,10 @@ namespace ShadowSampling
 		return SharedData::HasDirectionalShadows;
 	}
 
-	float GetWorldShadow(float3 positionWS, float3 offset)
+	float GetWorldShadow(float3 positionWS, float3 offset, out float cloudScatter)
 	{
+		cloudScatter = 0.0;
+
 		if (SharedData::InInterior || SharedData::HideSky || SharedData::InMapMenu)
 			return 1.0;
 
@@ -59,10 +60,29 @@ namespace ShadowSampling
 #endif
 
 #if defined(CLOUD_SHADOWS)
-		worldShadow *= CloudShadows::GetCloudShadowMult(positionWS, LinearSampler);
+		float cloudShadow = CloudShadows::GetCloudShadowMult(positionWS, LinearSampler);
+		cloudScatter = worldShadow * (1.0 - cloudShadow) * SharedData::cloudShadowsSettings.Scattering;
+		worldShadow *= cloudShadow;
 #endif
 
 		return worldShadow;
+	}
+
+	float GetWorldShadow(float3 positionWS, float3 offset)
+	{
+		float cloudScatter;
+		return GetWorldShadow(positionWS, offset, cloudScatter);
+	}
+
+	float3 GetCloudScatterLighting(float3 dirLightColor, float cloudScatter, float3 normal)
+	{
+		float3 deckDirection = normalize(SharedData::DirLightDirection.xyz + float3(0, 0, 1));
+		float wrap = saturate(dot(normal, deckDirection) * 0.5 + 0.5);
+		float3 scatterColor = dirLightColor * (cloudScatter * wrap * wrap * Color::BRDFScale);
+#if defined(TRUE_PBR)
+		scatterColor /= Color::PBRLightingCompensation;
+#endif
+		return scatterColor;
 	}
 
 	float Get3DFilteredShadow(float3 positionWS, float3 viewDirection, float2 screenPosition, out float surfaceShadow)
@@ -154,8 +174,7 @@ namespace ShadowSampling
 
 	float3 GetDirectionalLighting()
 	{
-		float llDirLightMult = (SharedData::linearLightingSettings.enableLinearLighting && !SharedData::linearLightingSettings.isDirLightLinear) ? SharedData::linearLightingSettings.dirLightMult : 1.0f;
-		return Color::DirectionalLight(SharedData::DirLightColor.xyz / max(llDirLightMult, MinDirectionalLightMultiplier), SharedData::linearLightingSettings.isDirLightLinear) * llDirLightMult;
+		return Color::DirectionalLight(SharedData::DirLightColor.xyz);
 	}
 
 	float3 GetSceneLightingColor()
@@ -163,9 +182,8 @@ namespace ShadowSampling
 		return GetAmbientLighting() + GetDirectionalLighting();
 	}
 
-	void ExtractLighting(float3 inputColor, out float3 dirColor, out float3 ambientColor)
+	void ExtractLighting(float3 inputColor, float3 ambientColorAmb, out float3 dirColor, out float3 ambientColor)
 	{
-		float3 ambientColorAmb = GetAmbientLighting();
 		float3 dirLightColorDir = GetDirectionalLighting();
 
 		float inputLuma = Color::RGBToLuminance(inputColor);
@@ -181,6 +199,11 @@ namespace ShadowSampling
 
 		dirColor = dirLightColorAmb;
 		ambientColor = ambientColorAmb;
+	}
+
+	void ExtractLighting(float3 inputColor, out float3 dirColor, out float3 ambientColor)
+	{
+		ExtractLighting(inputColor, GetAmbientLighting(), dirColor, ambientColor);
 	}
 }
 

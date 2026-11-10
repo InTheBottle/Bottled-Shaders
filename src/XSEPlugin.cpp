@@ -6,7 +6,7 @@
 #include "I18n/I18n.h"
 #include "Menu.h"
 #include "Menu/ThemeManager.h"
-#include "SceneSettingsManager.h"
+#include "NativeMenu/NativeMenu.h"
 #include "ShaderCache.h"
 #include "State.h"
 
@@ -51,7 +51,14 @@ extern "C" DLLEXPORT bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadInterface* a_s
 #endif
 	InitializeLog();
 	logger::info("Loaded {} {}", Plugin::NAME, Plugin::VERSION.string());
-	SKSE::Init(a_skse);
+	SKSE::Init(a_skse, false);
+	logger::info("{} {} | branch: {} | describe: {} | hash: {}{}",
+		Plugin::DISPLAY_NAME,
+		Util::GetFormattedVersion(Plugin::VERSION),
+		Plugin::BUILD_BRANCH.empty() ? "(detached)" : Plugin::BUILD_BRANCH,
+		Plugin::BUILD_DESCRIBE,
+		Plugin::BUILD_HASH.empty() ? "unknown" : Plugin::BUILD_HASH,
+		Plugin::BUILD_DIRTY ? " (dirty)" : "");
 	SKSE::AllocTrampoline(1 << 10);
 	return Load();
 }
@@ -93,9 +100,6 @@ void MessageHandler(SKSE::MessagingInterface::Message* message)
 				// Run feature PostPostLoad() first so features can disable themselves if needed
 				Feature::ForEachLoadedFeature("PostPostLoad", [](Feature* feature) { feature->PostPostLoad(); });
 
-				// Register scene settings event handler (Interior Only transitions)
-				SceneSettingsManager::MenuOpenCloseEventHandler::Register();
-
 				shaderCache->RemoveLegacyDiskCache();
 
 				if (shaderCache->UseFileWatcher())
@@ -136,6 +140,8 @@ void MessageHandler(SKSE::MessagingInterface::Message* message)
 				}
 
 				Feature::ForEachLoadedFeature("DataLoaded", [](Feature* feature) { feature->DataLoaded(); });
+
+				NativeMenu::Register();
 			}
 
 			break;
@@ -156,13 +162,6 @@ bool Load()
 		stl::report_and_fail("Old version of PrivateProfileRedirector detected, 0.6.2+ required if using it."sv);
 	}
 
-	if (Streamline::IsSmoothMotionEnabledForProfile())
-		logger::warn(
-			"NVIDIA Smooth Motion is enabled for this profile. It is known to crash "
-			"alongside D3D11 hooking mods (including this plugin). Disable Smooth "
-			"Motion for Skyrim Special Edition in the NVIDIA App if you experience "
-			"crashes at startup.");
-
 	auto messaging = SKSE::GetMessagingInterface();
 	messaging->RegisterListener("SKSE", MessageHandler);
 
@@ -175,7 +174,7 @@ bool Load()
 	I18n::GetSingleton()->Init();
 
 	state->Load();
-	state->LoadTheme();  // Load theme settings from SettingsTheme.json
+	state->LoadTheme();  // Load the active theme preset
 
 	// Initialize theme system - create default themes and discover existing ones
 	globals::menu->CreateDefaultThemes();  // Creates JSON files if they don't exist
@@ -198,11 +197,11 @@ bool Load()
 		L"Data/SKSE/Plugins/NativeWaterLightStabilizer.dll",
 		L"Data/SKSE/Plugins/DynamicWetness.dll",
 		L"Data/SKSE/Plugins/NMN_DeformableTerrain.dll",
-		L"Data/SKSE/Plugins/ShadowFixes.dll"
+		L"Data/SKSE/Plugins/skyrim-runtime-extender/reversed_z.dll"
 	};
 
 	for (const auto dll : incompatibleDLLs) {
-		if (LoadLibrary(dll)) {
+		if (std::filesystem::exists(dll)) {
 			auto errorMessage = std::format("Incompatible DLL {} detected", stl::utf16_to_utf8(dll).value_or("<unicode conversion error>"s));
 			logger::error("{}", errorMessage);
 			errors.push_back(errorMessage);

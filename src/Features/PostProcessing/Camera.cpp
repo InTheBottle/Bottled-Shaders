@@ -1,5 +1,7 @@
 #include "Camera.h"
 
+#include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
+
 #include "Features/PostProcessing.h"
 #include "I18n/I18n.h"
 #include "RasterPass.h"
@@ -24,14 +26,29 @@ void Camera::DrawSettings()
 	}
 
 	if (settings.UseFE) {
-		ImGui::SliderFloat(T("feature.post_processing.camera.fov", "FOV"), &settings.FEFoV, 20.0f, 180.0f, "%1.0f °");
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("%s", T("feature.post_processing.camera.fov_in_degrees_set_to_in_game_fov", "FOV in degrees.\n\nSet to in-game FOV."));
+		const auto* cam = owner ? owner->GetActivePhysicalCameraState() : nullptr;
+
+		float feFov = settings.FEFoV;
+		if (cam)
+			feFov = cam->HorizontalFOVDeg;
+		ImGui::BeginDisabled(cam != nullptr);
+		{
+			const SceneWidgetInterceptor::ProxyScope proxy(&settings.FEFoV, 1.0f);
+			ImGui::SliderFloat(T("feature.post_processing.camera.fov", "FOV"), &feFov, 20.0f, 180.0f, "%1.0f °");
+		}
+		ImGui::EndDisabled();
+		if (!cam && !SceneWidgetInterceptor::IsArmed())
+			settings.FEFoV = feFov;
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			if (cam)
+				ImGui::Text("%s", T("feature.post_processing.camera.fov_follows_cinematic_camera", "FOV in degrees.\n\nFollows the game FOV driven by Cinematic Camera."));
+			else
+				ImGui::Text("%s", T("feature.post_processing.camera.fov_in_degrees_set_to_in_game_fov", "FOV in degrees.\n\nSet to in-game FOV."));
 		}
 
 		ImGui::SliderFloat(T("feature.post_processing.camera.crop", "Crop"), &settings.FECrop, 0.0f, 1.0f, "%.3f");
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("%s", T("feature.post_processing.camera.how_much_to_crop_into_the_image", "How much to crop into the image.\n\n0 = circular, 1 = full-frame."));
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T("feature.post_processing.camera.how_much_to_crop_into_the_image", "How much to crop into the image.\n\n0 = circular, 1 = full-frame."));
 		}
 	}
 
@@ -45,7 +62,11 @@ void Camera::DrawSettings()
 		ImGui::SetTooltip("%s", T("feature.post_processing.camera.amount_of_noise_to_apply", "Amount of noise to apply."));
 	}
 
-	ImGui::Combo(T("feature.post_processing.camera.noise_type", "Noise type"), &settings.NoiseType, "Film grain\0Color grain\0\0");
+	const char* noiseTypes[] = {
+		T("feature.post_processing.camera.noise_type_film_grain", "Film grain"),
+		T("feature.post_processing.camera.noise_type_color_grain", "Color grain")
+	};
+	ImGui::Combo(T("feature.post_processing.camera.noise_type", "Noise type"), &settings.NoiseType, noiseTypes, IM_ARRAYSIZE(noiseTypes));
 	if (ImGui::IsItemHovered()) {
 		ImGui::SetTooltip("%s", T("feature.post_processing.camera.type_of_noise_to_apply", "Type of noise to apply."));
 	}
@@ -170,7 +191,10 @@ void Camera::Draw(TextureInfo& inout_tex)
 	res = Util::ConvertToDynamic(res);
 
 	CameraCB data = {
-		.FEFoV = settings.FEFoV,
+		.FEFoV = [this]() {
+			const auto* cam = owner ? owner->GetActivePhysicalCameraState() : nullptr;
+			return cam ? cam->HorizontalFOVDeg : settings.FEFoV;
+		}(),
 		.FECrop = settings.FECrop,
 		.CAStrength = settings.CAStrength,
 		.NoiseStrength = settings.NoiseStrength,

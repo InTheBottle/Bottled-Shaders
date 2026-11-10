@@ -1,3 +1,4 @@
+#include "Common/ColorManagement.hlsli"
 #include "Common/FrameBuffer.hlsli"
 #include "Common/Math.hlsli"
 #include "FootstepParticles/Common.hlsli"
@@ -81,7 +82,7 @@ VS_OUTPUT main(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
 	if (FootstepParticles::FrameFlags & FootstepParticles::FrameFlagFog) {
 		float distanceFactor = saturate(length(positionWS) * FootstepParticles::FogParams.y - FootstepParticles::FogParams.x);
 		float fogFactor = distanceFactor > 0.0 ? min(FootstepParticles::FogParams.w, exp2(FootstepParticles::FogParams.z * log2(distanceFactor))) : 0.0;
-		output.FogParam = float4(lerp(FootstepParticles::FogNearColor.xyz, FootstepParticles::FogFarColor.xyz, fogFactor), fogFactor);
+		output.FogParam = float4(lerp(ColorManagement::SRGBToWorking(FootstepParticles::FogNearColor.xyz), ColorManagement::SRGBToWorking(FootstepParticles::FogFarColor.xyz), fogFactor), fogFactor);
 	}
 
 	return output;

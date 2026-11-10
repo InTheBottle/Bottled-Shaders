@@ -2,11 +2,13 @@
 
 #include "Features/ReverseZ.h"
 #include "Deferred.h"
+#include "Feature.h"
 #include "Features/TerrainBlending.h"
 #include "ShaderCache.h"
 #include "ShaderDDC.h"
 #include "State.h"
 #include "Utils/Format.h"
+#include "Utils/Logging.h"
 #include <DDSTextureLoader.h>
 #include <DirectXTex.h>
 #include <d3dcompiler.h>
@@ -246,7 +248,8 @@ namespace Util
 		if (globals::features::reverseZ.IsActive())
 			macros.push_back({ "REVERSE_Z", "" });
 
-		if (globals::state->IsDeveloperMode()) {
+		const bool debugCompile = SIE::ShaderCache::IsDebugCompile();
+		if (debugCompile) {
 			macros.push_back({ "D3DCOMPILE_SKIP_OPTIMIZATION", "" });
 			macros.push_back({ "D3DCOMPILE_DEBUG", "" });
 		}
@@ -254,6 +257,15 @@ namespace Util
 		if (!shaderDefines->empty()) {
 			for (unsigned int i = 0; i < shaderDefines->size(); i++)
 				macros.push_back({ shaderDefines->at(i).first.c_str(), shaderDefines->at(i).second.c_str() });
+		}
+
+		for (auto* feature : Feature::GetFeatureList()) {
+			if (!feature->loaded)
+				continue;
+			for (const auto& [name, value] : feature->GetCommonShaderDefines()) {
+				if (std::ranges::none_of(macros, [&](const auto& macro) { return name == macro.Name; }))
+					macros.push_back({ name.data(), value.empty() ? nullptr : value.data() });
+			}
 		}
 		if (!_stricmp(ProgramType, "ps_5_0"))
 			macros.push_back({ "PSHADER", "" });
@@ -278,7 +290,7 @@ namespace Util
 		macros.push_back({ nullptr, nullptr });
 
 		// Compiler setup
-		uint32_t flags = !globals::state->IsDeveloperMode() ? (D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3) : D3DCOMPILE_DEBUG;
+		uint32_t flags = !debugCompile ? (D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3) : D3DCOMPILE_DEBUG;
 		if (globals::state->enablePartialPrecision.load(std::memory_order_relaxed))
 			flags |= D3DCOMPILE_PARTIAL_PRECISION;
 		if (globals::state->enableAvoidFlowControl.load(std::memory_order_relaxed))
@@ -311,11 +323,10 @@ namespace Util
 		std::optional<ShaderDDC::Entry> diskEntry;
 		if (globals::shaderCache->IsDiskCache() && IsCacheableTarget(ProgramType)) {
 			diskEntry.emplace(FilePath, L"Data/Shaders", GetCompileShaderCacheGroup(FilePath), macros.data(), Program, ProgramType, flags, 0u, L".cso");
-			winrt::com_ptr<ID3DBlob> cachedBlob;
-			cachedBlob.attach(diskEntry->Load());
-			if (cachedBlob) {
+			if (auto cachedBlob = diskEntry->Load()) {
 				ID3D11DeviceChild* shader = nullptr;
 				if (SUCCEEDED(CreateShaderObject(device, ProgramType, cachedBlob.get(), &shader))) {
+					Util::SetResourceName(shader, "%s:%s", str.c_str(), Program);
 					logger::debug("Loaded {} from {}", str, Util::WStringToString(diskEntry->GetPath()));
 					return shader;
 				}
@@ -337,7 +348,29 @@ namespace Util
 
 		ID3D11DeviceChild* shader = nullptr;
 		DX::ThrowIfFailed(CreateShaderObject(device, ProgramType, shaderBlob.get(), &shader));
+		Util::SetResourceName(shader, "%s:%s", str.c_str(), Program);
 		return shader;
+	}
+
+	bool SupportsMaterialAlpha(DXGI_FORMAT format)
+	{
+		static constexpr std::array formats{
+			DXGI_FORMAT_BC2_UNORM,
+			DXGI_FORMAT_BC3_UNORM,
+			DXGI_FORMAT_BC7_UNORM,
+			DXGI_FORMAT_R8G8B8A8_UNORM,
+			DXGI_FORMAT_R8G8B8A8_SNORM,
+			DXGI_FORMAT_B8G8R8A8_UNORM,
+			DXGI_FORMAT_B4G4R4A4_UNORM,
+			DXGI_FORMAT_A8_UNORM,
+			DXGI_FORMAT_R10G10B10A2_UNORM,
+			DXGI_FORMAT_R16G16B16A16_UNORM,
+			DXGI_FORMAT_R16G16B16A16_SNORM,
+			DXGI_FORMAT_R16G16B16A16_FLOAT,
+			DXGI_FORMAT_R32G32B32A32_FLOAT
+		};
+
+		return std::ranges::contains(formats, DirectX::MakeLinear(format));
 	}
 
 	// RAII wrapper for D3D mapped resources
@@ -405,11 +438,10 @@ namespace Util
 		const UINT pixelCount = desc.Width * desc.Height;
 		const UINT largeTextureThreshold = 1024 * 1024;  // 1 megapixel
 		if (pixelCount > largeTextureThreshold) {
-			static std::once_flag largeTextureWarning;
-			std::call_once(largeTextureWarning, [&]() {
+			static Util::OnceFlag largeTextureWarning;
+			if (largeTextureWarning.First())
 				logger::warn("ApplyHighlightTintToTexture: Processing large texture ({}x{} = {} pixels). Consider using compute shader for better performance. This warning will only be shown once.",
 					desc.Width, desc.Height, pixelCount);
-			});
 		}  // Create a temporary staging texture to read from
 		ID3D11Texture2D* stagingTexture = nullptr;
 		desc.Usage = D3D11_USAGE_STAGING;

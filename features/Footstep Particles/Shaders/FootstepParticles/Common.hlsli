@@ -10,7 +10,8 @@ namespace FootstepParticles
 	static const uint TypeClod = 2;
 	static const uint TypeDroplet = 3;
 	static const uint TypeMist = 4;
-	static const uint TypeCount = 5;
+	static const uint TypeBreath = 5;
+	static const uint TypeCount = 6;
 
 	static const uint SurfaceHard = 0;
 	static const uint SurfaceDirt = 1;
@@ -32,6 +33,7 @@ namespace FootstepParticles
 
 	static const uint EventFlagLanding = 1u << 0;
 	static const uint EventFlagWade = 1u << 1;
+	static const uint EventFlagBreath = 1u << 2;
 
 	struct Particle
 	{

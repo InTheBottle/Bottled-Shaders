@@ -8,8 +8,6 @@
     },
     "cs_editor.actions": "Aktionen",
     "cs_editor.active": "Aktiv:",
-    "cs_editor.active_click_pause": "Active - klicke zum pausieren",
-    "cs_editor.add": "Hinzufügen",
     "cs_editor.add_new_marker": "Neues Kennzeichen hinzufügen",
     "feature.exp_height_fog.color_lighting": "Farbe und Beleuchtung",
     "feature.exp_height_fog.debug": "Qualität und zeitliche Filterung",
@@ -28,7 +26,5 @@
     "feature.exp_height_fog.vanilla_fog": "Vanilla-Nebel",
     "feature.exp_height_fog.vanilla_strength": "Stärke des Wetternebels",
     "feature.exp_height_fog.volumetric_extinction_scale": "Extinktionsfaktor",
-    "feature.exp_height_fog.volumetric_extinction_scale_tooltip": "Skaliert die Nebeldichte beim Folgen des Vanilla-Nebels, auch wenn volumetrischer Nebel deaktiviert ist. Im manuellen Modus wirkt sich dies nur auf volumetrischen Nebel aus.",
-    "common.active": "Aktiv",
-    "common.inactive": "Inaktiv"
+    "feature.exp_height_fog.volumetric_extinction_scale_tooltip": "Skaliert die Nebeldichte beim Folgen des Vanilla-Nebels, auch wenn volumetrischer Nebel deaktiviert ist. Im manuellen Modus wirkt sich dies nur auf volumetrischen Nebel aus."
 }

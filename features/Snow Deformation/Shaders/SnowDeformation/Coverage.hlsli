@@ -24,11 +24,10 @@ float SnowCoverAt(float2 worldPosition, float2 windowPosition, float landHeight,
 		weather = clamp(weather * max(SharedData::snowCoverSettings.minAngle, normalZ), -1.0, 1.0);
 
 		float2 cameraRelative = windowPosition + EyeOffset.xy;
-		float2 cellFraction = frac(worldPosition / 4096.0 + 64.0);
-		int2 waterCell = (int2)round(cameraRelative / 4096.0 + 2.5 - cellFraction);
-		float waterHeight = -2147483648.0;
-		[flatten] if (all(waterCell >= 0) && all(waterCell < 5))
-			waterHeight = SharedData::WaterData[waterCell.x + waterCell.y * 5].w;
+		float2 cellFloor = floor(worldPosition / 4096.0);
+		float2 cellFraction = worldPosition / 4096.0 - cellFloor;
+		int2 waterCell = (int2)(cellFloor - floor((worldPosition - cameraRelative) / 4096.0)) + 2;
+		float waterHeight = SharedData::BlendWaterData(waterCell, cellFraction, landHeight + EyeOffset.z).w;
 		float waterFade = smoothstep(-64.0, 8.0, waterHeight - (landHeight + EyeOffset.z));
 
 		amount = max(saturate(max(environment, weather)) - waterFade, 0.0) * smoothstep(SharedData::snowCoverSettings.minAngle, SharedData::snowCoverSettings.maxAngle, normalZ);

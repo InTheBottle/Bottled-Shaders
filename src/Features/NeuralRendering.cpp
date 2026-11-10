@@ -1894,10 +1894,10 @@ NeuralRendering::DisplayTransform NeuralRendering::MakeDisplayTransform() const
 		std::copy_n(capture.tint, 4, display.tint);
 	}
 
-	// Post Processing's Composite applies its auto exposure downstream of every pre-tonemap
-	// placement whether or not it owns the tonemap; mirror its formula (composite.ps.hlsl).
+	// While its pipeline runs, Post Processing's Composite applies its auto exposure downstream
+	// of every pre-tonemap placement; mirror its formula (composite.ps.hlsl).
 	auto& postProcessing = globals::features::postProcessing;
-	if (postProcessing.loaded && !postProcessing.bypass && !postProcessing.IsTonemapOwnedByEffects11()) {
+	if (postProcessing.loaded && postProcessing.IsPipelineRunning()) {
 		auto* autoExposure = postProcessing.GetPipelineFeature<HistogramAutoExposure>(PostProcessing::FeaturePipelineIndex::AutoExposure);
 		if (autoExposure && autoExposure->enabled && autoExposure->GetAdaptationSRV()) {
 			display.postProcessExposure = true;

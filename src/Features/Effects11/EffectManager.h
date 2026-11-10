@@ -5,7 +5,10 @@
 #include "Effects/ENBDepthOfField.h"
 #include "Effects/ENBEffect.h"
 #include "Effects/ENBEffectPostPass.h"
+#include "Effects/ENBEffectPrePass.h"
 #include "Effects/ENBLens.h"
+#include "Effects/ENBSunSprite.h"
+#include "Effects/ENBUnderwater.h"
 #include "Buffer.h"
 #include "Profiler.h"
 
@@ -59,11 +62,14 @@ public:
 	void UpdateCommonVariablesForEffect(Effect& effect);
 
 public:
+	ENBEffectPrePass enbEffectPrePass;
 	ENBDepthOfField enbDepthOfField;
 	ENBBloom enbBloom;
 	ENBLens enbLens;
 	ENBAdaptation enbAdaptation;
+	ENBSunSprite enbSunSprite;
 	ENBEffect enbEffect;
+	ENBUnderwater enbUnderwater;
 	ENBEffectPostPass enbEffectPostPass;
 
 	// Common resources shared across effects
@@ -82,10 +88,8 @@ public:
 
 	// Color correction compute shader resources
 	winrt::com_ptr<ID3D11ComputeShader> colorCorrectionComputeShader;
+	winrt::com_ptr<ID3D11ComputeShader> colorCorrectionCopyComputeShader;
 	winrt::com_ptr<ID3D11Buffer> colorCorrectionConstantBuffer;
-
-	winrt::com_ptr<ID3D11PixelShader> nightEyePixelShader;
-	winrt::com_ptr<ID3D11Buffer> nightEyeConstantBuffer;
 
 	// Standard-Z depth copy handed to .fx files when the scene depth is reversed
 	winrt::com_ptr<ID3D11ComputeShader> standardDepthComputeShader;
@@ -97,7 +101,6 @@ public:
 	void CreateRenderStates();
 	void CreateCopyShaders();
 	void CreateColorCorrectionShader();
-	void CreateNightEyeShader();
 	void CreateStandardDepthShader();
 
 	/** @brief Depth SRV for .fx files: the scene depth, or a standard-Z (1 - z) copy of it when Reverse Z is active. */
@@ -111,6 +114,8 @@ public:
 		float enbWeather[4];
 		float timeOfDay1[4];
 		float timeOfDay2[4];
+		float fxTimeOfDay1[4];
+		float fxTimeOfDay2[4];
 		float eNightDayFactor;
 		float eInteriorFactor;
 		float fieldOfView;
@@ -132,6 +137,9 @@ public:
 		uint32_t useAdaptation = 0xFFFFFFFF;
 		uint32_t useDepthOfField = 0xFFFFFFFF;
 		uint32_t usePostPass = 0xFFFFFFFF;
+		uint32_t usePrepass = 0xFFFFFFFF;
+		uint32_t useSunGlare = 0xFFFFFFFF;
+		uint32_t useUnderwater = 0xFFFFFFFF;
 
 		uint32_t enableMultipleWeathers = 0xFFFFFFFF;
 		uint32_t enableLocationWeather = 0xFFFFFFFF;
@@ -147,9 +155,7 @@ public:
 		uint32_t gammaCurve = 0xFFFFFFFF;
 
 		uint32_t enableRain = 0xFFFFFFFF;
-
-		uint32_t nightEyeEnable = 0xFFFFFFFF;
-		uint32_t nightEyeFadeTime = 0xFFFFFFFF;
+		uint32_t rainRefractionFactor = 0xFFFFFFFF;
 	} ids;
 
 	const CommonVariableData& GetCommonData() const { return commonData; }
@@ -170,10 +176,10 @@ public:
 	// Texture copy using pixel shader
 	bool CopyTexture(ID3D11ShaderResourceView* source, ID3D11RenderTargetView* destination, bool dither = true);
 
-	// Color correction using compute shader
-	void ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV);
+	void CopyToMain(TextureManager::Texture& a_result);
 
-	void ApplyNightEye();
+	// Color correction using compute shader
+	bool ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV, ID3D11ShaderResourceView* a_source = nullptr);
 
 	void ReloadShaders();
 

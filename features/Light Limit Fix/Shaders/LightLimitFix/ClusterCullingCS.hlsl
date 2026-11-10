@@ -18,7 +18,7 @@ RWStructuredBuffer<uint> lightIndexCounter : register(u0);
 RWStructuredBuffer<uint> lightIndexList : register(u1);
 RWStructuredBuffer<LightGrid> lightGrid : register(u2);
 
-groupshared Light sharedLights[GROUP_SIZE];
+groupshared float4 sharedLightsVS[GROUP_SIZE];
 
 bool LightIntersectsCluster(float3 position, float radiusSquared, ClusterAABB cluster)
 {
@@ -30,11 +30,17 @@ bool LightIntersectsCluster(float3 position, float radiusSquared, ClusterAABB cl
 
 [numthreads(NUMTHREAD_X, NUMTHREAD_Y, NUMTHREAD_Z)] void main(
 	uint3 groupId : SV_GroupID, uint3 dispatchThreadId : SV_DispatchThreadID, uint3 groupThreadId : SV_GroupThreadID, uint groupIndex : SV_GroupIndex) {
+	if (groupIndex < LightCount) {
+		Light light = lights[groupIndex];
+		sharedLightsVS[groupIndex] = float4(FrameBuffer::WorldToView(light.positionWS.xyz), light.radius * light.radius);
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
 	if (any(dispatchThreadId >= uint3(ClusterSize.x, ClusterSize.y, ClusterSize.z)))
 		return;
 
 	uint visibleLightCount = 0;
-	uint visibleLightIndices[MAX_CLUSTER_LIGHTS];
 
 	uint clusterIndex = dispatchThreadId.x +
 	                    dispatchThreadId.y * ClusterSize.x +
@@ -42,37 +48,30 @@ bool LightIntersectsCluster(float3 position, float radiusSquared, ClusterAABB cl
 
 	ClusterAABB cluster = clusters[clusterIndex];
 
-	if (groupIndex < LightCount) {
-		uint lightIndex = groupIndex;
-		Light light = lights[lightIndex];
-		sharedLights[groupIndex] = light;
-	}
+	for (uint i = 0; i < LightCount && visibleLightCount < MAX_CLUSTER_LIGHTS; i++) {
+		float4 lightVS = sharedLightsVS[i];
 
-	GroupMemoryBarrierWithGroupSync();
-
-	for (uint i = 0; i < LightCount; i++) {
-		Light light = lights[i];
-
-		float radiusSquared = light.radius * light.radius;
-
-		float3 positionVS = FrameBuffer::WorldToView(light.positionWS.xyz);
-
-		[branch] if (LightIntersectsCluster(positionVS, radiusSquared, cluster))
-		{
-			visibleLightIndices[visibleLightCount] = i;
+		[branch] if (LightIntersectsCluster(lightVS.xyz, lightVS.w, cluster))
 			visibleLightCount++;
-			if (visibleLightCount >= MAX_CLUSTER_LIGHTS)
-				break;
-		}
 	}
-
-	GroupMemoryBarrierWithGroupSync();
 
 	uint offset = 0;
 	InterlockedAdd(lightIndexCounter[0], visibleLightCount, offset);
 
-	for (uint j = 0; j < visibleLightCount; j++) {
-		lightIndexList[offset + j] = visibleLightIndices[j];
+	// The list holds an average budget per cluster; clamp to what remains.
+	uint capacity, stride;
+	lightIndexList.GetDimensions(capacity, stride);
+	visibleLightCount = min(visibleLightCount, capacity - min(offset, capacity));
+
+	uint writtenLightCount = 0;
+	for (uint j = 0; j < LightCount && writtenLightCount < visibleLightCount; j++) {
+		float4 lightVS = sharedLightsVS[j];
+
+		[branch] if (LightIntersectsCluster(lightVS.xyz, lightVS.w, cluster))
+		{
+			lightIndexList[offset + writtenLightCount] = j;
+			writtenLightCount++;
+		}
 	}
 
 	LightGrid output = {

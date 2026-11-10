@@ -5,8 +5,10 @@
 #include "ShaderCache.h"
 #include "State.h"
 #include "Utils/D3D.h"
+#include "VanillaBinding.h"
 
 #include "Features/CSEditor.h"
+#include "Features/CapsuleShadows.h"
 #include "Features/DynamicCubemaps.h"
 #include "Features/Effects11.h"
 #include "Features/FurShells.h"
@@ -38,7 +40,7 @@ struct BlendStates
 	}
 };
 
-void SetupRenderTarget(RE::RENDER_TARGET target, D3D11_TEXTURE2D_DESC texDesc, D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc, D3D11_RENDER_TARGET_VIEW_DESC rtvDesc, D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc, DXGI_FORMAT format, uint bindFlags)
+void SetupRenderTarget(RE::RENDER_TARGET target, D3D11_TEXTURE2D_DESC texDesc, D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc, D3D11_RENDER_TARGET_VIEW_DESC rtvDesc, D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc, DXGI_FORMAT format, uint bindFlags, const char* name)
 {
 	auto renderer = globals::game::renderer;
 	auto device = globals::d3d::device;
@@ -86,6 +88,11 @@ void SetupRenderTarget(RE::RENDER_TARGET target, D3D11_TEXTURE2D_DESC texDesc, D
 
 	if (texDesc.BindFlags & D3D11_BIND_UNORDERED_ACCESS)
 		DX::ThrowIfFailed(device->CreateUnorderedAccessView(data.texture, &uavDesc, &data.UAV));
+
+	Util::SetResourceName(data.texture, "%s", name);
+	Util::SetResourceName(data.SRV, "%s SRV", name);
+	Util::SetResourceName(data.RTV, "%s RTV", name);
+	Util::SetResourceName(data.UAV, "%s UAV", name);
 }
 
 void Deferred::SetupResources()
@@ -130,21 +137,21 @@ void Deferred::SetupResources()
 		// TEMPORAL_AA_WATER_2
 
 		// Albedo
-		SetupRenderTarget(ALBEDO, texDesc, srvDesc, rtvDesc, uavDesc, DXGI_FORMAT_R10G10B10A2_UNORM, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
+		SetupRenderTarget(ALBEDO, texDesc, srvDesc, rtvDesc, uavDesc, DXGI_FORMAT_R10G10B10A2_UNORM, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, "Deferred::Albedo");
 		// Specular
-		SetupRenderTarget(SPECULAR, texDesc, srvDesc, rtvDesc, uavDesc, DXGI_FORMAT_R11G11B10_FLOAT, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
+		SetupRenderTarget(SPECULAR, texDesc, srvDesc, rtvDesc, uavDesc, DXGI_FORMAT_R11G11B10_FLOAT, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, "Deferred::Specular");
 		// Reflectance
-		SetupRenderTarget(REFLECTANCE, texDesc, srvDesc, rtvDesc, uavDesc, DXGI_FORMAT_R11G11B10_FLOAT, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
+		SetupRenderTarget(REFLECTANCE, texDesc, srvDesc, rtvDesc, uavDesc, DXGI_FORMAT_R11G11B10_FLOAT, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, "Deferred::Reflectance");
 		// Normal + Roughness
-		SetupRenderTarget(NORMALROUGHNESS, texDesc, srvDesc, rtvDesc, uavDesc, DXGI_FORMAT_R10G10B10A2_UNORM, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
+		SetupRenderTarget(NORMALROUGHNESS, texDesc, srvDesc, rtvDesc, uavDesc, DXGI_FORMAT_R10G10B10A2_UNORM, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, "Deferred::NormalRoughness");
 		// Masks
-		SetupRenderTarget(MASKS, texDesc, srvDesc, rtvDesc, uavDesc, DXGI_FORMAT_R11G11B10_FLOAT, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
+		SetupRenderTarget(MASKS, texDesc, srvDesc, rtvDesc, uavDesc, DXGI_FORMAT_R11G11B10_FLOAT, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, "Deferred::Masks");
 		// Masks2 (vertexAO; fp16 to allow blending)
-		SetupRenderTarget(MASKS2, texDesc, srvDesc, rtvDesc, uavDesc, DXGI_FORMAT_R16_UNORM, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
+		SetupRenderTarget(MASKS2, texDesc, srvDesc, rtvDesc, uavDesc, DXGI_FORMAT_R16_UNORM, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, "Deferred::Masks2");
 
 		// TAA water history buffers need RGBA16: alpha stores premultiplied coverage for ISWaterBlend
-		SetupRenderTarget(RE::RENDER_TARGETS::kWATER_1, texDesc, srvDesc, rtvDesc, uavDesc, DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
-		SetupRenderTarget(RE::RENDER_TARGETS::kWATER_2, texDesc, srvDesc, rtvDesc, uavDesc, DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
+		SetupRenderTarget(RE::RENDER_TARGETS::kWATER_1, texDesc, srvDesc, rtvDesc, uavDesc, DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, "Deferred::Water1");
+		SetupRenderTarget(RE::RENDER_TARGETS::kWATER_2, texDesc, srvDesc, rtvDesc, uavDesc, DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, "Deferred::Water2");
 	}
 
 	{
@@ -357,30 +364,36 @@ void Deferred::DeferredPasses()
 
 	auto& ibl = globals::features::ibl;
 
+	auto& capsuleShadows = globals::features::capsuleShadows;
+	if (capsuleShadows.loaded)
+		capsuleShadows.Draw();
+
 	// Deferred Composite
 	{
 		TracyD3D11Zone(globals::state->tracyCtx, "Deferred Composite");
 
-		ID3D11ShaderResourceView* srvs[16]{
-			specular.SRV,                                                                                    // t0  SpecularTexture
-			albedo.SRV,                                                                                      // t1  AlbedoTexture
-			normalRoughness.SRV,                                                                             // t2  NormalRoughnessTexture
-			masks.SRV,                                                                                       // t3  MasksTexture
-			Util::GetCurrentSceneDepthSRV(false),                                                            // t4  DepthTexture (24/32-bit; HLSL type baked at compile via TERRAIN_BLENDING)
-			dynamicCubemaps.loaded ? reflectance.SRV : nullptr,                                              // t5  ReflectanceTexture
-			dynamicCubemaps.loaded ? dynamicCubemaps.envTexture->srv.get() : nullptr,                        // t6  EnvTexture
-			dynamicCubemaps.loaded ? dynamicCubemaps.envReflectionsTexture->srv.get() : nullptr,             // t7  EnvReflectionsTexture
-			dynamicCubemaps.loaded && skylighting.loaded ? skylighting.texProbeArray->srv.get() : nullptr,   // t8  SkylightingProbeArray
-			masks2.SRV,                                                                                      // t9  Masks2Texture (vertexAO in .x)
-			ssgi_ao,                                                                                         // t10 SsgiAoTexture
-			ssgi_y,                                                                                          // t11 SsgiYTexture
-			ssgi_cocg,                                                                                       // t12 SsgiCoCgTexture
-			ssgi_hq_spec ? ssgi_gi_spec : nullptr,                                                           // t13 SsgiSpecularTexture
-			ibl.loaded ? ibl.envIBLTexture->srv.get() : nullptr,                                             // t14 EnvIBLTexture
-			ibl.loaded ? ibl.skyIBLTexture->srv.get() : nullptr,                                             // t15 SkyIBLTexture
+		ID3D11ShaderResourceView* skylightingProbes = skylighting.loaded && skylighting.texProbeArray ? skylighting.texProbeArray->srv.get() : nullptr;
+		ID3D11ShaderResourceView* srvs[17]{
+			specular.SRV,                                                                         // t0  SpecularTexture
+			albedo.SRV,                                                                           // t1  AlbedoTexture
+			normalRoughness.SRV,                                                                  // t2  NormalRoughnessTexture
+			masks.SRV,                                                                            // t3  MasksTexture
+			Util::GetCurrentSceneDepthSRV(false),                                                 // t4  DepthTexture (24/32-bit; HLSL type baked at compile via TERRAIN_BLENDING)
+			dynamicCubemaps.loaded ? reflectance.SRV : nullptr,                                   // t5  ReflectanceTexture
+			dynamicCubemaps.loaded ? dynamicCubemaps.envTexture->srv.get() : nullptr,             // t6  EnvTexture
+			dynamicCubemaps.loaded ? dynamicCubemaps.envReflectionsTexture->srv.get() : nullptr,  // t7  EnvReflectionsTexture
+			dynamicCubemaps.loaded ? skylightingProbes : nullptr,                                 // t8  SkylightingProbeArray
+			masks2.SRV,                                                                           // t9  Masks2Texture (vertexAO in .x)
+			ssgi_ao,                                                                              // t10 SsgiAoTexture
+			ssgi_y,                                                                               // t11 SsgiYTexture
+			ssgi_cocg,                                                                            // t12 SsgiCoCgTexture
+			ssgi_hq_spec ? ssgi_gi_spec : nullptr,                                                // t13 SsgiSpecularTexture
+			ibl.loaded ? ibl.envIBLTexture->srv.get() : nullptr,                                  // t14 EnvIBLTexture
+			ibl.loaded ? ibl.skyIBLTexture->srv.get() : nullptr,                                  // t15 SkyIBLTexture
+			capsuleShadows.loaded ? capsuleShadows.GetOcclusionSRV() : nullptr,                   // t16 CapsuleOcclusionTexture
 		};
 
-		if (dynamicCubemaps.loaded)
+		if (dynamicCubemaps.loaded || capsuleShadows.loaded)
 			context->CSSetSamplers(0, 1, &linearSampler);
 
 		context->CSSetShaderResources(0, ARRAYSIZE(srvs), srvs);
@@ -401,7 +414,7 @@ void Deferred::DeferredPasses()
 
 	// Clear
 	{
-		ID3D11ShaderResourceView* views[16]{ nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
+		ID3D11ShaderResourceView* views[17]{};
 		context->CSSetShaderResources(0, ARRAYSIZE(views), views);
 
 		ID3D11UnorderedAccessView* uavs[3]{ nullptr, nullptr, nullptr };
@@ -424,12 +437,7 @@ void Deferred::DeferredPasses()
 
 void Deferred::EndDeferred()
 {
-	if (!globals::state->inWorld)
-		return;
-
-	auto shaderCache = globals::shaderCache;
-
-	if (!shaderCache->IsEnabled())
+	if (!deferredPass)
 		return;
 
 	auto shadowState = globals::game::shadowState;
@@ -619,6 +627,9 @@ ID3D11ComputeShader* Deferred::GetComputeMainComposite()
 		if (globals::features::screenSpaceGI.loaded)
 			defines.push_back({ "SSGI", nullptr });
 
+		if (globals::features::capsuleShadows.loaded)
+			defines.push_back({ "CAPSULE_SHADOWS", nullptr });
+
 		if (globals::features::ibl.loaded)
 			defines.push_back({ "IBL", nullptr });
 
@@ -645,6 +656,9 @@ ID3D11ComputeShader* Deferred::GetComputeMainCompositeInterior()
 
 		if (globals::features::screenSpaceGI.loaded)
 			defines.push_back({ "SSGI", nullptr });
+
+		if (globals::features::capsuleShadows.loaded)
+			defines.push_back({ "CAPSULE_SHADOWS", nullptr });
 
 		if (globals::features::ibl.loaded)
 			defines.push_back({ "IBL", nullptr });
@@ -673,9 +687,6 @@ void Deferred::Hooks::Main_RenderWorld::thunk(bool a1)
 	state->permutationData.ExtraShaderDescriptor |= static_cast<uint32_t>(State::ExtraShaderDescriptors::InWorld);
 	state->inWorld = true;
 	func(a1);
-
-	if (globals::features::upscaling.loaded)
-		globals::features::upscaling.CaptureWorldCamera();
 
 	state->inWorld = false;
 	state->permutationData.ExtraShaderDescriptor &= ~static_cast<uint32_t>(State::ExtraShaderDescriptors::InWorld);
@@ -780,11 +791,5 @@ void Deferred::Hooks::Main_RenderFirstPersonView::thunk(bool a1, bool a2)
 void Deferred::Hooks::Renderer_ResetState::thunk(void* This)
 {
 	func(This);
-
-	auto* const state = globals::state;
-	auto* const context = globals::d3d::context;
-
-	ID3D11Buffer* buffers[3] = { state->permutationCB->CB(), state->sharedDataCB->CB(), state->featureDataCB->CB() };
-	context->PSSetConstantBuffers(4, 3, buffers);
-	context->CSSetConstantBuffers(5, 2, buffers + 1);
+	VanillaBinding::BindSharedConstantBuffers();
 }

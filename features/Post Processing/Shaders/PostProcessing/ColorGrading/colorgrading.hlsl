@@ -1,7 +1,3 @@
-// NOTE: the standalone shader disk cache (ShaderCache::EnqueueStandaloneShaderCompile)
-// compares only this file's mtime against the cached blob, never its includes. After
-// editing anything under ColorGrading/Include/, touch this file too or the stale blob
-// keeps being served.
 #include "Common/Color.hlsli"
 #include "Common/ColorSpaces.hlsli"
 #include "Common/Math.hlsli"
@@ -393,7 +389,7 @@ float3 LottesFilmic(float3 val)
 	float b = (pow(maxHDR, a) * midOut - pow(midIn, a) * peakOutput) /
 	          ((pow(maxHDR, a * d) - pow(midIn, a * d)) * midOut * peakOutput),
 		  c = (pow(maxHDR, a * d) * pow(midIn, a) * peakOutput - pow(maxHDR, a) * pow(midIn, a * d) * midOut) /
-	          ((pow(maxHDR, a * d) - pow(midIn, a * d)) * midOut * peakOutput);
+		      ((pow(maxHDR, a * d) - pow(midIn, a * d)) * midOut * peakOutput);
 
 	val = pow(val, a) / (pow(val, a * d) * b + c);
 	val = enableHDR ? clamp(val, 0.0, peakOutput) : saturate(val);
@@ -653,10 +649,21 @@ float3 PsychoVTonemap(float3 color)
 
 	// PsychoV expects scene-linear BT.709 input. The surrounding Color Grading
 	// pipeline converts into this native space before invoking the tonemapper.
-	if (enableHDR)
-		return renodx::tonemap::psycho::HDR(color, HDRPeakRatio());
-	else
-		return renodx::tonemap::psycho::SDR(color);
+	const float linearGrey = 0.18f;
+	return renodx::tonemap::psychov::psychotm_test30(
+		color,
+		enableHDR ? HDRPeakRatio() : 1.0f,
+		1.0f,                 // exposure, applied above
+		tonemapParams[0].y,   // highlights
+		tonemapParams[0].z,   // shadows
+		tonemapParams[0].w,   // contrast
+		tonemapParams[1].x,   // purity
+		tonemapParams[1].y,   // cone response
+		linearGrey,           // adaptation anchor
+		linearGrey,           // output background anchor
+		tonemapParams[1].z,   // gamut compression strength
+		enableHDR ? 1 : 0,    // target gamut: BT.2020 for HDR, BT.709 for SDR
+		tonemapParams[1].w);  // compression power, 0 = auto
 }
 
 float3 NeutwoTonemap(float3 color)
@@ -891,10 +898,14 @@ float4 PSColorGrading(FullscreenTriangleVSOutput input) : SV_Target
 	color = LinearContrast(color, cinematic.z, 0.18);
 
 	// Apply LUT or direct Color Grading
+#if defined(LUT_GRADING)
+	color = ApplyLUT(color);
+#else
 	if (skipLUT)
 		color = ColorGrading(color);
 	else
 		color = ApplyLUT(color);
+#endif
 
 	color = pow(abs(color), inOutGamma.w);
 

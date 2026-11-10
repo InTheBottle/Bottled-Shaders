@@ -3,6 +3,7 @@
 #include "D3D11StateBackup.h"
 #include "Editor/Effects11Editor.h"
 #include "Features/Effects11.h"
+#include "Features/LinearLighting.h"
 #include "Features/ProceduralSun.h"
 #include "Features/RainRefraction.h"
 #include "Features/ReverseZ.h"
@@ -10,10 +11,12 @@
 #include "Globals.h"
 #include "Menu.h"
 #include "State.h"
+#include "Utils/Game.h"
 
 #include "PresetManager.h"
 #include "SettingManager.h"
 #include "TextureManager.h"
+#include "Utils/Logging.h"
 #include "WeatherManager.h"
 
 #include <d3dcompiler.h>
@@ -35,7 +38,7 @@ EffectManager& EffectManager::GetSingleton()
 uint32_t EffectManager::GetFailedEffectCount() const
 {
 	uint32_t count = 0;
-	const Effect* allEffects[] = { &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbEffect, &enbEffectPostPass };
+	const Effect* allEffects[] = { &enbEffectPrePass, &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbSunSprite, &enbEffect, &enbUnderwater, &enbEffectPostPass };
 	for (const auto* effect : allEffects)
 		if (effect->IsFilePresent() && !effect->GetErrors().empty())
 			count++;
@@ -45,7 +48,7 @@ uint32_t EffectManager::GetFailedEffectCount() const
 std::vector<std::string> EffectManager::GetAllErrors() const
 {
 	std::vector<std::string> result;
-	const Effect* allEffects[] = { &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbEffect, &enbEffectPostPass };
+	const Effect* allEffects[] = { &enbEffectPrePass, &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbSunSprite, &enbEffect, &enbUnderwater, &enbEffectPostPass };
 	for (const auto* effect : allEffects)
 		if (effect->IsFilePresent() && !effect->GetErrors().empty())
 			for (const auto& err : effect->GetErrors())
@@ -122,15 +125,18 @@ void EffectManager::Apply()
 	if (auto& rainRefraction = globals::features::rainRefraction; rainRefraction.loaded)
 		rainRefraction.LoadPresetRaindrops(PresetManager::GetSingleton().GetENBSeriesPath());
 
+	enbEffectPrePass.Apply();
 	enbDepthOfField.Apply();
 	enbBloom.Apply();
 	enbLens.Apply();
 	enbAdaptation.Apply();
+	enbSunSprite.Apply();
 	enbEffect.Apply();
+	enbUnderwater.Apply();
 	enbEffectPostPass.Apply();
 
 #ifdef ENABLE_ENB_EXTENDER
-	EffectBase* allEffects[] = { &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbEffect, &enbEffectPostPass };
+	EffectBase* allEffects[] = { &enbEffectPrePass, &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbSunSprite, &enbEffect, &enbUnderwater, &enbEffectPostPass };
 	for (auto* effect : allEffects) {
 		if (effect->IsCompiled())
 			effect->LoadWeatherData();
@@ -142,7 +148,7 @@ void EffectManager::Apply()
 
 void EffectManager::Load()
 {
-	EffectBase* allEffects[] = { &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbEffect, &enbEffectPostPass };
+	EffectBase* allEffects[] = { &enbEffectPrePass, &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbSunSprite, &enbEffect, &enbUnderwater, &enbEffectPostPass };
 	for (auto* effect : allEffects) {
 		effect->Load();
 #ifdef ENABLE_ENB_EXTENDER
@@ -155,11 +161,14 @@ void EffectManager::Load()
 
 void EffectManager::Save()
 {
+	enbEffectPrePass.Save();
 	enbDepthOfField.Save();
 	enbBloom.Save();
 	enbLens.Save();
 	enbAdaptation.Save();
+	enbSunSprite.Save();
 	enbEffect.Save();
+	enbUnderwater.Save();
 	enbEffectPostPass.Save();
 }
 
@@ -174,6 +183,9 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterBoolSetting("EnableBloom", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableLens", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnablePostPassShader", "EFFECT", false, false);
+	settingManager.RegisterBoolSetting("EnablePrepass", "EFFECT", false, false);
+	settingManager.RegisterBoolSetting("EnableSunGlare", "EFFECT", false, false);
+	settingManager.RegisterBoolSetting("EnableUnderwaterShader", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableCloudShadows", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableCloudsScattering", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableImageBasedLighting", "EFFECT", false, false);
@@ -209,7 +221,7 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterTimeOfDaySetting("WavesAmplitude", "WATER", 1.0f, 0.0f, 10.0f, 0.01f, true);
 	settingManager.RegisterFloatSetting("Muddiness", "WATER", 1.0f, 0.0f, 1.0f, 0.01f, false);
 	settingManager.RegisterFloatSetting("SunLightingMultiplier", "WATER", 1.0f, 0.0f, 1.0f, 0.01f, false);
-	settingManager.RegisterFloatSetting("SunSpecularMultiplier", "WATER", 1.0f, 0.0f, 1.0f, 0.01f, false);
+	settingManager.RegisterFloatSetting("SunSpecularMultiplier", "WATER", 1.0f, 0.0f, 4.0f, 0.01f, false);
 	settingManager.RegisterFloatSetting("FresnelMin", "WATER", 1.0f, 0.0f, 1.0f, 0.01f, false);
 	settingManager.RegisterFloatSetting("FresnelMax", "WATER", 1.0f, 0.0f, 1.0f, 0.01f, false);
 	settingManager.RegisterFloatSetting("FresnelMultiplier", "WATER", 1.0f, 0.0f, 4.0f, 0.01f, false);
@@ -243,7 +255,7 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterTimeOfDaySetting("ColorPow", "ENVIRONMENT", 1.0f, 1.0f, 2.2f, 0.01f, true);
 
 	settingManager.RegisterBoolSetting("DisableWrongSkyMath", "SKY", false, false);
-	settingManager.RegisterBoolSetting("FixBlackCrush", "SKY", false, false);
+	settingManager.RegisterBoolSetting("FixBlackCrush", "SKY", true, false);
 	settingManager.RegisterTimeOfDaySetting("GradientIntensity", "SKY", 1.0f, 0.0f, 30000.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("GradientDesaturation", "SKY", 0.0f, -1.0f, 1.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("GradientTopIntensity", "SKY", 1.0f, 0.0f, 30000.0f, 0.01f, true);
@@ -273,8 +285,6 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterFloatSetting("StarsAnimationTime", "SKY", 0.3f, 0.0f, 1.0f, 0.01f, false);
 	settingManager.RegisterFloatSetting("StarsAnimationDensity", "SKY", 10.0f, 0.0f, 10.0f, 0.01f, false);
 	settingManager.RegisterFloatSetting("StarsAnimationIntensity", "SKY", 10.0f, 0.0f, 10.0f, 0.01f, false);
-	settingManager.RegisterTimeOfDaySetting("AuroraBorealisIntensity", "SKY", 1.0f, 0.0f, 30000.0f, 0.01f, true);
-	settingManager.RegisterTimeOfDaySetting("AuroraBorealisCurve", "SKY", 1.0f, 0.1f, 8.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("CloudsVertexAlphaBoost", "SKY", 0.0f, 0.0f, 2.0f, 0.01f, true);
 	settingManager.RegisterFloatSetting("CloudsEdgeClamp", "SKY", 0.5f, 0.05f, 8.0f, 0.01f, false);
 	settingManager.RegisterFloatSetting("CloudsEdgeIntensity", "SKY", 2.0f, 0.0f, 30000.0f, 0.01f, false);
@@ -312,7 +322,7 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterBoolSetting("EnableLighting", "VOLUMETRICFOG", false, false);
 	settingManager.RegisterBoolSetting("EnableShadows", "VOLUMETRICFOG", true, false);
 	settingManager.RegisterTimeOfDaySetting("Intensity", "VOLUMETRICFOG", 1.0f, 0.0f, 30000.0f, 0.01f, true);
-	settingManager.RegisterTimeOfDaySetting("Curve", "VOLUMETRICFOG", 1.0f, 1.0f, 2.5f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("Curve", "VOLUMETRICFOG", 1.0f, 0.1f, 8.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("ShadowAmount", "VOLUMETRICFOG", 0.5f, 0.0f, 0.8f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("Opacity", "VOLUMETRICFOG", 1.0f, 0.0f, 1.0f, 0.01f, true);
 	settingManager.RegisterColorTimeOfDaySetting("ColorFilter", "VOLUMETRICFOG", { 1.0f, 1.0f, 1.0f }, true);
@@ -322,7 +332,7 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterTimeOfDaySetting("GlowIntensity", "SUNGLARE", 1.0f, 0.0f, 1000.0f, 0.01f, true);
 
 	settingManager.RegisterTimeOfDaySetting("Intensity", "PARTICLE", 1.0f, 0.0f, 30000.0f, 0.01f, true);
-	settingManager.RegisterTimeOfDaySetting("LightingInfluence", "PARTICLE", 0.5f, 0.0f, 10.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("LightingInfluence", "PARTICLE", 0.5f, 0.0f, 30.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("AmbientInfluence", "PARTICLE", 0.5f, 0.0f, 10.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("PointLightingInfluence", "PARTICLE", 1.0f, 0.0f, 10.0f, 0.01f, true);
 
@@ -332,18 +342,11 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterBoolSetting("Enable", "RAIN", true, false);
 	settingManager.RegisterTimeOfDaySetting("MotionStretch", "RAIN", 0.28f, 0.0f, 1.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("MotionTransparency", "RAIN", 0.1f, 0.0f, 1.0f, 0.01f, true);
+	settingManager.RegisterFloatSetting("RefractionFactor", "RAIN", 1.0f, -2.0f, 2.0f, 0.01f, false);
+	settingManager.RegisterTimeOfDaySetting("MotionBluriness", "RAIN", 0.0f, 0.0f, 1.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("Brightness", "RAIN", 1.0f, 0.0f, 10.0f, 0.01f, true);
 
-	settingManager.RegisterBoolSetting("Enable", "NIGHTEYE", true, false);
-	settingManager.RegisterTimeOfDaySetting("Intensity", "NIGHTEYE", 1.0f, 0.0f, 1.0f, 0.01f, true);
-	settingManager.RegisterColorTimeOfDaySetting("ColorBalance", "NIGHTEYE", { 0.537f, 0.647f, 1.0f }, true);
-	settingManager.RegisterTimeOfDaySetting("Exposure", "NIGHTEYE", 1.0f, 0.0f, 8.0f, 0.01f, true);
-	settingManager.RegisterTimeOfDaySetting("Saturation", "NIGHTEYE", 1.0f, 0.0f, 10.0f, 0.01f, true);
-	settingManager.RegisterTimeOfDaySetting("Brightness", "NIGHTEYE", 1.0f, -5.0f, 5.0f, 0.01f, true);
-	settingManager.RegisterTimeOfDaySetting("Contrast", "NIGHTEYE", 1.1f, 0.0f, 5.0f, 0.01f, true);
-	settingManager.RegisterTimeOfDaySetting("LowClip", "NIGHTEYE", 0.0f, 0.0f, 1.0f, 0.01f, true);
-	settingManager.RegisterFloatSetting("FadeTime", "NIGHTEYE", 0.5f, 0.0f, 5.0f, 0.01f, false);
-
-	settingManager.RegisterTimeOfDaySetting("Amount", "CLOUDSHADOWS", 0.8f, 0.0f, 4.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("Amount", "CLOUDSHADOWS", 0.5f, 0.0f, 4.0f, 0.01f, true);
 
 	settingManager.RegisterTimeOfDaySetting("Intensity", "GAMEVOLUMETRICRAYS", 1.0f, 0.0f, 1000.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("RangeFactor", "GAMEVOLUMETRICRAYS", 1.0f, 0.0f, 100.0f, 0.01f, true);
@@ -363,6 +366,8 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterTimeOfDaySetting("SunRaysMultiplier", "RAYS", 1.0f, 0.0f, 30000.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("MoonRaysMultiplier", "RAYS", 1.0f, 0.0f, 30000.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("SkyColorAmount", "RAYS", 0.0f, 0.0f, 100.0f, 0.01f, true);
+	settingManager.RegisterTimeOfDaySetting("CloudGapRays", "RAYS", 1.0f, 0.0f, 10.0f, 0.01f, true);
+	settingManager.RegisterFloatSetting("CloudGapRaysSpread", "RAYS", 30.0f, 5.0f, 80.0f, 1.0f, false);
 
 	settingManager.SetCategoryDependency("BLOOM", "EnableBloom", "EFFECT");
 	settingManager.SetCategoryDependency("LENS", "EnableLens", "EFFECT");
@@ -371,7 +376,6 @@ void EffectManager::RegisterSettings()
 	settingManager.SetCategoryDependency("SKYSCATTERING", "EnableCloudsScattering", "EFFECT");
 	settingManager.SetCategoryDependency("IMAGEBASEDLIGHTING", "EnableImageBasedLighting", "EFFECT");
 	settingManager.SetCategoryDependency("VOLUMETRICRAYS", "EnableVolumetricRays", "EFFECT");
-	settingManager.SetCategoryDependency("NIGHTEYE", "Enable", "NIGHTEYE");
 
 	settingManager.SetSettingDependency("ProceduralGradientWeightCurve", "SKY", "UseProceduralGradientWeights", "SKY");
 	settingManager.SetSettingDependency("StarsAnimationTime", "SKY", "EnableAnimatedStars", "SKY");
@@ -394,6 +398,9 @@ void EffectManager::RegisterSettings()
 	ids.useLens = settingManager.GetSettingID("EnableLens", "EFFECT");
 	ids.useAdaptation = settingManager.GetSettingID("EnableAdaptation", "EFFECT");
 	ids.usePostPass = settingManager.GetSettingID("EnablePostPassShader", "EFFECT");
+	ids.usePrepass = settingManager.GetSettingID("EnablePrepass", "EFFECT");
+	ids.useSunGlare = settingManager.GetSettingID("EnableSunGlare", "EFFECT");
+	ids.useUnderwater = settingManager.GetSettingID("EnableUnderwaterShader", "EFFECT");
 	ids.useDepthOfField = settingManager.GetSettingID("EnableDepthOfField", "EFFECT");
 
 	ids.enableMultipleWeathers = settingManager.GetSettingID("EnableMultipleWeathers", "WEATHER");
@@ -410,9 +417,7 @@ void EffectManager::RegisterSettings()
 	ids.gammaCurve = settingManager.GetSettingID("GammaCurve", "COLORCORRECTION");
 
 	ids.enableRain = settingManager.GetSettingID("Enable", "RAIN");
-
-	ids.nightEyeEnable = settingManager.GetSettingID("Enable", "NIGHTEYE");
-	ids.nightEyeFadeTime = settingManager.GetSettingID("FadeTime", "NIGHTEYE");
+	ids.rainRefractionFactor = settingManager.GetSettingID("RefractionFactor", "RAIN");
 }
 
 void EffectManager::ExecuteEffect(EffectBase& a_effect, uint32_t enableSettingID)
@@ -455,6 +460,7 @@ bool EffectManager::ExecuteEffects(RE::BSGraphics::RenderTargetData& a_input, RE
 	// Effects sample kMAIN as TextureOriginal, so mirror any other input into it
 	auto& textureOriginal = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
 	const bool sameTexture = a_input.texture && a_input.texture == textureOriginal.texture;
+	bool colorCorrected = false;
 	if (&a_input != &textureOriginal && !sameTexture && a_input.SRV && textureOriginal.RTV) {
 		const bool haveTextures = a_input.texture && textureOriginal.texture;
 		D3D11_TEXTURE2D_DESC srcDesc{}, dstDesc{};
@@ -466,7 +472,13 @@ bool EffectManager::ExecuteEffects(RE::BSGraphics::RenderTargetData& a_input, RE
 		                          srcDesc.MipLevels == dstDesc.MipLevels && srcDesc.ArraySize == dstDesc.ArraySize &&
 		                          srcDesc.SampleDesc.Count == dstDesc.SampleDesc.Count && srcDesc.SampleDesc.Quality == dstDesc.SampleDesc.Quality;
 		if (haveTextures && layoutsMatch) {
-			context->CopyResource(textureOriginal.texture, a_input.texture);
+			if (srcDesc.MipLevels == 1 && srcDesc.ArraySize == 1) {
+				globals::profiler->BeginPass("Effects11::ColorCorrection");
+				colorCorrected = ApplyColorCorrection(textureOriginal.UAV, a_input.SRV);
+				globals::profiler->EndPass();
+			}
+			if (!colorCorrected)
+				context->CopyResource(textureOriginal.texture, a_input.texture);
 		} else {
 			CopyTexture(a_input.SRV, textureOriginal.RTV, false);
 			ID3D11RenderTargetView* nullRTV = nullptr;
@@ -486,22 +498,28 @@ bool EffectManager::ExecuteEffects(RE::BSGraphics::RenderTargetData& a_input, RE
 	context->IASetInputLayout(inputLayout.get());
 	context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
-	globals::profiler->BeginPass("Effects11::ColorCorrection");
-	ApplyColorCorrection(textureOriginal.UAV);
-	globals::profiler->EndPass();
+	if (!colorCorrected) {
+		globals::profiler->BeginPass("Effects11::ColorCorrection");
+		ApplyColorCorrection(textureOriginal.UAV);
+		globals::profiler->EndPass();
+	}
 
 	auto& textureManager = TextureManager::GetSingleton();
 
+	ExecuteEffect(enbEffectPrePass, ids.usePrepass);
 	ExecuteEffect(enbDepthOfField, ids.useDepthOfField);
 
-	if (WillEffectRun(enbBloom, ids.useBloom) || WillEffectRun(enbLens, ids.useLens) || WillEffectRun(enbAdaptation, ids.useAdaptation))
-		textureManager.UpdateDownsampledTexture(textureOriginal.SRV);
+	const bool adaptationWillRun = WillEffectRun(enbAdaptation, ids.useAdaptation);
+	if (WillEffectRun(enbBloom, ids.useBloom) || WillEffectRun(enbLens, ids.useLens) || adaptationWillRun)
+		textureManager.UpdateDownsampledTexture(textureOriginal.SRV, adaptationWillRun);
 
 	ExecuteEffect(enbBloom, ids.useBloom);
 	ExecuteEffect(enbLens, ids.useLens);
 	ExecuteEffect(enbAdaptation, ids.useAdaptation);
+	ExecuteEffect(enbSunSprite, ids.useSunGlare);
 	ExecuteEffect(enbEffect);
-	ApplyNightEye();
+	if (ENBUnderwater::IsCameraUnderwater())
+		ExecuteEffect(enbUnderwater, ids.useUnderwater);
 	ExecuteEffect(enbEffectPostPass, ids.usePostPass);
 
 	textureManager.IncrementTextureSwap();
@@ -536,7 +554,6 @@ void EffectManager::CreateCommonResources()
 	CreateRenderStates();
 	CreateCopyShaders();
 	CreateColorCorrectionShader();
-	CreateNightEyeShader();
 	CreateStandardDepthShader();
 }
 
@@ -562,6 +579,7 @@ void EffectManager::CreateStandardDepthShader()
 		logger::error("[EFFECTS11] Failed to create standard depth compute shader");
 		return;
 	}
+	Util::SetResourceName(standardDepthComputeShader.get(), "EffectManager::StandardDepthCS");
 }
 
 ID3D11ShaderResourceView* EffectManager::GetEffectDepthSRV()
@@ -653,6 +671,7 @@ void EffectManager::CreateQuadGeometry()
 	initData.pSysMem = vertices;
 
 	DX::ThrowIfFailed(globals::d3d::device->CreateBuffer(&bufferDesc, &initData, quadVertexBuffer.put()));
+	Util::SetResourceName(quadVertexBuffer.get(), "EffectManager::QuadVertexBuffer");
 
 	// Create input layout for ENB post-processing
 	D3D11_INPUT_ELEMENT_DESC inputElementDescs[] = {
@@ -683,6 +702,7 @@ void EffectManager::CreateQuadGeometry()
 	if (FAILED(hr)) {
 		logger::error("[EFFECTS11] Failed to create shared input layout for ENB effects");
 	}
+	Util::SetResourceName(inputLayout.get(), "EffectManager::InputLayout");
 }
 
 void EffectManager::CreateRenderStates()
@@ -701,6 +721,7 @@ void EffectManager::CreateRenderStates()
 	rastDesc.AntialiasedLineEnable = FALSE;
 
 	DX::ThrowIfFailed(globals::d3d::device->CreateRasterizerState(&rastDesc, rasterizerState.put()));
+	Util::SetResourceName(rasterizerState.get(), "EffectManager::RasterizerState");
 
 	// Blend state for standard rendering (no blending)
 	D3D11_BLEND_DESC blendDesc = {};
@@ -710,6 +731,7 @@ void EffectManager::CreateRenderStates()
 	blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
 
 	DX::ThrowIfFailed(globals::d3d::device->CreateBlendState(&blendDesc, blendState.put()));
+	Util::SetResourceName(blendState.get(), "EffectManager::BlendState");
 }
 
 void EffectManager::CreateCopyShaders()
@@ -734,6 +756,7 @@ void EffectManager::CreateCopyShaders()
 		logger::error("[EFFECTS11] Failed to create copy vertex shader");
 		return;
 	}
+	Util::SetResourceName(copyVertexShader.get(), "EffectManager::CopyVS");
 
 	auto pixelShaderSource = LoadShaderFile("Data\\Shaders\\Effects11\\CopyPS.hlsl");
 	if (pixelShaderSource.empty())
@@ -756,6 +779,7 @@ void EffectManager::CreateCopyShaders()
 		logger::error("[EFFECTS11] Failed to create copy pixel shader");
 		return;
 	}
+	Util::SetResourceName(copyPixelShader.get(), "EffectManager::CopyPS");
 
 	D3D11_BUFFER_DESC cbDesc{};
 	cbDesc.ByteWidth = 16;
@@ -763,6 +787,7 @@ void EffectManager::CreateCopyShaders()
 	cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 	globals::d3d::device->CreateBuffer(&cbDesc, nullptr, ditherConstantBuffer.put());
+	Util::SetResourceName(ditherConstantBuffer.get(), "EffectManager::DitherCB");
 
 	logger::info("[EFFECTS11] Created texture copy shaders successfully");
 }
@@ -789,6 +814,16 @@ void EffectManager::CreateColorCorrectionShader()
 		logger::error("[EFFECTS11] Failed to create color correction compute shader");
 		return;
 	}
+	Util::SetResourceName(colorCorrectionComputeShader.get(), "EffectManager::ColorCorrectionCS");
+
+	static constexpr D3D_SHADER_MACRO copySourceDefines[] = { { "COPY_SOURCE", "1" }, { nullptr, nullptr } };
+	winrt::com_ptr<ID3DBlob> copyBlob, copyErrorBlob;
+	if (SUCCEEDED(D3DCompile(computeShaderSource.data(), computeShaderSource.size(), "ColorCorrectionCS.hlsl", copySourceDefines, nullptr,
+			"main", "cs_5_0", 0, 0, copyBlob.put(), copyErrorBlob.put())) &&
+		SUCCEEDED(globals::d3d::device->CreateComputeShader(copyBlob->GetBufferPointer(), copyBlob->GetBufferSize(), nullptr, colorCorrectionCopyComputeShader.put())))
+		Util::SetResourceName(colorCorrectionCopyComputeShader.get(), "EffectManager::ColorCorrectionCopyCS");
+	else
+		logger::warn("[EFFECTS11] Failed to create the copying color correction compute shader; the input is copied before color correction");
 
 	// Create constant buffer
 	D3D11_BUFFER_DESC cbDesc = {};
@@ -802,46 +837,9 @@ void EffectManager::CreateColorCorrectionShader()
 		logger::error("[EFFECTS11] Failed to create color correction constant buffer");
 		return;
 	}
+	Util::SetResourceName(colorCorrectionConstantBuffer.get(), "EffectManager::ColorCorrectionCB");
 
 	logger::info("[EFFECTS11] Created color correction compute shader successfully");
-}
-
-void EffectManager::CreateNightEyeShader()
-{
-	auto pixelShaderSource = LoadShaderFile("Data\\Shaders\\Effects11\\NightEyePS.hlsl");
-	if (pixelShaderSource.empty())
-		return;
-
-	winrt::com_ptr<ID3DBlob> psBlob, errorBlob;
-	HRESULT hr = D3DCompile(pixelShaderSource.data(), pixelShaderSource.size(), "NightEyePS.hlsl", nullptr, nullptr,
-		"main", "ps_5_0", 0, 0, psBlob.put(), errorBlob.put());
-
-	if (FAILED(hr)) {
-		if (errorBlob) {
-			logger::error("[EFFECTS11] Failed to compile night eye pixel shader: {}", static_cast<char*>(errorBlob->GetBufferPointer()));
-		}
-		return;
-	}
-
-	hr = globals::d3d::device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, nightEyePixelShader.put());
-	if (FAILED(hr)) {
-		logger::error("[EFFECTS11] Failed to create night eye pixel shader");
-		return;
-	}
-
-	D3D11_BUFFER_DESC cbDesc{};
-	cbDesc.ByteWidth = sizeof(float) * 12;
-	cbDesc.Usage = D3D11_USAGE_DYNAMIC;
-	cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-	cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-
-	hr = globals::d3d::device->CreateBuffer(&cbDesc, nullptr, nightEyeConstantBuffer.put());
-	if (FAILED(hr)) {
-		logger::error("[EFFECTS11] Failed to create night eye constant buffer");
-		return;
-	}
-
-	logger::info("[EFFECTS11] Created night eye pixel shader successfully");
 }
 
 void EffectManager::UpdateCommonData()
@@ -919,7 +917,7 @@ void EffectManager::UpdateCommonData()
 		// Initialize and set factors
 		float factors[static_cast<int>(TimeOfDayFactorIndex::Count)] = { 0.0f };
 
-		if (!commonData.eInteriorFactor) {
+		{
 			// Calculate transition points
 			const float dawnStart = sunriseTime - dawnDuration;
 			const float dawnMid = sunriseTime - (dawnDuration * 0.5f);
@@ -996,12 +994,17 @@ void EffectManager::UpdateCommonData()
 			factors[static_cast<int>(TimeOfDayFactorIndex::Day)] = powDay;
 
 			// Assign to output arrays
-			commonData.timeOfDay1[static_cast<int>(TimeOfDay1Index::Dawn)] = factors[static_cast<int>(TimeOfDayFactorIndex::Dawn)];
-			commonData.timeOfDay1[static_cast<int>(TimeOfDay1Index::Sunrise)] = factors[static_cast<int>(TimeOfDayFactorIndex::Sunrise)];
-			commonData.timeOfDay1[static_cast<int>(TimeOfDay1Index::Day)] = factors[static_cast<int>(TimeOfDayFactorIndex::Day)];
-			commonData.timeOfDay1[static_cast<int>(TimeOfDay1Index::Sunset)] = factors[static_cast<int>(TimeOfDayFactorIndex::Sunset)];
-			commonData.timeOfDay2[static_cast<int>(TimeOfDay2Index::Dusk)] = factors[static_cast<int>(TimeOfDayFactorIndex::Dusk)];
-			commonData.timeOfDay2[static_cast<int>(TimeOfDay2Index::Night)] = factors[static_cast<int>(TimeOfDayFactorIndex::Night)];
+			commonData.fxTimeOfDay1[static_cast<int>(TimeOfDay1Index::Dawn)] = factors[static_cast<int>(TimeOfDayFactorIndex::Dawn)];
+			commonData.fxTimeOfDay1[static_cast<int>(TimeOfDay1Index::Sunrise)] = factors[static_cast<int>(TimeOfDayFactorIndex::Sunrise)];
+			commonData.fxTimeOfDay1[static_cast<int>(TimeOfDay1Index::Day)] = factors[static_cast<int>(TimeOfDayFactorIndex::Day)];
+			commonData.fxTimeOfDay1[static_cast<int>(TimeOfDay1Index::Sunset)] = factors[static_cast<int>(TimeOfDayFactorIndex::Sunset)];
+			commonData.fxTimeOfDay2[static_cast<int>(TimeOfDay2Index::Dusk)] = factors[static_cast<int>(TimeOfDayFactorIndex::Dusk)];
+			commonData.fxTimeOfDay2[static_cast<int>(TimeOfDay2Index::Night)] = factors[static_cast<int>(TimeOfDayFactorIndex::Night)];
+
+			if (!commonData.eInteriorFactor) {
+				std::copy(std::begin(commonData.fxTimeOfDay1), std::end(commonData.fxTimeOfDay1), std::begin(commonData.timeOfDay1));
+				std::copy(std::begin(commonData.fxTimeOfDay2), std::end(commonData.fxTimeOfDay2), std::begin(commonData.timeOfDay2));
+			}
 		}
 
 		// Calculate distance to night time (handling 24h wraparound)
@@ -1026,6 +1029,8 @@ void EffectManager::UpdateCommonData()
 
 		commonData.timeOfDay2[static_cast<int>(TimeOfDay2Index::InteriorDay)] = commonData.eInteriorFactor * commonData.eNightDayFactor;
 		commonData.timeOfDay2[static_cast<int>(TimeOfDay2Index::InteriorNight)] = commonData.eInteriorFactor * (1.0f - commonData.eNightDayFactor);
+		commonData.fxTimeOfDay2[static_cast<int>(TimeOfDay2Index::InteriorDay)] = commonData.timeOfDay2[static_cast<int>(TimeOfDay2Index::InteriorDay)];
+		commonData.fxTimeOfDay2[static_cast<int>(TimeOfDay2Index::InteriorNight)] = commonData.timeOfDay2[static_cast<int>(TimeOfDay2Index::InteriorNight)];
 	}
 
 	if (auto camera = RE::PlayerCamera::GetSingleton())
@@ -1042,7 +1047,7 @@ void EffectManager::UpdateCursorData()
 
 	// Shaders get the cursor while a UI that shows it is open, e.g. for click-to-focus depth of field
 	auto* menu = globals::menu;
-	const bool cursorVisible = (menu && menu->IsEnabled) || Effects11Editor::GetSingleton().IsOpen();
+	const bool cursorVisible = (menu && menu->IsOpen()) || Effects11Editor::GetSingleton().IsOpen();
 	if (cursorVisible && ImGui::GetCurrentContext()) {
 		const auto& io = ImGui::GetIO();
 		if (io.DisplaySize.x > 0.0f && io.DisplaySize.y > 0.0f) {
@@ -1103,7 +1108,10 @@ void EffectManager::UpdateCommonVariablesForEffect(Effect& effect)
 	if (!effect.GetEffect())
 		return;
 
-	effect.SetShaderResourceVariable("TextureDepth", GetEffectDepthSRV());
+	auto* depthVariable = effect.GetCachedVariable("TextureDepth");
+	auto* depthResource = depthVariable ? depthVariable->AsShaderResource() : nullptr;
+	if (depthResource && depthResource->IsValid())
+		depthResource->SetResource(GetEffectDepthSRV());
 
 	static const std::string renderTargets[] = {
 		"RenderTargetRGBA32", "RenderTargetRGBA64", "RenderTargetRGBA64F",
@@ -1118,15 +1126,19 @@ void EffectManager::UpdateCommonVariablesForEffect(Effect& effect)
 			effect.SetShaderResourceVariable(targetName, texture->srv.get());
 	}
 
+	const float screenWidth = static_cast<float>(globals::game::graphicsState->screenWidth);
+	const float screenHeight = static_cast<float>(globals::game::graphicsState->screenHeight);
+	const float screenAspect = screenWidth / screenHeight;
+	const float screenSize[4] = { screenWidth, 1.0f / screenWidth, screenAspect, 1.0f / screenAspect };
+	effect.SetVectorVariable("ScreenSize", screenSize, sizeof(screenSize));
+
 	effect.SetVectorVariable("Timer", commonData.timer, sizeof(commonData.timer));
 	effect.SetVectorVariable("Weather", commonData.enbWeather, sizeof(commonData.enbWeather));
 	effect.SetVectorVariable("WeatherAndTime", commonData.enbWeather, sizeof(commonData.enbWeather));
-	effect.SetVectorVariable("TimeOfDay1", commonData.timeOfDay1, sizeof(commonData.timeOfDay1));
-	effect.SetVectorVariable("TimeOfDay2", commonData.timeOfDay2, sizeof(commonData.timeOfDay2));
+	effect.SetVectorVariable("TimeOfDay1", commonData.fxTimeOfDay1, sizeof(commonData.fxTimeOfDay1));
+	effect.SetVectorVariable("TimeOfDay2", commonData.fxTimeOfDay2, sizeof(commonData.fxTimeOfDay2));
 	effect.SetVectorVariable("ENightDayFactor", &commonData.eNightDayFactor, sizeof(commonData.eNightDayFactor));
 	effect.SetVectorVariable("EInteriorFactor", &commonData.eInteriorFactor, sizeof(commonData.eInteriorFactor));
-	const float nightEyeFactor = globals::features::effects11.GetNightEyeFactor();
-	effect.SetVectorVariable("ENightEyeFactor", &nightEyeFactor, sizeof(nightEyeFactor));
 	effect.SetVectorVariable("FieldOfView", &commonData.fieldOfView, sizeof(commonData.fieldOfView));
 	effect.SetVectorVariable("tempInfo1", commonData.tempInfo1, sizeof(commonData.tempInfo1));
 	effect.SetVectorVariable("tempInfo2", commonData.tempInfo2, sizeof(commonData.tempInfo2));
@@ -1150,11 +1162,9 @@ void EffectManager::UpdateCommonVariablesForEffect(Effect& effect)
 bool EffectManager::CopyTexture(ID3D11ShaderResourceView* a_source, ID3D11RenderTargetView* a_dest, bool a_dither)
 {
 	if (!a_source || !a_dest || !copyPixelShader || !copyVertexShader) {
-		static bool logged = false;
-		if (!logged) {
+		static Util::OnceFlag logged;
+		if (logged.First())
 			logger::warn("[EFFECTS11] Invalid parameters or shaders not initialized for texture copy");
-			logged = true;
-		}
 		return false;
 	}
 
@@ -1229,26 +1239,83 @@ bool EffectManager::CopyTexture(ID3D11ShaderResourceView* a_source, ID3D11Render
 	return true;
 }
 
-void EffectManager::ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV)
+void EffectManager::CopyToMain(TextureManager::Texture& a_result)
 {
-	if (!textureUAV || !colorCorrectionComputeShader || !colorCorrectionConstantBuffer) {
-		logger::warn("[EFFECTS11] Invalid parameters or shaders not initialized for color correction");
+	auto& textureMain = globals::game::renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
+	if (!a_result.texture || !textureMain.texture)
 		return;
+
+	auto context = globals::d3d::context;
+	D3D11_TEXTURE2D_DESC srcDesc{}, dstDesc{};
+	a_result.texture->GetDesc(&srcDesc);
+	textureMain.texture->GetDesc(&dstDesc);
+	const bool layoutsMatch = srcDesc.Format == dstDesc.Format && srcDesc.Width == dstDesc.Width && srcDesc.Height == dstDesc.Height &&
+	                          srcDesc.MipLevels == dstDesc.MipLevels && srcDesc.ArraySize == dstDesc.ArraySize &&
+	                          srcDesc.SampleDesc.Count == dstDesc.SampleDesc.Count && srcDesc.SampleDesc.Quality == dstDesc.SampleDesc.Quality;
+	if (layoutsMatch) {
+		context->CopyResource(textureMain.texture, a_result.texture.get());
+	} else if (a_result.srv && textureMain.RTV) {
+		CopyTexture(a_result.srv.get(), textureMain.RTV, false);
+		ID3D11RenderTargetView* nullRTV = nullptr;
+		context->OMSetRenderTargets(1, &nullRTV, nullptr);
+	}
+}
+
+bool EffectManager::ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV, ID3D11ShaderResourceView* a_source)
+{
+	auto* computeShader = a_source ? colorCorrectionCopyComputeShader.get() : colorCorrectionComputeShader.get();
+	if (!textureUAV || !computeShader || !colorCorrectionConstantBuffer) {
+		if (!a_source)
+			logger::warn("[EFFECTS11] Invalid parameters or shaders not initialized for color correction");
+		return false;
+	}
+
+	// Get texture dimensions for dispatch
+	winrt::com_ptr<ID3D11Resource> resource;
+	textureUAV->GetResource(resource.put());
+	winrt::com_ptr<ID3D11Texture2D> texture;
+	if (!resource || !resource.try_as(texture) || !texture) {
+		logger::error("[EFFECTS11] Failed to get Texture2D from UAV in ApplyColorCorrection");
+		return false;
+	}
+	D3D11_TEXTURE2D_DESC texDesc;
+	texture->GetDesc(&texDesc);
+
+	auto context = globals::d3d::context;
+
+	ID3D11ShaderResourceView* nullSRV = nullptr;
+	if (a_source) {
+		D3D11_SHADER_RESOURCE_VIEW_DESC sourceDesc{};
+		a_source->GetDesc(&sourceDesc);
+		D3D11_UNORDERED_ACCESS_VIEW_DESC destinationDesc{};
+		textureUAV->GetDesc(&destinationDesc);
+		if (sourceDesc.Format != destinationDesc.Format || sourceDesc.ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2D || sourceDesc.Texture2D.MostDetailedMip != 0 ||
+			destinationDesc.ViewDimension != D3D11_UAV_DIMENSION_TEXTURE2D || destinationDesc.Texture2D.MipSlice != 0)
+			return false;
+
+		context->OMSetRenderTargets(0, nullptr, nullptr);
+		context->CSSetShaderResources(0, 1, &a_source);
+		winrt::com_ptr<ID3D11ShaderResourceView> boundSource;
+		context->CSGetShaderResources(0, 1, boundSource.put());
+		if (boundSource.get() != a_source) {
+			context->CSSetShaderResources(0, 1, &nullSRV);
+			return false;
+		}
 	}
 
 	auto& settingManager = SettingManager::GetSingleton();
 
 	auto brightness = settingManager.GetValue<float>(ids.brightness);
-	auto gammaCurve = settingManager.GetValue<float>(ids.gammaCurve);
-
-	auto context = globals::d3d::context;
+	auto gammaCurve = settingManager.GetValue<float>(ids.gammaCurve) * globals::features::linearLighting.GetEffects11InputCurve();
 
 	// Update constant buffer with current settings
 	D3D11_MAPPED_SUBRESOURCE mapped;
 	HRESULT hr = context->Map(colorCorrectionConstantBuffer.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
 	if (FAILED(hr)) {
 		logger::warn("[EFFECTS11] Failed to map color correction constant buffer");
-		return;
+		if (a_source)
+			context->CSSetShaderResources(0, 1, &nullSRV);
+		return false;
 	}
 	{
 		struct ColorCorrectionCB
@@ -1266,26 +1333,15 @@ void EffectManager::ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV)
 	}
 
 	// Set compute shader and resources
-	context->CSSetShader(colorCorrectionComputeShader.get(), nullptr, 0);
+	context->CSSetShader(computeShader, nullptr, 0);
 	ID3D11Buffer* bufferArray[] = { colorCorrectionConstantBuffer.get() };
 	context->CSSetConstantBuffers(0, 1, bufferArray);
 	context->CSSetUnorderedAccessViews(0, 1, &textureUAV, nullptr);
 
-	// Get texture dimensions for dispatch
-	winrt::com_ptr<ID3D11Resource> resource;
-	textureUAV->GetResource(resource.put());
-	winrt::com_ptr<ID3D11Texture2D> texture;
-	if (!resource || !resource.try_as(texture) || !texture) {
-		logger::error("[EFFECTS11] Failed to get Texture2D from UAV in ApplyColorCorrection");
-	} else {
-		D3D11_TEXTURE2D_DESC texDesc;
-		texture->GetDesc(&texDesc);
-
-		// Dispatch compute shader (8x8 thread groups)
-		UINT dispatchX = (texDesc.Width + 7) / 8;
-		UINT dispatchY = (texDesc.Height + 7) / 8;
-		context->Dispatch(dispatchX, dispatchY, 1);
-	}
+	// Dispatch compute shader (8x8 thread groups)
+	UINT dispatchX = (texDesc.Width + 7) / 8;
+	UINT dispatchY = (texDesc.Height + 7) / 8;
+	context->Dispatch(dispatchX, dispatchY, 1);
 
 	// Clear bindings
 	ID3D11UnorderedAccessView* nullUAV = nullptr;
@@ -1293,97 +1349,9 @@ void EffectManager::ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV)
 	context->CSSetShader(nullptr, nullptr, 0);
 	context->CSSetConstantBuffers(0, 1, &nullCB);
 	context->CSSetUnorderedAccessViews(0, 1, &nullUAV, nullptr);
-}
-
-void EffectManager::ApplyNightEye()
-{
-	const float factor = globals::features::effects11.GetNightEyeFactor();
-	if (factor <= 0.0f || !nightEyePixelShader || !nightEyeConstantBuffer || !copyVertexShader)
-		return;
-
-	auto& settingManager = SettingManager::GetSingleton();
-	if (!settingManager.GetValue<bool>(ids.nightEyeEnable) || enbEffect.PresetHandlesNightEye())
-		return;
-
-	auto& textureManager = TextureManager::GetSingleton();
-	auto* source = textureManager.GetCommonTexture("TextureSDRTemp");
-	auto* destination = textureManager.GetCommonTexture("TextureSDRTemp2");
-	if (!source || !destination || !source->srv || !destination->rtv || !destination->texture)
-		return;
-
-	struct NightEyeCB
-	{
-		float3 colorBalance;
-		float amount;
-		float exposure;
-		float saturation;
-		float contrast;
-		float brightness;
-		float lowClip;
-		float pad[3];
-	};
-	static_assert(sizeof(NightEyeCB) == sizeof(float) * 12);
-
-	NightEyeCB cb{};
-	cb.colorBalance = settingManager.GetInterpolatedColorTimeOfDayValue("ColorBalance", "NIGHTEYE");
-	cb.amount = std::clamp(factor * settingManager.GetInterpolatedTimeOfDayValue("Intensity", "NIGHTEYE"), 0.0f, 1.0f);
-	cb.exposure = settingManager.GetInterpolatedTimeOfDayValue("Exposure", "NIGHTEYE");
-	cb.saturation = settingManager.GetInterpolatedTimeOfDayValue("Saturation", "NIGHTEYE");
-	cb.contrast = settingManager.GetInterpolatedTimeOfDayValue("Contrast", "NIGHTEYE");
-	cb.brightness = settingManager.GetInterpolatedTimeOfDayValue("Brightness", "NIGHTEYE");
-	cb.lowClip = settingManager.GetInterpolatedTimeOfDayValue("LowClip", "NIGHTEYE");
-	if (cb.amount <= 0.0f)
-		return;
-
-	auto context = globals::d3d::context;
-
-	D3D11_MAPPED_SUBRESOURCE mapped;
-	if (FAILED(context->Map(nightEyeConstantBuffer.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
-		return;
-	*static_cast<NightEyeCB*>(mapped.pData) = cb;
-	context->Unmap(nightEyeConstantBuffer.get(), 0);
-
-	globals::profiler->BeginPass("Effects11::NightEye");
-
-	D3D11_TEXTURE2D_DESC texDesc;
-	destination->texture->GetDesc(&texDesc);
-
-	D3D11_VIEWPORT viewport = {};
-	viewport.Width = static_cast<float>(texDesc.Width);
-	viewport.Height = static_cast<float>(texDesc.Height);
-	viewport.MaxDepth = 1.0f;
-	context->RSSetViewports(1, &viewport);
-
-	ID3D11RenderTargetView* rtv = destination->rtv.get();
-	context->OMSetRenderTargets(1, &rtv, nullptr);
-	context->OMSetDepthStencilState(nullptr, 0);
-	context->RSSetState(rasterizerState.get());
-	context->OMSetBlendState(blendState.get(), nullptr, 0xFFFFFFFF);
-
-	UINT stride = 20;
-	UINT offset = 0;
-	ID3D11Buffer* vbs[] = { quadVertexBuffer.get() };
-	context->IASetVertexBuffers(0, 1, vbs, &stride, &offset);
-	context->IASetInputLayout(inputLayout.get());
-	context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-
-	context->VSSetShader(copyVertexShader.get(), nullptr, 0);
-	context->PSSetShader(nightEyePixelShader.get(), nullptr, 0);
-	ID3D11Buffer* cbs[] = { nightEyeConstantBuffer.get() };
-	context->PSSetConstantBuffers(0, 1, cbs);
-	ID3D11ShaderResourceView* srv = source->srv.get();
-	context->PSSetShaderResources(0, 1, &srv);
-
-	context->Draw(4, 0);
-
-	ID3D11ShaderResourceView* nullSRV = nullptr;
-	context->PSSetShaderResources(0, 1, &nullSRV);
-	ID3D11RenderTargetView* nullRTV = nullptr;
-	context->OMSetRenderTargets(1, &nullRTV, nullptr);
-
-	globals::profiler->EndPass();
-
-	textureManager.SwapTextures("TextureSDRTemp", "TextureSDRTemp2");
+	if (a_source)
+		context->CSSetShaderResources(0, 1, &nullSRV);
+	return true;
 }
 
 void EffectManager::ReloadShaders()
@@ -1393,12 +1361,10 @@ void EffectManager::ReloadShaders()
 	copyPixelShader = nullptr;
 	ditherConstantBuffer = nullptr;
 	colorCorrectionComputeShader = nullptr;
+	colorCorrectionCopyComputeShader = nullptr;
 	colorCorrectionConstantBuffer = nullptr;
-	nightEyePixelShader = nullptr;
-	nightEyeConstantBuffer = nullptr;
 	standardDepthComputeShader = nullptr;
 	CreateCopyShaders();
 	CreateColorCorrectionShader();
-	CreateNightEyeShader();
 	CreateStandardDepthShader();
 }

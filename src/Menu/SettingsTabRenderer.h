@@ -1,7 +1,9 @@
 #pragma once
 
+#include "Menu/SettingsSections.h"
 #include "Utils/Input.h"
 #include <functional>
+#include <span>
 #include <vector>
 
 // Forward declarations
@@ -13,6 +15,7 @@ class Menu;
  * The Shaders tab shows shader compilation options. The Keybindings tab allows
  * rebinding hotkeys for menu toggle, effects toggle, and other actions. The
  * Interface tab provides theme, font, styling, color, and behavior configuration.
+ * Each tab draws one or more of the section functions below.
  */
 class SettingsTabRenderer
 {
@@ -25,16 +28,16 @@ public:
 	 */
 	struct SettingsState
 	{
-		bool& settingToggleKey;               /**< @brief True while capturing a new menu toggle key. */
-		bool& settingsEffectsToggle;          /**< @brief True while capturing a new effects toggle key. */
-		bool& settingSkipCompilationKey;      /**< @brief True while capturing a new skip-compilation key. */
-		bool& settingOverlayToggleKey;        /**< @brief True while capturing a new overlay toggle key. */
-		bool& settingShaderBlockPrevKey;      /**< @brief True while capturing a new shader-block-previous key. */
-		bool& settingShaderBlockNextKey;      /**< @brief True while capturing a new shader-block-next key. */
-		bool& settingCSEditorToggleKey;       /**< @brief True while capturing a new CS Editor toggle key. */
-		bool& settingScreenshotKey;           /**< @brief True while capturing a new screenshot key. */
-		bool& settingEffects11ToggleKey;      /**< @brief True while capturing a new Effects 11 toggle key. */
-		bool& settingEffects11EditorKey;      /**< @brief True while capturing a new Effects 11 editor key. */
+		bool& settingToggleKey;                    /**< @brief True while capturing a new menu toggle key. */
+		bool& settingsEffectsToggle;               /**< @brief True while capturing a new effects toggle key. */
+		bool& settingSkipCompilationKey;           /**< @brief True while capturing a new skip-compilation key. */
+		bool& settingOverlayToggleKey;             /**< @brief True while capturing a new overlay toggle key. */
+		bool& settingShaderBlockPrevKey;           /**< @brief True while capturing a new shader-block-previous key. */
+		bool& settingShaderBlockNextKey;           /**< @brief True while capturing a new shader-block-next key. */
+		bool& settingCSEditorToggleKey;            /**< @brief True while capturing a new CS Editor toggle key. */
+		bool& settingScreenshotKey;                /**< @brief True while capturing a new screenshot key. */
+		bool& settingEffects11ToggleKey;           /**< @brief True while capturing a new Effects 11 toggle key. */
+		bool& settingEffects11EditorKey;           /**< @brief True while capturing a new Effects 11 editor key. */
 		bool& settingNeuralRenderingToggleKey;     /**< @brief True while capturing a new Neural Rendering toggle key. */
 		bool& settingNeuralRenderingCompareKey;    /**< @brief True while capturing a new Neural Rendering comparison screenshot key. */
 		bool& settingNeuralRenderingScaleUpKey;    /**< @brief True while capturing a new Neural Rendering scale up key. */
@@ -52,6 +55,47 @@ public:
 	 */
 	static void RenderGeneralSettings(
 		SettingsState& state);
+
+	/** @brief Searchable setting labels of the sections drawn here. */
+	static std::span<const SettingsSearchEntry> GetSearchIndex();
+
+	/** @brief The theme save note: one subtitle-sized line in the info colour, for the header of sections that edit the theme. */
+	static void RenderThemeSaveNote();
+	/** @brief Whether the theme differs from the selected theme's file, as of the last CheckThemeChanged(). */
+	static bool IsThemeDirty();
+	/**
+	 * @brief Compares the theme with the selected theme's file, for IsThemeDirty(). Call once a frame after the menu draws.
+	 * @param interacted A value was edited or something was clicked this frame; otherwise only a theme undo triggers the check.
+	 */
+	static void CheckThemeChanged(bool interacted);
+
+	/** @brief While the theme has unsaved edits, a banner that opens the Theme section. */
+	static void RenderThemeUnsavedBanner();
+
+	/** @brief Shader cache options and the last build's compilation breakdown. */
+	static void RenderShadersSection();
+	/**
+	 * @brief Rebinding rows for the menu hotkeys.
+	 * @param state References to the key-capture state flags for all rebindable hotkeys.
+	 */
+	static void RenderKeybindingsSection(
+		SettingsState& state);
+	/** @brief Interface language picker. */
+	static void RenderLanguageSection();
+	/** @brief General interface options (animations, window and layout, tooltips); drawn on the Behavior tab. */
+	static void RenderInterfaceOptions();
+	/** @brief The status bar toggle, background blur, menu fade and the theme cursor. */
+	static void RenderHeaderEffectsSection();
+	/** @brief Theme preset picker with save, save-as and delete. */
+	static void RenderThemesSection();
+	/** @brief Font size and per-role font pickers. Requests the font preview atlas while drawn. */
+	static void RenderFontsSection();
+	/** @brief Global scale and scrollbar opacity, with the raw ImGui style sliders in a collapsed fold. */
+	static void RenderStylingSection();
+	/** @brief Per-role look of the menu surfaces (Home cards, toasts, status card, palette, selected nav row). */
+	static void RenderSurfacesSection();
+	/** @brief Simple palette and the full ImGui color list. */
+	static void RenderColorsSection();
 
 private:
 	/** @brief Draws the active setting-constraint table; renders nothing when no constraints are active. */

@@ -3,21 +3,8 @@
 #include "../EffectManager.h"
 #include "../SettingManager.h"
 #include "../TextureManager.h"
-#include "Features/Effects11.h"
 #include "Globals.h"
 #include "Utils/Game.h"
-
-bool ENBEffect::PresetHandlesNightEye()
-{
-	auto* nightEyeVariable = GetCachedVariable("KNActive");
-	if (!nightEyeVariable || !nightEyeVariable->IsValid())
-		return false;
-	for (const auto& uiVar : uiVariables) {
-		if (uiVar.type == UIVariableType::Bool && uiVar.name == "KNEnable")
-			return uiVar.boolValue;
-	}
-	return true;
-}
 
 void ENBEffect::Execute()
 {
@@ -65,7 +52,10 @@ void ENBEffect::UpdateEffectVariables()
 	auto& modData = data.modData;
 
 	params01[2].x = baseData.hdr.receiveBloomThreshold;
-	params01[2].y = baseData.hdr.white * RE::GetINISetting("fReinhardWhiteScale:Display")->GetFloat();
+	static RE::Setting* reinhardWhiteScale = nullptr;
+	if (!reinhardWhiteScale)
+		reinhardWhiteScale = RE::GetINISetting("fReinhardWhiteScale:Display");
+	params01[2].y = baseData.hdr.white * (reinhardWhiteScale ? reinhardWhiteScale->GetFloat() : 1.0f);
 
 	params01[3].x = baseData.cinematic.saturation;
 	params01[3].z = baseData.cinematic.contrast;
@@ -84,9 +74,6 @@ void ENBEffect::UpdateEffectVariables()
 	params01[6] = { 1, 1, 1, 1 };
 
 	SetVectorVariable("Params01", &params01, sizeof(params01));
-
-	if (auto* nightEyeVariable = GetCachedVariable("KNActive"); nightEyeVariable && nightEyeVariable->IsValid())
-		nightEyeVariable->AsScalar()->SetBool(globals::features::effects11.IsNightEyeActive());
 
 	auto& textureManager = TextureManager::GetSingleton();
 	auto& settingManager = SettingManager::GetSingleton();

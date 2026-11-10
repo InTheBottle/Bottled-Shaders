@@ -73,7 +73,7 @@ namespace Skin
 
 	float3 DualSpecularGGX(float AverageRoughness, float Lobe0Roughness, float Lobe1Roughness, float LobeMix, float3 SpecularColor, float NdotL, float NdotV, float NdotH, float VdotH, out float3 F)
 	{
-		float D = lerp(BRDF::D_GGX(Lobe0Roughness, NdotH), BRDF::D_GGX(Lobe1Roughness, NdotH), LobeMix);
+		float D = lerp(BRDF::D_GGX(max(Lobe0Roughness, 0.04), NdotH), BRDF::D_GGX(max(Lobe1Roughness, 0.04), NdotH), LobeMix);
 		float G = BRDF::Vis_SmithJointApprox(AverageRoughness, NdotV, NdotL);
 		F = BRDF::F_Schlick(SpecularColor, VdotH);
 

@@ -48,11 +48,12 @@ namespace ProceduralSun
 	// Uses the Effects11 rational corona profile in angular cosine space.
 	float EvaluateHalo(float cosTheta, float sunDiskCos, float sunHaloCos, float haloFalloff)
 	{
-		if (sunHaloCos >= sunDiskCos || cosTheta <= sunHaloCos)
-			return 0.0f;
-
-		float normalizedDistance = saturate((sunDiskCos - cosTheta) / max(sunDiskCos - sunHaloCos, 1e-8f));
-		return (1.0f - normalizedDistance) * rcp(1.0f + max(haloFalloff, 0.0f) * normalizedDistance);
+		float halo = 0.0f;
+		if (sunHaloCos < sunDiskCos && cosTheta > sunHaloCos) {
+			float normalizedDistance = saturate((sunDiskCos - cosTheta) / max(sunDiskCos - sunHaloCos, 1e-8f));
+			halo = (1.0f - normalizedDistance) * rcp(1.0f + max(haloFalloff, 0.0f) * normalizedDistance);
+		}
+		return halo;
 	}
 
 	void ComposeDiscAndHalo(
@@ -74,26 +75,29 @@ namespace ProceduralSun
 	{
 		float3 emitted = max(color.xyz, 0.0f) * saturate(color.w);
 		float peak = max(emitted.x, max(emitted.y, emitted.z));
-		if (peak <= 0.0f)
-			return 0.0f;
-
-		float alpha = clamp(peak / max(radianceLimit, 1.0f), 1.0f / 256.0f, 1.0f);
-		return float4(emitted / alpha, alpha);
+		float4 result = 0.0f;
+		if (peak > 0.0f) {
+			float alpha = clamp(peak / max(radianceLimit, 1.0f), 1.0f / 256.0f, 1.0f);
+			result = float4(emitted / alpha, alpha);
+		}
+		return result;
 	}
 
 	float GetCloudTransmission(float capturedCloudOcclusion, float opticalDepthScale)
 	{
 		float cloudOpacity = saturate(capturedCloudOcclusion);
-		if (opticalDepthScale <= 0.0f || cloudOpacity <= 0.0f)
-			return 1.0f;
-		return pow(saturate(1.0f - cloudOpacity), opticalDepthScale);
+		float transmission = 1.0f;
+		if (opticalDepthScale > 0.0f && cloudOpacity > 0.0f)
+			transmission = pow(saturate(1.0f - cloudOpacity), opticalDepthScale);
+		return transmission;
 	}
 
 	float GetGlareCloudTransmission(float capturedCloudOcclusion, float extinction)
 	{
-		if (extinction <= 0.0f)
-			return 1.0f;
-		return GetCloudTransmission(capturedCloudOcclusion, 1.0f + 0.5f * extinction);
+		float transmission = 1.0f;
+		if (extinction > 0.0f)
+			transmission = GetCloudTransmission(capturedCloudOcclusion, 1.0f + 0.5f * extinction);
+		return transmission;
 	}
 }
 

@@ -23,6 +23,12 @@ float SpecularOcclusion(float NdotV, float alpha, float occlusion)
 	return saturate(pow(abs(NdotV + occlusion), alpha) - 1.0 + occlusion);
 }
 
+float SpecularHorizonOcclusion(float3 N, float3 V, float3 vertexNormal)
+{
+	float horizon = saturate(1.0 + 1.3 * dot(reflect(-V, N), vertexNormal));
+	return horizon * horizon;
+}
+
 // a contact shadow approximation, totally not physically correct; a riff on "Chan 2018, "Material Advances in Call of Duty: WWII" and "The Technical Art of Uncharted 4" http://advances.realtimerendering.com/other/2016/naughty_dog/NaughtyDog_TechArt_Final.pdf (microshadowing)"
 float ApproximateDirectOcculusion(float aoVisibility, float NdotL)
 {
@@ -73,7 +79,7 @@ float3 CalculateNormalFromHeight(float height, float heightScale, float2 uv)
 	float2 dUVdy = ddy(uv);
 
 	float det = dUVdx.x * dUVdy.y - dUVdx.y * dUVdy.x;
-	if (det < EPSILON_DIVISION) {
+	if (abs(det) < EPSILON_DIVISION) {
 		return float3(0, 0, 1);  // Avoid division by zero
 	}
 

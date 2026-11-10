@@ -25,8 +25,10 @@ namespace WetnessEffects
 	}
 
 	// xyz - ripple normal, w - splotches
-	float4 GetRainDrops(float3 worldPos, float t, float3 normal, float rippleStrengthModifier = 1.0, float2 flowOffset = float2(0.0, 0.0))
+	float4 GetRainDrops(float3 worldPos, float t, float3 normal, out float rippleLens, float rippleStrengthModifier = 1.0, float2 flowOffset = float2(0.0, 0.0))
 	{
+		rippleLens = 0.0;
+
 		// Apply flow offset to world position for flow-aware ripple positioning
 		worldPos.xy += flowOffset;
 
@@ -101,17 +103,20 @@ namespace WetnessEffects
 							float rippleR = lerp(0.0, rippleRadius, rippleT);
 							float rippleInnerRadius = rippleR - SharedData::wetnessEffectsSettings.RippleBreadth;
 
-							float bandLerp = (sqrt(distSqr) - rippleInnerRadius) * rippleBreadthRcp;
+							float rippleDist = sqrt(distSqr);
+							float bandLerp = (rippleDist - rippleInnerRadius) * rippleBreadthRcp;
 							if (bandLerp > 0.0 && bandLerp < 1.0) {
 								float rippleStrength = SharedData::wetnessEffectsSettings.RippleStrength * rippleStrengthModifier;
+								float rippleFade = lerp(rippleStrength, 0.0, rippleT * rippleT);
 								float deriv = (bandLerp < 0.5 ? SmoothstepDeriv(bandLerp * 2.0) : -SmoothstepDeriv(2.0 - bandLerp * 2.0)) *
-								              lerp(rippleStrength, 0.0, rippleT * rippleT);
+								              rippleFade;
 
 								float3 grad = float3(normalize(vec2Centre), -deriv);
 								float3 bitangent = float3(-grad.y, grad.x, 0.0);
 								float3 normal = normalize(cross(grad, bitangent));
 
 								rippleNormal = ReorientNormal(normal, rippleNormal);
+								rippleLens -= sin(bandLerp * Math::PI * 3.0) * rippleFade * saturate((1.0 - rippleDist) * 4.0);
 							}
 						}
 					}

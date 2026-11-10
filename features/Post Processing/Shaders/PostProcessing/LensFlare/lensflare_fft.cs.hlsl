@@ -5,7 +5,7 @@
 // Uses LensFlareConstants CB layout (shared with lensflare.cs.hlsl).
 //
 // Shaders:
-//   CS_FFT           — Stockham radix-2 FFT (row/col, forward/inverse via defines)
+//   CS_FFT           — Cooley-Tukey radix-2 FFT (row/col, forward/inverse via defines)
 //   CS_Multiply      — Frequency-domain complex multiply (scene × bokeh kernel)
 //   CSBokehPrepare   — Sample bokeh texture → zero-padded N×N RG32F with FFT-shift
 //   CSFFTThreshold   — Convert half-res threshold to N×N RG32F for FFT input
@@ -100,15 +100,20 @@ float2 ScreenToFFT(float2 screenUV)
 }
 
 // ============================================================
-// CS_FFT — Stockham radix-2 FFT (row/column pass)
+// CS_FFT — Cooley-Tukey radix-2 FFT (row/column pass)
 // Compiled with defines: ROW_PASS/COL_PASS + FORWARD/INVERSE
 // Dispatch: (N, 1, 1) where N = FFTResolution
 // ============================================================
 
-#define MAX_FFT_SIZE 1024
+#ifndef FFT_SIZE
+#	define FFT_SIZE 1024
+#endif
 
-groupshared float2 gs_buffer0[MAX_FFT_SIZE];
-groupshared float2 gs_buffer1[MAX_FFT_SIZE];
+groupshared float2 gs_buffer[FFT_SIZE];
+groupshared float2 gs_twiddle[FFT_SIZE / 2];
+#if defined(ROW_PASS) && defined(FORWARD)
+groupshared uint gs_nonzero;
+#endif
 
 float2 ComplexMul(float2 a, float2 b)
 {
@@ -127,73 +132,77 @@ float2 Twiddle(uint k, uint N)
 	return float2(c, s);
 }
 
-[numthreads(1024, 1, 1)] void CS_FFT(uint3 groupId : SV_GroupID, uint threadIdx : SV_GroupThreadID) {
-	uint lineIdx = groupId.x;
-	uint N = FFTResolution;
-	bool active = (threadIdx < N);
+[numthreads(FFT_SIZE / 2, 1, 1)] void CS_FFT(uint3 groupId : SV_GroupID, uint threadIdx : SV_GroupThreadID) {
+	const uint N = FFT_SIZE;
+	uint bits = firstbithigh(N);
 
-	// Load
-	if (active) {
-		uint2 readPos;
-#ifdef ROW_PASS
-		readPos = uint2(threadIdx, lineIdx);
-#else
-		readPos = uint2(lineIdx, threadIdx);
+#if defined(ROW_PASS) && defined(FORWARD)
+	if (threadIdx == 0)
+		gs_nonzero = 0;
+	GroupMemoryBarrierWithGroupSync();
+	uint nonzero = 0;
 #endif
-		gs_buffer0[threadIdx] = TexComplexA[readPos];
+	[unroll] for (uint i = 0; i < 2; ++i)
+	{
+		uint index = threadIdx + i * (FFT_SIZE / 2);
+#ifdef ROW_PASS
+		uint2 pos = uint2(index, groupId.x);
+#else
+		uint2 pos = uint2(groupId.x, index);
+#endif
+		uint rev = reversebits(index) >> (32 - bits);
+		float2 value = TexComplexA[pos];
+#if defined(ROW_PASS) && defined(FORWARD)
+		nonzero |= asuint(value.x) | asuint(value.y);
+#endif
+		gs_buffer[rev] = value;
 	}
+#if defined(ROW_PASS) && defined(FORWARD)
+	if (nonzero != 0)
+		InterlockedOr(gs_nonzero, 1u);
+#endif
+	gs_twiddle[threadIdx] = Twiddle(threadIdx, N);
 	GroupMemoryBarrierWithGroupSync();
 
-	// Bit-reversal permutation
-	if (active) {
-		uint bits = firstbithigh(N) - firstbithigh(1);
-		uint rev = 0;
-		uint tmp = threadIdx;
-		for (uint b = 0; b < bits; b++) {
-			rev = (rev << 1) | (tmp & 1);
-			tmp >>= 1;
-		}
-		gs_buffer1[rev] = gs_buffer0[threadIdx];
+#if defined(ROW_PASS) && defined(FORWARD)
+	// An all-zero row transforms to zero. Sync after reading the flag so the early-out stays
+	// uniform for the barriers below.
+	const bool emptyRow = gs_nonzero == 0;
+	GroupMemoryBarrierWithGroupSync();
+	[branch] if (emptyRow)
+	{
+		RWTexComplex[uint2(threadIdx, groupId.x)] = 0.0f.xx;
+		RWTexComplex[uint2(threadIdx + FFT_SIZE / 2, groupId.x)] = 0.0f.xx;
+		return;
 	}
-	GroupMemoryBarrierWithGroupSync();
+#endif
 
-	if (active)
-		gs_buffer0[threadIdx] = gs_buffer1[threadIdx];
-	GroupMemoryBarrierWithGroupSync();
-
-	// Cooley-Tukey butterfly
-	for (uint stage = 1; stage < N; stage <<= 1) {
-		if (active) {
-			uint halfStage = stage;
-			uint blockIdx = threadIdx / (halfStage * 2);
-			uint blockOffset = threadIdx % (halfStage * 2);
-
-			if (blockOffset < halfStage) {
-				uint topIdx = blockIdx * halfStage * 2 + blockOffset;
-				uint botIdx = topIdx + halfStage;
-				float2 tw = Twiddle(blockOffset * (N / (halfStage * 2)), N);
-				float2 top = gs_buffer0[topIdx];
-				float2 bot = ComplexMul(tw, gs_buffer0[botIdx]);
-				gs_buffer0[topIdx] = top + bot;
-				gs_buffer0[botIdx] = top - bot;
-			}
-		}
+	[unroll] for (uint stage = 1; stage < N; stage <<= 1)
+	{
+		uint butterflyIdx = threadIdx % stage;
+		uint topIdx = (threadIdx / stage) * (stage << 1) + butterflyIdx;
+		uint botIdx = topIdx + stage;
+		float2 tw = gs_twiddle[butterflyIdx * (N / (stage << 1))];
+		float2 top = gs_buffer[topIdx];
+		float2 bot = ComplexMul(tw, gs_buffer[botIdx]);
+		gs_buffer[topIdx] = top + bot;
+		gs_buffer[botIdx] = top - bot;
 		GroupMemoryBarrierWithGroupSync();
 	}
 
-	// Write output
-	if (active) {
-		float2 result = gs_buffer0[threadIdx];
+	[unroll] for (uint i = 0; i < 2; ++i)
+	{
+		uint index = threadIdx + i * (FFT_SIZE / 2);
+		float2 result = gs_buffer[index];
 #ifdef INVERSE
 		result /= float(N);
 #endif
-		uint2 writePos;
 #ifdef ROW_PASS
-		writePos = uint2(threadIdx, lineIdx);
+		uint2 pos = uint2(index, groupId.x);
 #else
-		writePos = uint2(lineIdx, threadIdx);
+		uint2 pos = uint2(groupId.x, index);
 #endif
-		RWTexComplex[writePos] = result;
+		RWTexComplex[pos] = result;
 	}
 }
 
@@ -332,11 +341,10 @@ float2 FisheyeUV(float2 uv, float compression, float zoom)
 {
 	float2 negPosUV = 2.0f * uv - 1.0f;
 	float scale = compression * atan(rcp(compression));
-	float radiusDist = length(negPosUV) * scale;
+	float radius = length(negPosUV);
+	float radiusDist = radius * scale;
 	float radiusDir = compression * tan(radiusDist / compression) * zoom;
-	float phi = atan2(negPosUV.y, negPosUV.x);
-	float2 newUV = float2(radiusDir * cos(phi) + 1.0f, radiusDir * sin(phi) + 1.0f) * 0.5f;
-	return newUV;
+	return (negPosUV * (radiusDir / max(radius, EPSILON)) + 1.0f) * 0.5f;
 }
 
 float DiscMask(float2 screenPos)
@@ -378,6 +386,7 @@ float DiscMask(float2 screenPos)
 				float mask1 = smoothstep(0.5, 0.9, distanceMask);
 				float mask2 = smoothstep(0.75, 1.0, distanceMask) * 0.95 + 0.05;
 				weight = mask1 * mask2;
+				[branch] if (weight == 0.0) continue;
 			} else {
 				weight = distanceMask;
 			}
@@ -394,11 +403,19 @@ float DiscMask(float2 screenPos)
 			float2 uvB = ghostUV - pixelOffset;
 
 			// Convert to FFT space (aspect + pad corrected) and sample IFFT result
-			float sR = InputTexture.SampleLevel(BokehSampler, ScreenToFFT(uvR), 0).x;
-			float sG = InputTexture.SampleLevel(BokehSampler, ScreenToFFT(uvG), 0).x;
-			float sB = InputTexture.SampleLevel(BokehSampler, ScreenToFFT(uvB), 0).x;
+			float3 ghostSample;
+			[branch] if (GhostChromaShift == 0.0)
+			{
+				ghostSample = InputTexture.SampleLevel(BokehSampler, ScreenToFFT(uvG), 0).xxx;
+			}
+			else
+			{
+				ghostSample.r = InputTexture.SampleLevel(BokehSampler, ScreenToFFT(uvR), 0).x;
+				ghostSample.g = InputTexture.SampleLevel(BokehSampler, ScreenToFFT(uvG), 0).x;
+				ghostSample.b = InputTexture.SampleLevel(BokehSampler, ScreenToFFT(uvB), 0).x;
+			}
 
-			color += float3(sR, sG, sB) * ghostColor.rgb * ghostColor.a * weight;
+			color += ghostSample * ghostColor.rgb * ghostColor.a * weight;
 		}
 
 		// Screen border mask
@@ -433,5 +450,9 @@ float DiscMask(float2 screenPos)
 	}
 
 	// Additive write (supports multi-pass for Ultra mode)
+#if defined(FIRST_GROUP)
+	RWTexColor[tid] = float4(color, 0.0);
+#else
 	RWTexColor[tid] = RWTexColor[tid] + float4(color, 0.0);
+#endif
 }

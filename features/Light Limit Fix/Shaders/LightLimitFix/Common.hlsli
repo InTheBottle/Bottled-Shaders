@@ -47,7 +47,7 @@ struct Light
 	uint lightFlags;
 	uint shadowLightIndex;
 	uint localShadowIndex;
-	uint pad1;
+	float sourceRadius;
 };
 
 #endif  //__LLF_COMMON_DEPENDENCY_HLSL__

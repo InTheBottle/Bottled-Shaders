@@ -7,7 +7,6 @@ private:
 	static constexpr std::string_view MOD_ID = "139352";
 
 public:
-
 	virtual inline std::string GetName() override { return "Skylighting"; }
 	virtual std::string GetDisplayName() override { return T("feature.skylighting.name", "Skylighting"); }
 	virtual inline std::string GetShortName() override { return "Skylighting"; }
@@ -114,7 +113,7 @@ public:
 	bool occlusionFresh = false;
 	uint frameCount = 0;
 
-	static constexpr uint OcclusionConvergenceFrames = 16;
+	static constexpr uint OcclusionConvergenceFrames = 64;
 	float3 lastOccCell = { 0, 0, 0 };
 	bool haveLastOccCell = false;
 	uint occlusionConvergedFrames = 0;

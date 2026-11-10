@@ -23,6 +23,15 @@ public:
 		kPreAndPostScatter = 2,
 	};
 
+	enum ProfileIndex : uint32_t
+	{
+		kProfileBase = 0,
+		kProfileHuman = 1,
+		kProfileFoliage = 2,
+		kProfileTranslucent = 3,
+		kProfileCount = 4,
+	};
+
 	struct Settings
 	{
 		uint EnableCharacterLighting = false;
@@ -34,6 +43,12 @@ public:
 		uint BurleySamples = 16;
 		float4 MeanFreePathBase = { 0.56f, 0.56f, 0.56f, 2.67f };
 		float4 MeanFreePathHuman = { 1.0f, 0.37f, 0.3f, 2.67f };
+		uint EnableFoliageProfile = false;
+		DiffusionProfile FoliageProfile{ 0.4f, 1.0f, { 0.3f, 0.45f, 0.2f }, { 0.5f, 0.75f, 0.35f } };
+		float4 MeanFreePathFoliage = { 0.5f, 0.8f, 0.35f, 1.0f };
+		uint EnableTranslucentProfile = true;
+		DiffusionProfile TranslucentProfile{ 1.5f, 1.0f, { 0.6f, 0.5f, 0.35f }, { 1.0f, 0.7f, 0.4f } };
+		float4 MeanFreePathTranslucent = { 1.0f, 0.7f, 0.4f, 6.0f };
 	};
 
 	Settings settings;
@@ -48,16 +63,13 @@ public:
 
 	struct alignas(16) BlurCB
 	{
-		Kernel BaseKernel;
-		Kernel HumanKernel;
-		float4 BaseProfile;
-		float4 HumanProfile;
+		Kernel Kernels[kProfileCount];
+		float4 Profiles[kProfileCount];
+		float4 MeanFreePath[kProfileCount];
 		float SSSS_FOVY;
 		uint BurleySamples;
 		uint ScatterMode;
 		uint pad;
-		float4 MeanFreePathBase;
-		float4 MeanFreePathHuman;
 	};
 	STATIC_ASSERT_ALIGNAS_16(BlurCB);
 
@@ -68,11 +80,14 @@ public:
 	bool updateKernels = true;
 	bool validMaterials = false;
 
+	void OnSubsurfaceMaterial(bool a_foliage);
+
 	Texture2D* blurHorizontalTemp = nullptr;
 	void EnsureBlurHorizontalTemp();
 	Texture2D* diffuseNoAlbedoTex = nullptr;
 
 	ID3D11ComputeShader* prepassSS = nullptr;
+	ID3D11ComputeShader* prepassBurleySS = nullptr;
 	ID3D11ComputeShader* horizontalSSBlur = nullptr;
 	ID3D11ComputeShader* verticalSSBlur = nullptr;
 	ID3D11ComputeShader* burleySS = nullptr;
@@ -173,5 +188,4 @@ public:
 			logger::info("[SSS] Installed hooks");
 		}
 	};
-
 };

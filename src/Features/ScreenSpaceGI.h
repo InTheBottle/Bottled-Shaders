@@ -8,7 +8,6 @@ private:
 	static constexpr std::string_view MOD_ID = "130375";
 
 public:
-
 	virtual inline std::string GetName() override { return "Screen Space GI"; }
 	virtual std::string GetDisplayName() override { return T("feature.screen_space_gi.name", "Screen Space GI"); }
 	virtual inline std::string GetShortName() override { return "ScreenSpaceGI"; }
@@ -54,8 +53,11 @@ public:
 	//////////////////////////////////////////////////////////////////////////////////
 
 	bool recompileFlag = false;
+	bool compiledWithGI = false;
 	uint outputAoIdx = 0;
 	uint outputIlIdx = 0;
+	Texture2D* outputAo = nullptr;
+	bool outputsCleared = false;
 
 	// Loading screen radiance decays at only 1/MaxAccumFrames per frame, bleeding the old scene
 	// into the new one for some frames.
@@ -73,7 +75,7 @@ public:
 	{
 		bool Enabled = true;
 		bool EnableGI = true;
-		bool EnableExperimentalSpecularGI = false;
+		bool EnableExperimentalSpecularGI = true;
 		bool EnableVanillaSSAO = false;
 		// performance/quality
 		uint NumSlices = 4u;
@@ -91,6 +93,7 @@ public:
 		// mix
 		float AOPower = 1.0f;
 		float GIStrength = 1.0f;
+		float SpecularStrength = 1.0f;
 		// denoise
 		bool EnableTemporalDenoiser = true;
 		bool EnableBlur = true;
@@ -111,7 +114,7 @@ public:
 		float2 RcpTexDim;  //
 		float2 FrameDim;
 		float2 RcpFrameDim;  //
-		uint FrameIndex;
+		float pad0;
 
 		uint NumSlices;
 		uint NumSteps;
@@ -127,7 +130,7 @@ public:
 		float GISaturation;  //
 		float GIDistanceCompensation;
 		float GICompensationMaxDist;
-		float pad1;
+		float SpecularStrength;
 
 		float AOPower;  //
 		float GIStrength;
@@ -155,6 +158,7 @@ public:
 	winrt::com_ptr<ID3D11UnorderedAccessView> uavNormal[5] = { nullptr };
 	eastl::unique_ptr<Texture2D> texAccumFrames[2] = { nullptr };
 	eastl::unique_ptr<Texture2D> texAo[2] = { nullptr };
+	eastl::unique_ptr<Texture2D> texAoBlur = nullptr;
 	eastl::unique_ptr<Texture2D> texIlY[2] = { nullptr };
 	eastl::unique_ptr<Texture2D> texIlCoCg[2] = { nullptr };
 	eastl::unique_ptr<Texture2D> texGiSpecular[2] = { nullptr };
@@ -166,9 +170,9 @@ public:
 	/** @brief Returns the current output SRVs for AO, indirect lighting Y/CoCg, and specular GI (or nullptrs if disabled). */
 	inline auto GetOutputTextures()
 	{
-		return (loaded && settings.Enabled) ?
+		return (loaded && settings.Enabled && outputAo && ShadersOK()) ?
 		           std::make_tuple(
-					   texAo[outputAoIdx]->srv.get(),
+					   outputAo->srv.get(),
 					   texIlY[outputIlIdx]->srv.get(),
 					   texIlCoCg[outputIlIdx]->srv.get(),
 					   GiSpecularSRV(outputAoIdx)) :

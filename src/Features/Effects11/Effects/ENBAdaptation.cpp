@@ -24,6 +24,7 @@ void ENBAdaptation::Execute()
 		return;
 	}
 
+	// Adaptation measures the frame without the procedural sun disc, so the disc does not darken it
 	currentSRV = MaskProceduralSun(currentSRV);
 
 	SetShaderResourceVariable("TextureCurrent", currentSRV);

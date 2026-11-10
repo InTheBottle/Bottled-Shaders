@@ -2,6 +2,9 @@
 
 #include "Buffer.h"
 
+#pragma warning(push)
+#pragma warning(disable: 4324)
+
 /** @brief Adds dynamic weather-driven wetness, puddle formation, shore wetness, and raindrop effects. */
 struct WetnessEffects : Feature
 {
@@ -36,7 +39,6 @@ public:
 		float MaxRainWetness = 1.0f;
 		float MaxPuddleWetness = 1.5f;
 		float MaxShoreWetness = 1.0f;
-		float GrassWetnessRoughness = 0.12f;
 		uint ShoreRange = 32;
 		float PuddleRadius = 1.0f;
 		float PuddleMaxAngle = 0.95f;
@@ -62,6 +64,7 @@ public:
 		float RippleRadius = 1.f;
 		float RippleBreadth = .5f;
 		float RippleLifetime = .5f;
+		float TopDownVisibility = 1.0f;
 	};
 
 	struct alignas(16) PerFrame
@@ -181,7 +184,7 @@ public:
 private:
 	void DrawWeatherAnalysis() const;
 
-	size_t rainTimer = 0;  // milliseconds; size_t for precision
+	size_t rainTimer = 0;  // microseconds; size_t for precision
 	bool splashesOfStormsLoaded = false;
 
 	// Weather wetness calculation result for debug display
@@ -193,3 +196,5 @@ private:
 
 	WeatherWetnessResult CalculateWeatherWetness(RE::TESWeather* weather, float weatherPct, bool isCurrentWeather) const;
 };
+
+#pragma warning(pop)

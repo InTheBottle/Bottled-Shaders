@@ -2,6 +2,8 @@
 
 #include "Feature.h"
 
+class BSLightingShaderMaterialPBR;
+
 struct GlintParameters
 {
 	bool enabled = false;
@@ -40,16 +42,17 @@ public:
 	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
 	{
 		return std::make_pair(
-			"True PBR replaces Skyrim's legacy material system with physically-based rendering. "
-			"Mod authors can supply PBR texture sets (roughness, metallic, displacement, etc.) "
-			"that are interpreted in a physically correct BRDF, producing realistic surface "
-			"response to lighting across all weather and time-of-day conditions.",
+			std::string(T("feature.true_pbr.description",
+				"True PBR replaces Skyrim's legacy material system with physically-based rendering. "
+				"Mod authors can supply PBR texture sets (roughness, metallic, displacement, etc.) "
+				"that are interpreted in a physically correct BRDF, producing realistic surface "
+				"response to lighting across all weather and time-of-day conditions.")),
 			std::vector<std::string>{
-				"Physically-based BRDF (energy-conserving specular & diffuse)",
-				"Roughness, metallic, and displacement map support",
-				"Clearcoat, subsurface scattering, and fuzz layers",
-				"Procedural glint rendering for sparkle effects",
-				"Full landscape and decal PBR support" });
+				T("feature.true_pbr.key_feature_1", "Physically-based BRDF (energy-conserving specular & diffuse)"),
+				T("feature.true_pbr.key_feature_2", "Roughness, metallic, and displacement map support"),
+				T("feature.true_pbr.key_feature_3", "Clearcoat, subsurface scattering, and fuzz layers"),
+				T("feature.true_pbr.key_feature_4", "Procedural glint rendering for sparkle effects"),
+				T("feature.true_pbr.key_feature_5", "Full landscape and decal PBR support") });
 	}
 
 	/** @brief Draws the ImGui settings UI for PBR texture sets and material objects. */
@@ -81,10 +84,12 @@ public:
 		float VertexAOStrength = 1.0f;
 		uint EnableMicroShadows = 1;
 		float MicroShadowStrength = 1.0f;
-		uint pad;
+		uint EnableMultiScatter = 1;
+		uint EnableHorizonOcclusion = 1;
+		uint pad[3];
 	};
 	STATIC_ASSERT_ALIGNAS_16(Settings);
-	static_assert(sizeof(Settings) == 16);
+	static_assert(sizeof(Settings) == 32);
 
 	Settings settings;
 
@@ -122,6 +127,25 @@ public:
 	 */
 	void SetupGrassMaterial(RE::BSLightingShaderProperty* sourceProperty, RE::BSLightingShaderProperty* grassProperty);
 
+	/** @brief Match the PBR PerMaterial layout at b1 in RunGrass.hlsl. */
+	struct GrassPBRConstants
+	{
+		uint32_t flags;
+		float params1[3];
+		float params2[4];
+		float params3[4];
+		float params4[4];
+		float params5[4];
+		bool operator==(const GrassPBRConstants&) const = default;
+	};
+	static_assert(sizeof(GrassPBRConstants) == 80 && offsetof(GrassPBRConstants, params4) == 48 && offsetof(GrassPBRConstants, params5) == 64);
+
+	/** @brief Set the renderer's textures and samplers for a PBR grass material. */
+	static void SetGrassPBRTextures(const BSLightingShaderMaterialPBR* material);
+
+	/** @brief Return a PBR grass material's PerMaterial constants. */
+	static GrassPBRConstants GetGrassPBRConstants(const BSLightingShaderMaterialPBR* material);
+
 	/**
 	 * @brief Binds extended PBR shader resources (displacement, RMAOS textures) to the device context.
 	 *
@@ -151,6 +175,12 @@ public:
 
 		RE::NiColor subsurfaceColor;
 		float subsurfaceOpacity = 0.f;
+		float subsurfaceBalance = 0.75f;
+		bool thinSurface = false;
+		bool foliage = false;
+		float thinSurfaceSpecularWeight = 0.5f;
+		float thinSurfaceBackSpecularWeight = 0.5f;
+		float thinSurfaceBackRoughnessScale = 1.f;
 
 		RE::NiColor coatColor = { 1.f, 1.f, 1.f };
 		float coatStrength = 1.f;
@@ -160,6 +190,8 @@ public:
 
 		RE::NiColor fuzzColor;
 		float fuzzWeight = 0.f;
+		float fuzzRoughness = -1.f;
+		bool fuzzRoughnessTexture = false;
 
 		GlintParameters glintParameters;
 	};

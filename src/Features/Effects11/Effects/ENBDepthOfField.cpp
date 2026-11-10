@@ -80,25 +80,8 @@ void ENBDepthOfField::Execute()
 	const auto technique = selectedTechniqueIndex < uiTechniques.size() ? GetSelectedTechnique() : fallbackTechnique;
 	auto [executed, inOutput, inTemp] = ExecuteTechniqueSequence(technique, textureMain.SRV, *textureHDRTemp, *textureHDRTemp2);
 
-	if (executed && (inOutput || inTemp)) {
-		auto* result = inOutput ? textureHDRTemp : textureHDRTemp2;
-		if (result->texture) {
-			auto* context = globals::d3d::context;
-			D3D11_TEXTURE2D_DESC srcDesc{}, dstDesc{};
-			result->texture->GetDesc(&srcDesc);
-			textureMain.texture->GetDesc(&dstDesc);
-			const bool layoutsMatch = srcDesc.Format == dstDesc.Format && srcDesc.Width == dstDesc.Width && srcDesc.Height == dstDesc.Height &&
-			                          srcDesc.MipLevels == dstDesc.MipLevels && srcDesc.ArraySize == dstDesc.ArraySize &&
-			                          srcDesc.SampleDesc.Count == dstDesc.SampleDesc.Count && srcDesc.SampleDesc.Quality == dstDesc.SampleDesc.Quality;
-			if (layoutsMatch) {
-				context->CopyResource(textureMain.texture, result->texture.get());
-			} else if (result->srv && textureMain.RTV) {
-				EffectManager::GetSingleton().CopyTexture(result->srv.get(), textureMain.RTV, false);
-				ID3D11RenderTargetView* nullRTV = nullptr;
-				context->OMSetRenderTargets(1, &nullRTV, nullptr);
-			}
-		}
-	}
+	if (executed && (inOutput || inTemp))
+		EffectManager::GetSingleton().CopyToMain(inOutput ? *textureHDRTemp : *textureHDRTemp2);
 }
 
 void ENBDepthOfField::UpdateEffectVariables()

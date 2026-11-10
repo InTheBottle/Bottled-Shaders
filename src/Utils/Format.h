@@ -7,6 +7,9 @@ namespace Util
 {
 	std::string GetFormattedVersion(const REL::Version& version);
 
+	/** @brief Dev build label: "[branch][describe]". */
+	std::string GetBuildLabel();
+
 	std::string DefinesToString(const std::vector<std::pair<const char*, const char*>>& defines);
 	std::string DefinesToString(const std::vector<D3D_SHADER_MACRO>& defines);
 
@@ -120,4 +123,32 @@ namespace Util
 
 	/** Case-insensitive equality for two strings. */
 	bool IEquals(std::string_view a, std::string_view b);
+
+	/** @brief ASCII-lowercased copy of the string. */
+	std::string ToLower(std::string text);
+
+	/**
+	 * @brief Reads the UTF-8 code point at `pos` and advances `pos` past it. A malformed byte reads as itself, one byte
+	 * long, so the walk always makes progress.
+	 */
+	char32_t NextCodepoint(std::string_view text, size_t& pos);
+
+	/** @brief Case-folded code point for search, for every script with case (Latin, Cyrillic, Greek...), not only ASCII. */
+	char32_t FoldCodepoint(char32_t c);
+
+	/** @brief Case-folded UTF-8 copy of the string, for matching user-typed searches in any language. */
+	std::string FoldForSearch(std::string_view text);
+
+	/**
+	 * Returns the defines-based shader cache filename suffix for the given shader
+	 * defines string, or an empty string when definesStr is empty.  The suffix
+	 * has the form "_{:08X}" where the hex value is a 32-bit FNV-1a hash of the string.
+	 *
+	 * This matches the suffix logic used by SIE::SShaderCache::GetDiskPath so
+	 * that any code building a cache path by hand stays in sync.
+	 */
+	std::string GetShaderDefinesSuffix(const std::string& definesStr);
+
+	/** @brief Splits an identifier on camel case, '_' and '-' into capitalized words ("LocTypeCity" to "Loc Type City"). */
+	std::string PrettifyIdentifier(std::string_view id);
 }  // namespace Util

@@ -1,7 +1,7 @@
 #ifndef __EXPONENTIAL_HEIGHT_FOG_VOLUMETRIC_COMMON_HLSLI__
 #define __EXPONENTIAL_HEIGHT_FOG_VOLUMETRIC_COMMON_HLSLI__
 
-#include "Common/Color.hlsli"
+#include "Common/ColorManagement.hlsli"
 #include "Common/Math.hlsli"
 #include "Common/SharedData.hlsli"
 
@@ -150,8 +150,8 @@ namespace ExponentialHeightFog
 										 max(SharedData::exponentialHeightFogSettings.vanillaFogFar - SharedData::exponentialHeightFogSettings.vanillaFogNear, 1.0f));
 		float maxOpacity = saturate(SharedData::exponentialHeightFogSettings.vanillaFogMaxOpacity);
 		float colorBlend = min(pow(normalizedRange, SharedData::exponentialHeightFogSettings.vanillaFogPower), maxOpacity);
-		return Color::Fog(lerp(SharedData::exponentialHeightFogSettings.vanillaFogNearColor.rgb,
-			SharedData::exponentialHeightFogSettings.vanillaFogFarColor.rgb, colorBlend));
+		return lerp(ColorManagement::SRGBToWorking(SharedData::exponentialHeightFogSettings.vanillaFogNearColor.rgb),
+			ColorManagement::SRGBToWorking(SharedData::exponentialHeightFogSettings.vanillaFogFarColor.rgb), colorBlend);
 	}
 
 	// Far volume slice for a scene depth; mirrors ComputeVolumetricNormalizedSlice over the far volume.

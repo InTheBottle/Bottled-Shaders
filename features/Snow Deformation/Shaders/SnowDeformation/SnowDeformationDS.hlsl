@@ -2,6 +2,8 @@
 
 #define SD_INTERPOLATE(member) output.member = patch[0].member * bary.x + patch[1].member * bary.y + patch[2].member * bary.z
 
+static const float PackedSnowDepth = 4.0;
+
 [domain("tri")]
 ControlPoint main(PatchConstants constants, float3 bary : SV_DomainLocation, const OutputPatch<ControlPoint, 3> patch)
 {
@@ -30,12 +32,17 @@ ControlPoint main(PatchConstants constants, float3 bary : SV_DomainLocation, con
 
 	output.WorldPosition.z += displacement;
 	output.PreviousWorldPosition.z += displacement;
+	output.LandBlendWeights2.z = saturate(-field * (1.0 / PackedSnowDepth));
 
-	float gradientStep = GradientStep(windowPosition);
-	float2 gradient = float2(
-						  SnowSurface(raise, SampleField(windowPosition + float2(gradientStep, 0.0))) - SnowSurface(raise, SampleField(windowPosition - float2(gradientStep, 0.0))),
-						  SnowSurface(raise, SampleField(windowPosition + float2(0.0, gradientStep))) - SnowSurface(raise, SampleField(windowPosition - float2(0.0, gradientStep)))) *
-	                  (0.5 / gradientStep);
+	float2 gradient = 0.0;
+	[branch] if (ActivityAt(windowPosition) > 0.0)
+	{
+		float gradientStep = GradientStep(windowPosition);
+		gradient = float2(
+					   SnowSurface(raise, SampleField(windowPosition + float2(gradientStep, 0.0))) - SnowSurface(raise, SampleField(windowPosition - float2(gradientStep, 0.0))),
+					   SnowSurface(raise, SampleField(windowPosition + float2(0.0, gradientStep))) - SnowSurface(raise, SampleField(windowPosition - float2(0.0, gradientStep)))) *
+		           (0.5 / gradientStep);
+	}
 
 	float3 normal = float3(output.TBN0.z, output.TBN1.z, output.TBN2.z);
 	[branch] if (dot(gradient, gradient) > 1e-8 && normal.z > 0.05 * length(normal))

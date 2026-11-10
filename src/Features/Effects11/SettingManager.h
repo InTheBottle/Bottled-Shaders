@@ -149,6 +149,8 @@ public:
 	uint32_t GetSettingID(std::string_view key, std::string_view category) const;
 
 	float GetInterpolatedTimeOfDayValue(std::string_view key, std::string_view category);
+	/** @brief Like GetInterpolatedTimeOfDayValue, but at the given weather blend: 0 is the last weather, 1 the current one. */
+	float GetInterpolatedTimeOfDayValueAtWeatherBlend(std::string_view key, std::string_view category, float weatherBlend);
 	float3 GetInterpolatedColorTimeOfDayValue(std::string_view key, std::string_view category);
 
 	const Setting* GetSettingInfo(std::string_view key, std::string_view category) const;
@@ -172,6 +174,26 @@ public:
 	/** @brief True when EnableMultipleWeathers is on, so weather-aware settings read and write the weather files. */
 	bool IsWeatherSystemEnabled() const;
 	void SetWeatherBlendFactors(uint32_t currentWeatherID, uint32_t lastWeatherID, float blendFactor);
+
+	/**
+	 * @brief Pins weather-aware reads on this thread to a fixed blend between the last (0) and current (1)
+	 * weather for its lifetime, so a weather's colours can be graded with that weather's own preset values.
+	 */
+	class ScopedWeatherBlend
+	{
+	public:
+		explicit ScopedWeatherBlend(float a_weatherBlend) :
+			previous(threadWeatherBlend)
+		{
+			threadWeatherBlend = std::clamp(a_weatherBlend, 0.0f, 1.0f);
+		}
+		~ScopedWeatherBlend() { threadWeatherBlend = previous; }
+		ScopedWeatherBlend(const ScopedWeatherBlend&) = delete;
+		ScopedWeatherBlend& operator=(const ScopedWeatherBlend&) = delete;
+
+	private:
+		float previous;
+	};
 	void LoadWeatherSettings(const std::vector<uint32_t>& weatherIDs, const std::string& filePath);
 	void SaveWeatherSettings(const std::string& weatherKey, const std::string& filePath);
 	void SaveAllWeatherSettings();
@@ -221,6 +243,7 @@ private:
 	uint32_t currentWeatherID = 0;
 	uint32_t lastWeatherID = 0;
 	float weatherBlendFactor = 0.0f;
+	static inline thread_local float threadWeatherBlend = -1.0f;
 	uint32_t multipleWeathersSettingID = 0xFFFFFFFF;
 
 	float timeOfDay1[4] = { 0, 0, 0, 0 };
@@ -237,7 +260,7 @@ private:
 	SettingValue ResolveWeatherValue(uint32_t weatherID, uint32_t settingID) const;
 
 	template <typename T>
-	T GetValueInternal(uint32_t id, bool rawValue = false) const;
+	T GetValueInternal(uint32_t id, bool rawValue = false, float weatherBlendOverride = -1.0f) const;
 	template <typename T>
 	void SetValueInternal(uint32_t id, const T& value);
 	uint32_t GetSettingIDInternal(std::string_view key, std::string_view category) const;

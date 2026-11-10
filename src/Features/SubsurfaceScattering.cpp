@@ -4,6 +4,7 @@
 #include "Deferred.h"
 #include "ShaderCache.h"
 #include "State.h"
+#include "Utils/MathUtils.h"
 
 #define I18N_KEY_PREFIX "feature.sss."
 
@@ -20,7 +21,13 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	HumanProfile,
 	BurleySamples,
 	MeanFreePathBase,
-	MeanFreePathHuman)
+	MeanFreePathHuman,
+	EnableFoliageProfile,
+	FoliageProfile,
+	MeanFreePathFoliage,
+	EnableTranslucentProfile,
+	TranslucentProfile,
+	MeanFreePathTranslucent)
 
 void SubsurfaceScattering::DrawSettings()
 {
@@ -116,6 +123,33 @@ void SubsurfaceScattering::DrawSettings()
 				ImGui::TreePop();
 			}
 		}
+
+		ImGui::Spacing();
+		ImGui::Checkbox(T(TKEY("enable_foliage_profile"), "Foliage Profile"), (bool*)&settings.EnableFoliageProfile);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("enable_foliage_profile_tooltip"), "Softens PBR foliage that has subsurface data. Costly on dense leaves."));
+		}
+		ImGui::Checkbox(T(TKEY("enable_translucent_profile"), "Translucent Profile"), (bool*)&settings.EnableTranslucentProfile);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("enable_translucent_profile_tooltip"), "Diffuses light inside thick PBR subsurface materials such as wax, marble or ice."));
+		}
+
+		auto drawExtraProfile = [&](const char* a_label, bool a_enabled, DiffusionProfile& a_profile, float4& a_meanFreePath) {
+			if (!a_enabled || !ImGui::TreeNodeEx(a_label))
+				return;
+			if (settings.SSMode == 0) {
+				ImGui::SliderFloat(T(TKEY("blur_radius"), "Blur Radius"), &a_profile.BlurRadius, 0, 3, "%.2f");
+				ImGui::SliderFloat(T(TKEY("thickness"), "Thickness"), &a_profile.Thickness, 0, 3, "%.2f");
+				updateKernels |= ImGui::ColorEdit3(T(TKEY("strength"), "Strength"), (float*)&a_profile.Strength);
+				updateKernels |= ImGui::ColorEdit3(T(TKEY("falloff"), "Falloff"), (float*)&a_profile.Falloff);
+			} else {
+				ImGui::ColorEdit3(T(TKEY("mean_free_path_color"), "Mean Free Path Color"), (float*)&a_meanFreePath);
+				ImGui::SliderFloat(T(TKEY("mean_free_path_distance"), "Mean Free Path Distance"), &a_meanFreePath.w, 0.01f, 10.0f, "%.2f");
+			}
+			ImGui::TreePop();
+		};
+		drawExtraProfile(T(TKEY("foliage_profile"), "Foliage Profile Settings"), settings.EnableFoliageProfile, settings.FoliageProfile, settings.MeanFreePathFoliage);
+		drawExtraProfile(T(TKEY("translucent_profile"), "Translucent Profile Settings"), settings.EnableTranslucentProfile, settings.TranslucentProfile, settings.MeanFreePathTranslucent);
 
 		ImGui::Spacing();
 		ImGui::Spacing();
@@ -227,6 +261,12 @@ void SubsurfaceScattering::DrawSSS()
 
 	validMaterials = false;
 
+	auto* prepassShader = GetComputeShaderPrepass();
+	auto* firstBlurShader = settings.SSMode == 0 ? GetComputeShaderHorizontalBlur() : GetComputeShaderBurley();
+	auto* secondBlurShader = settings.SSMode == 0 ? GetComputeShaderVerticalBlur() : firstBlurShader;
+	if (!prepassShader || !firstBlurShader || !secondBlurShader)
+		return;
+
 	auto dispatchCount = Util::GetScreenDispatchCount();
 
 	{
@@ -234,17 +274,22 @@ void SubsurfaceScattering::DrawSSS()
 
 		blurCBData.SSSS_FOVY = atan(1.0f / cameraData.projMat.m[0][0]) * 2.0f * (180.0f / 3.14159265359f);
 
-		blurCBData.BaseProfile = { settings.BaseProfile.BlurRadius, settings.BaseProfile.Thickness, 0, 0 };
-		blurCBData.HumanProfile = { settings.HumanProfile.BlurRadius, settings.HumanProfile.Thickness, 0, 0 };
+		auto profileData = [](const DiffusionProfile& a_profile, bool a_enabled) {
+			return float4{ a_profile.BlurRadius, a_profile.Thickness, a_enabled ? 1.0f : 0.0f, 0.0f };
+		};
+		blurCBData.Profiles[kProfileBase] = profileData(settings.BaseProfile, true);
+		blurCBData.Profiles[kProfileHuman] = profileData(settings.HumanProfile, true);
+		blurCBData.Profiles[kProfileFoliage] = profileData(settings.FoliageProfile, settings.EnableFoliageProfile);
+		blurCBData.Profiles[kProfileTranslucent] = profileData(settings.TranslucentProfile, settings.EnableTranslucentProfile);
 
 		blurCBData.BurleySamples = settings.BurleySamples;
 		// Burley always does full albedo removal/reapply; scatter mode only applies to Separable SSS.
-		blurCBData.ScatterMode = (settings.SSMode == 0)
-		                             ? (uint)std::clamp(settings.ScatterMode, (int)kPreScatter, (int)kPreAndPostScatter)
-		                             : (uint)kPostScatter;
+		blurCBData.ScatterMode = (settings.SSMode == 0) ? (uint)std::clamp(settings.ScatterMode, (int)kPreScatter, (int)kPreAndPostScatter) : (uint)kPostScatter;
 
-		blurCBData.MeanFreePathBase = settings.MeanFreePathBase;
-		blurCBData.MeanFreePathHuman = settings.MeanFreePathHuman;
+		blurCBData.MeanFreePath[kProfileBase] = settings.MeanFreePathBase;
+		blurCBData.MeanFreePath[kProfileHuman] = settings.MeanFreePathHuman;
+		blurCBData.MeanFreePath[kProfileFoliage] = settings.MeanFreePathFoliage;
+		blurCBData.MeanFreePath[kProfileTranslucent] = settings.MeanFreePathTranslucent;
 
 		blurCB->Update(blurCBData);
 	}
@@ -279,8 +324,7 @@ void SubsurfaceScattering::DrawSSS()
 			ID3D11UnorderedAccessView* uav = diffuseNoAlbedoTex->uav.get();
 			context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
 
-			auto shader = GetComputeShaderPrepass();
-			context->CSSetShader(shader, nullptr, 0);
+			context->CSSetShader(prepassShader, nullptr, 0);
 
 			context->Dispatch(dispatchCount.x, dispatchCount.y, 1);
 
@@ -303,8 +347,7 @@ void SubsurfaceScattering::DrawSSS()
 				ID3D11UnorderedAccessView* uav = blurHorizontalTemp->uav.get();
 				context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
 
-				auto shader = GetComputeShaderHorizontalBlur();
-				context->CSSetShader(shader, nullptr, 0);
+				context->CSSetShader(firstBlurShader, nullptr, 0);
 
 				globals::profiler->BeginPass("SubsurfaceScattering::HorizontalBlur");
 				context->Dispatch(dispatchCount.x, dispatchCount.y, 1);
@@ -324,8 +367,7 @@ void SubsurfaceScattering::DrawSSS()
 				ID3D11UnorderedAccessView* uavs[1] = { main.UAV };
 				context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 
-				auto shader = GetComputeShaderVerticalBlur();
-				context->CSSetShader(shader, nullptr, 0);
+				context->CSSetShader(secondBlurShader, nullptr, 0);
 
 				globals::profiler->BeginPass("SubsurfaceScattering::VerticalBlur");
 				context->Dispatch(dispatchCount.x, dispatchCount.y, 1);
@@ -339,8 +381,7 @@ void SubsurfaceScattering::DrawSSS()
 				ID3D11UnorderedAccessView* uavs[1] = { main.UAV };
 				context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 
-				auto shader = GetComputeShaderBurley();
-				context->CSSetShader(shader, nullptr, 0);
+				context->CSSetShader(firstBlurShader, nullptr, 0);
 
 				globals::profiler->BeginPass("SubsurfaceScattering::Burley");
 				context->Dispatch(dispatchCount.x, dispatchCount.y, 1);
@@ -368,7 +409,7 @@ void SubsurfaceScattering::DrawSSS()
 void SubsurfaceScattering::SetupResources()
 {
 	{
-		blurCB = new ConstantBuffer(ConstantBufferDesc<BlurCB>());
+		blurCB = new ConstantBuffer(ConstantBufferDesc<BlurCB>(), "SSS::BlurCB");
 	}
 
 	auto renderer = globals::game::renderer;
@@ -425,9 +466,17 @@ void SubsurfaceScattering::Reset()
 
 	if (updateKernels) {
 		updateKernels = false;
-		CalculateKernel(settings.BaseProfile, blurCBData.BaseKernel);
-		CalculateKernel(settings.HumanProfile, blurCBData.HumanKernel);
+		CalculateKernel(settings.BaseProfile, blurCBData.Kernels[kProfileBase]);
+		CalculateKernel(settings.HumanProfile, blurCBData.Kernels[kProfileHuman]);
+		CalculateKernel(settings.FoliageProfile, blurCBData.Kernels[kProfileFoliage]);
+		CalculateKernel(settings.TranslucentProfile, blurCBData.Kernels[kProfileTranslucent]);
 	}
+}
+
+void SubsurfaceScattering::OnSubsurfaceMaterial(bool a_foliage)
+{
+	if (a_foliage ? settings.EnableFoliageProfile : settings.EnableTranslucentProfile)
+		validMaterials = true;
 }
 
 void SubsurfaceScattering::RestoreDefaultSettings()
@@ -439,7 +488,14 @@ void SubsurfaceScattering::RestoreDefaultSettings()
 void SubsurfaceScattering::LoadSettings(json& o_json)
 {
 	settings = o_json;
+	settings.SSMode = std::clamp(settings.SSMode, 0, 1);
 	settings.ScatterMode = std::clamp(settings.ScatterMode, (int)kPreScatter, (int)kPreAndPostScatter);
+	settings.BurleySamples = std::clamp(settings.BurleySamples, 1u, 64u);
+	const Settings defaults{};
+	settings.MeanFreePathBase.w = Util::ClampFinite(settings.MeanFreePathBase.w, defaults.MeanFreePathBase.w, 0.01f, 10.0f);
+	settings.MeanFreePathHuman.w = Util::ClampFinite(settings.MeanFreePathHuman.w, defaults.MeanFreePathHuman.w, 0.01f, 10.0f);
+	settings.MeanFreePathFoliage.w = Util::ClampFinite(settings.MeanFreePathFoliage.w, defaults.MeanFreePathFoliage.w, 0.01f, 10.0f);
+	settings.MeanFreePathTranslucent.w = Util::ClampFinite(settings.MeanFreePathTranslucent.w, defaults.MeanFreePathTranslucent.w, 0.01f, 10.0f);
 	updateKernels = true;
 }
 
@@ -453,6 +509,10 @@ void SubsurfaceScattering::ClearShaderCache()
 	if (prepassSS) {
 		prepassSS->Release();
 		prepassSS = nullptr;
+	}
+	if (prepassBurleySS) {
+		prepassBurleySS->Release();
+		prepassBurleySS = nullptr;
 	}
 	if (horizontalSSBlur) {
 		horizontalSSBlur->Release();
@@ -470,6 +530,11 @@ void SubsurfaceScattering::ClearShaderCache()
 
 ID3D11ComputeShader* SubsurfaceScattering::GetComputeShaderPrepass()
 {
+	if (settings.SSMode == 1) {
+		if (!prepassBurleySS)
+			prepassBurleySS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\SubsurfaceScattering\\DiffuseExtractionCS.hlsl", { { "BURLEY", "" } }, "cs_5_0");
+		return prepassBurleySS;
+	}
 	if (!prepassSS) {
 		logger::debug("Compiling prepassSS");
 		prepassSS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\SubsurfaceScattering\\DiffuseExtractionCS.hlsl", {}, "cs_5_0");
