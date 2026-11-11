@@ -98,17 +98,76 @@ namespace CameraFXLens
 			return Element::kNone;
 		}
 
+		enum class Body
+		{
+			kFlesh,
+			kBone,
+			kNone
+		};
+
+		// The victim's body, by its race's blood impact material (the material the game picks hit effects by),
+		// walking up the parent materials so modded ones inherit. Without it, atronachs, wisps, ice wraiths,
+		// spriggans and seekers splattered red blood.
+		Body GetBody(const RE::TESRace* a_race)
+		{
+			using Material = RE::MATERIAL_ID;
+			constexpr int kMaxMaterialDepth = 8;
+			const RE::BGSMaterialType* material = a_race ? a_race->bloodImpactMaterial : nullptr;
+			for (int depth = 0; material && depth < kMaxMaterialDepth; ++depth, material = material->parentType) {
+				switch (material->materialID) {
+				case Material::kBoneActor:
+				case Material::kBone:
+				case Material::kSkinSkeleton:
+					return Body::kBone;
+				case Material::kGhost:
+				case Material::kWard:
+				case Material::kWater:
+				case Material::kIce:
+				case Material::kIceForm:
+				case Material::kStone:
+				case Material::kStoneHeavy:
+				case Material::kStoneBroken:
+				case Material::kWood:
+				case Material::kWoodLight:
+				case Material::kWoodHeavy:
+				case Material::kMetalLight:
+				case Material::kMetalSolid:
+				case Material::kMetalHeavy:
+					return Body::kNone;
+				default:
+					break;
+				}
+			}
+			return Body::kFlesh;
+		}
+
 		bool GetBloodType(RE::Actor* a_actor, SplatType& o_type)
 		{
 			if (!a_actor || a_actor->IsGhost())
 				return false;
-			if (a_actor->HasKeywordString("ActorTypeDwarven"))
+			const auto* race = a_actor->GetRace();
+			if (race && race->data.flags.any(RE::RACE_DATA::Flag::kDontShowBloodSpray))
+				return false;
+			// Dwarven machines are metal by material but leak oil.
+			if (a_actor->HasKeywordString("ActorTypeDwarven")) {
 				o_type = SplatType::kOil;
-			else if (a_actor->HasKeywordString("ActorTypeUndead"))
+				return true;
+			}
+			const bool undead = a_actor->HasKeywordString("ActorTypeUndead");
+			switch (GetBody(race)) {
+			case Body::kNone:
+				return false;
+			case Body::kBone:
+				// Draugr share the skeletons' bone material and keep their dark blood; living bone bodies
+				// (spriggans, seekers) have none.
+				if (!undead)
+					return false;
 				o_type = SplatType::kDarkBlood;
-			else
-				o_type = SplatType::kBlood;
-			return true;
+				return true;
+			default:
+				o_type = undead ? SplatType::kDarkBlood : SplatType::kBlood;
+				return true;
+			}
 		}
 
 		float GetLife(SplatType a_type)
@@ -152,7 +211,9 @@ namespace CameraFXLens
 		auto* values = a_actor ? a_actor->AsActorValueOwner() : nullptr;
 		if (!values)
 			return 1.0f;
-		const float maximum = values->GetPermanentActorValue(RE::ActorValue::kHealth);
+		// The maximum the health bar shows, temporary modifiers included: Fortify Health potions and enchantments
+		// otherwise shifted the low-health threshold away from the game's own heartbeat.
+		const float maximum = a_actor->GetActorValueMax(RE::ActorValue::kHealth);
 		const float current = values->GetActorValue(RE::ActorValue::kHealth);
 		return std::isfinite(maximum) && maximum > 1.0f && std::isfinite(current) ? std::clamp(current / maximum, 0.0f, 1.0f) : 1.0f;
 	}
@@ -483,7 +544,7 @@ namespace CameraFXLens
 		float staminaFraction = 1.0f;
 		if (player) {
 			if (auto* values = player->AsActorValueOwner()) {
-				const float maximum = values->GetPermanentActorValue(RE::ActorValue::kStamina);
+				const float maximum = player->GetActorValueMax(RE::ActorValue::kStamina);
 				const float current = values->GetActorValue(RE::ActorValue::kStamina);
 				if (std::isfinite(maximum) && maximum > 1.0f && std::isfinite(current))
 					staminaFraction = std::clamp(current / maximum, 0.0f, 1.0f);

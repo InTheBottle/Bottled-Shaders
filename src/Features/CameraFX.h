@@ -131,6 +131,7 @@ struct CameraFX : Feature
 
 	bool TakesOverModifiers() const;
 	void DrawBeforeInterface();
+	void MarkWorldPostProcessed();
 
 private:
 	struct SceneTarget
@@ -154,6 +155,7 @@ private:
 	void UpdateLights(RE::Sky* a_sky);
 	void UpdateThemeClocks(float a_deltaTime);
 	float UpdateLowHealth(float a_presence, float a_step);
+	void ResetGameState();
 
 	ID3D11VertexShader* GetVS();
 	ID3D11PixelShader* GetScenePS();
@@ -165,6 +167,7 @@ private:
 	float GetSceneEncoding(bool a_hdrTarget) const;
 
 	std::array<bool, CameraFXModifiers::kThemeCount> GetEnabledThemes() const;
+	static bool IsMenuSceneOpen();
 
 	CameraFXLens::WeatherLens weather;
 	CameraFXLens::CombatLens combat;
@@ -202,8 +205,11 @@ private:
 	std::array<float, CameraFXModifiers::kThemeCount> themeLevels{};
 	float idleSeconds = 0.0f;
 	float frostIdleSeconds = 0.0f;
+	float frostAspect = 0.0f;
 	float windOffset = 0.0f;
 	uint32_t lastDrawnFrame = UINT32_MAX;
+	uint32_t worldPostProcessedFrame = UINT32_MAX;
+	bool worldPostProcessSeen = false;
 
 	eastl::unique_ptr<Texture2D> sceneCopy;
 	eastl::unique_ptr<Texture2D> visibility;
@@ -238,5 +244,9 @@ private:
 	bool pipelineReady = false;
 	bool pipelineFailureLogged = false;
 	bool sceneCopyFailed = false;
+	UINT failedCopyWidth = 0;
+	UINT failedCopyHeight = 0;
+	DXGI_FORMAT failedCopyFormat = DXGI_FORMAT_UNKNOWN;
 	bool sceneTargetAvailable = true;
+	bool clearedAtMainMenu = false;
 };
