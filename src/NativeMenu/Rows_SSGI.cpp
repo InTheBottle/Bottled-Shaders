@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <array>
-#include <optional>
 
 #define I18N_KEY_PREFIX "feature.screen_space_gi."
 
@@ -22,19 +21,19 @@ namespace
 
 	struct SSGIPreset
 	{
-		uint32_t numSlices;
 		uint32_t numSteps;
-		std::optional<int> resolutionMode;
-		bool enableBlur;
+		bool halfRes;
+		bool quarterRes;
 		bool enableGI;
+		bool enableSH;
 	};
 
 	constexpr std::array<SSGIPreset, 5> kSSGIPresets{ {
-		{ 1, 6, std::nullopt, true, false },
-		{ 10, 12, 2, true, true },
-		{ 4, 8, 1, true, true },
-		{ 4, 8, 0, true, true },
-		{ 8, 10, 0, true, true },
+		{ 6, true, false, false, false },
+		{ 6, false, true, true, false },
+		{ 8, true, false, true, true },
+		{ 12, false, false, true, true },
+		{ 16, false, false, true, true },
 	} };
 	constexpr size_t kSSGICustomIndex = kSSGIPresets.size();
 
@@ -42,8 +41,8 @@ namespace
 	{
 		for (size_t i = 0; i < kSSGIPresets.size(); ++i) {
 			const auto& p = kSSGIPresets[i];
-			if (s.NumSlices == p.numSlices && s.NumSteps == p.numSteps && s.EnableBlur == p.enableBlur &&
-				s.EnableGI == p.enableGI && (!p.resolutionMode || *p.resolutionMode == s.ResolutionMode))
+			if (s.NumSteps == p.numSteps && s.HalfRes == p.halfRes && s.QuarterRes == p.quarterRes &&
+				s.EnableGI == p.enableGI && (!p.enableGI || s.EnableSH == p.enableSH))
 				return i;
 		}
 		return kSSGICustomIndex;
@@ -84,13 +83,17 @@ namespace
 			return;
 
 		const auto& preset = kSSGIPresets[option - 1];
-		s.NumSlices = preset.numSlices;
+		const bool needsReblur = preset.halfRes || preset.quarterRes;
 		s.NumSteps = preset.numSteps;
-		if (preset.resolutionMode)
-			s.ResolutionMode = *preset.resolutionMode;
-		s.EnableBlur = preset.enableBlur;
+		s.EnableREBLUR = s.EnableREBLUR || needsReblur;
+		s.HalfRes = preset.halfRes;
+		s.QuarterRes = preset.quarterRes;
 		s.EnableGI = preset.enableGI;
-		globals::features::screenSpaceGI.recompileFlag = true;
+		if (preset.enableGI)
+			s.EnableSH = preset.enableSH;
+		auto& ssgi = globals::features::screenSpaceGI;
+		ssgi.recompileFlag = true;
+		ssgi.queuedResetHistory = true;
 	}
 
 	bool __stdcall IsSSGIEditable()

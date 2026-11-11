@@ -707,8 +707,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float3 directionalAmbientColor = Color::Ambient(max(0, SharedData::GetAmbient(normal)));
 #				if defined(IBL)
 	if (SharedData::iblSettings.EnableIBL)
-		directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -normal);
+		directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -normal, input.WorldPosition.xyz);
 #				endif
+	if (SharedData::ssgiSettings.ReplaceAmbient != 0)
+		directionalAmbientColor = 0;
 	directionalAmbientColor += ShadowSampling::GetCloudScatterLighting(cloudScatterColor, cloudScatter, normal);
 	directColor += indirectLobes.diffuse * directionalAmbientColor;
 	float3 outputAlbedo = indirectLobes.diffuse;
@@ -1087,8 +1089,11 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 #				if defined(IBL)
 	if (SharedData::iblSettings.EnableIBL)
-		directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -normal);
+		directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -normal, input.WorldPosition.xyz);
 #				endif
+
+	if (SharedData::ssgiSettings.ReplaceAmbient != 0)
+		directionalAmbientColor = 0;
 
 	directionalAmbientColor += ShadowSampling::GetCloudScatterLighting(cloudScatterColor, cloudScatter, normal);
 	directionalAmbientColor *= reflectionAlbedo * canopyVisibility;
@@ -1297,7 +1302,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 #			if defined(IBL)
 	if (SharedData::iblSettings.EnableIBL)
-		directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -normal);
+		directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -normal, input.WorldPosition.xyz);
 #			endif
 
 	directionalAmbientColor += ShadowSampling::GetCloudScatterLighting(cloudScatterColor, cloudScatter, normal);

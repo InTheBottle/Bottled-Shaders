@@ -185,7 +185,11 @@ PS_OUTPUT main(PS_INPUT input)
 	float3 fogColor = lerp(ColorManagement::SRGBToWorking(FogNearColor.xyz), ColorManagement::SRGBToWorking(FogFarColor.xyz), fogFactor);
 #		if defined(IBL)
 	if (SharedData::iblSettings.EnableIBL) {
-		fogColor = ImageBasedLighting::GetFogIBLColor(fogColor);
+		float2 fogUV = input.TexCoord.xy;
+		float4 fogPositionWS = float4(2 * float2(fogUV.x, -fogUV.y + 1) - 1, nativeDepth, 1);
+		fogPositionWS = mul(FrameBuffer::CameraViewProjInverse, fogPositionWS);
+		fogPositionWS.xyz /= fogPositionWS.w;
+		fogColor = ImageBasedLighting::GetFogIBLColor(fogColor, fogPositionWS.xyz);
 	}
 #		endif
 #		if defined(EXP_HEIGHT_FOG)
