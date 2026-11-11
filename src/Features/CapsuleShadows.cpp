@@ -28,6 +28,8 @@ namespace
 	constexpr float kMinLightWeight = 0.02f;
 	constexpr float kLightSmoothing = 0.25f;
 	constexpr uint32_t kForgetFrames = 120;
+	constexpr float kLightClearanceStart = 8.0f;
+	constexpr float kLightClearanceEnd = 24.0f;
 
 	struct BoneSegment
 	{
@@ -36,7 +38,7 @@ namespace
 		float radius;
 	};
 
-	constexpr std::array<BoneSegment, 12> kHumanoidSegments{ {
+	constexpr std::array<BoneSegment, 11> kHumanoidSegments{ {
 		{ "NPC Pelvis [Pelv]", "NPC Spine2 [Spn2]", 12.0f },
 		{ "NPC Spine2 [Spn2]", "NPC Neck [Neck]", 13.0f },
 		{ "NPC Head [Head]", nullptr, 9.0f },
@@ -48,12 +50,38 @@ namespace
 		{ "NPC L Calf [LClf]", "NPC L Foot [Lft ]", 4.5f },
 		{ "NPC R Thigh [RThg]", "NPC R Calf [RClf]", 6.5f },
 		{ "NPC R Calf [RClf]", "NPC R Foot [Rft ]", 4.5f },
-		{ "NPC Spine [Spn0]", "NPC Spine1 [Spn1]", 12.0f },
 	} };
 
 	float3 ToFloat3(const RE::NiPoint3& a_point)
 	{
 		return { a_point.x, a_point.y, a_point.z };
+	}
+
+	RE::NiPoint3 ToNiPoint3(const float3& a_point)
+	{
+		return { a_point.x, a_point.y, a_point.z };
+	}
+
+	float DistanceToBody(const RE::NiPoint3& a_point, std::span<const CapsuleShadows::Capsule> a_body)
+	{
+		float best = std::numeric_limits<float>::max();
+		for (const auto& capsule : a_body) {
+			const RE::NiPoint3 start = ToNiPoint3(capsule.A);
+			const RE::NiPoint3 axis = ToNiPoint3(capsule.B) - start;
+			const float lengthSq = axis.SqrLength();
+			const float t = lengthSq > 1e-4f ? std::clamp((a_point - start).Dot(axis) / lengthSq, 0.0f, 1.0f) : 0.0f;
+			best = std::min(best, (a_point - (start + axis * t)).Length() - capsule.Radius);
+		}
+		return best;
+	}
+
+	bool IsAttachedTo(const RE::NiAVObject* a_node, const RE::NiAVObject* a_root)
+	{
+		for (auto* parent = a_node ? a_node->parent : nullptr; parent; parent = parent->parent) {
+			if (parent == a_root)
+				return true;
+		}
+		return false;
 	}
 }
 
@@ -118,11 +146,11 @@ void CapsuleShadows::CollectLights()
 		const auto& data = niLight->GetLightRuntimeData();
 		const float luminance = (data.diffuse.red + data.diffuse.green + data.diffuse.blue) / 3.0f * data.fade * bsLight->lodDimmer;
 		if (luminance > 0.0f && data.radius.x > 1.0f)
-			lights.push_back({ niLight->world.translate, data.radius.x, luminance });
+			lights.push_back({ niLight, niLight->world.translate, data.radius.x, luminance });
 	}
 }
 
-bool CapsuleShadows::FindDominantLight(const RE::NiPoint3& a_position, RE::NiPoint3& a_light, float& a_dominance) const
+bool CapsuleShadows::FindDominantLight(const RE::NiPoint3& a_position, const RE::NiAVObject* a_root, std::span<const Capsule> a_body, RE::NiPoint3& a_light, float& a_dominance) const
 {
 	float best = 0.0f;
 	float total = sunLuminance;
@@ -134,7 +162,7 @@ bool CapsuleShadows::FindDominantLight(const RE::NiPoint3& a_position, RE::NiPoi
 		const float falloff = 1.0f - distanceSq / radiusSq;
 		const float weight = light.luminance * falloff * falloff;
 		total += weight;
-		if (weight > best) {
+		if (weight > best && !IsAttachedTo(light.node, a_root) && DistanceToBody(light.position, a_body) > kLightClearanceStart) {
 			best = weight;
 			a_light = light.position;
 		}
@@ -221,7 +249,8 @@ void CapsuleShadows::AddActor(RE::Actor* a_actor, float a_deltaTime)
 
 	RE::NiPoint3 lightPosition = center;
 	float dominance = 0.0f;
-	const bool lit = FindDominantLight(center, lightPosition, dominance);
+	const std::span<const Capsule> body(capsules.data() + firstCapsule, capsuleCount - firstCapsule);
+	const bool lit = FindDominantLight(center, root, body, lightPosition, dominance);
 
 	auto& state = actorLights[a_actor->GetFormID()];
 	const float blend = 1.0f - std::exp(-a_deltaTime / kLightSmoothing);
@@ -236,7 +265,8 @@ void CapsuleShadows::AddActor(RE::Actor* a_actor, float a_deltaTime)
 	actor.Center = ToFloat3(center);
 	actor.BoundRadius = kShadowReach + kReferenceHeight * 0.75f * scale;
 	actor.LightPosition = ToFloat3(state.position);
-	actor.LightStrength = state.strength;
+	const float clearance = std::clamp((DistanceToBody(state.position, body) - kLightClearanceStart) / (kLightClearanceEnd - kLightClearanceStart), 0.0f, 1.0f);
+	actor.LightStrength = state.strength * clearance * clearance * (3.0f - 2.0f * clearance);
 	actor.FirstCapsule = firstCapsule;
 	actor.CapsuleCount = capsuleCount - firstCapsule;
 }

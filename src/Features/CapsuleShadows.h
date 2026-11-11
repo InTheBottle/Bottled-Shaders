@@ -2,6 +2,8 @@
 
 #include "Buffer.h"
 
+#include <span>
+
 struct CapsuleShadows : Feature
 {
 	virtual inline std::string GetName() override { return "Capsule Shadows"; }
@@ -75,6 +77,7 @@ struct CapsuleShadows : Feature
 private:
 	struct NearbyLight
 	{
+		const RE::NiAVObject* node = nullptr;
 		RE::NiPoint3 position;
 		float radius = 0.0f;
 		float luminance = 0.0f;
@@ -91,7 +94,7 @@ private:
 	void AddActor(RE::Actor* a_actor, float a_deltaTime);
 	uint32_t AddSkeletonCapsules(RE::NiAVObject* a_root, float a_scale);
 	void AddBoundCapsule(RE::Actor* a_actor, RE::NiAVObject* a_root);
-	bool FindDominantLight(const RE::NiPoint3& a_position, RE::NiPoint3& a_light, float& a_dominance) const;
+	bool FindDominantLight(const RE::NiPoint3& a_position, const RE::NiAVObject* a_root, std::span<const Capsule> a_body, RE::NiPoint3& a_light, float& a_dominance) const;
 	bool EnsureTexture(uint32_t a_width, uint32_t a_height);
 	ID3D11ComputeShader* GetShader();
 
