@@ -67,7 +67,11 @@ groupshared float2 TileMotion[DILATE_TILE * DILATE_TILE];
 			float neighborDepth = TileDepth[neighborIndex];
 
 			// Take neighbor if it's longer AND closer
+#ifdef REVERSE_Z
+			if (neighborDepth > depth) {
+#else
 			if (neighborDepth < depth) {
+#endif
 				float2 neighborMotionVector = TileMotion[neighborIndex];
 
 				// Square motion vector for length

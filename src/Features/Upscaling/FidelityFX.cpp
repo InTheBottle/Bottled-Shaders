@@ -1,4 +1,5 @@
 #include "FidelityFX.h"
+#include "Features/ReverseZ.h"
 
 #include <directx/d3dx12.h>
 
@@ -55,6 +56,8 @@ void FidelityFX::SetupFrameGeneration()
 	createFg.displaySize = { swapChain.swapChainDesc.Width, swapChain.swapChainDesc.Height };
 	createFg.maxRenderSize = createFg.displaySize;
 	createFg.flags = FFX_FRAMEGENERATION_ENABLE_ASYNC_WORKLOAD_SUPPORT;
+	if (globals::features::reverseZ.IsActive())
+		createFg.flags |= FFX_FRAMEGENERATION_ENABLE_DEPTH_INVERTED;
 	createFg.backBufferFormat = ffxApiGetSurfaceFormatDX12(swapChain.swapChainDesc.Format);
 
 	ffx::CreateBackendDX12Desc backendDesc{};
@@ -284,6 +287,8 @@ void FidelityFX::CreateFSRResources()
 	contextDescription.displaySize.height = displayHeight;
 	// FSR upscales kMAIN before the tonemap, so its input is HDR radiance whatever the display mode
 	contextDescription.flags = FFX_FSR3_ENABLE_UPSCALING_ONLY | FFX_FSR3_ENABLE_AUTO_EXPOSURE | FFX_FSR3_ENABLE_HIGH_DYNAMIC_RANGE;
+	if (globals::features::reverseZ.IsActive())
+		contextDescription.flags |= FFX_FSR3_ENABLE_DEPTH_INVERTED;
 	contextDescription.backBufferFormat = globals::features::hdrDisplay.loaded ? FFX_SURFACE_FORMAT_R10G10B10A2_UNORM : FFX_SURFACE_FORMAT_R8G8B8A8_UNORM;
 	contextDescription.backendInterfaceUpscaling = fsrInterface;
 
