@@ -248,7 +248,7 @@ void ScreenSpaceGI::DrawSettings()
 		if (texNRDOutputSH1)
 			BUFFER_VIEWER_NODE(texNRDOutputSH1, debugRescale)
 		if (auto validation = settings.Reblur.EnableValidation ? nrdReblur.GetValidationSRV() : nullptr) {
-			if (ImGui::TreeNode("NRD Validation")) {
+			if (ImGui::TreeNode(T(TKEY("nrd_validation"), "NRD Validation"))) {
 				ImGui::Image(validation, { nrdReblur.GetWidth() * debugRescale, nrdReblur.GetHeight() * debugRescale });
 				ImGui::TreePop();
 			}
@@ -268,7 +268,12 @@ namespace
 
 	bool IsLegacySSGISchema(const json& a_json)
 	{
-		return a_json.is_object() && a_json.contains("ResolutionMode") && !a_json.contains("HalfRes") && !a_json.contains("EnableREBLUR");
+		constexpr std::array kLegacyOnlyKeys{
+			"ResolutionMode", "EnableExperimentalSpecularGI", "NumSlices", "MinScreenRadius", "AORadius", "GIRadius",
+			"DepthFadeRange", "GISaturation", "GIDistanceCompensation", "SpecularStrength", "EnableTemporalDenoiser",
+			"EnableBlur", "DepthDisocclusion", "NormalDisocclusion", "MaxAccumFrames", "BlurRadius", "DistanceNormalisation"
+		};
+		return a_json.is_object() && std::ranges::any_of(kLegacyOnlyKeys, [&](const char* key) { return a_json.contains(key); });
 	}
 }
 
@@ -284,9 +289,9 @@ void ScreenSpaceGI::LoadSettings(json& o_json)
 		migrated.Enabled = settings.Enabled;
 		migrated.EnableGI = settings.EnableGI;
 		migrated.EnableVanillaSSAO = settings.EnableVanillaSSAO;
-		if (const auto& resolutionMode = o_json["ResolutionMode"]; resolutionMode.is_number_integer()) {
-			migrated.HalfRes = resolutionMode.get<int>() == 1;
-			migrated.QuarterRes = resolutionMode.get<int>() == 2;
+		if (const auto resolutionMode = o_json.find("ResolutionMode"); resolutionMode != o_json.end() && resolutionMode->is_number_integer()) {
+			migrated.HalfRes = resolutionMode->get<int>() == 1;
+			migrated.QuarterRes = resolutionMode->get<int>() == 2;
 		}
 		settings = migrated;
 		logger::info("[SSGI] Migrated settings from the previous Screen Space GI schema; tuning values use the new defaults");
@@ -866,7 +871,7 @@ void ScreenSpaceGI::DrawSSGI()
 			srvs.at(4) = dynamicCubemaps.envTexture->srv.get();
 			srvs.at(5) = reflections.SRV;
 		}
-		if (dynamicCubemaps.loaded && skylighting.loaded)
+		if (dynamicCubemaps.loaded && skylighting.loaded && skylighting.texProbeArray)
 			srvs.at(6) = skylighting.texProbeArray->srv.get();
 		srvs.at(8) = texNormal->srv.get();
 		ID3D11ShaderResourceView* envIBLSrv = ibl.loaded && ibl.envIBLTexture ? ibl.envIBLTexture->srv.get() : nullptr;

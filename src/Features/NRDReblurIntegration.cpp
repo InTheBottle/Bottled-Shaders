@@ -69,6 +69,7 @@ bool NRDReblurIntegration::Init(uint32_t halfWidth, uint32_t halfHeight, nrd::De
 	Shutdown();
 
 	m_identifier = identifier;
+	m_label = nrd::GetDenoiserString(denoiser);
 	m_width = halfWidth;
 	m_height = halfHeight;
 
@@ -323,17 +324,21 @@ void NRDReblurIntegration::CreatePoolTextures(uint32_t w, uint32_t h)
 
 		PoolTexture& pt = isPermanent ? m_permanentPool[poolIdx] : m_transientPool[poolIdx];
 		DX::ThrowIfFailed(device->CreateTexture2D(&d3dDesc, nullptr, pt.texture.put()));
+		const char* poolName = isPermanent ? "Permanent" : "Transient";
+		Util::SetResourceName(pt.texture.get(), "NRD::%s %s%u", m_label, poolName, poolIdx);
 
 		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
 		srvDesc.Format = fmt;
 		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
 		srvDesc.Texture2D.MipLevels = 1;
 		DX::ThrowIfFailed(device->CreateShaderResourceView(pt.texture.get(), &srvDesc, pt.srv.put()));
+		Util::SetResourceName(pt.srv.get(), "NRD::%s %s%u SRV", m_label, poolName, poolIdx);
 
 		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
 		uavDesc.Format = fmt;
 		uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
 		DX::ThrowIfFailed(device->CreateUnorderedAccessView(pt.texture.get(), &uavDesc, pt.uav.put()));
+		Util::SetResourceName(pt.uav.get(), "NRD::%s %s%u UAV", m_label, poolName, poolIdx);
 	}
 }
 
@@ -361,7 +366,9 @@ void NRDReblurIntegration::CreateValidationTexture()
 	DX::ThrowIfFailed(device->CreateTexture2D(&desc, nullptr, m_validation.texture.put()));
 	DX::ThrowIfFailed(device->CreateShaderResourceView(m_validation.texture.get(), nullptr, m_validation.srv.put()));
 	DX::ThrowIfFailed(device->CreateUnorderedAccessView(m_validation.texture.get(), nullptr, m_validation.uav.put()));
-	Util::SetResourceName(m_validation.texture.get(), "NRD::Validation");
+	Util::SetResourceName(m_validation.texture.get(), "NRD::%s Validation", m_label);
+	Util::SetResourceName(m_validation.srv.get(), "NRD::%s Validation SRV", m_label);
+	Util::SetResourceName(m_validation.uav.get(), "NRD::%s Validation UAV", m_label);
 }
 
 void NRDReblurIntegration::DestroyValidationTexture()
@@ -382,6 +389,7 @@ void NRDReblurIntegration::CreatePipelines()
 		if (!dxbc.bytecode || !dxbc.size)
 			continue;
 		DX::ThrowIfFailed(device->CreateComputeShader(dxbc.bytecode, static_cast<SIZE_T>(dxbc.size), nullptr, m_pipelines[i].put()));
+		Util::SetResourceName(m_pipelines[i].get(), "NRD::%s Pipeline%u", m_label, i);
 	}
 }
 
@@ -402,6 +410,7 @@ void NRDReblurIntegration::CreateConstantBuffer(uint32_t maxSize)
 	desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 	DX::ThrowIfFailed(globals::d3d::device->CreateBuffer(&desc, nullptr, m_constantBuffer.put()));
+	Util::SetResourceName(m_constantBuffer.get(), "NRD::%s Constants", m_label);
 }
 
 void NRDReblurIntegration::CreateSamplers()
@@ -416,7 +425,9 @@ void NRDReblurIntegration::CreateSamplers()
 
 	desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
 	DX::ThrowIfFailed(device->CreateSamplerState(&desc, m_samplers[0].put()));  // NEAREST
+	Util::SetResourceName(m_samplers[0].get(), "NRD::%s NearestClampSampler", m_label);
 
 	desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
 	DX::ThrowIfFailed(device->CreateSamplerState(&desc, m_samplers[1].put()));  // LINEAR
+	Util::SetResourceName(m_samplers[1].get(), "NRD::%s LinearClampSampler", m_label);
 }

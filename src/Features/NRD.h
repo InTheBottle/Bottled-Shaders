@@ -20,21 +20,22 @@
 struct NRD : Feature
 {
 	virtual inline std::string GetName() override { return "NRD"; }
+	virtual std::string GetDisplayName() override { return T("feature.nrd.name", "NRD"); }
 	virtual inline std::string GetShortName() override { return "NRD"; }
 	virtual std::string_view GetCategory() const override { return FeatureCategories::kLighting; }
 
 	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
 	{
 		return std::make_pair(
-			std::string(
+			std::string(T("feature.nrd.description",
 				"NVIDIA Real-Time Denoisers (NRD) integration. Provides the shared "
 				"viewZ / normal+roughness / motion-vector guide textures and the "
 				"REBLUR denoiser plumbing used by Screen Space GI, Screen Space "
-				"Reflections, and other features that produce noisy radiance signals."),
+				"Reflections, and other features that produce noisy radiance signals.")),
 			std::vector<std::string>{
-				"Shared NRD guide textures",
-				"REBLUR denoiser infrastructure",
-				"Common camera/jitter/frame-index state" });
+				T("feature.nrd.key_feature_1", "Shared NRD guide textures"),
+				T("feature.nrd.key_feature_2", "REBLUR denoiser infrastructure"),
+				T("feature.nrd.key_feature_3", "Common camera/jitter/frame-index state") });
 	}
 
 	virtual void RestoreDefaultSettings() override;
@@ -48,7 +49,8 @@ struct NRD : Feature
 
 	// Per-frame service entry point. Called once at the start of the deferred
 	// pass so every consumer sees consistent guides for this frame.
-	void PrepareGuides();
+	/** @brief Prepares this frame's guides; a_requested false only clears the per-frame state, so no consumer reads stale guides. */
+	void PrepareGuides(bool a_requested);
 
 	// True when PrepareGuides has run successfully for this frame. Consumers
 	// should skip their dispatches if guides aren't ready (e.g. world not

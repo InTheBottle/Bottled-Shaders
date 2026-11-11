@@ -1,6 +1,8 @@
 #include "NativeMenu/NativeMenu.h"
 
+#include "Features/DynamicCubemaps.h"
 #include "Features/ScreenSpaceGI.h"
+#include "Features/ScreenSpaceReflections.h"
 #include "Globals.h"
 #include "I18n/I18n.h"
 
@@ -100,22 +102,49 @@ namespace
 	{
 		return NativeMenu::IsFeatureEditable(globals::features::screenSpaceGI.GetShortName());
 	}
+
+	float __stdcall GetSSREnabled()
+	{
+		return globals::features::screenSpaceReflections.settings.Enabled ? 1.0f : 0.0f;
+	}
+
+	void __stdcall SetSSREnabled(float v)
+	{
+		auto& ssr = globals::features::screenSpaceReflections;
+		const bool enabled = v != 0.0f;
+		if (ssr.settings.Enabled == enabled)
+			return;
+		ssr.settings.Enabled = enabled;
+		ssr.queuedEnabledChange = true;
+	}
+
+	bool __stdcall IsSSREditable()
+	{
+		return NativeMenu::IsFeatureEditable(globals::features::screenSpaceReflections.GetShortName());
+	}
 }
 
 namespace NativeMenu
 {
 	std::vector<Row> SSGIRows()
 	{
-		if (!globals::features::screenSpaceGI.loaded)
-			return {};
-
-		return {
-			Dropdown(T(TKEY("name"), "Screen Space GI"), SSGIQualityOptions(), &GetSSGIQuality, &SetSSGIQuality,
+		std::vector<Row> rows;
+		if (globals::features::screenSpaceGI.loaded) {
+			rows.push_back(Dropdown(T(TKEY("name"), "Screen Space GI"), SSGIQualityOptions(), &GetSSGIQuality, &SetSSGIQuality,
 				SSGIOption(Settings{}),
 				T(TKEY("description"),
 					"Screen Space Global Illumination adds realistic indirect lighting and ambient occlusion to the game. This technique simulates how light bounces off surfaces to illuminate other objects naturally."),
-				&IsSSGIEditable),
-		};
+				&IsSSGIEditable));
+		}
+
+		if (globals::features::screenSpaceReflections.loaded && globals::features::dynamicCubemaps.loaded) {
+			rows.push_back(Checkbox(T("feature.screen_space_reflections.name", "Screen Space Reflections"), &GetSSREnabled, &SetSSREnabled,
+				ScreenSpaceReflections::Settings{}.Enabled ? 1.0f : 0.0f,
+				T("feature.screen_space_reflections.native_menu_description",
+					"Reflects nearby objects on screen in glossy surfaces, falling back to the dynamic cubemaps where rays leave the screen."),
+				&IsSSREditable));
+		}
+		return rows;
 	}
 }
 

@@ -352,17 +352,21 @@ void Deferred::DeferredPasses()
 
 	auto& skylighting = globals::features::skylighting;
 
-	auto& nrd = globals::features::nrd;
-	if (nrd.loaded)
-		nrd.PrepareGuides();
-
 	auto& ssgi = globals::features::screenSpaceGI;
+	auto& ssr = globals::features::screenSpaceReflections;
+
+	auto& nrd = globals::features::nrd;
+	if (nrd.loaded) {
+		const bool ssgiDenoises = ssgi.loaded && ssgi.settings.Enabled && ssgi.settings.EnableREBLUR;
+		const bool ssrDenoises = ssr.loaded && ssr.settings.Enabled && ssr.settings.EnableREBLUR && globals::features::dynamicCubemaps.loaded;
+		nrd.PrepareGuides(ssgiDenoises || ssrDenoises);
+	}
+
 	if (ssgi.loaded) {
 		ssgi.DrawSSGI();
 		ssgi.Composite();
 	}
 
-	auto& ssr = globals::features::screenSpaceReflections;
 	if (ssr.loaded)
 		ssr.DrawSSR();
 

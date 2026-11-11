@@ -78,6 +78,8 @@ private:
 	winrt::com_ptr<ID3D11Buffer> m_constantBuffer;
 	uint32_t m_cbMaxSize = 0;
 
+	const char* m_label = "REBLUR";
+
 	// Samplers: [0]=NEAREST_CLAMP, [1]=LINEAR_CLAMP
 	winrt::com_ptr<ID3D11SamplerState> m_samplers[2];
 

@@ -47,7 +47,9 @@ void ScreenSpaceReflections::DrawSettings()
 	static bool showAdvanced;
 
 	if (!ShadersOK())
-		ImGui::TextColored({ 1, 0, 0, 1 }, "%s", T(TKEY("compute_shaders_failed_to_compile"), "Compute shaders failed to compile!"));
+		Util::Text::Error("%s", T(TKEY("compute_shaders_failed_to_compile"), "Compute shaders failed to compile!"));
+	if (!globals::features::dynamicCubemaps.loaded)
+		Util::Text::WrappedWarning("%s", T(TKEY("requires_dynamic_cubemaps"), "Requires Dynamic Cubemaps. Reflections are composited into the cubemap specular, so without it nothing is traced."));
 
 	ImGui::SeparatorText(T(TKEY("toggles"), "Toggles"));
 
@@ -146,7 +148,7 @@ void ScreenSpaceReflections::DrawSettings()
 		if (texNRDSpecOutput)
 			BUFFER_VIEWER_NODE(texNRDSpecOutput, debugRescale)
 		if (auto validation = settings.Reblur.EnableValidation ? nrdReblurSpecular.GetValidationSRV() : nullptr) {
-			if (ImGui::TreeNode("NRD Validation")) {
+			if (ImGui::TreeNode(T(TKEY("nrd_validation"), "NRD Validation"))) {
 				ImGui::Image(validation, { nrdReblurSpecular.GetWidth() * debugRescale, nrdReblurSpecular.GetHeight() * debugRescale });
 				ImGui::TreePop();
 			}
@@ -158,10 +160,30 @@ void ScreenSpaceReflections::DrawSettings()
 
 #undef I18N_KEY_PREFIX
 
+namespace
+{
+	void ClampSetting(float& a_value, float a_min, float a_max, float a_default)
+	{
+		a_value = std::isfinite(a_value) ? std::clamp(a_value, a_min, a_max) : a_default;
+	}
+}
+
 void ScreenSpaceReflections::LoadSettings(json& o_json)
 {
 	const auto previous = settings;
+	const Settings defaults{};
 	settings = o_json;
+	settings.SpecMaxSteps = std::clamp(settings.SpecMaxSteps, 1u, 256u);
+	ClampSetting(settings.SpecularMult, 0.0f, 5.0f, defaults.SpecularMult);
+	ClampSetting(settings.SpecCubemapMult, 0.0f, 5.0f, defaults.SpecCubemapMult);
+	ClampSetting(settings.SpecThickness, 0.0f, 50.0f, defaults.SpecThickness);
+	ClampSetting(settings.NormalBias, 0.0f, 1.0f, defaults.NormalBias);
+	ClampSetting(settings.BRDFBias, 0.0f, 1.0f, defaults.BRDFBias);
+	ClampSetting(settings.OcclusionStrength, 0.0f, 1.0f, defaults.OcclusionStrength);
+	ClampSetting(settings.HitDistA, 1.0f, 1000.0f, defaults.HitDistA);
+	ClampSetting(settings.HitDistB, 0.0f, 1.0f, defaults.HitDistB);
+	ClampSetting(settings.HitDistC, 1.0f, 200.0f, defaults.HitDistC);
+	ClampSetting(settings.SpecularPrepassBlurRadius, 0.0f, 75.0f, defaults.SpecularPrepassBlurRadius);
 	if (!settings.EnableREBLUR)
 		settings.HalfRes = false;
 	recompileFlag = recompileFlag || settings.HalfRes != previous.HalfRes;
@@ -386,10 +408,16 @@ void ScreenSpaceReflections::DrawSSR()
 {
 	outputReady = false;
 
+	if (queuedEnabledChange.exchange(false)) {
+		resetReblurHistory = true;
+		if (globals::deferred)
+			globals::deferred->ClearShaderCache();
+	}
+
 	if (recompileFlag)
 		ClearShaderCache();
 
-	if (!(settings.Enabled && ShadersOK() && texHiZDepth && texNRDSpecInput))
+	if (!(settings.Enabled && globals::features::dynamicCubemaps.loaded && ShadersOK() && texHiZDepth && texNRDSpecInput))
 		return;
 
 	ZoneScoped;
@@ -512,7 +540,7 @@ void ScreenSpaceReflections::DrawSSR()
 		specSRVs[3] = texHiZDepth->srv.get();
 		specSRVs[4] = dynamicCubemaps.loaded ? dynamicCubemaps.envTexture->srv.get() : nullptr;
 		specSRVs[5] = dynamicCubemaps.loaded ? dynamicCubemaps.envReflectionsTexture->srv.get() : nullptr;
-		specSRVs[6] = dynamicCubemaps.loaded && skylighting.loaded ? skylighting.texProbeArray->srv.get() : nullptr;
+		specSRVs[6] = dynamicCubemaps.loaded && skylighting.loaded && skylighting.texProbeArray ? skylighting.texProbeArray->srv.get() : nullptr;
 		ID3D11ShaderResourceView* envIBLSrv = ibl.loaded && ibl.envIBLTexture ? ibl.envIBLTexture->srv.get() : nullptr;
 
 		ID3D11UnorderedAccessView* specUAV = texNRDSpecInput->uav.get();
@@ -602,7 +630,7 @@ ID3D11ShaderResourceView* ScreenSpaceReflections::GetOutputTexture()
 ScreenSpaceReflections::SharedData ScreenSpaceReflections::GetCommonBufferData()
 {
 	SharedData data;
-	data.Enabled = (loaded && settings.Enabled && !recompileFlag && ShadersOK() && texHiZDepth && texNRDSpecInput) ? 1u : 0u;
+	data.Enabled = (loaded && settings.Enabled && globals::features::dynamicCubemaps.loaded && !recompileFlag && ShadersOK() && texHiZDepth && texNRDSpecInput) ? 1u : 0u;
 	data.SpecularMult = settings.SpecularMult;
 	data.SpecCubemapMult = settings.UseDynamicCubemapsAsFallback && globals::features::dynamicCubemaps.loaded ? settings.SpecCubemapMult : 0.0f;
 	data.pad0 = 0;
