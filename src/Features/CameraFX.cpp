@@ -878,7 +878,7 @@ void CameraFX::UpdateThemeClocks(float a_deltaTime)
 		}
 		const float duration = std::lerp(0.25f, 0.7f, exhaustion);
 		const float closure = blinkAge < duration ? std::sin(RE::NI_PI * blinkAge / duration) : 0.0f;
-		const float droop = 0.12f * exhaustion;
+		const float droop = 0.08f * exhaustion;
 		eyelid = std::clamp(droop + (1.0f - droop) * closure * std::min(1.0f, 0.6f + 0.4f * exhaustion), 0.0f, 1.0f);
 	} else {
 		blinkTimer = 0.0f;
@@ -1117,8 +1117,10 @@ void CameraFX::UpdateFrame(float a_deltaTime, bool a_hasDepth)
 	frameData.Blurs = { settings.BloodBlur ? settings.BloodBlurStrength : 0.0f, settings.HeartbeatBlur ? 1.0f : 0.0f, 0.0f, 0.0f };
 
 	const uint32_t splatCount = static_cast<uint32_t>(std::min<size_t>(combatState.splats.size(), CameraFXLens::kMaxSplats));
+	bool blurredSplats = false;
 	for (uint32_t i = 0; i < splatCount; ++i) {
 		const auto& splat = combatState.splats[i];
+		blurredSplats |= splat.type != CameraFXLens::SplatType::kFire && splat.type != CameraFXLens::SplatType::kGrit;
 		const float life = std::max(splat.life, 0.01f);
 		const float fadeIn = std::clamp(splat.age / 0.08f, 0.0f, 1.0f);
 		const float fadeOut = 1.0f - Util::Smoothstep(0.7f * life, life, splat.age);
@@ -1153,6 +1155,8 @@ void CameraFX::UpdateFrame(float a_deltaTime, bool a_hasDepth)
 	combatPass.overlay = splatCount > 0 || discharging || combatState.shockLasting > kActiveEpsilon;
 	combatPass.additive = combatPass.overlay;
 	lensActive = weatherPass.overlay || weatherPass.additive || combatPass.overlay;
+	lensNeedsMips = frost > kActiveEpsilon || frameData.Weather.z > kActiveEpsilon || frameData.Weather.w > kActiveEpsilon || frameData.Weather2.x > kActiveEpsilon ||
+	                breathing || blurredSplats || (frameData.Lens.y > kActiveEpsilon && settings.LensDirt > kActiveEpsilon);
 	sceneNeedsMips = generic.blurRadius > kMinBlurRadius || generic.dofStrength > kActiveEpsilon || frameData.Themes.y > kActiveEpsilon || hitBlurring ||
 	                 transforming || (settings.HeartbeatBlur && frameData.Themes.x > kActiveEpsilon);
 }
@@ -1311,7 +1315,7 @@ void CameraFX::DrawBeforeInterface()
 	};
 
 	if (needsCopy)
-		copyScene(sceneActive ? sceneNeedsMips : true);
+		copyScene(sceneActive ? sceneNeedsMips : lensNeedsMips);
 	else
 		context->OMSetRenderTargets(0, nullptr, nullptr);
 
@@ -1371,7 +1375,7 @@ void CameraFX::DrawBeforeInterface()
 		if (sceneActive) {
 			ID3D11ShaderResourceView* nullResources[2] = {};
 			context->PSSetShaderResources(0, 2, nullResources);
-			copyScene(true);
+			copyScene(lensNeedsMips);
 		}
 		ID3D11ShaderResourceView* resources[kLensResourceCount] = { sceneSRV, depthSRV, visibility ? visibility->srv.get() : nullptr,
 			lensDirt ? lensDirt->srv.get() : nullptr, frostMask ? frostMask->srv.get() : nullptr };

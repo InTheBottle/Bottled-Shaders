@@ -43,6 +43,8 @@ namespace CameraFXLens
 		constexpr float kHitBlurDecay = 2.2f;
 		constexpr float kBlurInterval = 0.12f;
 		constexpr float kSpellBlurInterval = 1.0f;
+		constexpr float kElementInterval = 0.2f;
+		constexpr float kSpellElementInterval = 1.0f;
 
 		class HitSink final : public RE::BSTEventSink<RE::TESHitEvent>
 		{
@@ -174,13 +176,13 @@ namespace CameraFXLens
 		{
 			switch (a_type) {
 			case SplatType::kIce:
-				return 3.5f;
-			case SplatType::kFire:
-				return 1.3f;
-			case SplatType::kGrit:
 				return 3.0f;
+			case SplatType::kFire:
+				return 1.1f;
+			case SplatType::kGrit:
+				return 2.5f;
 			default:
-				return 8.0f;
+				return 6.0f;
 			}
 		}
 
@@ -188,15 +190,15 @@ namespace CameraFXLens
 		{
 			switch (a_type) {
 			case SplatType::kVenom:
-				return 0.14f;
+				return 0.12f;
 			case SplatType::kIce:
-				return 0.18f;
+				return 0.15f;
 			case SplatType::kFire:
-				return 0.2f;
-			case SplatType::kGrit:
 				return 0.16f;
+			case SplatType::kGrit:
+				return 0.13f;
 			default:
-				return 0.07f + 0.06f * std::clamp(a_strength, 0.0f, 1.0f);
+				return 0.06f + 0.05f * std::clamp(a_strength, 0.0f, 1.0f);
 			}
 		}
 
@@ -305,10 +307,10 @@ namespace CameraFXLens
 			hit.type = type;
 			if (!ProjectPoint(torso, hit.u, hit.v))
 				return;
-			hit.count = ranged ? 1 : (power ? 3 : 1 + (distance < 200.0f ? 1 : 0));
-			hit.strength = (ranged ? 0.6f : (power ? 1.2f : 0.9f)) * (1.0f - 0.5f * Util::Smoothstep(150.0f, maxDistance, distance));
+			hit.count = ranged ? 1 : (power ? 2 : 1 + (distance < 200.0f ? 1 : 0));
+			hit.strength = (ranged ? 0.5f : (power ? 1.0f : 0.75f)) * (1.0f - 0.5f * Util::Smoothstep(150.0f, maxDistance, distance));
 			if (power && weapon)
-				hit.flash = 0.12f;
+				hit.flash = 0.08f;
 			Queue(hit);
 			return;
 		}
@@ -321,11 +323,11 @@ namespace CameraFXLens
 		const bool big = dragon || (attacker && attacker->GetHeight() > kBigActorHeight);
 
 		if (options.shake) {
-			float strength = spell ? 0.0f : (bash ? 0.3f : (power ? 0.4f : 0.22f));
+			float strength = spell ? 0.0f : (bash ? 0.22f : (power ? 0.3f : 0.15f));
 			if (ranged && !spell)
-				strength = 0.12f;
+				strength = 0.08f;
 			if (big)
-				strength = std::max(strength, 0.55f);
+				strength = std::max(strength, 0.4f);
 			if (blocked)
 				strength *= 0.5f;
 			if (strength > 0.0f && Ready(kCoolShake, 0.15f))
@@ -341,11 +343,11 @@ namespace CameraFXLens
 
 		const Element element = ClassifySpell(spell);
 		if (options.hitBlur) {
-			float blur = spell ? (element != Element::kNone ? 0.3f : 0.0f) : (bash ? 0.6f : (power ? 0.75f : 0.45f));
+			float blur = spell ? (element != Element::kNone ? 0.2f : 0.0f) : (bash ? 0.42f : (power ? 0.55f : 0.3f));
 			if (ranged && !spell)
-				blur = 0.3f;
+				blur = 0.2f;
 			if (big)
-				blur = std::max(blur, spell ? 0.5f : 0.85f);
+				blur = std::max(blur, spell ? 0.35f : 0.65f);
 			if (blocked)
 				blur *= 0.4f;
 			if (blur > 0.0f && Ready(spell ? kCoolSpellBlur : kCoolBlur, spell ? kSpellBlurInterval : kBlurInterval)) {
@@ -355,14 +357,14 @@ namespace CameraFXLens
 			}
 		}
 
-		if (element != Element::kNone && options.elemental && Ready(kCoolElement, 0.2f)) {
+		if (element != Element::kNone && options.elemental && Ready(kCoolElement, spell ? kSpellElementInterval : kElementInterval)) {
 			switch (element) {
 			case Element::kFire:
 				hit.splat = true;
 				hit.type = SplatType::kFire;
 				hit.count = dragon ? 3 : 1;
-				hit.strength = dragon ? 1.3f : 0.9f;
-				hit.flash = 0.15f;
+				hit.strength = dragon ? 1.1f : 0.75f;
+				hit.flash = 0.1f;
 				hit.flashWarmth = 1.0f;
 				hit.fire = dragon ? 1.0f : 0.5f;
 				break;
@@ -370,17 +372,17 @@ namespace CameraFXLens
 				hit.splat = true;
 				hit.type = SplatType::kIce;
 				hit.count = dragon ? 3 : 1;
-				hit.strength = dragon ? 1.2f : 0.9f;
-				hit.frost = dragon ? 0.8f : 0.35f;
+				hit.strength = dragon ? 1.0f : 0.75f;
+				hit.frost = dragon ? 0.6f : 0.25f;
 				break;
 			case Element::kShock:
-				hit.shock = 1.0f;
-				hit.flash = 0.1f;
+				hit.shock = 0.8f;
+				hit.flash = 0.06f;
 				break;
 			case Element::kPoison:
 				hit.splat = true;
 				hit.type = SplatType::kVenom;
-				hit.strength = 0.9f;
+				hit.strength = 0.75f;
 				break;
 			default:
 				break;
@@ -401,7 +403,7 @@ namespace CameraFXLens
 			hit.slashAngle = side * (0.6f + 0.4f * Random());
 		}
 		if (options.flash)
-			hit.flash = power ? 0.2f : 0.1f;
+			hit.flash = power ? 0.12f : 0.06f;
 		hit.flashWarmth = 0.6f;
 
 		if (options.blood && GetHealthFraction(player) < 0.5f && Random() < 0.5f && Ready(kCoolOwnBlood, 1.0f)) {
@@ -409,12 +411,12 @@ namespace CameraFXLens
 			hit.type = SplatType::kBlood;
 			hit.u = 0.2f + 0.6f * Random();
 			hit.v = 0.75f + 0.15f * Random();
-			hit.strength = 0.7f;
+			hit.strength = 0.55f;
 		} else if (big && options.elemental && Ready(kCoolGrit, 0.5f)) {
 			hit.splat = true;
 			hit.type = SplatType::kGrit;
 			hit.count = 2;
-			hit.strength = 1.0f;
+			hit.strength = 0.8f;
 		}
 		Queue(hit);
 	}
