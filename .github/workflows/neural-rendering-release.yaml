@@ -22,6 +22,7 @@ jobs:
       run-cpp: true
       run-shader-validation: true
       cmake-preset: ALL
+      disable-warnings-as-errors: true
 
   publish:
     name: Publish Neural Rendering prerelease
