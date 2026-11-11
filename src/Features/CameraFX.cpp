@@ -101,11 +101,14 @@ namespace
 	constexpr float kSceneCopyIdleSeconds = 10.0f;
 	constexpr float kContrastPivot = 0.5f;
 	constexpr float kFrostIdleSeconds = 30.0f;
+	constexpr float kClockPeriod = 3600.0f;
+	constexpr float kWindOffsetPeriod = 1000.0f;
 	constexpr UINT kLensResourceCount = 5;
 	constexpr UINT kLensSamplerCount = 2;
 	constexpr UINT kDirtSize = 1024;
-	constexpr UINT kFrostWidth = 2048;
 	constexpr UINT kFrostHeight = 1152;
+	constexpr UINT kMaxFrostWidth = 4096;
+	constexpr float kFrostAspectTolerance = 0.01f;
 	constexpr UINT kBakeGroupSize = 8;
 	constexpr float kSwimDropsFromSheet = 0.8f;
 	constexpr float kThawStart = 0.05f;
@@ -141,6 +144,21 @@ namespace
 		{
 			globals::features::cameraFX.DrawBeforeInterface();
 			func(a1);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	// The world's post-processing call, which Upscaling and HDR Display also hook (each wraps the call it finds, so the
+	// order doesn't matter). It writes kFRAMEBUFFER only on frames the world is drawn. Behind a freeze-frame menu (the
+	// Tween menu, the Journal) the engine draws the world once into kMENUBG and then only copies that into the SDR
+	// framebuffer each frame, so the HDR scene and the frame-generation swap chain are left holding last frame's output.
+	struct Main_PostProcessing
+	{
+		static void thunk(RE::ImageSpaceManager* a_this, uint32_t a3, RE::RENDER_TARGET a_target, void* a_4, bool a_5)
+		{
+			func(a_this, a3, a_target, a_4, a_5);
+			if (a_target == RE::RENDER_TARGET::kFRAMEBUFFER)
+				globals::features::cameraFX.MarkWorldPostProcessed();
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -492,6 +510,8 @@ void CameraFX::ClearShaderCache()
 	lensDirt.reset();
 	frostMask.reset();
 	pipelineReady = false;
+	pipelineFailureLogged = false;
+	sceneCopyFailed = false;
 }
 
 ID3D11VertexShader* CameraFX::GetVS()
@@ -568,6 +588,12 @@ bool CameraFX::EnsurePipeline()
 
 void CameraFX::Load()
 {
+	// The passes draw one mono fullscreen image, which would smear across VR's side-by-side eyes, and the modifier
+	// takeover isn't installed in VR either.
+	if (REL::Module::IsVR()) {
+		logger::info("[CameraFX] Not supported in VR, interface hook not installed");
+		return;
+	}
 	stl::detour_thunk<MenuManager_DrawInterfaceStart>(REL::RelocationID(79947, 82084));
 	logger::info("[CameraFX] Installed interface hook");
 }
@@ -575,6 +601,18 @@ void CameraFX::Load()
 void CameraFX::PostPostLoad()
 {
 	ImageSpaceModifiers::Install();
+	if (!REL::Module::IsVR()) {
+		stl::write_thunk_call<Main_PostProcessing>(REL::RelocationID(100430, 107148).address() + REL::Relocate(0x1F0, 0x1E7));
+		logger::info("[CameraFX] Hooked world post-processing");
+	}
+}
+
+void CameraFX::MarkWorldPostProcessed()
+{
+	if (auto state = globals::state) {
+		worldPostProcessedFrame = state->frameCount;
+		worldPostProcessSeen = true;
+	}
 }
 
 void CameraFX::DataLoaded()
@@ -592,6 +630,11 @@ void CameraFX::DataLoaded()
 
 void CameraFX::GameLoaded()
 {
+	ResetGameState();
+}
+
+void CameraFX::ResetGameState()
+{
 	weather.Reset();
 	combat.Reset();
 	frost = 0.0f;
@@ -606,11 +649,23 @@ void CameraFX::GameLoaded()
 	beastVampire = false;
 }
 
+bool CameraFX::IsMenuSceneOpen()
+{
+	// State caches the menu flags after Present, a frame late: on the first frame of the map, stats, main or loading
+	// menu it still read closed, so Camera FX took over and drew the lens over that frame. Ask the UI as well.
+	auto state = globals::state;
+	auto* ui = globals::game::ui;
+	if (state && state->IsMenuSceneOpen())
+		return true;
+	return ui && (ui->IsMenuOpen(RE::MainMenu::MENU_NAME) || ui->IsMenuOpen(RE::LoadingMenu::MENU_NAME) || ui->IsMenuOpen(RE::MapMenu::MENU_NAME) ||
+					 ui->IsMenuOpen(RE::StatsMenu::MENU_NAME));
+}
+
 bool CameraFX::TakesOverModifiers() const
 {
 	auto state = globals::state;
 	return loaded && settings.Enabled && settings.ReplaceModifiers && pipelineReady && !sceneCopyFailed && sceneTargetAvailable && state &&
-	       !state->IsMenuSceneOpen() && state->frameCount - lastDrawnFrame <= kMaxFramesSinceDraw;
+	       !IsMenuSceneOpen() && state->frameCount - lastDrawnFrame <= kMaxFramesSinceDraw;
 }
 
 std::array<bool, CameraFXModifiers::kThemeCount> CameraFX::GetEnabledThemes() const
@@ -665,6 +720,9 @@ bool CameraFX::EnsureSceneCopy(const D3D11_TEXTURE2D_DESC& a_desc)
 	const DXGI_FORMAT format = GetTypedFormat(a_desc.Format);
 	if (sceneCopy && sceneCopy->desc.Width == a_desc.Width && sceneCopy->desc.Height == a_desc.Height && sceneCopy->desc.Format == format)
 		return true;
+	// A failed size and format is not retried until the target changes, so one failure doesn't log every frame.
+	if (sceneCopyFailed && failedCopyWidth == a_desc.Width && failedCopyHeight == a_desc.Height && failedCopyFormat == format)
+		return false;
 
 	sceneCopy.reset();
 
@@ -694,14 +752,22 @@ bool CameraFX::EnsureSceneCopy(const D3D11_TEXTURE2D_DESC& a_desc)
 		logger::error("[CameraFX] Failed to create the scene copy ({}), leaving screen effects to the game", e.what());
 		sceneCopy.reset();
 		sceneCopyFailed = true;
+		failedCopyWidth = a_desc.Width;
+		failedCopyHeight = a_desc.Height;
+		failedCopyFormat = format;
 		return false;
 	}
+	// A copy made at a new size hands the modifiers back to Camera FX after an earlier failure.
+	sceneCopyFailed = false;
 	return true;
 }
 
 void CameraFX::EnsureLensTextures(bool a_needFrost, float a_deltaTime)
 {
 	auto context = globals::d3d::context;
+	// The dirt is tiled at several scales, up to four repeats per screen height, so it carries a full mip chain;
+	// sampling only its top level made the specks shimmer wherever they drift. The frost mask is stretched over the
+	// screen, never minified, and keeps one level.
 	auto bake = [&](eastl::unique_ptr<Texture2D>& a_texture, bool& a_failed, bool a_frost, UINT a_width, UINT a_height, DXGI_FORMAT a_format, const char* a_name) {
 		if (a_texture || a_failed)
 			return;
@@ -710,25 +776,28 @@ void CameraFX::EnsureLensTextures(bool a_needFrost, float a_deltaTime)
 			a_failed = true;
 			return;
 		}
+		const bool mips = !a_frost;
 
 		D3D11_TEXTURE2D_DESC desc{};
 		desc.Width = a_width;
 		desc.Height = a_height;
-		desc.MipLevels = 1;
+		desc.MipLevels = mips ? 0 : 1;
 		desc.ArraySize = 1;
 		desc.Format = a_format;
 		desc.SampleDesc = { 1, 0 };
 		desc.Usage = D3D11_USAGE_DEFAULT;
-		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS | (mips ? D3D11_BIND_RENDER_TARGET : 0u);
+		desc.MiscFlags = mips ? D3D11_RESOURCE_MISC_GENERATE_MIPS : 0u;
 
 		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
 		srvDesc.Format = a_format;
 		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-		srvDesc.Texture2D.MipLevels = 1;
+		srvDesc.Texture2D.MipLevels = mips ? static_cast<UINT>(-1) : 1u;
 
 		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
 		uavDesc.Format = a_format;
 		uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+		uavDesc.Texture2D.MipSlice = 0;
 
 		try {
 			a_texture = eastl::make_unique<Texture2D>(desc, a_name);
@@ -741,19 +810,38 @@ void CameraFX::EnsureLensTextures(bool a_needFrost, float a_deltaTime)
 			return;
 		}
 
+		// The frost bake reads the screen aspect from the frame constants, so the ferns and bubbles stay round on
+		// any display rather than on 16:9 only.
+		ID3D11Buffer* frameBuffer = nullptr;
+		if (a_frost) {
+			frameConstants->Update(frameData);
+			frameBuffer = frameConstants->CB();
+		}
+		ID3D11Buffer* nullBuffer = nullptr;
 		ID3D11UnorderedAccessView* uav = a_texture->uav.get();
 		ID3D11UnorderedAccessView* nullUAV = nullptr;
 		context->CSSetShader(shader, nullptr, 0);
+		context->CSSetConstantBuffers(0, 1, a_frost ? &frameBuffer : &nullBuffer);
 		context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
 		context->Dispatch((a_width + kBakeGroupSize - 1) / kBakeGroupSize, (a_height + kBakeGroupSize - 1) / kBakeGroupSize, 1);
 		context->CSSetUnorderedAccessViews(0, 1, &nullUAV, nullptr);
+		context->CSSetConstantBuffers(0, 1, &nullBuffer);
+		if (mips)
+			context->GenerateMips(a_texture->srv.get());
 	};
 
 	bake(lensDirt, dirtBakeFailed, false, kDirtSize, kDirtSize, DXGI_FORMAT_R8_UNORM, "CameraFX::LensDirt");
 
+	const float aspect = frameData.Resolution.x * frameData.Resolution.w;
+	if (frostMask && std::abs(aspect - frostAspect) > kFrostAspectTolerance)
+		frostMask.reset();
 	if (a_needFrost) {
 		frostIdleSeconds = 0.0f;
-		bake(frostMask, frostBakeFailed, true, kFrostWidth, kFrostHeight, DXGI_FORMAT_R8G8B8A8_UNORM, "CameraFX::FrostMask");
+		if (!frostMask) {
+			const UINT width = static_cast<UINT>(std::clamp(std::round(kFrostHeight * aspect), static_cast<float>(kFrostHeight), static_cast<float>(kMaxFrostWidth)));
+			bake(frostMask, frostBakeFailed, true, width, kFrostHeight, DXGI_FORMAT_R8G8B8A8_UNORM, "CameraFX::FrostMask");
+			frostAspect = aspect;
+		}
 	} else if (frostMask) {
 		frostIdleSeconds += a_deltaTime;
 		if (frostIdleSeconds > kFrostIdleSeconds)
@@ -761,7 +849,8 @@ void CameraFX::EnsureLensTextures(bool a_needFrost, float a_deltaTime)
 	}
 
 	frameData.LensLook.y = frostMask ? 1.0f : 0.0f;
-	frameData.LensLook.z = lensDirt ? 1.0f : 0.0f;
+	// The dirt texture's size, which also flags it as baked; the lens shader picks its mip from it.
+	frameData.LensLook.z = lensDirt ? static_cast<float>(kDirtSize) : 0.0f;
 }
 
 void CameraFX::UpdateThemeClocks(float a_deltaTime)
@@ -801,8 +890,12 @@ void CameraFX::UpdateThemeClocks(float a_deltaTime)
 
 	float beastPulse = 0.0f;
 	if (beastLevel > 0.0f) {
-		beastPhase = std::fmod(beastPhase + a_deltaTime * kBeastBeatsPerMinute / 60.0f, 1.0f);
-		beastPulse = std::max(Beat(beastPhase, 0.0f, 120.0f), 0.6f * Beat(beastPhase, 0.2f, 120.0f));
+		// The double beat at full rate peaks about 3.7 times a second, past the 3 flashes a second that
+		// Photosensitive Safe keeps under, so it gets the heartbeat's treatment: a slower rate and no echo.
+		const float beastRate = settings.PhotosensitiveSafe ? std::min(kBeastBeatsPerMinute, kSafeHeartRate) : kBeastBeatsPerMinute;
+		beastPhase = std::fmod(beastPhase + a_deltaTime * beastRate / 60.0f, 1.0f);
+		const float beastEcho = settings.PhotosensitiveSafe ? 0.0f : 0.6f * Beat(beastPhase, 0.2f, 120.0f);
+		beastPulse = std::max(Beat(beastPhase, 0.0f, 120.0f), beastEcho);
 	} else {
 		beastPhase = 0.0f;
 	}
@@ -874,7 +967,13 @@ void CameraFX::UpdateFrame(float a_deltaTime, bool a_hasDepth)
 {
 	const bool paused = globals::game::ui && globals::game::ui->GameIsPaused();
 	const float step = paused ? 0.0f : a_deltaTime;
-	time = std::fmod(time + step, 3600.0f);
+	// The clocks wrap to keep float precision, but every drop, sparkle and sway jumps when they do, so they wait for
+	// a frame with nothing on screen (last frame's state) and only force it at twice the period.
+	const bool drawing = sceneActive || lensActive;
+	auto wrapClock = [drawing](float a_clock, float a_period) {
+		return std::abs(a_clock) >= a_period && (!drawing || std::abs(a_clock) >= 2.0f * a_period) ? std::fmod(a_clock, a_period) : a_clock;
+	};
+	time = wrapClock(time + step, kClockPeriod);
 
 	if (settings.ReplaceModifiers)
 		CameraFXModifiers::Snapshot(modifierFrame);
@@ -969,8 +1068,9 @@ void CameraFX::UpdateFrame(float a_deltaTime, bool a_hasDepth)
 			for (size_t i = 0; i < 2; ++i) {
 				if (!moons[i])
 					continue;
-				const auto& baseColor = i == 0 ? Util::Moon::MasserBaseColor : Util::Moon::SecundaBaseColor;
-				const float phase = Util::Moon::GetLightColor(moons[i], baseColor, syncSettings.NewMoonIntensity, syncSettings.CrescentMoonIntensity, syncSettings.FullMoonIntensity).GetColor().w;
+				// The phase alone: the light colour's alpha is the sky blend, near 1 every night, which lit the flare
+				// for crescents and half moons as brightly as for a full moon.
+				const float phase = Util::Moon::GetPhaseIntensity(moons[i], syncSettings.NewMoonIntensity, syncSettings.CrescentMoonIntensity, syncSettings.FullMoonIntensity);
 				const float fullness = Util::Smoothstep(0.6f, 1.0f, phase / std::max(syncSettings.FullMoonIntensity, 1e-3f));
 				moonTargets[i] = GetMoonDiscVisibility(moons[i]) * fullness * night * clearSky * settings.MoonLensStrength * (i == 0 ? 1.0f : kSecundaLensScale);
 			}
@@ -985,6 +1085,15 @@ void CameraFX::UpdateFrame(float a_deltaTime, bool a_hasDepth)
 	frameData.Grade = { generic.cinematic.x, generic.cinematic.y, generic.cinematic.z, time };
 	frameData.TintColor = generic.tint;
 	frameData.FadeColor = generic.fade;
+	// The game's own fade, which has already darkened the scene whenever Camera FX leaves the modifiers to the game
+	// (Replace Modifiers off, or a frame it fell back). The lens fades with it, so drops and glare don't hang over
+	// a black screen. It is zero while Camera FX takes over, since the modifiers' fade then reaches the game as zero.
+	float gameFade = 0.0f;
+	if (auto* imageSpaceManager = globals::game::imageSpaceManager) {
+		const auto& data = imageSpaceManager->GetRuntimeData().data;
+		gameFade = Util::ClampFinite(data.modData.data[RE::ImageSpaceModData::kFadeAmount] * data.modAmount, 0.0f, 0.0f, 1.0f);
+	}
+	frameData.LensLook.w = gameFade;
 	frameData.Radial = { generic.radialStrength, generic.radialStart, generic.radialRampUp, generic.radialDownStart };
 	frameData.Radial2 = { generic.radialRampDown, generic.radialCenter.x, generic.radialCenter.y, 0.0f };
 	frameData.DepthOfField = { generic.dofDistance, generic.dofRange, generic.dofMode, 0.0f };
@@ -998,7 +1107,7 @@ void CameraFX::UpdateFrame(float a_deltaTime, bool a_hasDepth)
 	frameData.Weather = { lensClear ? weatherState.rain : 0.0f, weatherState.lookUp, lensClear ? weatherState.sheet : 0.0f, weatherState.entryFog };
 	frameData.Weather2 = { lensClear ? weatherState.condensation : 0.0f, lensClear ? weatherState.ash : 0.0f, lensClear ? weatherState.dust : 0.0f, lensClear ? weatherState.embers : 0.0f };
 	frameData.Weather3 = { extraDrops, breathVisible, combatState.exhaleAge, combatState.exhaleStrength };
-	windOffset = std::fmod(windOffset + weatherState.wind.x * step, 1000.0f);
+	windOffset = wrapClock(windOffset + weatherState.wind.x * step, kWindOffsetPeriod);
 	frameData.Wind = { weatherState.wind.x, windOffset, weatherState.windSpeed, combatState.firstPerson ? 1.0f : 0.0f };
 	frameData.Combat = { combatState.flash, combatState.shock, combatState.fire, combatState.staminaLow };
 	frameData.Combat3 = { combatState.hitU, combatState.hitV, combatState.hitAge, settings.PhotosensitiveSafe ? 1.0f : 0.0f };
@@ -1024,7 +1133,10 @@ void CameraFX::UpdateFrame(float a_deltaTime, bool a_hasDepth)
 	const bool hitBlurring = combatState.hitBlur > kActiveEpsilon;
 	const bool transforming = beastLevel > kActiveEpsilon;
 	sceneActive = generic.active || themesTotal > kActiveEpsilon || hitBlurring || transforming;
-	lightsActive = a_hasDepth && ((sunAmount > kActiveEpsilon && frameData.SunScreen.z > 0.0f) || frameData.MoonScreen[0].z > kActiveEpsilon || frameData.MoonScreen[1].z > kActiveEpsilon);
+	// Without the visibility pass the glare is multiplied by a visibility that stays zero, so a frame spent drawing it
+	// would show nothing.
+	const bool canOcclude = a_hasDepth && visibilityShader && visibility && visibilityConstants;
+	lightsActive = canOcclude && ((sunAmount > kActiveEpsilon && frameData.SunScreen.z > 0.0f) || frameData.MoonScreen[0].z > kActiveEpsilon || frameData.MoonScreen[1].z > kActiveEpsilon);
 	if (!lightsActive) {
 		frameData.Lens.y = 0.0f;
 		frameData.Lens.z = 0.0f;
@@ -1066,11 +1178,28 @@ void CameraFX::DrawBeforeInterface()
 		return;
 	}
 
+	// Quitting to the main menu and starting a New Game sends no load event, so the last game's frost, water and
+	// blood would carry into the new one. Clear them once while the main menu is up.
+	auto* ui = globals::game::ui;
+	if (ui && ui->IsMenuOpen(RE::MainMenu::MENU_NAME)) {
+		if (!clearedAtMainMenu) {
+			ResetGameState();
+			clearedAtMainMenu = true;
+		}
+	} else {
+		clearedAtMainMenu = false;
+	}
+
 	auto state = globals::state;
 	auto context = globals::d3d::context;
-	if (!state || !context || !globals::game::renderer || state->IsMainOrLoadingMenuOpen() || state->IsMenuSceneOpen())
+	if (!state || !context || !globals::game::renderer || IsMenuSceneOpen())
 		return;
 	if (lastDrawnFrame == state->frameCount)
+		return;
+	// No fresh world this frame (a freeze-frame menu is open): drawing would apply the effects to their own output
+	// again, every frame, which compounded the blur behind the Tween menu. The game keeps the modifiers while Camera FX
+	// is away, and the first frame back starts clean.
+	if (worldPostProcessSeen && worldPostProcessedFrame != state->frameCount)
 		return;
 	lastDrawnFrame = state->frameCount;
 

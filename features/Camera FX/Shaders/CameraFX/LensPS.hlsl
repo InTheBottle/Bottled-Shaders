@@ -80,8 +80,9 @@ void Blend(inout Composite c, float3 target, float amount)
 float Dirt(float2 q, float scale, float2 shift)
 {
 	float dirt;
+	// LensLook.z is the baked texture's size: one texel per screen pixel is mip 0, and each halving steps a level.
 	[branch] if (CameraFX::LensLook.z > 0.5)
-		dirt = LensDirtTexture.SampleLevel(WrapSampler, q * scale * 0.85 + shift, 0);
+		dirt = LensDirtTexture.SampleLevel(WrapSampler, q * scale * 0.85 + shift, max(0.0, log2(CameraFX::LensLook.z * scale * 0.85 * CameraFX::Resolution.w)));
 	else
 		dirt = smoothstep(0.55, 0.9, CameraFX::Fbm(q * scale * 9.0 + shift * 17.0, 3)) * 0.6;
 	return dirt;
@@ -449,7 +450,9 @@ void ApplyFrost(inout Composite c, float2 uv, float2 q, float2 viewUV, float fro
 	float2 snowGradient = 0.0;
 	[branch] if (baked)
 	{
-		float2 texel = CameraFX::Resolution.zw * 1.5;
+		// A fixed step across the baked mask, the 1.5 screen pixels it was tuned with at 1080p. Stepping in screen
+		// texels made the fern relief, bubbles and crust shading half as strong at 4K and 1.5x as strong at 720p.
+		float2 texel = float2(1.5 / ReferenceHeight / Aspect(), 1.5 / ReferenceHeight);
 		float4 sampleR = FrostTexture.SampleLevel(LinearSampler, uv + float2(texel.x, 0.0), 0);
 		float4 sampleL = FrostTexture.SampleLevel(LinearSampler, uv - float2(texel.x, 0.0), 0);
 		float4 sampleD = FrostTexture.SampleLevel(LinearSampler, uv + float2(0.0, texel.y), 0);
@@ -885,7 +888,9 @@ void ApplyBurn(inout Composite c, float2 q, float edgeR, float amount)
 	float charred = smoothstep(start + 0.02, start + 0.12, front);
 	float burnLine = exp(-pow((front - start - 0.02) / 0.02, 2.0));
 	float heat = exp(-pow((front - start) / 0.1, 2.0));
-	float flicker = 0.7 + 0.3 * CameraFX::ValueNoise(float2(time * 8.0, front * 30.0));
+	// Photosensitive Safe (Combat3.w) slows the flame's flicker from about eight changes a second to two.
+	float flickerRate = CameraFX::Combat3.w > 0.5 ? 2.0 : 8.0;
+	float flicker = 0.7 + 0.3 * CameraFX::ValueNoise(float2(time * flickerRate, front * 30.0));
 	Blend(c, float3(0.02, 0.012, 0.008), charred * 0.72);
 	float3 flame = lerp(float3(1.0, 0.3, 0.04), float3(1.0, 0.62, 0.22), saturate(fine * 1.4 - 0.2));
 	Blend(c, flame, burnLine * flicker * 0.8 * amount);
@@ -1307,7 +1312,8 @@ float4 main(CameraFX::Interpolants input) : SV_Target
 	}
 #endif
 
-	float visible = 1.0 - saturate(CameraFX::FadeColor.a);
+	// Camera FX's own fade, or the game's (LensLook.w) when the game applied the modifiers itself.
+	float visible = 1.0 - saturate(max(CameraFX::FadeColor.a, CameraFX::LensLook.w));
 	float alpha = overlay ? saturate(c.alpha) : 0.0;
 	float3 premultiplied = overlay ? (c.color - base * (1.0 - alpha)) * visible : float3(0.0, 0.0, 0.0);
 	alpha *= visible;

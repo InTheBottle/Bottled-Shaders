@@ -221,6 +221,10 @@ shared_integrations:
       match: ["settingNeuralRendering"]
 
 repository:
+  neural_rendering_ci:
+    source: personal
+    reason: "Neural Rendering automatic prerelease build and release retention workflows"
+    paths: [.github/workflows/neural-rendering-release.yaml, .github/workflows/neural-rendering-retention.yaml]
   # Whole files outside the features that differ from Bottle.
   personal_build:
     source: personal

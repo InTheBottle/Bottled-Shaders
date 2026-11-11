@@ -22,13 +22,14 @@ groupshared uint VisibleCount[3];
 
 	float4 source = Lights[light];
 	if (source.z > 0.5) {
-		float2 uv = source.xy + FlareOcclusion::GetSampleOffset(tap);
-		if (all(uv >= 0.0) && all(uv < 1.0)) {
-			float depth = DepthTexture.Load(int3(uv * DepthParams.xy, 0));
-			bool sky = DepthParams.z > 0.5 ? depth <= 1e-6 : depth >= 0.999999;
-			if (sky)
-				InterlockedAdd(VisibleCount[light], 1u);
-		}
+		// Taps past the screen edge read the border texel, as the vanilla flare's clamped depth sampler does. Skipping
+		// them counted every off-screen tap as blocked, so the glare died while the CPU was still fading it over the
+		// margin past the edge.
+		float2 uv = clamp(source.xy + FlareOcclusion::GetSampleOffset(tap), 0.5 / DepthParams.xy, 1.0 - 0.5 / DepthParams.xy);
+		float depth = DepthTexture.Load(int3(uv * DepthParams.xy, 0));
+		bool sky = DepthParams.z > 0.5 ? depth <= 1e-6 : depth >= 0.999999;
+		if (sky)
+			InterlockedAdd(VisibleCount[light], 1u);
 	}
 	GroupMemoryBarrierWithGroupSync();
 

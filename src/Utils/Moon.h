@@ -110,6 +110,26 @@ namespace Util::Moon
 		return dir;
 	}
 
+	/**
+	 * @brief Get the intensity factor of the phase a moon currently shows, read from its phase texture.
+	 *
+	 * Unlike GetLightColor's intensity, this is not scaled by the moon's sky blend alpha.
+	 *
+	 * @return The phase's factor from GetPhaseIntensityFactor, or 0 if the moon has no sky shader.
+	 */
+	inline float GetPhaseIntensity(const RE::Moon* moon, float newMoon = NewMoonIntensityFactor, float crescent = CrescentMoonIntensityFactor, float full = FullMoonIntensityFactor)
+	{
+		if (!moon || !moon->moonMesh)
+			return 0.0f;
+
+		const auto prop = skyrim_cast<RE::BSSkyShaderProperty*>(moon->moonMesh->GetGeometryRuntimeData().shaderProperty.get());
+		if (!prop)
+			return 0.0f;
+
+		const auto tex = prop->GetBaseTexture();
+		return GetPhaseIntensityFactor(GetPhaseFromTexture(tex ? tex->name.c_str() : nullptr), newMoon, crescent, full);
+	}
+
 	inline Util::ColorSpace::LightColor GetLightColor(const RE::Moon* moon, const Util::ColorSpace::LightColor& baseColor, float newMoon = NewMoonIntensityFactor, float crescent = CrescentMoonIntensityFactor, float full = FullMoonIntensityFactor)
 	{
 		if (!moon || !moon->moonMesh)

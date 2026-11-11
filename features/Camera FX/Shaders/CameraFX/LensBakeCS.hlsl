@@ -119,14 +119,19 @@ float Fibres(float2 uv, float period, float salt)
 
 RWTexture2D<unorm float4> FrostOutput : register(u0);
 
-static const float FrostAspect = 16.0 / 9.0;
+// The screen's aspect at bake time, from the frame constants; the CPU re-bakes the mask when it changes. A fixed 16:9
+// stretched the ferns and bubbles on ultrawide screens and squashed them on 4:3 and 16:10.
+float FrostAspect()
+{
+	return CameraFX::Resolution.x * CameraFX::Resolution.w;
+}
 
 float BakedArrival(float2 uv)
 {
-	float2 p = float2(uv.x * FrostAspect, uv.y);
+	float2 p = float2(uv.x * FrostAspect(), uv.y);
 	float shaped = CameraFX::FrameArrival(uv, 4.5);
 	float broad = CameraFX::Fbm(p * 2.6 + 3.7, 5);
-	float2 centred = (uv - 0.5) * float2(FrostAspect, 1.0);
+	float2 centred = (uv - 0.5) * float2(FrostAspect(), 1.0);
 	float angle = atan2(centred.y, centred.x);
 	float warp = CameraFX::Fbm(float2(angle * 3.0, shaped * 4.0) + 11.0, 3);
 	float fingers = pow(CameraFX::Ridge(float2(angle * 15.0 + warp * 4.0, shaped * 2.5)), 4.0);
@@ -195,13 +200,13 @@ float FernLayer(float2 p, float cellSize, float2 lengths, float reach, float sal
 		{
 			float2 id = cell + float2(x, y) + salt;
 			float2 origin = (cell + float2(x, y) + 0.2 + 0.6 * CameraFX::Hash22(id + 9.1)) * cellSize;
-			float2 originUV = float2(origin.x / FrostAspect, origin.y);
+			float2 originUV = float2(origin.x / FrostAspect(), origin.y);
 			float near = 1.0 - smoothstep(reach * 0.3, reach, CameraFX::FrameArrival(saturate(originUV), 4.5));
 			if (CameraFX::Hash12(id * 1.31 + 5.7) > 0.95 * near)
 				continue;
 			float2 oc = originUV - 0.5;
-			float2 inward = abs(oc.x) * FrostAspect > abs(oc.y) ? float2(-sign(oc.x), 0.0) : float2(0.0, -sign(oc.y));
-			float2 toCentre = normalize(float2(0.5 * FrostAspect, 0.5) - origin);
+			float2 inward = abs(oc.x) * FrostAspect() > abs(oc.y) ? float2(-sign(oc.x), 0.0) : float2(0.0, -sign(oc.y));
+			float2 toCentre = normalize(float2(0.5 * FrostAspect(), 0.5) - origin);
 			float2 direction = normalize(lerp(inward, toCentre, 0.4));
 			direction = CameraFX::Rotate(direction, (CameraFX::Hash12(id + 3.3) - 0.5) * 1.6);
 			float fernLength = lerp(lengths.x, lengths.y, CameraFX::Hash12(id + 7.7));
@@ -213,7 +218,7 @@ float FernLayer(float2 p, float cellSize, float2 lengths, float reach, float sal
 
 float FernRelief(float2 uv)
 {
-	float2 p = float2(uv.x * FrostAspect, uv.y);
+	float2 p = float2(uv.x * FrostAspect(), uv.y);
 	float relief = FernLayer(p, 0.1, float2(0.08, 0.2), 0.36, 0.0);
 	relief = max(relief, FernLayer(p, 0.045, float2(0.03, 0.08), 0.42, 71.0) * 0.8);
 	float fuzz = pow(CameraFX::Ridge(p * 140.0), 6.0) * smoothstep(0.05, 0.4, relief);
@@ -222,7 +227,7 @@ float FernRelief(float2 uv)
 
 float Bubbles(float2 uv, float arrival)
 {
-	float2 p = float2(uv.x * FrostAspect, uv.y);
+	float2 p = float2(uv.x * FrostAspect(), uv.y);
 	float zone = smoothstep(0.04, 0.12, arrival) * (1.0 - smoothstep(0.3, 0.45, arrival));
 	float value = 0.5;
 	[unroll] for (int layer = 0; layer < 2; layer++)
@@ -248,7 +253,7 @@ float Bubbles(float2 uv, float arrival)
 
 float Snow(float2 uv)
 {
-	float2 p = float2(uv.x * FrostAspect, uv.y);
+	float2 p = float2(uv.x * FrostAspect(), uv.y);
 	float frame = 1.0 - smoothstep(0.0, 0.3, BakedArrival(uv));
 	float grains = 0.0;
 	[unroll] for (int layer = 0; layer < 2; layer++)

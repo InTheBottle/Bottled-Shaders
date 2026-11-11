@@ -357,7 +357,7 @@ float GetPointLightIntensity(LightLimitFix::Light light, float3 positionWS, out 
 	intensity *= light.fade;
 	if (intensity >= 1e-5) {
 		[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow)
-			intensity *= LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, positionWS, FrameBuffer::CameraPosAdjust.xyz, lightDirection, false, 0.0);
+			intensity *= LightLimitFix::GetLocalShadowWithLightFade(LinearSampler, light.localShadowIndex, positionWS, FrameBuffer::CameraPosAdjust.xyz, lightDirection, false, 0.0);
 	} else {
 		intensity = 0.0;
 	}
