@@ -617,7 +617,6 @@ float3 GetLightingShadow(float3 color, float3 worldPosition, float2 screenPositi
 }
 #	endif
 
-#	if defined(EFFECTS11)
 namespace EffectClass
 {
 	static const uint None = 0;
@@ -678,7 +677,6 @@ uint GetEffectClass()
 	}
 	return effectClass;
 }
-#	endif
 
 #	if defined(NIGHT_EYE)
 #		include "NightEye/NightEye.hlsli"
@@ -906,8 +904,16 @@ PS_OUTPUT main(PS_INPUT input)
 			baseColor.xyz = pow(max(baseColor.xyz, 0.0), SharedData::enbSettings.FireCurve) * SharedData::enbSettings.FireIntensity;
 		else if (effectClass == EffectClass::LightSprite)
 			baseColor.xyz = pow(max(baseColor.xyz, 0.0), SharedData::enbSettings.LightSpriteCurve) * SharedData::enbSettings.LightSpriteIntensity;
-	}
+	} else
 #	endif
+	[branch] if (SharedData::postProcessingSettings.EnableFire)
+	{
+		const uint additiveClass = GetEffectClass();
+		if (additiveClass == EffectClass::Fire)
+			baseColor.xyz = pow(max(baseColor.xyz, 0.0), SharedData::postProcessingSettings.FireCurve) * SharedData::postProcessingSettings.FireIntensity;
+		else if (additiveClass == EffectClass::LightSprite)
+			baseColor.xyz = pow(max(baseColor.xyz, 0.0), SharedData::postProcessingSettings.LightSpriteCurve) * SharedData::postProcessingSettings.LightSpriteIntensity;
+	}
 
 #	if !defined(MOTIONVECTORS_NORMALS)
 	if (alpha * fogMul.w - AlphaTestRefRS < 0) {

@@ -447,6 +447,16 @@ namespace SharedData
 		uint pad0;
 	};
 
+	struct PostProcessingSettings
+	{
+		uint EnableFire;
+		float FireIntensity;
+		float FireCurve;
+		float LightSpriteIntensity;
+		float LightSpriteCurve;
+		float3 pad0;
+	};
+
 	struct ExponentialHeightFogSettings
 	{
 		uint enabled;
@@ -709,6 +719,7 @@ namespace SharedData
 		ProceduralNightSkySettings proceduralNightSkySettings;
 		SSGISettings ssgiSettings;
 		SSRSettings ssrSettings;
+		PostProcessingSettings postProcessingSettings;
 	};
 
 	Texture2D<float4> DepthTexture : register(t17);

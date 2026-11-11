@@ -85,5 +85,6 @@ std::pair<unsigned char*, size_t> GetFeatureBufferData(bool a_inWorld)
 		globals::features::nightEye.GetCommonBufferData(),
 		globals::features::proceduralNightSky.GetCommonBufferData(),
 		globals::features::screenSpaceGI.GetCommonBufferData(),
-		globals::features::screenSpaceReflections.GetCommonBufferData());
+		globals::features::screenSpaceReflections.GetCommonBufferData(),
+		globals::features::postProcessing.GetCommonBufferData());
 }

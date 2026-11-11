@@ -34,19 +34,6 @@ bool Effects11::HasShaderDefine(RE::BSShader::Type)
 
 namespace
 {
-	float GetBillboardHalfTan(const RE::NiAVObject* a_billboard, const RE::NiPoint3& a_viewer, float a_fallback)
-	{
-		if (!a_billboard)
-			return a_fallback;
-
-		const auto& bound = a_billboard->worldBound;
-		const float distance = bound.center.GetDistance(a_viewer);
-		if (bound.radius <= 0.0f || distance <= bound.radius)
-			return a_fallback;
-
-		return bound.radius * 0.70710678f / distance;
-	}
-
 	/** @brief A screen-sized 2D texture with an SRV, plus an RTV and/or UAV on request. */
 	std::unique_ptr<Texture2D> CreateScreenTexture(uint32_t a_width, uint32_t a_height, DXGI_FORMAT a_format, bool a_renderTarget, bool a_unorderedAccess, const char* a_name)
 	{
@@ -261,11 +248,11 @@ void Effects11::UpdateSkyScattering(PerFrame& a_data)
 	if (sky && sky->root) {
 		const auto& viewer = sky->root->world.translate;
 		if (sky->sun && sky->sun->sunBase)
-			a_data.SunBillboardTan = GetBillboardHalfTan(sky->sun->sunBase.get(), viewer, a_data.SunBillboardTan);
+			a_data.SunBillboardTan = Util::GetBillboardHalfTan(sky->sun->sunBase.get(), viewer, a_data.SunBillboardTan);
 		if (sky->masser && sky->masser->moonMesh)
-			a_data.MasserBillboardTan = GetBillboardHalfTan(sky->masser->moonMesh.get(), viewer, 0.0f);
+			a_data.MasserBillboardTan = Util::GetBillboardHalfTan(sky->masser->moonMesh.get(), viewer, 0.0f);
 		if (sky->secunda && sky->secunda->moonMesh)
-			a_data.SecundaBillboardTan = GetBillboardHalfTan(sky->secunda->moonMesh.get(), viewer, 0.0f);
+			a_data.SecundaBillboardTan = Util::GetBillboardHalfTan(sky->secunda->moonMesh.get(), viewer, 0.0f);
 	}
 }
 
