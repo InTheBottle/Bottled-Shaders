@@ -36,21 +36,23 @@ namespace
 		const char* start;
 		const char* end;
 		float radius;
+		float extrude;
 	};
 
 	constexpr std::array<BoneSegment, 11> kHumanoidSegments{ {
-		{ "NPC Pelvis [Pelv]", "NPC Spine2 [Spn2]", 12.0f },
-		{ "NPC Spine2 [Spn2]", "NPC Neck [Neck]", 13.0f },
-		{ "NPC Head [Head]", nullptr, 9.0f },
-		{ "NPC L UpperArm [LUar]", "NPC L Forearm [LLar]", 4.5f },
-		{ "NPC L Forearm [LLar]", "NPC L Hand [LHnd]", 3.5f },
-		{ "NPC R UpperArm [RUar]", "NPC R Forearm [RLar]", 4.5f },
-		{ "NPC R Forearm [RLar]", "NPC R Hand [RHnd]", 3.5f },
-		{ "NPC L Thigh [LThg]", "NPC L Calf [LClf]", 6.5f },
-		{ "NPC L Calf [LClf]", "NPC L Foot [Lft ]", 4.5f },
-		{ "NPC R Thigh [RThg]", "NPC R Calf [RClf]", 6.5f },
-		{ "NPC R Calf [RClf]", "NPC R Foot [Rft ]", 4.5f },
+		{ "NPC Pelvis [Pelv]", "NPC Spine2 [Spn2]", 12.0f, 0.0f },
+		{ "NPC Spine2 [Spn2]", "NPC Neck [Neck]", 13.0f, 0.0f },
+		{ "NPC Head [Head]", "NPC Neck [Neck]", 9.0f, 8.0f },
+		{ "NPC L UpperArm [LUar]", "NPC L Forearm [LLar]", 4.5f, 0.0f },
+		{ "NPC L Forearm [LLar]", "NPC L Hand [LHnd]", 3.5f, 0.0f },
+		{ "NPC R UpperArm [RUar]", "NPC R Forearm [RLar]", 4.5f, 0.0f },
+		{ "NPC R Forearm [RLar]", "NPC R Hand [RHnd]", 3.5f, 0.0f },
+		{ "NPC L Thigh [LThg]", "NPC L Calf [LClf]", 6.5f, 0.0f },
+		{ "NPC L Calf [LClf]", "NPC L Foot [Lft ]", 4.5f, 0.0f },
+		{ "NPC R Thigh [RThg]", "NPC R Calf [RClf]", 6.5f, 0.0f },
+		{ "NPC R Calf [RClf]", "NPC R Foot [Rft ]", 4.5f, 0.0f },
 	} };
+	static_assert(kHumanoidSegments.size() * 2 == CapsuleShadows::kSkeletonNodes);
 
 	float3 ToFloat3(const RE::NiPoint3& a_point)
 	{
@@ -171,33 +173,73 @@ bool CapsuleShadows::FindDominantLight(const RE::NiPoint3& a_position, const RE:
 	return best > kMinLightWeight;
 }
 
-uint32_t CapsuleShadows::AddSkeletonCapsules(RE::NiAVObject* a_root, float a_scale)
+void CapsuleShadows::ReleaseBones(ActorState& a_state)
 {
+	if (a_state.root)
+		pendingRelease.push_back(std::move(a_state.root));
+	for (auto& bone : a_state.bones) {
+		if (bone)
+			pendingRelease.push_back(std::move(bone));
+	}
+}
+
+void CapsuleShadows::ForgetAllActors()
+{
+	for (auto& [formID, state] : actorStates)
+		ReleaseBones(state);
+	actorStates.clear();
+}
+
+void CapsuleShadows::FlushReleases()
+{
+	if (pendingRelease.empty())
+		return;
+	if (auto* tasks = SKSE::GetTaskInterface()) {
+		tasks->AddTask([nodes = std::move(pendingRelease)]() mutable { nodes.clear(); });
+		pendingRelease = {};
+	} else {
+		pendingRelease.clear();
+	}
+}
+
+void CapsuleShadows::RefreshBones(ActorState& a_state, RE::NiAVObject* a_root)
+{
+	if (a_state.root.get() == a_root)
+		return;
+
 	static const auto names = [] {
-		std::array<std::pair<RE::BSFixedString, RE::BSFixedString>, kHumanoidSegments.size()> result;
+		std::array<RE::BSFixedString, kSkeletonNodes> result;
 		for (size_t i = 0; i < kHumanoidSegments.size(); ++i) {
-			result[i].first = kHumanoidSegments[i].start;
-			if (kHumanoidSegments[i].end)
-				result[i].second = kHumanoidSegments[i].end;
+			result[i * 2] = kHumanoidSegments[i].start;
+			result[i * 2 + 1] = kHumanoidSegments[i].end;
 		}
 		return result;
 	}();
 
+	ReleaseBones(a_state);
+	a_state.root = RE::NiPointer<RE::NiAVObject>(a_root);
+	for (size_t i = 0; i < kSkeletonNodes; ++i)
+		a_state.bones[i] = RE::NiPointer<RE::NiAVObject>(a_root->GetObjectByName(names[i]));
+}
+
+uint32_t CapsuleShadows::AddSkeletonCapsules(const ActorState& a_state, float a_scale)
+{
 	uint32_t added = 0;
 	for (size_t i = 0; i < kHumanoidSegments.size() && added < kMaxCapsulesPerActor && capsuleCount < kMaxCapsules; ++i) {
-		auto* start = a_root->GetObjectByName(names[i].first);
-		if (!start)
+		const auto* start = a_state.bones[i * 2].get();
+		const auto* end = a_state.bones[i * 2 + 1].get();
+		if (!start || (!end && kHumanoidSegments[i].extrude <= 0.0f))
 			continue;
 
-		RE::NiPoint3 startPoint = start->world.translate;
-		RE::NiPoint3 endPoint = startPoint;
-		if (kHumanoidSegments[i].end) {
-			auto* end = a_root->GetObjectByName(names[i].second);
-			if (!end)
-				continue;
-			endPoint = end->world.translate;
+		const RE::NiPoint3 startPoint = start->world.translate;
+		RE::NiPoint3 endPoint;
+		if (kHumanoidSegments[i].extrude > 0.0f) {
+			RE::NiPoint3 direction = end ? startPoint - end->world.translate : RE::NiPoint3{ 0.0f, 0.0f, 1.0f };
+			const float length = direction.Length();
+			direction = length > 1e-3f ? direction * (1.0f / length) : RE::NiPoint3{ 0.0f, 0.0f, 1.0f };
+			endPoint = startPoint + direction * (kHumanoidSegments[i].extrude * a_scale);
 		} else {
-			endPoint.z += 8.0f * a_scale;
+			endPoint = end->world.translate;
 		}
 
 		auto& capsule = capsules[capsuleCount++];
@@ -239,8 +281,13 @@ void CapsuleShadows::AddActor(RE::Actor* a_actor, float a_deltaTime)
 	const float height = a_actor->GetHeight();
 	const float scale = std::clamp(std::isfinite(height) && height > 0.0f ? height / kReferenceHeight : 1.0f, 0.35f, 4.0f);
 
+	auto& state = actorStates[a_actor->GetFormID()];
+	const bool fresh = state.frame == 0;
+	state.frame = globals::state->frameCount;
+	RefreshBones(state, root);
+
 	const uint32_t firstCapsule = capsuleCount;
-	if (AddSkeletonCapsules(root, scale) == 0)
+	if (AddSkeletonCapsules(state, scale) == 0)
 		AddBoundCapsule(a_actor, root);
 	if (capsuleCount == firstCapsule)
 		return;
@@ -252,18 +299,22 @@ void CapsuleShadows::AddActor(RE::Actor* a_actor, float a_deltaTime)
 	const std::span<const Capsule> body(capsules.data() + firstCapsule, capsuleCount - firstCapsule);
 	const bool lit = FindDominantLight(center, root, body, lightPosition, dominance);
 
-	auto& state = actorLights[a_actor->GetFormID()];
 	const float blend = 1.0f - std::exp(-a_deltaTime / kLightSmoothing);
-	if (state.frame == 0 || state.strength <= 0.0f)
+	if (fresh || state.strength <= 0.0f)
 		state.position = lightPosition;
 	else if (lit)
 		state.position += (lightPosition - state.position) * blend;
 	state.strength += ((lit ? dominance : 0.0f) - state.strength) * blend;
-	state.frame = globals::state->frameCount;
+
+	const float shadowLength = kShadowReach * scale;
+	float extent = kReferenceHeight * 0.75f * scale;
+	for (const auto& capsule : body)
+		extent = std::max(extent, std::max(center.GetDistance(ToNiPoint3(capsule.A)), center.GetDistance(ToNiPoint3(capsule.B))) + capsule.Radius);
 
 	auto& actor = actors[actorCount++];
 	actor.Center = ToFloat3(center);
-	actor.BoundRadius = kShadowReach + kReferenceHeight * 0.75f * scale;
+	actor.BoundRadius = shadowLength + extent;
+	actor.ShadowLength = shadowLength;
 	actor.LightPosition = ToFloat3(state.position);
 	const float clearance = std::clamp((DistanceToBody(state.position, body) - kLightClearanceStart) / (kLightClearanceEnd - kLightClearanceStart), 0.0f, 1.0f);
 	actor.LightStrength = state.strength * clearance * clearance * (3.0f - 2.0f * clearance);
@@ -277,7 +328,8 @@ void CapsuleShadows::Prepass()
 	capsuleCount = 0;
 
 	if (!settings.Enabled || (settings.AmbientStrength <= 0.0f && settings.ShadowStrength <= 0.0f) || globals::state->isLoadingMenuOpen) {
-		actorLights.clear();
+		ForgetAllActors();
+		FlushReleases();
 		return;
 	}
 
@@ -302,7 +354,8 @@ void CapsuleShadows::Prepass()
 	}
 
 	if (candidates.empty()) {
-		actorLights.clear();
+		ForgetAllActors();
+		FlushReleases();
 		return;
 	}
 
@@ -316,8 +369,15 @@ void CapsuleShadows::Prepass()
 	candidates.clear();
 
 	const uint32_t frame = globals::state->frameCount;
-	for (auto it = actorLights.begin(); it != actorLights.end();)
-		it = it->second.frame + kForgetFrames < frame ? actorLights.erase(it) : std::next(it);
+	for (auto it = actorStates.begin(); it != actorStates.end();) {
+		if (it->second.frame + kForgetFrames < frame) {
+			ReleaseBones(it->second);
+			it = actorStates.erase(it);
+		} else {
+			++it;
+		}
+	}
+	FlushReleases();
 
 	if (actorCount == 0 || !capsuleBuffer || !actorBuffer)
 		return;

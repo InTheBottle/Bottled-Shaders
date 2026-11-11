@@ -22,6 +22,7 @@ struct CapsuleShadows : Feature
 	static constexpr uint32_t kMaxActors = 8;
 	static constexpr uint32_t kMaxCapsulesPerActor = 12;
 	static constexpr uint32_t kMaxCapsules = kMaxActors * kMaxCapsulesPerActor;
+	static constexpr size_t kSkeletonNodes = 22;
 
 	struct Settings
 	{
@@ -48,7 +49,8 @@ struct CapsuleShadows : Feature
 		float LightStrength;
 		uint FirstCapsule;
 		uint CapsuleCount;
-		float2 pad;
+		float ShadowLength;
+		float pad;
 	};
 	static_assert(sizeof(ActorData) == 48);
 
@@ -83,16 +85,22 @@ private:
 		float luminance = 0.0f;
 	};
 
-	struct ActorLight
+	struct ActorState
 	{
 		RE::NiPoint3 position;
 		float strength = 0.0f;
 		uint32_t frame = 0;
+		RE::NiPointer<RE::NiAVObject> root;
+		std::array<RE::NiPointer<RE::NiAVObject>, kSkeletonNodes> bones;
 	};
 
 	void CollectLights();
 	void AddActor(RE::Actor* a_actor, float a_deltaTime);
-	uint32_t AddSkeletonCapsules(RE::NiAVObject* a_root, float a_scale);
+	uint32_t AddSkeletonCapsules(const ActorState& a_state, float a_scale);
+	void RefreshBones(ActorState& a_state, RE::NiAVObject* a_root);
+	void ReleaseBones(ActorState& a_state);
+	void ForgetAllActors();
+	void FlushReleases();
 	void AddBoundCapsule(RE::Actor* a_actor, RE::NiAVObject* a_root);
 	bool FindDominantLight(const RE::NiPoint3& a_position, const RE::NiAVObject* a_root, std::span<const Capsule> a_body, RE::NiPoint3& a_light, float& a_dominance) const;
 	bool EnsureTexture(uint32_t a_width, uint32_t a_height);
@@ -100,7 +108,8 @@ private:
 
 	std::vector<NearbyLight> lights;
 	std::vector<std::pair<float, RE::ActorPtr>> candidates;
-	std::unordered_map<RE::FormID, ActorLight> actorLights;
+	std::unordered_map<RE::FormID, ActorState> actorStates;
+	std::vector<RE::NiPointer<RE::NiAVObject>> pendingRelease;
 	std::array<Capsule, kMaxCapsules> capsules{};
 	std::array<ActorData, kMaxActors> actors{};
 	uint32_t capsuleCount = 0;

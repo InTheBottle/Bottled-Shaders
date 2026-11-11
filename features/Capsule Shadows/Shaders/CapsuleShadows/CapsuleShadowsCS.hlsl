@@ -19,7 +19,8 @@ struct ActorData
 	float LightStrength;
 	uint FirstCapsule;
 	uint CapsuleCount;
-	float2 pad;
+	float ShadowLength;
+	float pad;
 };
 
 #if defined(TERRAIN_BLENDING)
@@ -42,7 +43,6 @@ cbuffer CapsuleShadowsFrame : register(b0)
 };
 
 static const float PenumbraSlope = 0.12;
-static const float MaxShadowLength = 160.0;
 static const float SelfMaskStart = 0.5;
 static const float SelfMaskEnd = 1.0;
 
@@ -60,7 +60,7 @@ float GetAmbientVisibility(float3 position, float3 normal, Capsule capsule)
 	return 1.0 - saturate(occlusion);
 }
 
-float GetLightVisibility(float3 position, float3 toLight, float lightDistance, Capsule capsule)
+float GetLightVisibility(float3 position, float3 toLight, float lightDistance, float shadowLength, Capsule capsule)
 {
 	float3 nearest = ClosestPointOnSegment(position, capsule.A, capsule.B);
 	float selfFade = smoothstep(capsule.Radius * 1.1, capsule.Radius * 2.0, length(nearest - position));
@@ -81,7 +81,7 @@ float GetLightVisibility(float3 position, float3 toLight, float lightDistance, C
 			float visibility = saturate((length(offset) - capsule.Radius + penumbra) / (2.0 * penumbra));
 			visibility = visibility * visibility * (3.0 - 2.0 * visibility);
 
-			float lengthFade = 1.0 - saturate(travel / MaxShadowLength);
+			float lengthFade = 1.0 - saturate(travel / shadowLength);
 			result = lerp(1.0, visibility, selfFade * lengthFade);
 		}
 	}
@@ -140,7 +140,7 @@ float GetLightVisibility(float3 position, float3 toLight, float lightDistance, C
 				Capsule capsule = Capsules[capsuleIndex];
 				actorAmbient *= GetAmbientVisibility(position, normal, capsule);
 				[branch] if (actor.LightStrength > 0.0)
-					actorShadow = min(actorShadow, GetLightVisibility(position, toLight, lightDistance, capsule));
+					actorShadow = min(actorShadow, GetLightVisibility(position, toLight, lightDistance, max(actor.ShadowLength, 1.0), capsule));
 			}
 			ambient *= lerp(1.0, actorAmbient, actorWeight);
 			float facing = saturate(dot(normal, toLight) * 4.0);

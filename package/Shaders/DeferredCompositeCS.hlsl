@@ -37,6 +37,31 @@ TextureCube<float3> EnvReflectionsTexture : register(t7);
 
 #if defined(CAPSULE_SHADOWS)
 Texture2D<unorm float2> CapsuleOcclusionTexture : register(t16);
+
+float2 UpsampleCapsuleOcclusion(uint2 pixel)
+{
+	uint2 size;
+	CapsuleOcclusionTexture.GetDimensions(size.x, size.y);
+	uint2 base = pixel >> 1;
+	uint2 span = pixel & 1;
+	float centerDepth = SharedData::GetScreenDepth(DepthTexture[pixel]);
+
+	float2 occlusion = 0.0;
+	float totalWeight = 0.0;
+	[unroll] for (uint i = 0; i < 4; i++)
+	{
+		uint2 offset = uint2(i & 1, i >> 1);
+		if (any(offset > span))
+			continue;
+		uint2 texel = min(base + offset, size - 1);
+		float tapDepth = SharedData::GetScreenDepth(DepthTexture[texel * 2]);
+		float difference = abs(tapDepth - centerDepth) / max(centerDepth * 0.02, 1.0);
+		float weight = exp2(-difference * difference) + 1e-4;
+		occlusion += CapsuleOcclusionTexture[texel] * weight;
+		totalWeight += weight;
+	}
+	return occlusion / totalWeight;
+}
 #endif
 
 #if defined(SKYLIGHTING)
@@ -105,7 +130,7 @@ void SampleSSGISpecular(uint2 pixCoord, sh2 lobe, inout float ao, out float3 il,
 
 	float2 uv = float2(dispatchID.xy + 0.5) * SharedData::BufferDim.zw;
 #if defined(CAPSULE_SHADOWS)
-	float2 capsuleVisibility = 1.0 - CapsuleOcclusionTexture.SampleLevel(LinearSampler, uv, 0);
+	float2 capsuleVisibility = 1.0 - UpsampleCapsuleOcclusion(dispatchID.xy);
 #endif
 	uv *= FrameBuffer::DynamicResolutionParams2.xy;  // adjust for dynamic res
 
