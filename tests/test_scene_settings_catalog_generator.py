@@ -1276,7 +1276,7 @@ class SceneSettingsCatalogGeneratorTests(unittest.TestCase):
                                                        "ManualFocusPlane", "TransitionSpeed",
                                                        "BokehBladeCount", "BokehBladeRoundness",
                                                        "HighlightShapeRotationAngle")),
-                           ("Camera/settings", ("FEFoV",)),
+                           ("Camera/settings", ("LensFOV",)),
                            ("Lens Flare/settings", ("ApertureBlades", "FStop", "ApertureRotation")),
                            ("Physical Glare/settings", ("ApertureBlades", "FStop", "ApertureRotation")),
                            ("Vignette/settings", ("FocalLength",))):
