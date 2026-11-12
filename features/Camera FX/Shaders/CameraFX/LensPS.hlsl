@@ -809,9 +809,9 @@ void ApplyFireHit(inout Composite c, float2 p, float seed, float progress, float
 		light += lerp(EmberHot, EmberCool, progress) * exp(-dot(d, d) * 520.0);
 	}
 	light *= 1.0 - progress;
-	light += float3(1.0, 0.5, 0.15) * exp(-dot(p, p) * 6.0) * (1.0 - smoothstep(0.0, 0.35, progress)) * 0.15;
-	c.light += light * 1.2 * opacity;
-	float soot = (1.0 - smoothstep(0.2, 0.55, length(p) + (CameraFX::Fbm(p * 3.0 + seed, 3) - 0.5) * 0.3)) * smoothstep(0.05, 0.25, progress) * 0.28;
+	light += float3(1.0, 0.5, 0.15) * exp(-dot(p, p) * 6.0) * (1.0 - smoothstep(0.0, 0.35, progress)) * 0.1;
+	c.light += light * 0.7 * opacity;
+	float soot = (1.0 - smoothstep(0.2, 0.55, length(p) + (CameraFX::Fbm(p * 3.0 + seed, 3) - 0.5) * 0.3)) * smoothstep(0.05, 0.25, progress) * 0.17;
 	Blend(c, float3(0.02, 0.015, 0.012), soot * opacity);
 }
 
@@ -887,7 +887,7 @@ void ApplyBurn(inout Composite c, float2 q, float edgeR, float amount)
 	float noise = CameraFX::Fbm(q * 3.0 + float2(0.0, -time * 0.3), 4);
 	float fine = CameraFX::ValueNoise(q * 16.0 + float2(time * 0.5, -time * 1.8));
 	float front = edgeR + (noise - 0.5) * 0.35 + (fine - 0.5) * 0.05;
-	float start = 1.12 - amount * 0.38;
+	float start = 1.12 - amount * 0.28;
 	[branch] if (front < start - 0.3)
 		return;
 	float charred = smoothstep(start + 0.02, start + 0.12, front);
@@ -896,11 +896,11 @@ void ApplyBurn(inout Composite c, float2 q, float edgeR, float amount)
 	// Photosensitive Safe (Combat3.w) slows the flame's flicker from about eight changes a second to two.
 	float flickerRate = CameraFX::Combat3.w > 0.5 ? 2.0 : 8.0;
 	float flicker = 0.7 + 0.3 * CameraFX::ValueNoise(float2(time * flickerRate, front * 30.0));
-	Blend(c, float3(0.02, 0.012, 0.008), charred * 0.55);
+	Blend(c, float3(0.02, 0.012, 0.008), charred * 0.35);
 	float3 flame = lerp(float3(1.0, 0.3, 0.04), float3(1.0, 0.62, 0.22), saturate(fine * 1.4 - 0.2));
-	Blend(c, flame, burnLine * flicker * 0.6 * amount);
-	c.light += flame * burnLine * flicker * 0.18 * amount;
-	c.light += float3(1.0, 0.38, 0.08) * heat * 0.07 * amount;
+	Blend(c, flame, burnLine * flicker * 0.38 * amount);
+	c.light += flame * burnLine * flicker * 0.11 * amount;
+	c.light += float3(1.0, 0.38, 0.08) * heat * 0.045 * amount;
 
 	float2 g = q * 18.0 + float2(0.0, time * 1.6);
 	float2 cell = floor(g);
@@ -910,7 +910,7 @@ void ApplyBurn(inout Composite c, float2 q, float edgeR, float amount)
 		float spark = exp(-dot(local * float2(1.0, 0.45), local * float2(1.0, 0.45)) * 220.0);
 		float near = smoothstep(start - 0.25, start, front) * (1.0 - charred * 0.5);
 		float life = sin(3.14159 * frac(time * 0.7 + CameraFX::Hash12(cell + 67.0)));
-		c.light += EmberHot * spark * near * life * amount * 1.4;
+		c.light += EmberHot * spark * near * life * amount * 0.8;
 	}
 }
 
@@ -1264,13 +1264,13 @@ float3 MoonLight(float2 uv, float2 q, float4 moon, float visibility)
 		float aspect = Aspect();
 		float radius = max(moon.w, 0.008);
 		float d = length(float2((moon.x - uv.x) * aspect, moon.y - uv.y));
-		float aureole = exp(-d * d / (radius * radius * 7.0)) * 0.11 + exp(-d / (radius * 5.0)) * 0.022;
-		float ring = exp(-pow((d - radius * 4.2) / (radius * 0.9), 2.0)) * 0.016;
+		float aureole = exp(-d * d / (radius * radius * 7.0)) * 0.066 + exp(-d / (radius * 5.0)) * 0.013;
+		float ring = exp(-pow((d - radius * 4.2) / (radius * 0.9), 2.0)) * 0.009;
 		float ghostDistance = length(float2((1.0 - moon.x - uv.x) * aspect, 1.0 - moon.y - uv.y));
-		float ghost = exp(-ghostDistance * ghostDistance / (radius * radius * 2.5)) * 0.014 + exp(-pow((ghostDistance - radius * 1.4) / (radius * 0.3), 2.0)) * 0.007;
+		float ghost = exp(-ghostDistance * ghostDistance / (radius * radius * 2.5)) * 0.008 + exp(-pow((ghostDistance - radius * 1.4) / (radius * 0.3), 2.0)) * 0.004;
 		light = MoonTint * (aureole + ring + ghost);
 		[branch] if (CameraFX::Lens.w > 0.001)
-			light += MoonTint * Dirt(q, 1.0, 0.0) * exp(-d * d * 8.0) * CameraFX::Lens.w * 0.2;
+			light += MoonTint * Dirt(q, 1.0, 0.0) * exp(-d * d * 8.0) * CameraFX::Lens.w * 0.12;
 		light *= strength;
 	}
 	return light;

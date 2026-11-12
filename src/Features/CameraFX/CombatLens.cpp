@@ -194,7 +194,7 @@ namespace CameraFXLens
 			case SplatType::kIce:
 				return 0.15f;
 			case SplatType::kFire:
-				return 0.16f;
+				return 0.13f;
 			case SplatType::kGrit:
 				return 0.13f;
 			default:
@@ -366,7 +366,7 @@ namespace CameraFXLens
 				hit.strength = dragon ? 1.1f : 0.75f;
 				hit.flash = 0.1f;
 				hit.flashWarmth = 1.0f;
-				hit.fire = dragon ? 1.0f : 0.5f;
+				hit.fire = dragon ? 0.7f : 0.35f;
 				break;
 			case Element::kFrost:
 				hit.splat = true;
@@ -525,7 +525,7 @@ namespace CameraFXLens
 				continue;
 			switch (base->data.resistVariable) {
 			case RE::ActorValue::kResistFire:
-				persistentFire = std::min(persistentFire + 0.5f, 1.0f);
+				persistentFire = std::min(persistentFire + 0.35f, 0.7f);
 				break;
 			case RE::ActorValue::kResistFrost:
 				persistentFrost = std::min(persistentFrost + 0.4f, 1.0f);
