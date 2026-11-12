@@ -134,10 +134,10 @@ void Camera::SetupResources()
 	}
 }
 
-void Camera::EnsureTargets()
+bool Camera::EnsureTargets()
 {
 	if (texLens && texOutput)
-		return;
+		return true;
 
 	auto gameTexMainCopy = globals::game::renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN_COPY];
 
@@ -160,13 +160,21 @@ void Camera::EnsureTargets()
 	texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
 	texDesc.MiscFlags = 0;
 
-	texLens = eastl::make_unique<Texture2D>(texDesc, "Camera::Lens");
-	texLens->CreateSRV(srvDesc);
-	texLens->CreateRTV(rtvDesc);
+	try {
+		texLens = eastl::make_unique<Texture2D>(texDesc, "Camera::Lens");
+		texLens->CreateSRV(srvDesc);
+		texLens->CreateRTV(rtvDesc);
 
-	texOutput = eastl::make_unique<Texture2D>(texDesc, "Camera::Output");
-	texOutput->CreateSRV(srvDesc);
-	texOutput->CreateRTV(rtvDesc);
+		texOutput = eastl::make_unique<Texture2D>(texDesc, "Camera::Output");
+		texOutput->CreateSRV(srvDesc);
+		texOutput->CreateRTV(rtvDesc);
+	} catch (const std::exception& e) {
+		logger::error("[PostProcessing] Camera could not create its targets: {}", e.what());
+		texLens.reset();
+		texOutput.reset();
+		return false;
+	}
+	return true;
 }
 
 void Camera::ClearShaderCache()
@@ -206,7 +214,8 @@ void Camera::Draw(TextureInfo& inout_tex)
 		return;
 	if (!AllShadersReady({ &cameraPS, &finishPS }))
 		return;
-	EnsureTargets();
+	if (!EnsureTargets())
+		return;
 
 	globals::profiler->BeginPass("PostProcessing::Camera");
 	auto context = globals::d3d::context;
