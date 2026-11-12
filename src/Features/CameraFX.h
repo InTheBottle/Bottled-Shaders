@@ -182,6 +182,7 @@ private:
 	LensPass weatherPass;
 	LensPass combatPass;
 	bool sceneNeedsMips = false;
+	bool lensNeedsMips = false;
 	bool visibilityCleared = true;
 
 	float time = 0.0f;

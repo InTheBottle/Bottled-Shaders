@@ -1,29 +1,38 @@
+#include "Common/FrameBuffer.hlsli"
 #include "Common/GBuffer.hlsli"
 #include "ScreenSpaceGI/common.hlsli"
 
 Texture2D<float4> srcNormalRoughness : register(t0);
+Texture2D<float> srcWorkingDepth : register(t1);
 
 RWTexture2D<unorm float2> outNormal0 : register(u0);
 RWTexture2D<unorm float2> outNormal1 : register(u1);
 RWTexture2D<unorm float2> outNormal2 : register(u2);
 RWTexture2D<unorm float2> outNormal3 : register(u3);
 RWTexture2D<unorm float2> outNormal4 : register(u4);
+RWTexture2D<half3> outCurrentGeo : register(u5);
 
 float2 NormalMIPFilter(float2 enc0, float2 enc1, float2 enc2, float2 enc3)
 {
 	float3 avg = GBuffer::DecodeNormal(enc0) + GBuffer::DecodeNormal(enc1) + GBuffer::DecodeNormal(enc2) + GBuffer::DecodeNormal(enc3);
-	return dot(avg, avg) > 1e-6 ? GBuffer::EncodeNormal(normalize(avg)) : enc0;
+	return GBuffer::EncodeNormal(normalize(avg));
 }
 
-#if defined(HALF_RES) || defined(QUARTER_RES)
-float2 FootprintNormal(uint2 internalCoord, float2 frameScale)
+void WriteCurrentGeometry(uint2 pixCoord, float2 encodedNormal)
 {
-	const float2 uv = (internalCoord + .5) * RCP_OUT_FRAME_DIM;
-	float4 nr0 = srcNormalRoughness.GatherRed(samplerPointClamp, uv * frameScale);
-	float4 nr1 = srcNormalRoughness.GatherGreen(samplerPointClamp, uv * frameScale);
-	return NormalMIPFilter(float2(nr0.w, nr1.w), float2(nr0.z, nr1.z), float2(nr0.x, nr1.x), float2(nr0.y, nr1.y));
+	if (any(pixCoord >= uint2(OUT_FRAME_DIM)))
+		return;
+
+	float viewZ = READ_DEPTH(srcWorkingDepth, pixCoord);
+	if (viewZ <= FP_Z) {
+		outCurrentGeo[pixCoord] = 0;
+		return;
+	}
+
+	float3 normalVS = GBuffer::DecodeNormal(encodedNormal);
+	float3 normalWS = normalize(ViewToWorldVector(normalVS, FrameBuffer::CameraViewInverse));
+	outCurrentGeo[pixCoord] = half3(viewZ, GBuffer::EncodeNormal(normalWS));
 }
-#endif
 
 groupshared float2 g_scratchNormal[8][8];
 [numthreads(8, 8, 1)] void main(uint2 dispatchThreadID : SV_DispatchThreadID, uint2 groupThreadID : SV_GroupThreadID) {
@@ -32,13 +41,6 @@ groupshared float2 g_scratchNormal[8][8];
 	// MIP 0
 	const uint2 baseCoord = dispatchThreadID;
 	const uint2 pixCoord = baseCoord * 2;
-
-#if defined(HALF_RES) || defined(QUARTER_RES)
-	float2 normal0 = FootprintNormal(pixCoord + uint2(0, 0), frameScale);
-	float2 normal1 = FootprintNormal(pixCoord + uint2(1, 0), frameScale);
-	float2 normal2 = FootprintNormal(pixCoord + uint2(0, 1), frameScale);
-	float2 normal3 = FootprintNormal(pixCoord + uint2(1, 1), frameScale);
-#else
 	const float2 uv = (pixCoord + .5) * RCP_OUT_FRAME_DIM;
 
 	float4 nr0 = srcNormalRoughness.GatherRed(samplerPointClamp, uv * frameScale);
@@ -48,18 +50,22 @@ groupshared float2 g_scratchNormal[8][8];
 	float2 normal1 = float2(nr0.z, nr1.z);
 	float2 normal2 = float2(nr0.x, nr1.x);
 	float2 normal3 = float2(nr0.y, nr1.y);
-#endif
 
 	outNormal0[pixCoord + uint2(0, 0)] = normal0;
 	outNormal0[pixCoord + uint2(1, 0)] = normal1;
 	outNormal0[pixCoord + uint2(0, 1)] = normal2;
 	outNormal0[pixCoord + uint2(1, 1)] = normal3;
+	[branch] if (MultiBounceMode != 0)
+	{
+		WriteCurrentGeometry(pixCoord + uint2(0, 0), normal0);
+		WriteCurrentGeometry(pixCoord + uint2(1, 0), normal1);
+		WriteCurrentGeometry(pixCoord + uint2(0, 1), normal2);
+		WriteCurrentGeometry(pixCoord + uint2(1, 1), normal3);
+	}
 
 	// MIP 1
 	float2 nm1 = NormalMIPFilter(normal0, normal1, normal2, normal3);
-#if !defined(HALF_RES) && !defined(QUARTER_RES)
 	outNormal1[baseCoord] = nm1;
-#endif
 	g_scratchNormal[groupThreadID.x][groupThreadID.y] = nm1;
 
 	GroupMemoryBarrierWithGroupSync();
@@ -73,9 +79,7 @@ groupshared float2 g_scratchNormal[8][8];
 		float2 inBR = g_scratchNormal[groupThreadID.x + 1][groupThreadID.y + 1];
 
 		float2 nm2 = NormalMIPFilter(inTL, inTR, inBL, inBR);
-#if !defined(QUARTER_RES)
 		outNormal2[baseCoord / 2] = nm2;
-#endif
 		g_scratchNormal[groupThreadID.x][groupThreadID.y] = nm2;
 	}
 

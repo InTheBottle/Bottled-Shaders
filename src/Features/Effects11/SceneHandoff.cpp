@@ -13,7 +13,9 @@ namespace E11Handoff
 		constexpr std::array<std::string_view, static_cast<size_t>(Feature::Count)> kShortNames{
 			"ImageBasedLighting",
 			"CloudShadows",
-			"ExponentialHeightFog"
+			"ExponentialHeightFog",
+			"ScreenSpaceGI",
+			"ScreenSpaceReflections"
 		};
 
 		/** @brief An Effects 11 setting a feature replaces; an empty key covers its whole category. */
@@ -29,6 +31,10 @@ namespace E11Handoff
 			E11Setting{ Feature::IBL, "EFFECT", "EnableImageBasedLighting" },
 			E11Setting{ Feature::CloudShadows, "CLOUDSHADOWS", {} },
 			E11Setting{ Feature::CloudShadows, "EFFECT", "EnableCloudShadows" },
+			E11Setting{ Feature::SSGI, "SSAO_SSIL", {} },
+			E11Setting{ Feature::SSGI, "EFFECT", "EnableAmbientOcclusion" },
+			E11Setting{ Feature::SSR, "REFLECTION", {} },
+			E11Setting{ Feature::SSR, "EFFECT", "EnableReflection" },
 			E11Setting{ Feature::HeightFog, "ENVIRONMENT", "FogColorMultiplier" },
 			E11Setting{ Feature::HeightFog, "ENVIRONMENT", "FogColorCurve" },
 			E11Setting{ Feature::HeightFog, "ENVIRONMENT", "FogAmountMultiplier" },

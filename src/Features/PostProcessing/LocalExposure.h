@@ -101,6 +101,8 @@ struct LocalExposure : public PostProcessFeature
 	virtual void RestoreDefaultSettings() override;
 	virtual void LoadSettings(json&) override;
 	virtual void SaveSettings(json&) override;
+	/** @brief Drops BaseMip, which the Local Exposure rewrite replaced. */
+	virtual void MigrateLegacySettings(json& a_settings) override;
 	virtual void DrawSettings() override;
 
 	virtual void Draw(TextureInfo&) override;

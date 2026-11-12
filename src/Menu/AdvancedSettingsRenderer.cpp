@@ -9,6 +9,7 @@
 #include <thread>
 
 #include "CSEditor/EditorWindow.h"
+#include "Deferred.h"
 #include "Feature.h"
 #include "FeatureIssues.h"
 #include "Features/PerformanceOverlay/ABTesting/ABTesting.h"
@@ -766,6 +767,10 @@ void AdvancedSettingsRenderer::RenderTestingSection()
 
 	// Developer mode: the issue tests and the one-click test scene
 	if (globals::state->IsDeveloperMode()) {
+		ImGui::Spacing();
+		ImGui::Separator();
+		ImGui::Spacing();
+		globals::deferred->DrawSettings();
 		ImGui::Spacing();
 		ImGui::Separator();
 		ImGui::Spacing();

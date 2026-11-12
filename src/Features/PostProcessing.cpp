@@ -342,6 +342,23 @@ void PostProcessing::LoadSettings(json& o_json)
 		ProcessSettings(o_json);
 }
 
+void PostProcessing::MigrateLegacySettings(json& o_json)
+{
+	if (!o_json.is_object())
+		return;
+	o_json.erase("ppsettings");
+	for (auto& feat : pipeline) {
+		if (!feat)
+			continue;
+		const auto featIt = o_json.find(feat->GetType());
+		if (featIt == o_json.end() || !featIt->is_object())
+			continue;
+		const auto settingsIt = featIt->find("settings");
+		if (settingsIt != featIt->end() && settingsIt->is_object())
+			feat->MigrateLegacySettings(*settingsIt);
+	}
+}
+
 void PostProcessing::ProcessSettings(json& o_json)
 {
 	// Scene blends reload every frame, so no info-level log and no per-load SetupResources:
@@ -358,6 +375,7 @@ void PostProcessing::ProcessSettings(json& o_json)
 				if (!feat->IsAutoEnabled())
 					feat->enabled = featJson.value("enabled", true);
 				json featSettings = featJson.value("settings", json::object());
+				feat->MigrateLegacySettings(featSettings);
 				feat->LoadSettings(featSettings);
 			} catch (const json::exception& e) {
 				logger::warn("Failed to load Post Processing settings for {}: {}", feat->GetType(), e.what());
@@ -426,6 +444,8 @@ void PostProcessing::ApplyContextualDefaults(json& a_defaults) const
 
 void PostProcessing::BuildPipeline()
 {
+	pipeline[static_cast<size_t>(FeaturePipelineIndex::Fire)] = std::make_shared<FireEffects>();
+	pipeline[static_cast<size_t>(FeaturePipelineIndex::SunRays)] = std::make_shared<SunRays>();
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::LocalExposure)] = std::make_shared<LocalExposure>();
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::AutoExposure)] = std::make_shared<HistogramAutoExposure>();
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::ColorGrading)] = std::make_shared<ColorGrading>();
@@ -445,7 +465,7 @@ void PostProcessing::BuildPipeline()
 void PostProcessing::ApplyDefaultEnabledStates()
 {
 	using enum FeaturePipelineIndex;
-	constexpr std::array kOffByDefault = { LUT, MotionBlur, PhysicalGlare, Camera, Border };
+	constexpr std::array kOffByDefault = { Fire, SunRays, LUT, MotionBlur, PhysicalGlare, Camera, Border };
 	for (size_t index = 0; index < pipeline.size(); ++index) {
 		if (auto& pipe = pipeline[index]; pipe && !pipe->IsAutoEnabled())
 			pipe->enabled = std::ranges::find(kOffByDefault, static_cast<FeaturePipelineIndex>(index)) == kOffByDefault.end();
@@ -794,6 +814,22 @@ bool PostProcessing::WantsTonemapOwnership() const
 bool PostProcessing::IsPipelineRunning() const
 {
 	return !bypass && globals::state->GetTonemapOwner() == State::TonemapOwner::kPostProcessing;
+}
+
+PostProcessing::SharedData PostProcessing::GetCommonBufferData() const
+{
+	SharedData data{ .FireIntensity = 1.0f, .FireCurve = 1.0f, .LightSpriteIntensity = 1.0f, .LightSpriteCurve = 1.0f };
+	if (!loaded || !IsPipelineRunning())
+		return data;
+	const auto* fire = static_cast<const FireEffects*>(pipeline[static_cast<size_t>(FeaturePipelineIndex::Fire)].get());
+	if (!fire || !fire->IsActive())
+		return data;
+	data.EnableFire = 1u;
+	data.FireIntensity = fire->settings.FireIntensity;
+	data.FireCurve = fire->settings.FireCurve;
+	data.LightSpriteIntensity = fire->settings.LightSpriteIntensity;
+	data.LightSpriteCurve = fire->settings.LightSpriteCurve;
+	return data;
 }
 
 bool PostProcessing::WantsAutoHDR() const

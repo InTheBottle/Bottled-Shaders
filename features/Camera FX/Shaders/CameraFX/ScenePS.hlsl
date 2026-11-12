@@ -57,20 +57,20 @@ float GetBlurMip(float2 uv)
 	}
 
 	float exhaustion = saturate(CameraFX::Themes.y);
-	mip = max(mip, exhaustion * (0.6 + 2.4 * CameraFX::ThemeParams.y));
+	mip = max(mip, exhaustion * (0.25 + 2.4 * CameraFX::ThemeParams.y));
 
 	float edge = CameraFX::EdgeDistance(uv);
 	float heartbeat = saturate(CameraFX::Themes.x) * CameraFX::Blurs.y;
 	[branch] if (heartbeat > 0.0)
-		mip = max(mip, smoothstep(0.5, 1.1, edge) * heartbeat * (0.3 + 0.9 * CameraFX::ThemeParams.x));
+		mip = max(mip, smoothstep(0.5, 1.1, edge) * heartbeat * (0.2 + 0.6 * CameraFX::ThemeParams.x));
 
 	float beast = saturate(CameraFX::Transform.x);
 	[branch] if (beast > 0.0)
-		mip = max(mip, smoothstep(0.2, 1.0, edge) * beast * (1.2 + 2.0 * CameraFX::Transform.z));
+		mip = max(mip, smoothstep(0.2, 1.0, edge) * beast * (0.9 + 1.2 * CameraFX::Transform.z));
 
 	float hit = saturate(CameraFX::HitBlur.x);
 	[branch] if (hit > 0.0)
-		mip = max(mip, hit * (0.4 + 1.6 * smoothstep(0.15, 0.9, edge)));
+		mip = max(mip, hit * (0.3 + 1.2 * smoothstep(0.15, 0.9, edge)));
 	return min(mip, CameraFX::Blur.w);
 }
 
@@ -79,7 +79,7 @@ float3 ApplyHitSmear(float3 color, float2 uv, float mip)
 	float amount = saturate(CameraFX::HitBlur.x);
 	float2 away = uv - CameraFX::HitBlur.yz;
 	float edge = smoothstep(0.1, 0.9, CameraFX::EdgeDistance(uv));
-	float2 delta = away * (amount * (0.35 + 0.65 * edge) * 0.045 / HitSteps);
+	float2 delta = away * (amount * (0.35 + 0.65 * edge) * 0.035 / HitSteps);
 	float spacing = length(delta * CameraFX::Resolution.xy);
 	float smearMip = min(max(mip, log2(1.0 + spacing * 0.6)), CameraFX::Blur.w);
 	float2 doubled = CameraFX::Blur.y > 0.0 ? float2(CameraFX::Blur.y, CameraFX::Blur.y * 0.5) : 0.0;
@@ -103,9 +103,9 @@ float3 ApplyThemes(float3 color, float2 uv)
 	{
 		float pulse = CameraFX::ThemeParams.x;
 		float strength = smoothstep(0.45, 1.15, edge) * lowHealth * (0.75 + 0.25 * pulse);
-		color = lerp(color, CameraFX::Luminance(color).xxx, 0.15 * lowHealth);
-		color = lerp(color, color * float3(1.0, 0.4, 0.35), strength * 0.55);
-		color *= 1.0 - strength * 0.3;
+		color = lerp(color, CameraFX::Luminance(color).xxx, 0.1 * lowHealth);
+		color = lerp(color, color * float3(1.0, 0.4, 0.35), strength * 0.4);
+		color *= 1.0 - strength * 0.2;
 	}
 
 	float exhaustion = saturate(CameraFX::Themes.y);
@@ -116,23 +116,23 @@ float3 ApplyThemes(float3 color, float2 uv)
 		float fromEdge = min(uv.y, 1.0 - uv.y) - curve * lid;
 		float open = smoothstep(lid * 0.55 - 0.04, lid * 0.55 + 0.06, fromEdge);
 		open = lerp(1.0, open, saturate(lid * 10.0));
-		float vignette = 1.0 - smoothstep(0.45, 1.05, edge) * 0.55 * exhaustion;
+		float vignette = 1.0 - smoothstep(0.45, 1.05, edge) * 0.4 * exhaustion;
 		color *= open * vignette;
 	}
 
 	float hunger = saturate(CameraFX::Themes.z);
 	[branch] if (hunger > 0.0)
 	{
-		float amount = hunger * (0.3 + 0.45 * CameraFX::ThemeParams.z);
+		float amount = hunger * (0.2 + 0.25 * CameraFX::ThemeParams.z);
 		color = lerp(color, CameraFX::Luminance(color).xxx, amount);
-		color *= 1.0 - smoothstep(0.5, 1.05, edge) * 0.3 * hunger;
+		color *= 1.0 - smoothstep(0.5, 1.05, edge) * 0.2 * hunger;
 	}
 
 	float poison = saturate(CameraFX::Themes.w);
 	[branch] if (poison > 0.0)
 	{
 		float ring = smoothstep(0.3, 1.0, edge);
-		color = lerp(color, color * float3(0.7, 1.0, 0.55) + float3(0.02, 0.05, 0.0), ring * poison * 0.85);
+		color = lerp(color, color * float3(0.7, 1.0, 0.55) + float3(0.02, 0.05, 0.0), ring * poison * 0.55);
 	}
 
 	float beast = saturate(CameraFX::Transform.x);
@@ -143,8 +143,8 @@ float3 ApplyThemes(float3 color, float2 uv)
 		float ring = smoothstep(0.25, 1.0, edge);
 		float3 haze = vampire ? float3(0.42, 0.12, 0.3) : float3(0.62, 0.16, 0.05);
 		float luma = CameraFX::Luminance(color);
-		color = lerp(color, luma * haze * 2.2 + haze * 0.04, ring * beast * (0.55 + 0.3 * pulse));
-		color *= 1.0 - ring * beast * (0.3 + 0.25 * pulse);
+		color = lerp(color, luma * haze * 2.2 + haze * 0.04, ring * beast * (0.4 + 0.2 * pulse));
+		color *= 1.0 - ring * beast * (0.22 + 0.15 * pulse);
 		color = lerp(color, luma.xxx, beast * (vampire ? 0.35 : 0.15) * (1.0 - ring));
 	}
 
@@ -171,7 +171,7 @@ float4 main(CameraFX::Interpolants input) : SV_Target
 	[branch] if (poison > 0.0)
 	{
 		float time = CameraFX::ThemeParams.w;
-		sampleUV += float2(sin(time * 1.3 + uv.y * 5.0), cos(time * 1.1 + uv.x * 4.0)) * 0.0035 * poison;
+		sampleUV += float2(sin(time * 1.3 + uv.y * 5.0), cos(time * 1.1 + uv.x * 4.0)) * 0.0022 * poison;
 	}
 
 	float blurMip = GetBlurMip(uv);

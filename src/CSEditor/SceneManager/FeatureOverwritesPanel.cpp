@@ -56,7 +56,9 @@ namespace
 				// Rediscovery clears the verdict until the next load applies the file, so recheck against the live shape.
 				json shape;
 				feature->SaveSettings(shape);
-				Util::Settings::CollectUnknownSettingKeys(info.values, shape, "", unknownKeys);
+				json values = info.values;
+				feature->MigrateLegacySettings(values);
+				Util::Settings::CollectUnknownSettingKeys(values, shape, "", unknownKeys);
 			}
 			for (const auto& key : unknownKeys)
 				row.unknownKeys += (row.unknownKeys.empty() ? "" : "\n") + key;

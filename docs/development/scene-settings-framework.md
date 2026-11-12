@@ -389,10 +389,11 @@ are **blocked** rather than clobbering it, and unknown fields on an entry are pr
       `LUT` (`LUT::LoadSettings` rereads its texture from disk), DoF `HighlightShape`, Motion Blur
       `VelocityScale`, and the Color Grading tonemapper selection (`enableTonemap`, `useOpenDrt`,
       `currentTonemapper`, `tonemapParams`), which recompiles shaders.
-    - `ScreenSpaceGI`'s `ResolutionMode`, `EnableGI`, `EnableTemporalDenoiser` and
-      `EnableExperimentalSpecularGI`: each is a shader define, so a change recompiles every SSGI compute
-      shader on the render thread and a location transition would hitch.
-- `kLocationFeatureWhitelist` (7) and `kTimeOfDayFeatureWhitelist` (10): which features those scene types
+    - `ScreenSpaceGI`'s `HalfRes`, `QuarterRes`, `EnableGI`, `EnableSH` and `EnableREBLUR`, and
+      `ScreenSpaceReflections`' `Enabled`, `HalfRes` and `EnableREBLUR`: each is a shader define or a
+      denoiser instance, so a change recompiles compute shaders or rebuilds REBLUR on the render thread
+      and a location transition would hitch.
+- `kLocationFeatureWhitelist` (8) and `kTimeOfDayFeatureWhitelist` (11): which features those scene types
   may target.
 
 `PostProcessing` defers its load: `LoadSettings` stores the JSON and `ProcessSettings` applies it in

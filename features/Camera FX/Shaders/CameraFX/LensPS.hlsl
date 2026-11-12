@@ -137,7 +137,7 @@ void AddDrop(inout Water water, float2 q, float cellSize, float salt, float spaw
 
 	water.mask = mask;
 	water.normal = shaped;
-	water.offset = -shaped * radius * cellSize * 1.7;
+	water.offset = -shaped * radius * cellSize * 1.4;
 	water.rim = smoothstep(0.55, 1.0, r);
 	float facing = saturate(dot(shaped, LensLight));
 	float2 spot = shaped - LensLight * 0.42;
@@ -198,9 +198,9 @@ float2 ApplyWater(inout Composite c, float2 uv, float2 q, out Water water)
 	[branch] if (drops > 0.001)
 	{
 		float density = drops * lerp(0.75, 1.25, saturate(CameraFX::Weather.y * 0.5 + 0.5));
-		AddDrop(water, q, 0.09, 1.0, saturate(density * 0.34), 0.25, 9.0);
-		AddDrop(water, q + 0.37, 0.052, 2.0, saturate(density * 0.46), 0.15, 7.0);
-		AddDrop(water, q + 0.71, 0.028, 3.0, saturate(density * 0.58), 0.0, 5.0);
+		AddDrop(water, q, 0.09, 1.0, saturate(density * 0.27), 0.25, 9.0);
+		AddDrop(water, q + 0.37, 0.052, 2.0, saturate(density * 0.37), 0.15, 7.0);
+		AddDrop(water, q + 0.71, 0.028, 3.0, saturate(density * 0.46), 0.0, 5.0);
 		AddRivulets(water, q, saturate(max(max(rain, extra * 1.6), thaw * 0.8)));
 		[branch] if (rain <= 0.001 && extra <= 0.001)
 		{
@@ -224,7 +224,7 @@ float2 ApplyWater(inout Composite c, float2 uv, float2 q, out Water water)
 		front = exp(-pow((level - top - 0.02) / 0.025, 2.0)) * saturate(sheet * 4.0);
 		float2 film = float2(CameraFX::ValueNoise(q * float2(5.0, 2.4) + float2(0.0, time * 0.9)), CameraFX::ValueNoise(q * float2(5.0, 2.4) + float2(13.7, time * 0.9))) - 0.5;
 		streak = smoothstep(0.55, 0.9, CameraFX::Fbm(float2(q.x * 90.0, uv.y * 1.6 - time * 0.9), 3));
-		sheetOffset = (film * 0.022 + float2(streak * 0.0015, streak * 0.004)) * sheetMask * sheet;
+		sheetOffset = (film * 0.016 + float2(streak * 0.0012, streak * 0.003)) * sheetMask * sheet;
 		sheetBody = sheetMask * saturate(sheet * 2.5);
 	}
 
@@ -235,7 +235,7 @@ float2 ApplyWater(inout Composite c, float2 uv, float2 q, out Water water)
 		float3 seen = Scene(viewUV, sheetMask * sheet * 1.8);
 		seen *= 1.0 - water.rim * water.mask * 0.35 - front * 0.1;
 		float level = 0.25 + LightLevel(seen);
-		seen += (water.shine * water.mask * 0.35 + front * 0.18 + streak * sheetBody * 0.05) * level;
+		seen += (water.shine * water.mask * 0.28 + front * 0.14 + streak * sheetBody * 0.04) * level;
 		Blend(c, seen, coverage);
 	}
 	return viewUV;
@@ -248,10 +248,10 @@ void ApplyDust(inout Composite c, float2 q, float edgeR, float dust)
 	float lum = LightLevel(c.color);
 	float gust = smoothstep(0.42, 0.85, CameraFX::Fbm(float2(q.x * 1.4 - time * 0.9 - CameraFX::Wind.y * 0.3, q.y * 12.0 + sin(time * 0.3)), 4));
 	float clearCentre = 0.25 + 0.75 * smoothstep(0.2, 0.62, edgeR + (CameraFX::Fbm(q * 1.5 + time * 0.05, 3) - 0.5) * 0.15);
-	Blend(c, dustColor * (0.5 + 0.5 * lum), dust * (0.14 + 0.28 * gust) * clearCentre);
+	Blend(c, dustColor * (0.5 + 0.5 * lum), dust * (0.1 + 0.2 * gust) * clearCentre);
 	float grit = saturate(Dirt(q, 2.3, float2(0.47, 0.83)) * 1.5);
 	float edge = smoothstep(0.55, 1.05, edgeR + (CameraFX::Fbm(q * 2.0, 3) - 0.5) * 0.3);
-	Blend(c, dustColor * 0.55, grit * edge * dust * 0.6);
+	Blend(c, dustColor * 0.55, grit * edge * dust * 0.45);
 }
 
 void ApplyAsh(inout Composite c, float2 uv, float2 q, float edgeR, float ash)
@@ -269,14 +269,14 @@ void ApplyAsh(inout Composite c, float2 uv, float2 q, float edgeR, float ash)
 	float broken = smoothstep(0.3, 0.7, CameraFX::ValueNoise(settled * 140.0));
 	float flakes = saturate(Dirt(settled, 3.4, float2(0.31, 0.57)) * 1.6 + Dirt(settled, 1.8, float2(0.62, 0.14)) * 0.8) * (0.35 + 0.65 * broken);
 	float film = smoothstep(0.45, 0.85, CameraFX::Fbm(q * 9.0 - float2(0.0, slide * 9.0), 3));
-	Blend(c, ashColor * (0.55 + 0.45 * lum), saturate(edge * (flakes * 0.85 + film * 0.5)) * amount * 0.65);
+	Blend(c, ashColor * (0.55 + 0.45 * lum), saturate(edge * (flakes * 0.85 + film * 0.5)) * amount * 0.5);
 
 	float2 nearDrift = float2(sin(time * 0.31) * 0.05 + sin(time * 0.07 + 1.3) * 0.08 - CameraFX::Wind.y * 0.2, -time * (0.035 + 0.11 * storm));
 	float2 farDrift = float2(sin(time * 0.23 + 2.1) * 0.03 - CameraFX::Wind.y * 0.1, -time * (0.018 + 0.06 * storm));
 	float nearFlakes = Dirt(q, 2.0, nearDrift * 2.0) * smoothstep(0.25, 0.6, CameraFX::ValueNoise(q * 90.0 + nearDrift * 40.0));
 	float farFlakes = Dirt(q, 4.2, farDrift * 4.2);
 	float airborne = saturate(pow(max(nearFlakes, 0.0), 1.4) * 1.1 + pow(max(farFlakes, 0.0), 1.4) * 0.7) * amount * (0.35 + 0.4 * storm);
-	Blend(c, ashColor * (0.7 + 0.3 * lum), airborne * 0.4);
+	Blend(c, ashColor * (0.7 + 0.3 * lum), airborne * 0.3);
 	Blend(c, ashColor, amount * (0.1 + 0.06 * storm) * 0.25);
 }
 
@@ -308,23 +308,23 @@ float3 Embers(float2 q, float amount)
 			light += lerp(EmberHot, EmberCool, cooling) * spark * glow * life * life * edgeFade * (1.0 - 0.25 * layer);
 		}
 	}
-	return light * amount * 1.6;
+	return light * amount * 1.2;
 }
 
 float3 MistHalo(float2 viewUV, float fog)
 {
 	float3 halo = Scene(viewUV, 4.5);
-	return halo * smoothstep(0.55, 1.1, LightLevel(halo)) * fog * 0.22;
+	return halo * smoothstep(0.55, 1.1, LightLevel(halo)) * fog * 0.16;
 }
 
 void ApplyMist(inout Composite c, float2 q, float2 viewUV, float edgeR, float fog)
 {
 	c.light += MistHalo(viewUV, fog);
 	float3 veil = Scene(viewUV, 2.5);
-	Blend(c, veil * 0.85 + (0.03 + LightLevel(veil) * 0.25) * float3(0.9, 0.94, 1.0), fog * 0.38);
+	Blend(c, veil * 0.85 + (0.03 + LightLevel(veil) * 0.25) * float3(0.9, 0.94, 1.0), fog * 0.28);
 	float edge = smoothstep(0.5, 1.05, edgeR + (CameraFX::Fbm(q * 2.5, 3) - 0.5) * 0.35);
 	float beads = saturate(Dirt(q, 3.1, float2(0.19, 0.71)) * 1.8);
-	Blend(c, Scene(viewUV, 2.0) * 1.03 + 0.035, saturate(edge * (0.45 + 0.55 * beads) * fog * 1.3) * 0.6);
+	Blend(c, Scene(viewUV, 2.0) * 1.03 + 0.035, saturate(edge * (0.45 + 0.55 * beads) * fog * 1.3) * 0.45);
 }
 
 void ApplyEntryFog(inout Composite c, float2 q, float2 viewUV, float edgeR, float fog)
@@ -336,8 +336,8 @@ void ApplyEntryFog(inout Composite c, float2 q, float2 viewUV, float edgeR, floa
 		float3 soft = Scene(viewUV, MipForRadius(18.0 * mask));
 		float beads = saturate(Dirt(q, 3.1, float2(0.37, 0.11)) * 1.6);
 		float lift = 0.14 + LightLevel(soft) * 0.1;
-		Blend(c, soft * 0.8 + lift * float3(0.96, 0.98, 1.0), mask * 0.85);
-		Blend(c, soft * 0.85 + lift * 1.3, beads * mask * 0.35);
+		Blend(c, soft * 0.8 + lift * float3(0.96, 0.98, 1.0), mask * 0.7);
+		Blend(c, soft * 0.85 + lift * 1.3, beads * mask * 0.28);
 	}
 }
 
@@ -381,7 +381,7 @@ void ApplyBreath(inout Composite c, float2 uv, float2 q, float2 viewUV, float vi
 	density = smoothstep(0.05, 0.45, density);
 	density *= 1.0 - 0.7 * smoothstep(0.4, 2.6, age);
 	density *= 1.0 - 0.85 * smoothstep(0.35, 0.62, 1.0 - uv.y);
-	float alpha = saturate(density * envelope * visible * (0.65 + 0.35 * strength) * 0.75);
+	float alpha = saturate(density * envelope * visible * (0.65 + 0.35 * strength) * 0.6);
 	[branch] if (alpha > 0.002)
 	{
 		float3 behind = Scene(viewUV + warp * 0.004 * alpha, 2.0 + 2.5 * alpha);
@@ -632,7 +632,7 @@ float BloodHeight(float2 p, float2 s, float seed, float progress, float dripSpee
 	return max(max(height, Spatter(p, seed)), drip);
 }
 
-void ApplyLiquid(inout Composite c, float2 uv, float2 viewUV, float2 p, float2 s, float size, float angle, uint kind, float seed, float progress, float opacity, inout float below)
+void ApplyLiquid(inout Composite c, float2 uv, float2 viewUV, float2 p, float2 s, float size, float angle, uint kind, float seed, float progress, float opacity, inout float below, inout float3 probe)
 {
 	float dripSpeed = kind == SplatOil ? 1.3 : 2.2;
 	float smudge = CameraFX::Blurs.x;
@@ -645,7 +645,7 @@ void ApplyLiquid(inout Composite c, float2 uv, float2 viewUV, float2 p, float2 s
 		{
 			float3 smeared = Scene(viewUV, MipForRadius(6.0 + 6.0 * smudge));
 			smeared *= kind == SplatOil ? float3(0.9, 0.88, 0.85) : float3(1.0, 0.86, 0.84);
-			Blend(c, smeared, film * 0.8);
+			Blend(c, smeared, film * 0.6);
 		}
 	}
 
@@ -671,13 +671,17 @@ void ApplyLiquid(inout Composite c, float2 uv, float2 viewUV, float2 p, float2 s
 	float3 fluid = behind * exp(log(max(tint, 0.004)) * height * 1.1) + tint * (0.04 + 0.1 * height);
 	fluid *= 1.0 - saturate(slope * 0.02 - 0.2) * 0.3;
 
-	float lightR = LightLevel(Scene(uv + float2(0.05, 0.0), 3.0));
-	float lightL = LightLevel(Scene(uv - float2(0.05, 0.0), 3.0));
-	float lightD = LightLevel(Scene(uv + float2(0.0, 0.05), 3.0));
-	float lightU = LightLevel(Scene(uv - float2(0.0, 0.05), 3.0));
-	float2 toLight = float2(lightR - lightL, lightD - lightU);
-	toLight /= max(length(toLight), 1e-3);
-	float brightest = saturate(max(max(lightR, lightL), max(lightD, lightU)) * 1.2);
+	[branch] if (probe.z < 0.0)
+	{
+		float lightR = LightLevel(Scene(uv + float2(0.05, 0.0), 3.0));
+		float lightL = LightLevel(Scene(uv - float2(0.05, 0.0), 3.0));
+		float lightD = LightLevel(Scene(uv + float2(0.0, 0.05), 3.0));
+		float lightU = LightLevel(Scene(uv - float2(0.0, 0.05), 3.0));
+		float2 gradientToLight = float2(lightR - lightL, lightD - lightU);
+		probe = float3(gradientToLight / max(length(gradientToLight), 1e-3), saturate(max(max(lightR, lightL), max(lightD, lightU)) * 1.2));
+	}
+	float2 toLight = probe.xy;
+	float brightest = probe.z;
 	float rimBand = saturate(slope * 0.025) * smoothstep(0.04, 0.2, height) * (1.0 - smoothstep(0.4, 0.85, height));
 	float facing = saturate(dot(gradient / max(slope, 1e-3), toLight) * 0.7 + 0.3);
 	fluid += lerp(tint * 2.4, 1.0, 0.15) * rimBand * facing * brightest * 0.16 * (1.0 - saturate(below * 2.0));
@@ -722,7 +726,7 @@ void ApplyVenom(inout Composite c, float2 viewUV, float2 p, float2 s, float size
 			}
 		}
 	}
-	Blend(c, film, mask * 0.86);
+	Blend(c, film, mask * 0.75);
 	c.color += goo * (1.0 - smoothstep(0.0, 0.25, length(p - float2(-0.15, -0.2)))) * core * 0.18 * mask;
 }
 
@@ -780,18 +784,18 @@ void ApplyIceHit(inout Composite c, float2 viewUV, float2 p, float seed, float p
 	float grain = CameraFX::Fbm(p * 7.0 + seed * 3.0, 3);
 	float frost = saturate((max(nearCrack, nearCore * 0.8) * (0.3 + 0.7 * grain * grain) + feather * nearCrack * 0.9) * grow - 0.1) * thaw;
 	float3 frostBehind = Scene(viewUV, 2.0);
-	Blend(c, frostBehind * 0.6 + (0.24 + 0.3 * LightLevel(frostBehind)) * IceTint, frost * 0.9 * opacity);
+	Blend(c, frostBehind * 0.6 + (0.24 + 0.3 * LightLevel(frostBehind)) * IceTint, frost * 0.75 * opacity);
 
 	float crackFade = opacity * (1.0 - smoothstep(0.75, 1.0, progress));
-	Blend(c, 0.0, crack * 0.55 * crackFade);
-	c.color += IceTint * glint * 0.75 * crackFade;
+	Blend(c, 0.0, crack * 0.45 * crackFade);
+	c.color += IceTint * glint * 0.55 * crackFade;
 
 	float melt = smoothstep(0.15, 0.75, progress);
 	float lumpEdge = 0.13 * (1.0 - 0.45 * melt) * (0.4 + 1.2 * CameraFX::Fbm(float2(cos(angle), sin(angle)) * 1.8 + seed * 11.0, 3));
 	float lump = (1.0 - smoothstep(lumpEdge - 0.03, lumpEdge, r)) * (0.75 + 0.25 * CameraFX::Fbm(p * 11.0 + seed, 3));
 	float3 slush = Scene(viewUV, 2.5);
 	float3 snow = float3(0.9, 0.93, 0.97) * (0.62 + 0.38 * CameraFX::Fbm(p * 22.0 + seed * 4.0, 3)) * (0.62 + 0.5 * LightLevel(slush));
-	Blend(c, lerp(snow, slush * 0.85 + 0.1, melt), lump * 1.25 * (1.0 - 0.6 * melt) * opacity);
+	Blend(c, lerp(snow, slush * 0.85 + 0.1, melt), lump * (1.0 - 0.6 * melt) * opacity);
 }
 
 void ApplyFireHit(inout Composite c, float2 p, float seed, float progress, float opacity)
@@ -805,9 +809,9 @@ void ApplyFireHit(inout Composite c, float2 p, float seed, float progress, float
 		light += lerp(EmberHot, EmberCool, progress) * exp(-dot(d, d) * 520.0);
 	}
 	light *= 1.0 - progress;
-	light += float3(1.0, 0.5, 0.15) * exp(-dot(p, p) * 6.0) * (1.0 - smoothstep(0.0, 0.35, progress)) * 0.15;
-	c.light += light * 1.6 * opacity;
-	float soot = (1.0 - smoothstep(0.2, 0.55, length(p) + (CameraFX::Fbm(p * 3.0 + seed, 3) - 0.5) * 0.3)) * smoothstep(0.05, 0.25, progress) * 0.35;
+	light += float3(1.0, 0.5, 0.15) * exp(-dot(p, p) * 6.0) * (1.0 - smoothstep(0.0, 0.35, progress)) * 0.1;
+	c.light += light * 0.7 * opacity;
+	float soot = (1.0 - smoothstep(0.2, 0.55, length(p) + (CameraFX::Fbm(p * 3.0 + seed, 3) - 0.5) * 0.3)) * smoothstep(0.05, 0.25, progress) * 0.17;
 	Blend(c, float3(0.02, 0.015, 0.012), soot * opacity);
 }
 
@@ -838,7 +842,7 @@ void ApplyGrit(inout Composite c, float2 p, float seed, float opacity)
 			rim = max(rim, saturate(body - core) * saturate(-local.y / max(radius, 1e-3) + 0.2));
 		}
 	}
-	float mask = spread * opacity;
+	float mask = spread * opacity * 0.8;
 	float lum = LightLevel(c.color);
 	Blend(c, c.color * 0.42 + float3(0.066, 0.053, 0.037), occlusion * mask);
 	c.color += rim * mask * 0.4 * (0.25 + lum);
@@ -849,6 +853,7 @@ void ApplySplats(inout Composite c, float2 uv, float2 q, float2 viewUV)
 	float aspect = Aspect();
 	uint count = min((uint)(CameraFX::Combat2.w + 0.5), CameraFX::MaxSplats);
 	float below = 0.0;
+	float3 probe = float3(0.0, 0.0, -1.0);
 	[loop] for (uint i = 0; i < count; i++)
 	{
 		float4 placement = CameraFX::Splats[i * 2];
@@ -864,7 +869,7 @@ void ApplySplats(inout Composite c, float2 uv, float2 q, float2 viewUV)
 		float angle = data.w;
 		float2 p = CameraFX::Rotate(s, -angle);
 		[branch] if (kind <= SplatOil)
-			ApplyLiquid(c, uv, viewUV, p, s, size, angle, kind, seed, progress, opacity, below);
+			ApplyLiquid(c, uv, viewUV, p, s, size, angle, kind, seed, progress, opacity, below, probe);
 		else if (kind == SplatVenom)
 			ApplyVenom(c, viewUV, p, s, size, seed, progress, opacity);
 		else if (kind == SplatIce)
@@ -882,7 +887,7 @@ void ApplyBurn(inout Composite c, float2 q, float edgeR, float amount)
 	float noise = CameraFX::Fbm(q * 3.0 + float2(0.0, -time * 0.3), 4);
 	float fine = CameraFX::ValueNoise(q * 16.0 + float2(time * 0.5, -time * 1.8));
 	float front = edgeR + (noise - 0.5) * 0.35 + (fine - 0.5) * 0.05;
-	float start = 1.12 - amount * 0.38;
+	float start = 1.12 - amount * 0.28;
 	[branch] if (front < start - 0.3)
 		return;
 	float charred = smoothstep(start + 0.02, start + 0.12, front);
@@ -891,11 +896,11 @@ void ApplyBurn(inout Composite c, float2 q, float edgeR, float amount)
 	// Photosensitive Safe (Combat3.w) slows the flame's flicker from about eight changes a second to two.
 	float flickerRate = CameraFX::Combat3.w > 0.5 ? 2.0 : 8.0;
 	float flicker = 0.7 + 0.3 * CameraFX::ValueNoise(float2(time * flickerRate, front * 30.0));
-	Blend(c, float3(0.02, 0.012, 0.008), charred * 0.72);
+	Blend(c, float3(0.02, 0.012, 0.008), charred * 0.35);
 	float3 flame = lerp(float3(1.0, 0.3, 0.04), float3(1.0, 0.62, 0.22), saturate(fine * 1.4 - 0.2));
-	Blend(c, flame, burnLine * flicker * 0.8 * amount);
-	c.light += flame * burnLine * flicker * 0.25 * amount;
-	c.light += float3(1.0, 0.38, 0.08) * heat * 0.1 * amount;
+	Blend(c, flame, burnLine * flicker * 0.38 * amount);
+	c.light += flame * burnLine * flicker * 0.11 * amount;
+	c.light += float3(1.0, 0.38, 0.08) * heat * 0.045 * amount;
 
 	float2 g = q * 18.0 + float2(0.0, time * 1.6);
 	float2 cell = floor(g);
@@ -905,7 +910,7 @@ void ApplyBurn(inout Composite c, float2 q, float edgeR, float amount)
 		float spark = exp(-dot(local * float2(1.0, 0.45), local * float2(1.0, 0.45)) * 220.0);
 		float near = smoothstep(start - 0.25, start, front) * (1.0 - charred * 0.5);
 		float life = sin(3.14159 * frac(time * 0.7 + CameraFX::Hash12(cell + 67.0)));
-		c.light += EmberHot * spark * near * life * amount * 1.4;
+		c.light += EmberHot * spark * near * life * amount * 0.8;
 	}
 }
 
@@ -996,11 +1001,11 @@ void ApplyDischarge(inout Composite c, float2 centred, float amount, float age, 
 	}
 
 	float glowAmount = saturate(glow * 0.8) * amount;
-	Blend(c, c.color * float3(0.5, 0.72, 1.15) + float3(0.03, 0.1, 0.38), glowAmount * 0.5);
-	c.light += float3(0.12, 0.35, 1.0) * glowAmount * 0.4;
-	Blend(c, ArcColor * 1.35, saturate(sheath * 0.8) * amount);
-	c.light += float3(0.95, 0.97, 1.0) * saturate(core) * 1.8 * amount;
-	c.light += c.color * float3(0.4, 0.6, 1.0) * saturate(flash) * 0.6 * amount;
+	Blend(c, c.color * float3(0.5, 0.72, 1.15) + float3(0.03, 0.1, 0.38), glowAmount * 0.35);
+	c.light += float3(0.12, 0.35, 1.0) * glowAmount * 0.3;
+	Blend(c, ArcColor * 1.35, saturate(sheath * 0.8) * amount * 0.75);
+	c.light += float3(0.95, 0.97, 1.0) * saturate(core) * 1.3 * amount;
+	c.light += c.color * float3(0.4, 0.6, 1.0) * saturate(flash) * 0.35 * amount;
 }
 
 void ApplyLastingShock(inout Composite c, float2 uv, float2 q, float2 centred, float amount, bool calm)
@@ -1075,11 +1080,11 @@ void ApplyLastingShock(inout Composite c, float2 uv, float2 q, float2 centred, f
 		glow += k * exp(-d / 0.015);
 	}
 	float frameGlow = smoothstep(0.78, 1.0, edge) * (0.6 + 0.4 * CameraFX::ValueNoise(float2(q.x * 3.0 + q.y * 2.0, time * 1.5)));
-	c.light += float3(0.1, 0.3, 1.0) * frameGlow * 0.07 * amount;
+	c.light += float3(0.1, 0.3, 1.0) * frameGlow * 0.05 * amount;
 	float glowAmount = saturate(glow * 0.6) * amount;
-	Blend(c, c.color * float3(0.6, 0.78, 1.12) + float3(0.02, 0.07, 0.25), glowAmount * 0.6);
-	Blend(c, ArcColor * 1.3, saturate(sheath * 0.75) * amount);
-	c.light += float3(0.92, 0.96, 1.0) * saturate(core) * 1.5 * amount;
+	Blend(c, c.color * float3(0.6, 0.78, 1.12) + float3(0.02, 0.07, 0.25), glowAmount * 0.45);
+	Blend(c, ArcColor * 1.3, saturate(sheath * 0.75) * amount * 0.75);
+	c.light += float3(0.92, 0.96, 1.0) * saturate(core) * 1.1 * amount;
 }
 
 void ApplySlash(inout Composite c, float2 q, float2 viewUV, float strength, float angle, float2 hit)
@@ -1097,7 +1102,7 @@ void ApplySlash(inout Composite c, float2 q, float2 viewUV, float strength, floa
 	float behind = head - along;
 	float drawn = smoothstep(-0.03, 0.02, behind) * (1.0 - smoothstep(reach * 0.7, reach * 1.6, behind));
 	float taper = 1.0 - smoothstep(reach * 0.55, reach, abs(along));
-	float width = 0.062 * (0.3 + taper) * (0.75 + 0.5 * CameraFX::ValueNoise(float2(along * 9.0, angle * 13.0)));
+	float width = 0.05 * (0.3 + taper) * (0.75 + 0.5 * CameraFX::ValueNoise(float2(along * 9.0, angle * 13.0)));
 	float band = exp(-(across * across) / (width * width)) * taper * drawn;
 	[branch] if (band * envelope <= 0.002)
 		return;
@@ -1109,13 +1114,13 @@ void ApplySlash(inout Composite c, float2 q, float2 viewUV, float strength, floa
 		smear += Scene(viewUV + ToUV(offset), 0.0);
 	}
 	smear /= 8.0;
-	Blend(c, smear * 1.18 + 0.04, band * envelope * 0.95);
+	Blend(c, smear * 1.1 + 0.02, band * envelope * 0.7);
 	float lead = exp(-pow((across + width * 0.45) / (width * 0.35), 2.0)) * taper * drawn * smoothstep(0.0, 0.12, behind) * (1.0 - smoothstep(0.08, 0.3, behind));
-	c.color += float3(0.95, 0.97, 1.0) * lead * envelope * 0.6 * (0.6 + 0.4 * LightLevel(smear));
+	c.color += float3(0.95, 0.97, 1.0) * lead * envelope * 0.4 * (0.6 + 0.4 * LightLevel(smear));
 	float back = exp(-pow((across - width * 0.35) / (width * 0.18), 2.0)) * taper * drawn * smoothstep(0.02, 0.15, behind);
 	c.color += float3(0.9, 0.93, 1.0) * back * envelope * 0.18;
 	float2 tip = float2(along - head, across + width * 0.45) / float2(0.05, 0.012);
-	c.color += float3(1.0, 0.98, 0.95) * exp(-dot(tip, tip)) * envelope * saturate(1.0 - age * 6.0) * 0.6;
+	c.color += float3(1.0, 0.98, 0.95) * exp(-dot(tip, tip)) * envelope * saturate(1.0 - age * 6.0) * 0.4;
 	float wake = exp(-pow((across - width * 0.7) / (width * 0.55), 2.0)) * taper * drawn;
 	Blend(c, 0.0, wake * envelope * 0.1);
 }
@@ -1206,7 +1211,7 @@ void ApplyOverlay(inout Composite c, float2 uv, float2 q, float edgeR, bool full
 		{
 			float age = CameraFX::Weather3.z;
 			float pulse = smoothstep(0.0, 0.25, age) * (1.0 - smoothstep(0.35, 1.0, age));
-			Blend(c, 0.0, CameraFX::Combat.w * pulse * smoothstep(0.45, 1.1, CameraFX::EdgeDistance(uv)) * 0.25);
+			Blend(c, 0.0, CameraFX::Combat.w * pulse * smoothstep(0.45, 1.1, CameraFX::EdgeDistance(uv)) * 0.18);
 		}
 	}
 	else
@@ -1239,7 +1244,7 @@ float3 SunLight(float2 uv, float2 q, float3 color, Water water)
 			float dirt = Dirt(q, 1.0, 0.0);
 			float3 bloom = Scene(uv, 4.5);
 			float3 source = bloom * smoothstep(0.6, 1.2, LightLevel(bloom)) * 0.6 + sunColor * near * 0.7;
-			light += saturate(dirt * source * dirtAmount * strength * 1.1) * saturate(1.0 - color);
+			light += saturate(dirt * source * dirtAmount * strength * 0.85) * saturate(1.0 - color);
 		}
 		[branch] if (water.mask > 0.001)
 		{
@@ -1259,13 +1264,13 @@ float3 MoonLight(float2 uv, float2 q, float4 moon, float visibility)
 		float aspect = Aspect();
 		float radius = max(moon.w, 0.008);
 		float d = length(float2((moon.x - uv.x) * aspect, moon.y - uv.y));
-		float aureole = exp(-d * d / (radius * radius * 7.0)) * 0.11 + exp(-d / (radius * 5.0)) * 0.022;
-		float ring = exp(-pow((d - radius * 4.2) / (radius * 0.9), 2.0)) * 0.016;
+		float aureole = exp(-d * d / (radius * radius * 7.0)) * 0.066 + exp(-d / (radius * 5.0)) * 0.013;
+		float ring = exp(-pow((d - radius * 4.2) / (radius * 0.9), 2.0)) * 0.009;
 		float ghostDistance = length(float2((1.0 - moon.x - uv.x) * aspect, 1.0 - moon.y - uv.y));
-		float ghost = exp(-ghostDistance * ghostDistance / (radius * radius * 2.5)) * 0.014 + exp(-pow((ghostDistance - radius * 1.4) / (radius * 0.3), 2.0)) * 0.007;
+		float ghost = exp(-ghostDistance * ghostDistance / (radius * radius * 2.5)) * 0.008 + exp(-pow((ghostDistance - radius * 1.4) / (radius * 0.3), 2.0)) * 0.004;
 		light = MoonTint * (aureole + ring + ghost);
 		[branch] if (CameraFX::Lens.w > 0.001)
-			light += MoonTint * Dirt(q, 1.0, 0.0) * exp(-d * d * 8.0) * CameraFX::Lens.w * 0.2;
+			light += MoonTint * Dirt(q, 1.0, 0.0) * exp(-d * d * 8.0) * CameraFX::Lens.w * 0.12;
 		light *= strength;
 	}
 	return light;

@@ -199,8 +199,11 @@ size_t BaselineManager::ApplyBaselines(const std::string& featureName, json& fea
 
 	auto it = featureFileMap.find(featureName);
 	if (it != featureFileMap.end()) {
+		auto* feature = Feature::FindFeatureByShortName(featureName);
 		for (size_t index : it->second) {
 			auto& file = files[index];
+			if (feature)
+				feature->MigrateLegacySettings(file.values);
 			if (!RejectsUnknownKeys(file, featureJson)) {
 				try {
 					Util::Settings::MergeSettings(featureJson, file.values);
