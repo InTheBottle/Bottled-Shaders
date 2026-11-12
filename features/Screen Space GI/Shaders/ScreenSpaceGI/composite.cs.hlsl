@@ -43,6 +43,7 @@ float3 SampleSSGIIL(uint2 pixCoord)
 
 	float3 linAlbedo = ColorManagement::SceneToLinear(AlbedoTexture[dispatchID.xy] / Color::PBRLightingScale);
 	float3 ssgiIl = SampleSSGIIL(dispatchID.xy);
+	ssgiIl = max(lerp(Color::RGBToLuminance(ssgiIl), ssgiIl, SharedData::ssgiSettings.ILSaturation), 0.0);
 
 	float4 mainColor = MainRW[dispatchID.xy];
 	float3 linDiffuseColor = ColorManagement::SceneToLinear(mainColor.xyz);

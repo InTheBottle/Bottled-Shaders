@@ -355,6 +355,11 @@ void Deferred::DeferredPasses()
 	auto& ssgi = globals::features::screenSpaceGI;
 	auto& ssr = globals::features::screenSpaceReflections;
 
+	if (ssgi.loaded)
+		ssgi.RefreshE11Overlay();
+	if (ssr.loaded)
+		ssr.RefreshE11Overlay();
+
 	auto& nrd = globals::features::nrd;
 	if (nrd.loaded) {
 		const bool ssgiDenoises = ssgi.loaded && ssgi.settings.Enabled && ssgi.settings.EnableREBLUR;

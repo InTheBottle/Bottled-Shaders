@@ -72,6 +72,8 @@ namespace
 		{ "WEATHER", Group::TimeAndWeather },
 		{ "ENVIRONMENT", Group::Lighting },
 		{ "IMAGEBASEDLIGHTING", Group::Lighting },
+		{ "SSAO_SSIL", Group::Lighting },
+		{ "REFLECTION", Group::Lighting },
 		{ "PARTICLE", Group::Lighting },
 		{ "LIGHTSPRITE", Group::Lighting },
 		{ "FIRE", Group::Lighting },
@@ -140,6 +142,10 @@ namespace
 			return { T("feature.effects11.category.environment", "Environment"), T("feature.effects11.category.environment_desc", "Sun, ambient and point light strength and color, plus fog.") };
 		if (a_category == "IMAGEBASEDLIGHTING")
 			return { T("feature.effects11.category.imagebasedlighting", "Image Based Lighting"), T("feature.effects11.category.imagebasedlighting_desc", "Strength of image based lighting.") };
+		if (a_category == "SSAO_SSIL")
+			return { T("feature.effects11.category.ssao_ssil", "Ambient Occlusion and Indirect Lighting"), T("feature.effects11.category.ssao_ssil_desc", "Drives Screen Space GI while the preset owns it: AO and IL amounts, and whether indirect lighting is on.") };
+		if (a_category == "REFLECTION")
+			return { T("feature.effects11.category.reflection", "Reflections"), T("feature.effects11.category.reflection_desc", "Drives Screen Space Reflections while the preset owns it: strength outdoors and indoors.") };
 		if (a_category == "PARTICLE")
 			return { T("feature.effects11.category.particle", "Particles"), T("feature.effects11.category.particle_desc", "Particle brightness and how much scene lighting affects particles.") };
 		if (a_category == "LIGHTSPRITE")

@@ -2,6 +2,8 @@
 
 #include "Deferred.h"
 #include "DynamicCubemaps.h"
+#include "Effects11.h"
+#include "Effects11/SettingManager.h"
 #include "I18n/I18n.h"
 #include "IBL.h"
 #include "NRD.h"
@@ -30,13 +32,20 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	EnableREBLUR,
 	Reblur,
 	SpecularPrepassBlurRadius,
-	UsePrepassOnlyForSpecularMotionEstimation)
+	UsePrepassOnlyForSpecularMotionEstimation,
+	E11AmountScale)
 
 ////////////////////////////////////////////////////////////////////////////////////
 
 void ScreenSpaceReflections::RestoreDefaultSettings()
 {
 	settings = {};
+	userSettings = settings;
+	appliedE11Overlay = GetE11Overlay();
+	if (appliedE11Overlay.active) {
+		settings.Enabled = appliedE11Overlay.enabled;
+		settings.SpecularMult = appliedE11Overlay.specularMult;
+	}
 	recompileFlag = true;
 	resetReblurHistory = true;
 	outputReady = false;
@@ -45,9 +54,20 @@ void ScreenSpaceReflections::RestoreDefaultSettings()
 void ScreenSpaceReflections::DrawSettings()
 {
 	static bool showAdvanced;
+	const auto syncUserSettings = SKSE::stl::scope_exit([this]() noexcept {
+		Settings edited = settings;
+		if (appliedE11Overlay.active) {
+			edited.Enabled = userSettings.Enabled;
+			edited.SpecularMult = userSettings.SpecularMult;
+		}
+		userSettings = edited;
+	});
+	const bool e11Managed = appliedE11Overlay.active;
 
 	if (!ShadersOK())
 		Util::Text::Error("%s", T(TKEY("compute_shaders_failed_to_compile"), "Compute shaders failed to compile!"));
+	if (e11Managed)
+		Util::Text::WrappedInfo("%s", T(TKEY("e11_managed"), "The active Effects 11 preset drives Enabled and Specular Multiplier from its [EFFECT] EnableReflection and [REFLECTION] Amount. Hand SSR back on its scene page to use your own values."));
 	if (!globals::features::dynamicCubemaps.loaded)
 		Util::Text::WrappedWarning("%s", T(TKEY("requires_dynamic_cubemaps"), "Requires Dynamic Cubemaps. Reflections are composited into the cubemap specular, so without it nothing is traced."));
 
@@ -55,8 +75,11 @@ void ScreenSpaceReflections::DrawSettings()
 
 	ImGui::Checkbox(T(TKEY("show_advanced_options"), "Show Advanced Options"), &showAdvanced);
 
-	if (ImGui::Checkbox(T(TKEY("enabled"), "Enabled"), &settings.Enabled))
-		globals::deferred->ClearShaderCache();
+	{
+		auto managedGuard = Util::DisableGuard(e11Managed);
+		if (ImGui::Checkbox(T(TKEY("enabled"), "Enabled"), &settings.Enabled))
+			globals::deferred->ClearShaderCache();
+	}
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T(TKEY("enabled_tooltip"), "Enable screen-space reflections. When disabled, the deferred composite falls back to cubemap-only reflections."));
 	}
@@ -80,7 +103,10 @@ void ScreenSpaceReflections::DrawSettings()
 
 	{
 		auto visualGuard = Util::DisableGuard(!settings.Enabled);
-		ImGui::SliderFloat(T(TKEY("specular_multiplier"), "Specular Multiplier"), &settings.SpecularMult, 0.0f, 5.0f, "%.2f");
+		{
+			auto managedGuard = Util::DisableGuard(e11Managed);
+			ImGui::SliderFloat(T(TKEY("specular_multiplier"), "Specular Multiplier"), &settings.SpecularMult, 0.0f, 5.0f, "%.2f");
+		}
 		ImGui::Checkbox(T(TKEY("use_dynamic_cubemaps_as_fallback"), "Use Dynamic Cubemaps as Fallback"), &settings.UseDynamicCubemapsAsFallback);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T(TKEY("use_dynamic_cubemaps_as_fallback_tooltip"), "When ray marching misses, fall back to dynamic cubemaps for reflections."));
@@ -135,6 +161,13 @@ void ScreenSpaceReflections::DrawSettings()
 		}
 	}
 
+	if (globals::features::effects11.loaded) {
+		ImGui::SeparatorText(T(TKEY("e11_calibration"), "Effects 11 Presets"));
+		ImGui::SliderFloat(T(TKEY("e11_amount_scale"), "Preset Reflection Scale"), &settings.E11AmountScale, 0.0f, 4.0f, "%.2f");
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("e11_amount_scale_tooltip"), "Specular Multiplier is the preset's [REFLECTION] Amount times this."));
+	}
+
 	ImGui::SeparatorText(T(TKEY("debug"), "Debug"));
 
 	if (ImGui::TreeNode(T(TKEY("buffer_viewer"), "Buffer Viewer"))) {
@@ -184,8 +217,15 @@ void ScreenSpaceReflections::LoadSettings(json& o_json)
 	ClampSetting(settings.HitDistB, 0.0f, 1.0f, defaults.HitDistB);
 	ClampSetting(settings.HitDistC, 1.0f, 200.0f, defaults.HitDistC);
 	ClampSetting(settings.SpecularPrepassBlurRadius, 0.0f, 75.0f, defaults.SpecularPrepassBlurRadius);
+	ClampSetting(settings.E11AmountScale, 0.0f, 4.0f, defaults.E11AmountScale);
 	if (!settings.EnableREBLUR)
 		settings.HalfRes = false;
+	userSettings = settings;
+	appliedE11Overlay = GetE11Overlay();
+	if (appliedE11Overlay.active) {
+		settings.Enabled = appliedE11Overlay.enabled;
+		settings.SpecularMult = appliedE11Overlay.specularMult;
+	}
 	recompileFlag = recompileFlag || settings.HalfRes != previous.HalfRes;
 	if (settings.Enabled != previous.Enabled && globals::deferred)
 		globals::deferred->ClearShaderCache();
@@ -200,7 +240,37 @@ void ScreenSpaceReflections::LoadSettings(json& o_json)
 
 void ScreenSpaceReflections::SaveSettings(json& o_json)
 {
-	o_json = settings;
+	o_json = userSettings;
+}
+
+bool ScreenSpaceReflections::IsManagedByE11() const
+{
+	const auto& effects11 = globals::features::effects11;
+	return effects11.IsActive() && effects11.OwnsFeature(E11Handoff::Feature::SSR);
+}
+
+ScreenSpaceReflections::E11Overlay ScreenSpaceReflections::GetE11Overlay() const
+{
+	E11Overlay overlay;
+	if (!IsManagedByE11())
+		return overlay;
+	auto& settingManager = SettingManager::GetSingleton();
+	const bool interior = Util::IsInterior();
+	overlay.active = true;
+	overlay.enabled = settingManager.GetValue<bool>("EnableReflection", "EFFECT") &&
+	                  (!interior || settingManager.GetValue<bool>("EnableInterior", "REFLECTION"));
+	const float amount = settingManager.GetValue<float>(interior ? "AmountInterior" : "Amount", "REFLECTION");
+	const float specularMult = amount * userSettings.E11AmountScale;
+	overlay.specularMult = std::isfinite(specularMult) ? std::clamp(specularMult, 0.0f, 5.0f) : 1.0f;
+	return overlay;
+}
+
+void ScreenSpaceReflections::RefreshE11Overlay()
+{
+	if (GetE11Overlay() == appliedE11Overlay)
+		return;
+	json document = userSettings;
+	LoadSettings(document);
 }
 
 void ScreenSpaceReflections::SetupResources()

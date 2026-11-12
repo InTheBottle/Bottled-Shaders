@@ -33,7 +33,7 @@ cbuffer SSGICB : register(b1)
 	float2 FrameDim;
 	float2 RcpFrameDim;
 
-	float pad0;
+	uint FrameIndex;
 
 	uint NumSteps;
 

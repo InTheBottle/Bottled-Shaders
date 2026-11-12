@@ -283,7 +283,8 @@ float3 SSRT_HierarchicalRaymarch(float3 origin,
 		++num_iters;
 	}
 
-	valid_hit = num_iters <= max_traversal_intersections;
+	bool left_screen = any(position.xy >= 1.0) || any(position.xy < 0.0) || position.z >= 1.0 - 1e-6 || position.z < 0.0;
+	valid_hit = current_mip < most_detailed_mip && !left_screen;
 	return position;
 }
 
@@ -304,12 +305,12 @@ float SSRT_ValidateHit(float3 hit,
 	occlusion = 1.f;
 	isBackfaceHit = false;
 
-	if ((hit.x < 0.0f) || (hit.y < 0.0f) || (hit.x > 1.0f) || (hit.y > 1.0f)) {
+	if ((hit.x < 0.0f) || (hit.y < 0.0f) || (hit.x >= 1.0f) || (hit.y >= 1.0f)) {
 		return 0.0f;
 	}
 
 	int2 texel_coords = int2(screen_size * hit.xy * FrameBuffer::DynamicResolutionParams1.xy);
-	float surface_z = SSRT_LoadDepth(texel_coords / 2, 1);
+	float surface_z = SSRT_LoadDepth(texel_coords, 0);
 	if (surface_z == 1.0) {
 		return 0;
 	}
@@ -420,7 +421,7 @@ float SSRT_ValidateHit(float3 hit,
 	float occlusion = 1.0f;
 	bool isBackfaceHit = false;
 	float confidence = 0.0f;
-	if (valid_hit) {
+	if (valid_hit && all(isfinite(hit))) {
 		confidence = SSRT_ValidateHit(hit, uv, view_space_ray, screen_size, thickness, ray_length, occlusion, isBackfaceHit);
 	}
 	float screenConfidence = isBackfaceHit ? 1.0 : confidence;

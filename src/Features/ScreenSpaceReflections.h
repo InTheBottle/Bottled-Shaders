@@ -88,7 +88,28 @@ struct ScreenSpaceReflections : Feature
 		};
 		float SpecularPrepassBlurRadius = 50.0f;
 		bool UsePrepassOnlyForSpecularMotionEstimation = true;
+
+		float E11AmountScale = 1.0f;
 	} settings;
+	/** @brief The settings as the user left them; settings holds them with the Effects 11 overlay applied. */
+	Settings userSettings;
+
+	/** @brief The values an active Effects 11 preset drives: [EFFECT] EnableReflection and [REFLECTION]. */
+	struct E11Overlay
+	{
+		bool active = false;
+		bool enabled = false;
+		float specularMult = 1.0f;
+		bool operator==(const E11Overlay&) const = default;
+	};
+	E11Overlay appliedE11Overlay;
+
+	/** @brief Whether an active Effects 11 preset drives SSR, which it does until the preset hands SSR back. */
+	bool IsManagedByE11() const;
+	/** @brief The overlay the active preset asks for now; inactive when Effects 11 does not drive SSR. */
+	E11Overlay GetE11Overlay() const;
+	/** @brief Reapplies the user's settings when the preset's overlay has changed since the last load. */
+	void RefreshE11Overlay();
 
 	struct alignas(16) SSRCB
 	{

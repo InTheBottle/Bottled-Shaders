@@ -437,6 +437,8 @@ namespace SharedData
 		uint EnableIL;
 		uint ReplaceAmbient;
 		float AOPower;
+		float ILSaturation;
+		float3 pad0;
 	};
 
 	struct SSRSettings

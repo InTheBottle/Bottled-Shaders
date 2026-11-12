@@ -105,7 +105,33 @@ public:
 		// NRD REBLUR
 		bool EnableREBLUR = true;
 		NRD::REBLURSettings Reblur;
+		float DiffusePrepassBlurRadius = 30.0f;
+		float E11AOScale = 0.5f;
+		float E11ILScale = 0.2f;
+		float E11ILSaturation = 0.8f;
 	} settings;
+
+	/** @brief The settings as the user and the scene layers left them, before an Effects 11 preset overlays its own. */
+	Settings userSettings;
+
+	/** @brief The values an active Effects 11 preset drives: [EFFECT] EnableAmbientOcclusion and [SSAO_SSIL]. */
+	struct E11Overlay
+	{
+		bool active = false;
+		bool enabled = false;
+		bool indirectLighting = false;
+		float aoPower = 1.0f;
+		float giStrength = 1.0f;
+		bool operator==(const E11Overlay&) const = default;
+	};
+	E11Overlay appliedE11Overlay;
+
+	/** @brief Whether an active Effects 11 preset drives SSGI, i.e. it is not handed back to Bottled Shaders. */
+	bool IsManagedByE11() const;
+	/** @brief The overlay the active preset wants this frame, inactive when Effects 11 does not own SSGI. */
+	E11Overlay GetE11Overlay() const;
+	/** @brief Re-applies the settings when the preset's overlay changed since the last apply. Render thread. */
+	void RefreshE11Overlay();
 
 	struct alignas(16) SSGICB
 	{
@@ -116,7 +142,7 @@ public:
 		float2 RcpTexDim;
 		float2 FrameDim;
 		float2 RcpFrameDim;
-		float pad0;
+		uint FrameIndex;
 
 		uint NumSteps;
 
@@ -137,6 +163,8 @@ public:
 		uint EnableIL;
 		uint ReplaceAmbient;
 		float AOPower;
+		float ILSaturation;
+		float pad0[3];
 	};
 
 	SharedData GetCommonBufferData();

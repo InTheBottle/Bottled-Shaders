@@ -94,13 +94,15 @@ namespace
 		if (preset.enableGI)
 			s.EnableSH = preset.enableSH;
 		auto& ssgi = globals::features::screenSpaceGI;
+		ssgi.userSettings = ssgi.settings;
 		ssgi.recompileFlag = true;
 		ssgi.queuedResetHistory = true;
 	}
 
 	bool __stdcall IsSSGIEditable()
 	{
-		return NativeMenu::IsFeatureEditable(globals::features::screenSpaceGI.GetShortName());
+		auto& ssgi = globals::features::screenSpaceGI;
+		return !ssgi.appliedE11Overlay.active && NativeMenu::IsFeatureEditable(ssgi.GetShortName());
 	}
 
 	float __stdcall GetSSREnabled()
@@ -115,12 +117,14 @@ namespace
 		if (ssr.settings.Enabled == enabled)
 			return;
 		ssr.settings.Enabled = enabled;
+		ssr.userSettings.Enabled = enabled;
 		ssr.queuedEnabledChange = true;
 	}
 
 	bool __stdcall IsSSREditable()
 	{
-		return NativeMenu::IsFeatureEditable(globals::features::screenSpaceReflections.GetShortName());
+		auto& ssr = globals::features::screenSpaceReflections;
+		return !ssr.appliedE11Overlay.active && NativeMenu::IsFeatureEditable(ssr.GetShortName());
 	}
 }
 

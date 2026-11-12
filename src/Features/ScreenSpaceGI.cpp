@@ -6,6 +6,7 @@
 #include "Deferred.h"
 #include "DynamicCubemaps.h"
 #include "Effects11.h"
+#include "Effects11/SettingManager.h"
 #include "I18n/I18n.h"
 #include "IBL.h"
 #include "NRD.h"
@@ -15,6 +16,7 @@
 #include "TerrainBlending.h"
 #include "Upscaling.h"
 #include "Util.h"
+#include "Utils/MathUtils.h"
 
 #define I18N_KEY_PREFIX "feature.screen_space_gi."
 
@@ -34,13 +36,25 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	UseDynamicCubemapsAsFallback,
 	DiffuseCubemapMult,
 	EnableREBLUR,
-	Reblur)
+	Reblur,
+	DiffusePrepassBlurRadius,
+	E11AOScale,
+	E11ILScale,
+	E11ILSaturation)
 
 ////////////////////////////////////////////////////////////////////////////////////
 
 void ScreenSpaceGI::RestoreDefaultSettings()
 {
 	settings = {};
+	userSettings = settings;
+	appliedE11Overlay = GetE11Overlay();
+	if (appliedE11Overlay.active) {
+		settings.Enabled = appliedE11Overlay.enabled;
+		settings.EnableGI = appliedE11Overlay.indirectLighting;
+		settings.AOPower = appliedE11Overlay.aoPower;
+		settings.GIStrength = appliedE11Overlay.giStrength;
+	}
 	recompileFlag = true;
 	resetReblurHistory = true;
 	outputReady = false;
@@ -52,6 +66,16 @@ void ScreenSpaceGI::RestoreDefaultSettings()
 void ScreenSpaceGI::DrawSettings()
 {
 	static bool showAdvanced;
+	const auto syncUserSettings = SKSE::stl::scope_exit([this]() noexcept {
+		Settings edited = settings;
+		if (appliedE11Overlay.active) {
+			edited.Enabled = userSettings.Enabled;
+			edited.EnableGI = userSettings.EnableGI;
+			edited.AOPower = userSettings.AOPower;
+			edited.GIStrength = userSettings.GIStrength;
+		}
+		userSettings = edited;
+	});
 
 	if (!ShadersOK())
 		Util::Text::Error("%s", T(TKEY("compute_shaders_failed_to_compile"), "Compute shaders failed to compile!"));
@@ -61,11 +85,18 @@ void ScreenSpaceGI::DrawSettings()
 
 	ImGui::Checkbox(T(TKEY("show_advanced_options"), "Show Advanced Options"), &showAdvanced);
 
+	const bool e11Managed = appliedE11Overlay.active;
+	if (e11Managed)
+		Util::Text::WrappedInfo("%s", T(TKEY("e11_managed"), "The active Effects 11 preset drives SSGI: its Ambient Occlusion and Indirect Lighting settings set Enabled, Indirect Lighting, AO Power and IL Brightness. Hand SSGI back on its scene page to use your own values."));
+
 	if (ImGui::BeginTable("Toggles", 4)) {
 		ImGui::TableNextColumn();
-		if (ImGui::Checkbox(T(TKEY("enabled"), "Enabled"), &settings.Enabled)) {
-			resetReblurHistory = true;
-			hasMultiBounceHistory = false;
+		{
+			auto enabledGuard = Util::DisableGuard(e11Managed);
+			if (ImGui::Checkbox(T(TKEY("enabled"), "Enabled"), &settings.Enabled)) {
+				resetReblurHistory = true;
+				hasMultiBounceHistory = false;
+			}
 		}
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T(TKEY("enabled_tooltip"), "Enable Screen Space Global Illumination. When disabled, all other settings are ignored."));
@@ -73,7 +104,7 @@ void ScreenSpaceGI::DrawSettings()
 
 		ImGui::TableNextColumn();
 		{
-			auto ilToggleGuard = Util::DisableGuard(!settings.Enabled);
+			auto ilToggleGuard = Util::DisableGuard(!settings.Enabled || e11Managed);
 			if (ImGui::Checkbox(T(TKEY("indirect_lighting"), "Indirect Lighting (IL)"), &settings.EnableGI)) {
 				recompileFlag = true;
 				SetupNRDResources();
@@ -155,14 +186,20 @@ void ScreenSpaceGI::DrawSettings()
 	{
 		auto visualGuard = Util::DisableGuard(!settings.Enabled);
 
-		if (ImGui::SliderFloat(T(TKEY("ao_power"), "AO Power"), &settings.AOPower, 0.f, 6.f, "%.2f"))
-			resetReblurHistory = true;
+		{
+			auto aoGuard = Util::DisableGuard(e11Managed);
+			if (ImGui::SliderFloat(T(TKEY("ao_power"), "AO Power"), &settings.AOPower, 0.f, 6.f, "%.2f"))
+				resetReblurHistory = true;
+		}
 
 		{
 			auto ilGuard = Util::DisableGuard(!settings.EnableGI);
-			if (ImGui::SliderFloat(T(TKEY("il_source_brightness"), "IL Source Brightness"), &settings.GIStrength, 0.f, 6.f, "%.2f")) {
-				resetReblurHistory = true;
-				hasMultiBounceHistory = false;
+			{
+				auto strengthGuard = Util::DisableGuard(e11Managed);
+				if (ImGui::SliderFloat(T(TKEY("il_source_brightness"), "IL Source Brightness"), &settings.GIStrength, 0.f, 6.f, "%.2f")) {
+					resetReblurHistory = true;
+					hasMultiBounceHistory = false;
+				}
 			}
 			if (ImGui::Checkbox(T(TKEY("multi_bounce"), "Multi-Bounce"), &settings.EnableMultiBounce)) {
 				resetReblurHistory = true;
@@ -220,8 +257,27 @@ void ScreenSpaceGI::DrawSettings()
 			hasMultiBounceHistory = false;
 		}
 
-		if (settings.EnableREBLUR)
+		if (settings.EnableREBLUR) {
 			resetReblurHistory |= globals::features::nrd.DrawReblurSettings(settings.Reblur, showAdvanced, "ssgi_reblur");
+			if (showAdvanced) {
+				resetReblurHistory |= ImGui::SliderFloat(T(TKEY("diffuse_prepass_blur_radius"), "Diffuse Pre-pass Radius"), &settings.DiffusePrepassBlurRadius, 0.0f, 75.0f, "%.1f px");
+				if (auto _tt = Util::HoverTooltipWrapper())
+					ImGui::Text("%s", T(TKEY("diffuse_prepass_blur_radius_tooltip"), "Spatial reuse before temporal accumulation. It is the only spatial filtering the AO term gets, so lowering it makes AO and dim indirect light noisier."));
+			}
+		}
+	}
+
+	if (globals::features::effects11.loaded) {
+		ImGui::SeparatorText(T(TKEY("e11_calibration"), "Effects 11 Presets"));
+		ImGui::SliderFloat(T(TKEY("e11_ao_scale"), "Preset AO Scale"), &settings.E11AOScale, 0.0f, 4.0f, "%.2f");
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("e11_ao_scale_tooltip"), "AO Power is the preset's AOAmount times this. ENB's occlusion is weaker than SSGI's, so presets set it high."));
+		ImGui::SliderFloat(T(TKEY("e11_il_scale"), "Preset IL Scale"), &settings.E11ILScale, 0.0f, 4.0f, "%.2f");
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("e11_il_scale_tooltip"), "IL Brightness is the preset's ILAmount times this. ENB's indirect light is faint, so presets often set ILAmount to 3 or 5."));
+		ImGui::SliderFloat(T(TKEY("e11_il_saturation"), "Preset IL Saturation"), &settings.E11ILSaturation, 0.0f, 2.0f, "%.2f");
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("e11_il_saturation_tooltip"), "Colour of the bounce light while a preset drives SSGI. Below 1 keeps strongly coloured surfaces from tinting the preset's grade."));
 	}
 
 	// The buffer viewer has no scene-context meaning, so hide it while a Scene Manager replica
@@ -302,12 +358,25 @@ void ScreenSpaceGI::LoadSettings(json& o_json)
 	ResetIfOutOfRange(settings.AOPower, 0.0f, 6.0f, defaults.AOPower);
 	ResetIfOutOfRange(settings.GIStrength, 0.0f, 6.0f, defaults.GIStrength);
 	ResetIfOutOfRange(settings.DiffuseCubemapMult, 0.0f, 5.0f, defaults.DiffuseCubemapMult);
+	ResetIfOutOfRange(settings.DiffusePrepassBlurRadius, 0.0f, 75.0f, defaults.DiffusePrepassBlurRadius);
 	if (settings.QuarterRes)
 		settings.HalfRes = false;
 	if (!settings.EnableREBLUR) {
 		settings.HalfRes = false;
 		settings.QuarterRes = false;
 	}
+	settings.E11AOScale = Util::ClampFinite(settings.E11AOScale, defaults.E11AOScale, 0.0f, 4.0f);
+	settings.E11ILScale = Util::ClampFinite(settings.E11ILScale, defaults.E11ILScale, 0.0f, 4.0f);
+	settings.E11ILSaturation = Util::ClampFinite(settings.E11ILSaturation, defaults.E11ILSaturation, 0.0f, 2.0f);
+	userSettings = settings;
+	appliedE11Overlay = GetE11Overlay();
+	if (appliedE11Overlay.active) {
+		settings.Enabled = appliedE11Overlay.enabled;
+		settings.EnableGI = appliedE11Overlay.indirectLighting;
+		settings.AOPower = appliedE11Overlay.aoPower;
+		settings.GIStrength = appliedE11Overlay.giStrength;
+	}
+
 	recompileFlag = recompileFlag ||
 	                settings.HalfRes != previous.HalfRes ||
 	                settings.QuarterRes != previous.QuarterRes ||
@@ -330,7 +399,38 @@ void ScreenSpaceGI::LoadSettings(json& o_json)
 
 void ScreenSpaceGI::SaveSettings(json& o_json)
 {
-	o_json = settings;
+	o_json = userSettings;
+}
+
+bool ScreenSpaceGI::IsManagedByE11() const
+{
+	const auto& effects11 = globals::features::effects11;
+	return effects11.IsActive() && effects11.OwnsFeature(E11Handoff::Feature::SSGI);
+}
+
+ScreenSpaceGI::E11Overlay ScreenSpaceGI::GetE11Overlay() const
+{
+	E11Overlay overlay;
+	if (!IsManagedByE11())
+		return overlay;
+	auto& settingManager = SettingManager::GetSingleton();
+	const bool interior = Util::IsInterior();
+	overlay.active = true;
+	overlay.enabled = settingManager.GetValue<bool>("EnableAmbientOcclusion", "EFFECT");
+	overlay.indirectLighting = settingManager.GetValue<bool>("UseIndirectLighting", "SSAO_SSIL");
+	const float aoAmount = settingManager.GetValue<float>(interior ? "AOAmountInterior" : "AOAmount", "SSAO_SSIL");
+	const float ilAmount = settingManager.GetValue<float>(interior ? "ILAmountInterior" : "ILAmount", "SSAO_SSIL");
+	overlay.aoPower = Util::ClampFinite(aoAmount * userSettings.E11AOScale, 1.0f, 0.0f, 6.0f);
+	overlay.giStrength = Util::ClampFinite(ilAmount * userSettings.E11ILScale, 1.0f, 0.0f, 6.0f);
+	return overlay;
+}
+
+void ScreenSpaceGI::RefreshE11Overlay()
+{
+	if (GetE11Overlay() == appliedE11Overlay)
+		return;
+	json document = userSettings;
+	LoadSettings(document);
 }
 
 RE::BSEventNotifyControl ScreenSpaceGI::MenuOpenCloseEventHandler::ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*)
@@ -688,6 +788,7 @@ void ScreenSpaceGI::UpdateSB()
 		data.RcpTexDim = float2(1.0f) / res;
 		data.FrameDim = dynres;
 		data.RcpFrameDim = float2(1.0f) / dynres;
+		data.FrameIndex = globals::state->frameCount;
 
 		data.NumSteps = settings.NumSteps;
 
@@ -916,12 +1017,15 @@ void ScreenSpaceGI::DrawSSGI()
 
 		nrdSvc.ApplyReblurSettings(reblurSettings, settings.Reblur,
 			settings.HalfRes ? nrd::CheckerboardMode::BLACK : nrd::CheckerboardMode::OFF);
+		reblurSettings.hitDistanceParameters.A = 3.0f / Util::Units::GAME_UNIT_TO_M;
+		reblurSettings.hitDistanceParameters.B = 0.1f;
+		reblurSettings.diffusePrepassBlurRadius = settings.DiffusePrepassBlurRadius;
 		if (settings.QuarterRes) {
 			if (reblurSettings.hitDistanceReconstructionMode == nrd::HitDistanceReconstructionMode::OFF)
 				reblurSettings.hitDistanceReconstructionMode = nrd::HitDistanceReconstructionMode::AREA_3X3;
 			// Probabilistic inputs require spatial reuse to redistribute the
 			// probability-compensated radiance before temporal accumulation.
-			reblurSettings.diffusePrepassBlurRadius = std::max(reblurSettings.maxBlurRadius, 1.0f);
+			reblurSettings.diffusePrepassBlurRadius = std::max({ reblurSettings.diffusePrepassBlurRadius, reblurSettings.maxBlurRadius, 1.0f });
 		}
 		nrdReblur.SetDenoiserSettings(&reblurSettings);
 
@@ -1057,6 +1161,7 @@ ScreenSpaceGI::SharedData ScreenSpaceGI::GetCommonBufferData()
 	data.EnableIL = (enabled && settings.EnableGI) ? 1u : 0u;
 	data.ReplaceAmbient = (data.EnableIL && UsesCubemapFallback()) ? 1u : 0u;
 	data.AOPower = settings.AOPower;
+	data.ILSaturation = appliedE11Overlay.active ? userSettings.E11ILSaturation : 1.0f;
 	return data;
 }
 
