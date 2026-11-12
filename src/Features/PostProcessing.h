@@ -52,6 +52,8 @@ struct PostProcessing : Feature
 	virtual void DrawSettings() override;
 	virtual void LoadSettings(json& o_json) override;
 	virtual void SaveSettings(json& o_json) override;
+	/** @brief Migrates each pipeline feature's legacy settings keys inside a full Post Processing settings document. */
+	virtual void MigrateLegacySettings(json& o_json) override;
 	virtual void RestoreDefaultSettings() override;
 	virtual void ApplyContextualDefaults(json& a_defaults) const override;
 

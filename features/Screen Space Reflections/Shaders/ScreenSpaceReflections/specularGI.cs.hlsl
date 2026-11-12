@@ -407,15 +407,19 @@ float SSRT_ValidateHit(float3 hit,
 	screen_uv_space_ray_origin = ProjectPosition(view_space_ray, FrameBuffer::CameraProj);
 	float3 screen_space_ray_direction = ProjectDirection(view_space_ray, view_space_reflected_direction, screen_uv_space_ray_origin, FrameBuffer::CameraProj);
 
-	// Ray march
-	bool valid_hit;
+	const float traceWeight = saturate((MaxTraceRoughness - roughness) * 10.0);
+	bool valid_hit = false;
 	float thickness = SpecThickness + roughness * 10.0;
-	float3 hit = SSRT_HierarchicalRaymarch(screen_uv_space_ray_origin,
-		screen_space_ray_direction,
-		depth_screen_size,
-		most_detailed_mip,
-		HIZ_MAX_ITERATIONS,
-		valid_hit);
+	float3 hit = 0;
+	[branch] if (traceWeight > 0.0)
+	{
+		hit = SSRT_HierarchicalRaymarch(screen_uv_space_ray_origin,
+			screen_space_ray_direction,
+			depth_screen_size,
+			most_detailed_mip,
+			HIZ_MAX_ITERATIONS,
+			valid_hit);
+	}
 
 	float ray_length = 0.0f;
 	float occlusion = 1.0f;
@@ -424,7 +428,8 @@ float SSRT_ValidateHit(float3 hit,
 	if (valid_hit && all(isfinite(hit))) {
 		confidence = SSRT_ValidateHit(hit, uv, view_space_ray, screen_size, thickness, ray_length, occlusion, isBackfaceHit);
 	}
-	float screenConfidence = isBackfaceHit ? 1.0 : confidence;
+	confidence *= traceWeight;
+	float screenConfidence = isBackfaceHit ? traceWeight : confidence;
 	float3 sampleColor = 0;
 	if (confidence > 0.0f) {
 		sampleColor = ColorManagement::SceneToLinear(ScreenColorTexture.SampleLevel(LinearSampler, hit.xy * FrameBuffer::DynamicResolutionParams1.xy, 0).xyz);
@@ -433,10 +438,11 @@ float SSRT_ValidateHit(float3 hit,
 
 #if defined(DYNAMIC_CUBEMAPS)
 	if (SpecUseDynamicCubemap != 0 && (confidence < 0.999f)) {
-		float3 world_space_reflected_direction = mul(FrameBuffer::CameraViewInverse, float4(view_space_reflected_direction, 0)).xyz;
+		float3 world_space_reflected_direction = mul(FrameBuffer::CameraViewInverse, float4(reflect(view_space_ray_direction, view_space_surface_normal), 0)).xyz;
+		const float envLevel = roughness * 8.0;
 		float3 biased_view_space_ray_direction = normalize(view_space_ray);
 		const float NdotV = saturate(dot(biased_view_space_ray_direction, view_space_surface_normal));
-		float3 envSampleRaw = EnvTexture.SampleLevel(LinearSampler, world_space_reflected_direction, 0);
+		float3 envSampleRaw = EnvTexture.SampleLevel(LinearSampler, world_space_reflected_direction, envLevel);
 		float3 envColor = envSampleRaw;
 
 #	if defined(SKYLIGHTING)
@@ -446,7 +452,7 @@ float SSRT_ValidateHit(float3 hit,
 			float3 positionMS = mul(FrameBuffer::CameraViewInverse, float4(unbiased_view_space_ray, 1)).xyz;
 			float3 world_space_view = -normalize(positionMS);
 
-			sh2 skylightingSH = Skylighting::Sample(positionMS, world_space_reflected_direction);
+			sh2 skylightingSH = Skylighting::Sample(Skylighting::ClampToArrayHeight(positionMS), world_space_reflected_direction);
 			float fadeOutFactor = Skylighting::GetFadeOutFactor(positionMS);
 			float3 skylightingNormal = normalize(float3(world_space_normal.xy, max(0, world_space_normal.z)));
 			skylightingSpecular = Skylighting::EvaluateSpecular(skylightingSH, SphericalHarmonics::FauxSpecularLobe(world_space_normal, world_space_view, roughness), fadeOutFactor);
@@ -469,7 +475,7 @@ float SSRT_ValidateHit(float3 hit,
 			}
 
 			if (!SharedData::InInterior) {
-				float3 fullSample = EnvReflectionsTexture.SampleLevel(LinearSampler, world_space_reflected_direction, 0);
+				float3 fullSample = EnvReflectionsTexture.SampleLevel(LinearSampler, world_space_reflected_direction, envLevel);
 				float3 skyColor = max(fullSample - envSampleRaw, 0) * SharedData::iblSettings.SkySpecularIBLScale;
 #		if defined(SKYLIGHTING)
 				skyColor *= skylightingSpecular;
@@ -488,7 +494,7 @@ float SSRT_ValidateHit(float3 hit,
 			} else {
 				float3 fullIrradiance = 0;
 				if (skylightingSpecular > 0.0) {
-					float3 fullSample = EnvReflectionsTexture.SampleLevel(LinearSampler, world_space_reflected_direction, 0);
+					float3 fullSample = EnvReflectionsTexture.SampleLevel(LinearSampler, world_space_reflected_direction, envLevel);
 					float fullLum = Color::RGBToLuminance(EnvReflectionsTexture.SampleLevel(LinearSampler, world_space_reflected_direction, 15));
 					fullIrradiance = ColorManagement::SceneToLinear((fullSample / max(fullLum, 0.001)) * directionalAmbientColorSpecular);
 				}
@@ -503,7 +509,7 @@ float SSRT_ValidateHit(float3 hit,
 				envColor = lerp(envIrradiance, fullIrradiance, skylightingSpecular);
 			}
 #	else
-			float3 fullSample = EnvReflectionsTexture.SampleLevel(LinearSampler, world_space_reflected_direction, 0);
+			float3 fullSample = EnvReflectionsTexture.SampleLevel(LinearSampler, world_space_reflected_direction, envLevel);
 			float fullLum = Color::RGBToLuminance(EnvReflectionsTexture.SampleLevel(LinearSampler, world_space_reflected_direction, 15));
 			envColor = ColorManagement::SceneToLinear((fullSample / max(fullLum, 0.001)) * directionalAmbientColorSpecular);
 #	endif
@@ -522,6 +528,10 @@ float SSRT_ValidateHit(float3 hit,
 		normHitDist = REBLUR_FrontEnd_GetNormHitDist(ray_length, viewZ, kHitDistParams, roughness);
 	} else {
 		normHitDist = 0.0;
+#if defined(DYNAMIC_CUBEMAPS)
+		if (SpecUseDynamicCubemap != 0)
+			normHitDist = 1.0;
+#endif
 	}
 	OutSpecRadianceHitDist[outPixelPos] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(sampleColor, normHitDist, true);
 }

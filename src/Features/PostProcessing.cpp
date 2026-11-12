@@ -342,6 +342,23 @@ void PostProcessing::LoadSettings(json& o_json)
 		ProcessSettings(o_json);
 }
 
+void PostProcessing::MigrateLegacySettings(json& o_json)
+{
+	if (!o_json.is_object())
+		return;
+	o_json.erase("ppsettings");
+	for (auto& feat : pipeline) {
+		if (!feat)
+			continue;
+		const auto featIt = o_json.find(feat->GetType());
+		if (featIt == o_json.end() || !featIt->is_object())
+			continue;
+		const auto settingsIt = featIt->find("settings");
+		if (settingsIt != featIt->end() && settingsIt->is_object())
+			feat->MigrateLegacySettings(*settingsIt);
+	}
+}
+
 void PostProcessing::ProcessSettings(json& o_json)
 {
 	// Scene blends reload every frame, so no info-level log and no per-load SetupResources:
@@ -358,6 +375,7 @@ void PostProcessing::ProcessSettings(json& o_json)
 				if (!feat->IsAutoEnabled())
 					feat->enabled = featJson.value("enabled", true);
 				json featSettings = featJson.value("settings", json::object());
+				feat->MigrateLegacySettings(featSettings);
 				feat->LoadSettings(featSettings);
 			} catch (const json::exception& e) {
 				logger::warn("Failed to load Post Processing settings for {}: {}", feat->GetType(), e.what());

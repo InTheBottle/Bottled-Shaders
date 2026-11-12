@@ -54,6 +54,8 @@ struct Camera : public PostProcessFeature
 	virtual void RestoreDefaultSettings() override;
 	virtual void LoadSettings(json&) override;
 	virtual void SaveSettings(json&) override;
+	/** @brief Maps the pre-lens fisheye, chromatic aberration and noise keys onto the lens settings; the old Camera had no edge softness. */
+	virtual void MigrateLegacySettings(json& a_settings) override;
 
 	virtual void DrawSettings() override;
 

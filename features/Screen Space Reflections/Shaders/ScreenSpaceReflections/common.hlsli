@@ -25,6 +25,9 @@ cbuffer SSRCB : register(b1)
 	float HitDistA;
 	float HitDistB;
 	float HitDistC;
+
+	float MaxTraceRoughness;
+	float3 pad0;
 };
 
 SamplerState samplerPointClamp : register(s0);

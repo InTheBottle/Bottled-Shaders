@@ -241,6 +241,8 @@ public:
 	virtual void SaveSettings(json&) {}
 	virtual void LoadSettings(json&) {}
 	virtual void RestoreDefaultSettings() {}
+	/** @brief Rewrites settings saved by an older version into the current shape, in place, before baselines are validated against it. */
+	virtual void MigrateLegacySettings(json&) {}
 
 	/** @brief Rewrites defaults that depend on the current settings, so a middle-click reset restores the right value.
 	 *  @param a_defaults The feature's default settings, in the shape SaveSettings writes. */

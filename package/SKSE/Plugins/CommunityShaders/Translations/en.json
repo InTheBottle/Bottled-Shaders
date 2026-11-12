@@ -3539,6 +3539,8 @@
     "feature.screen_space_reflections.key_feature_3": "Dynamic cubemap fallback for off-screen rays",
     "feature.screen_space_reflections.key_feature_4": "NVIDIA REBLUR specular denoising",
     "feature.screen_space_reflections.max_steps": "Max Steps",
+    "feature.screen_space_reflections.max_trace_roughness": "Max Trace Roughness",
+    "feature.screen_space_reflections.max_trace_roughness_tooltip": "Rougher surfaces skip the screen trace and use the cubemap reflection. Rough rays on grass, rock and dirt are mostly noise; lower this to trace only glossy surfaces.",
     "feature.screen_space_reflections.name": "Screen Space Reflections",
     "feature.screen_space_reflections.native_menu_description": "Reflects nearby objects on screen in glossy surfaces, falling back to the dynamic cubemaps where rays leave the screen.",
     "feature.screen_space_reflections.normal_bias": "Normal Bias",

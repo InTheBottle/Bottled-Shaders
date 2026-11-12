@@ -97,6 +97,36 @@ void Camera::LoadSettings(json& o_json)
 	settings.GrainColor = std::clamp(settings.GrainColor, 0.0f, 1.0f);
 }
 
+void Camera::MigrateLegacySettings(json& a_settings)
+{
+	constexpr std::array kLegacyKeys{ "UseFE", "FEFoV", "FECrop", "CAStrength", "NoiseStrength", "NoiseType" };
+	if (!a_settings.is_object() || std::ranges::none_of(kLegacyKeys, [&](const char* a_key) { return a_settings.contains(a_key); }))
+		return;
+
+	const auto number = [&](const char* a_key, float a_fallback) {
+		const auto it = a_settings.find(a_key);
+		return it != a_settings.end() && it->is_number() ? it->get<float>() : a_fallback;
+	};
+	const auto useFisheye = a_settings.find("UseFE");
+	const bool fisheye = useFisheye != a_settings.end() && useFisheye->is_boolean() && useFisheye->get<bool>();
+	const float caScale = std::max(number("CAStrength", 0.04f), 0.0f) / 0.04f;
+
+	Settings migrated{};
+	if (!fisheye)
+		migrated.LensDistortion = 0.0f;
+	migrated.LensFOV = number("FEFoV", migrated.LensFOV);
+	migrated.ChromaticAberration *= caScale;
+	migrated.GrainIntensity = number("NoiseStrength", 0.08f);
+	migrated.BlurStrength = 0.0f;
+	const json shaped = migrated;
+	for (const char* key : { "LensDistortion", "LensFOV", "ChromaticAberration", "GrainIntensity", "BlurStrength" }) {
+		if (!a_settings.contains(key))
+			a_settings[key] = shaped.at(key);
+	}
+	for (const char* key : kLegacyKeys)
+		a_settings.erase(key);
+}
+
 void Camera::SaveSettings(json& o_json)
 {
 	o_json = settings;

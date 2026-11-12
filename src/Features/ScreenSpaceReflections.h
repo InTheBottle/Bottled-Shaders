@@ -66,6 +66,7 @@ struct ScreenSpaceReflections : Feature
 		bool HalfRes = true;
 
 		float SpecularMult = 1.0f;
+		float MaxTraceRoughness = 0.6f;
 		uint SpecMaxSteps = 128;
 		float SpecThickness = 5.0f;
 		float NormalBias = 0.2f;
@@ -132,6 +133,9 @@ struct ScreenSpaceReflections : Feature
 		float HitDistA;
 		float HitDistB;
 		float HitDistC;
+
+		float MaxTraceRoughness;
+		float pad0[3];
 	};
 	STATIC_ASSERT_ALIGNAS_16(SSRCB);
 	eastl::unique_ptr<ConstantBuffer> ssrCB;

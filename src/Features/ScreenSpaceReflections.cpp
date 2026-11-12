@@ -19,6 +19,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	Enabled,
 	HalfRes,
 	SpecularMult,
+	MaxTraceRoughness,
 	SpecMaxSteps,
 	SpecThickness,
 	NormalBias,
@@ -106,6 +107,11 @@ void ScreenSpaceReflections::DrawSettings()
 		{
 			auto managedGuard = Util::DisableGuard(e11Managed);
 			ImGui::SliderFloat(T(TKEY("specular_multiplier"), "Specular Multiplier"), &settings.SpecularMult, 0.0f, 5.0f, "%.2f");
+		}
+		if (ImGui::SliderFloat(T(TKEY("max_trace_roughness"), "Max Trace Roughness"), &settings.MaxTraceRoughness, 0.0f, 1.0f, "%.2f"))
+			resetReblurHistory = true;
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("max_trace_roughness_tooltip"), "Rougher surfaces skip the screen trace and use the cubemap reflection. Rough rays on grass, rock and dirt are mostly noise; lower this to trace only glossy surfaces."));
 		}
 		ImGui::Checkbox(T(TKEY("use_dynamic_cubemaps_as_fallback"), "Use Dynamic Cubemaps as Fallback"), &settings.UseDynamicCubemapsAsFallback);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -208,6 +214,7 @@ void ScreenSpaceReflections::LoadSettings(json& o_json)
 	settings = o_json;
 	settings.SpecMaxSteps = std::clamp(settings.SpecMaxSteps, 1u, 256u);
 	ClampSetting(settings.SpecularMult, 0.0f, 5.0f, defaults.SpecularMult);
+	ClampSetting(settings.MaxTraceRoughness, 0.0f, 1.0f, defaults.MaxTraceRoughness);
 	ClampSetting(settings.SpecCubemapMult, 0.0f, 5.0f, defaults.SpecCubemapMult);
 	ClampSetting(settings.SpecThickness, 0.0f, 50.0f, defaults.SpecThickness);
 	ClampSetting(settings.NormalBias, 0.0f, 1.0f, defaults.NormalBias);
@@ -470,6 +477,7 @@ void ScreenSpaceReflections::UpdateSB()
 	data.HitDistA = settings.HitDistA;
 	data.HitDistB = settings.HitDistB;
 	data.HitDistC = settings.HitDistC;
+	data.MaxTraceRoughness = settings.MaxTraceRoughness;
 
 	ssrCB->Update(data);
 }
