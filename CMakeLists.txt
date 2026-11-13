@@ -677,6 +677,7 @@ install(
     PATTERN "Tests" EXCLUDE
 )
 include(FeaturePackaging)
+include(FidelityFX-Runtime)
 # Icon fonts + licenses live under src/Menu/Icons/glyphs; deploy under Icons/glyphs (not Fonts).
 # CONFIGURE_DEPENDS picks up new TTFs / LICENSE files without editing this list.
 set(CS_ICON_FONT_SRC_DIR "${CMAKE_SOURCE_DIR}/src/Menu/Icons/glyphs")
@@ -778,6 +779,7 @@ if(AUTO_PLUGIN_DEPLOYMENT OR AIO_ZIP_TO_DIST)
     foreach(_fpath IN LISTS FEATURE_PATHS)
         file(APPEND "${_feature_paths_file}" "${_fpath}\n")
     endforeach()
+    file(APPEND "${_feature_paths_file}" "${FFX_RUNTIME_FEATURE_ROOT}\n")
 
     # Ensure SKSE/Plugins dir exists
     # Note: DLL and PDB are copied via POST_BUILD command to avoid race conditions
@@ -942,7 +944,7 @@ if(AUTO_PLUGIN_DEPLOYMENT OR AIO_ZIP_TO_DIST)
     set(_shader_copy_inputs ${_package_shaders})
 
     set(_feature_shader_paths_file "${CMAKE_CURRENT_BINARY_DIR}/feature_shader_paths.txt")
-    file(WRITE "${_feature_shader_paths_file}" "")
+    file(WRITE "${_feature_shader_paths_file}" "${FFX_RUNTIME_SHADER_ROOT}\n")
     foreach(_fpath IN LISTS FEATURE_PATHS)
         if(EXISTS "${_fpath}/Shaders")
             file(APPEND "${_feature_shader_paths_file}" "${_fpath}/Shaders\n")
@@ -962,6 +964,7 @@ if(AUTO_PLUGIN_DEPLOYMENT OR AIO_ZIP_TO_DIST)
     )
 
     append_copy_if_different(_shader_copy_cmds _package_shaders "${CMAKE_SOURCE_DIR}/package/Shaders" "${AIO_DIR}/Shaders")
+    append_copy_if_different(_shader_copy_cmds FFX_RUNTIME_FILES "${FFX_RUNTIME_SHADER_ROOT}" "${AIO_DIR}/Shaders")
 
     # feature shader folders
     set(_all_feature_shader_files)
@@ -989,6 +992,7 @@ if(AUTO_PLUGIN_DEPLOYMENT OR AIO_ZIP_TO_DIST)
         DEPENDS
             ${HLSL_FILES}
             ${_shader_copy_inputs}
+            ${FFX_RUNTIME_FILES}
             ${CMAKE_SOURCE_DIR}/cmake/CleanupStaleEntries.cmake
         COMMENT "Copying changed shaders into AIO/Shaders"
     )
@@ -1481,7 +1485,7 @@ if(TARGET PREPARE_AIO)
 else()
     add_custom_command(
         OUTPUT ${AIO_DIR}/SKSE/Plugins/${PROJECT_NAME}.dll
-        DEPENDS ${PROJECT_NAME} ${CORE_SOURCES}
+        DEPENDS ${PROJECT_NAME} ${CORE_SOURCES} ${FFX_RUNTIME_FILES}
         COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --config $<CONFIG> --prefix ${AIO_DIR}
         COMMENT "Installing to AIO folder"
     )
@@ -1545,7 +1549,7 @@ else()
     endif()
     add_custom_command(
         OUTPUT ${AIO_PACKAGE}
-        DEPENDS ${PROJECT_NAME} ${CORE_SOURCES}
+        DEPENDS ${PROJECT_NAME} ${CORE_SOURCES} ${FFX_RUNTIME_FILES}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${AIO_DIR}
         COMMAND
             ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --config $<CONFIG>
