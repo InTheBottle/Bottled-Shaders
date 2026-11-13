@@ -18,6 +18,7 @@
         "LODBlending": 7,
         "LightLimitFix": 3,
         "LinearLighting": 16,
+        "NeuralRendering": 60,
         "PerformanceOverlay": 12,
         "PostProcessing": 291,
         "ProceduralSun": 9,

@@ -3,6 +3,7 @@
 #include "NeuralRendering/Backend.h"
 
 #include "../I18n/I18n.h"
+#include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
 #include "Deferred.h"
 #include "HDRDisplay.h"
 #include "LinearLighting.h"
@@ -780,22 +781,32 @@ void NeuralRendering::DrawSettings()
 	const bool controlsAvailable = settings.enabled && backendAvailable;
 	if (!controlsAvailable)
 		ImGui::BeginDisabled();
-	DrawPresetControls();
 
-	ImGui::Checkbox(T(TKEY("show_advanced"), "Show Advanced Settings"), &settings.showAdvanced);
-	if (auto _tt = Util::HoverTooltipWrapper()) {
-		ImGui::TextUnformatted(T(TKEY("show_advanced_tooltip"),
-			"Show model tuning, color and lighting controls, material adjustments, and diagnostic views."));
+	// A Scene Manager page authors overrides. Presets rewrite the base settings, so they stay on the
+	// main menu, and the page shows every control rather than hiding some behind Show Advanced.
+	const bool scenePage = SceneWidgetInterceptor::IsArmed();
+	if (!scenePage) {
+		DrawPresetControls();
+
+		ImGui::Checkbox(T(TKEY("show_advanced"), "Show Advanced Settings"), &settings.showAdvanced);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::TextUnformatted(T(TKEY("show_advanced_tooltip"),
+				"Show model tuning, color and lighting controls, material adjustments, and diagnostic views."));
+		}
 	}
+	const bool showAdvanced = settings.showAdvanced || scenePage;
 	const char* placementLabels[] = {
 		T(TKEY("placement_before"), "Before Upscaling"),
 		T(TKEY("placement_after"), "After Upscaling"),
 		T(TKEY("placement_separate"), "Separate Upscaling (Experimental)"),
 		T(TKEY("placement_finished_image"), "Finished Image")
 	};
-	int placement = static_cast<int>(settings.placement);
-	if (ImGui::Combo(T(TKEY("placement"), "Placement"), &placement, placementLabels, IM_ARRAYSIZE(placementLabels)))
-		settings.placement = static_cast<uint>(std::clamp(placement, 0, 3));
+	{
+		int placement = static_cast<int>(settings.placement);
+		const SceneWidgetInterceptor::ProxyScope proxy(&settings.placement, 1.0f);
+		if (ImGui::Combo(T(TKEY("placement"), "Placement"), &placement, placementLabels, IM_ARRAYSIZE(placementLabels)) && !scenePage)
+			settings.placement = static_cast<uint>(std::clamp(placement, 0, 3));
+	}
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::TextUnformatted(T(TKEY("placement_tooltip"),
 			"Before Upscaling enhances the image before DLSS upscales it. After Upscaling enhances the upscaled image.\nSeparate Upscaling enhances a lower-resolution image and upscales the changes separately. Uses more GPU time and VRAM.\nFinished Image enhances the final image after tone mapping, Depth of Field, and Motion Blur. Does not run on the main menu or loading screens."));
@@ -805,9 +816,12 @@ void NeuralRendering::DrawSettings()
 		T(TKEY("resolution_mode_uniform"), "Uniform"),
 		T(TKEY("resolution_mode_per_axis"), "Per-Axis (Experimental)")
 	};
-	int resolutionMode = static_cast<int>(settings.resolutionMode);
-	if (ImGui::Combo(T(TKEY("resolution_mode"), "Model Resolution"), &resolutionMode, resolutionModeLabels, IM_ARRAYSIZE(resolutionModeLabels)))
-		settings.resolutionMode = static_cast<uint>(std::clamp(resolutionMode, 0, 1));
+	{
+		int resolutionMode = static_cast<int>(settings.resolutionMode);
+		const SceneWidgetInterceptor::ProxyScope proxy(&settings.resolutionMode, 1.0f);
+		if (ImGui::Combo(T(TKEY("resolution_mode"), "Model Resolution"), &resolutionMode, resolutionModeLabels, IM_ARRAYSIZE(resolutionModeLabels)) && !scenePage)
+			settings.resolutionMode = static_cast<uint>(std::clamp(resolutionMode, 0, 1));
+	}
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::TextUnformatted(T(TKEY("resolution_mode_tooltip"),
 			"Uniform scales model width and height equally. Per-Axis lets you adjust them separately to balance detail and performance."));
@@ -851,7 +865,7 @@ void NeuralRendering::DrawSettings()
 	if (compareView.wipe)
 		ImGui::SliderFloat(T(TKEY("compare_wipe_position"), "Split Position"), &compareView.wipePosition, 0.0f, 1.0f, "%.2f");
 
-	if (settings.showAdvanced) {
+	if (showAdvanced) {
 		ImGui::Separator();
 		ImGui::TextUnformatted(T(TKEY("model_inputs"), "Model Tuning"));
 		if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -864,9 +878,12 @@ void NeuralRendering::DrawSettings()
 			T(TKEY("style_natural"), "Natural"),
 			T(TKEY("style_cinematic"), "Cinematic")
 		};
-		int neuralStyle = static_cast<int>(settings.style);
-		if (ImGui::Combo(T(TKEY("style"), "NR Style"), &neuralStyle, neuralStyles, IM_ARRAYSIZE(neuralStyles)))
-			settings.style = static_cast<uint>(std::clamp(neuralStyle, 0, 2));
+		{
+			int neuralStyle = static_cast<int>(settings.style);
+			const SceneWidgetInterceptor::ProxyScope proxy(&settings.style, 1.0f);
+			if (ImGui::Combo(T(TKEY("style"), "NR Style"), &neuralStyle, neuralStyles, IM_ARRAYSIZE(neuralStyles)) && !scenePage)
+				settings.style = static_cast<uint>(std::clamp(neuralStyle, 0, 2));
+		}
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::TextUnformatted(T(TKEY("style_tooltip"), "Choose the Neural Rendering visual style."));
 		}
@@ -894,9 +911,13 @@ void NeuralRendering::DrawSettings()
 			T(TKEY("proxy_legacy"), "Legacy")
 		};
 		ImGui::BeginDisabled(finishedImage);
-		int proxyCurve = static_cast<int>(std::min<uint>(settings.proxyCurve, static_cast<uint>(ProxyCurve::kLegacy)));
-		if (ImGui::Combo(T(TKEY("proxy_curve"), "Proxy Curve"), &proxyCurve, proxyCurveLabels, IM_ARRAYSIZE(proxyCurveLabels)))
-			settings.proxyCurve = static_cast<uint>(std::clamp(proxyCurve, 0, 2));
+		{
+			// LoadSettings already sanitizes proxyCurve; a plain cast is what the scene catalog recognizes.
+			int proxyCurve = static_cast<int>(settings.proxyCurve);
+			const SceneWidgetInterceptor::ProxyScope proxy(&settings.proxyCurve, 1.0f);
+			if (ImGui::Combo(T(TKEY("proxy_curve"), "Proxy Curve"), &proxyCurve, proxyCurveLabels, IM_ARRAYSIZE(proxyCurveLabels)) && !scenePage)
+				settings.proxyCurve = static_cast<uint>(std::clamp(proxyCurve, 0, 2));
+		}
 		ImGui::EndDisabled();
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::TextUnformatted(T(TKEY("proxy_curve_tooltip"),
@@ -1308,8 +1329,11 @@ void NeuralRendering::LoadSettings(json& o_json)
 		settings.preset = static_cast<uint>(Preset::kFull);
 
 	// A user preset whose file is gone is forgotten; its values stay and read as the built-in
-	// preset they were based on, "(modified)" wherever they differ.
-	RefreshUserPresets();
+	// preset they were based on, "(modified)" wherever they differ. The folder is read on the first
+	// load only: Scene Manager blends reload these settings every frame, and the preset combo
+	// re-reads it whenever it opens.
+	if (!userPresetsLoaded)
+		RefreshUserPresets();
 	if (!settings.userPreset.empty() && !FindUserPreset(settings.userPreset)) {
 		logger::info("[NeuralRendering] Preset '{}' no longer exists; keeping its values", settings.userPreset);
 		settings.userPreset.clear();

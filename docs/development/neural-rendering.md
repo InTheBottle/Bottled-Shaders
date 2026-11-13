@@ -999,8 +999,10 @@ user preset; both comparisons are case-insensitive, as Windows file names are. R
 preset to a new case of its own name is allowed. Names are UTF-8 from ImGui and are converted
 to paths through `std::u8string`, not the ANSI code page.
 
-`LoadSettings` re-reads the folder and clears a `userPreset` whose file is gone. Its values
-stay, labelled as the built-in they were based on.
+The first `LoadSettings` reads the folder, and every load clears a `userPreset` whose file is
+not in the list read last. Its values stay, labelled as the built-in they were based on. Later
+loads do not re-read the folder, because the Scene Manager reloads these settings every frame
+while it blends; the combo re-reads it when it opens.
 
 ### Layout
 
@@ -1013,6 +1015,28 @@ judges whether the edit is an improvement at all.
 Behind Advanced: NR Style, Local Tone/Structure/Skin, Automatic Mask, Proxy Curve,
 Transfer/Color/Broad/Detail strengths, Band Radius, Ratio Guard and Max Ratio, the
 per-category trees, Depth-Aware Silhouette, Frame Hold, and the whole Debug group.
+
+### Scene Manager
+
+Neural Rendering's settings can be overridden per interior, time of day, weather and location,
+like every other feature in the Scene Manager. The per-category strengths are part of this. A
+scene page draws the same `DrawSettings()`, with these differences:
+
+- **The preset controls and Show Advanced are left out.** A preset writes the base settings
+  directly, not a scene override. The Advanced section is always shown, so every setting a scene
+  can hold is visible.
+- **Some settings cannot be scene-set** (`SceneSettingsPolicy.h`): Show Advanced, the two saved
+  debug views (Show Material Categories, Raw Model Output), and Model Resolution with its
+  scales. During a blend, a scale would re-allocate the model raster at every 2-pixel step. These
+  controls are greyed out on a scene page. The runtime-only aids (Split Screen, Frame Hold, the
+  band and guard views) stay live, because they are never saved.
+- **Booleans and combos snap.** Enable, Placement, NR Style, Proxy Curve and the toggles can be
+  set only on interior pages and on location pages with Time of Day off, as for every feature.
+  A Placement or Enable change
+  releases the model and recreates it on the next frame.
+- The four combos bind through `SceneWidgetInterceptor::ProxyScope`, because they draw a
+  temporary `int`, not the `uint` member. While the page is armed they never write the member
+  back.
 
 ### Settings migration
 

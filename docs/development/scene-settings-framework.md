@@ -392,8 +392,17 @@ are **blocked** rather than clobbering it, and unknown fields on an entry are pr
     - `ScreenSpaceGI`'s `ResolutionMode`, `EnableGI`, `EnableTemporalDenoiser` and
       `EnableExperimentalSpecularGI`: each is a shader define, so a change recompiles every SSGI compute
       shader on the render thread and a location transition would hitch.
-- `kLocationFeatureWhitelist` (7) and `kTimeOfDayFeatureWhitelist` (10): which features those scene types
+    - `NeuralRendering`'s `showAdvanced` (panel layout), `debugCategoryView` and `rawModelOutput` (debug
+      views), and `resolutionMode` / `resolutionScale` / `resolutionScaleX` / `resolutionScaleY`. The
+      scales size the model raster, which the backend re-allocates once a 2-pixel-rounded extent holds
+      for 12 frames, so a blend would re-allocate at every step.
+- `kLocationFeatureWhitelist` (8) and `kTimeOfDayFeatureWhitelist` (12): which features those scene types
   may target.
+
+`NeuralRendering` takes part in every scene type. Its `LoadSettings` must stay cheap for the same reason as
+`PostProcessing`'s (below), so it reads the user-preset folder only on its first load. On a scene page its
+panel leaves out the preset controls, which rewrite the base settings, and always shows the Advanced
+section, because its own Show Advanced toggle is blacklisted.
 
 `PostProcessing` defers its load: `LoadSettings` stores the JSON and `ProcessSettings` applies it in
 `Prepass`. Its per-load path must stay cheap because a blend reloads every frame, so sub-features reconcile
