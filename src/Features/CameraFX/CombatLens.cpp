@@ -43,6 +43,8 @@ namespace CameraFXLens
 		constexpr float kHitBlurDecay = 2.2f;
 		constexpr float kBlurInterval = 0.12f;
 		constexpr float kSpellBlurInterval = 1.0f;
+		constexpr float kElementInterval = 0.2f;
+		constexpr float kSpellElementInterval = 1.0f;
 
 		class HitSink final : public RE::BSTEventSink<RE::TESHitEvent>
 		{
@@ -98,30 +100,89 @@ namespace CameraFXLens
 			return Element::kNone;
 		}
 
+		enum class Body
+		{
+			kFlesh,
+			kBone,
+			kNone
+		};
+
+		// The victim's body, by its race's blood impact material (the material the game picks hit effects by),
+		// walking up the parent materials so modded ones inherit. Without it, atronachs, wisps, ice wraiths,
+		// spriggans and seekers splattered red blood.
+		Body GetBody(const RE::TESRace* a_race)
+		{
+			using Material = RE::MATERIAL_ID;
+			constexpr int kMaxMaterialDepth = 8;
+			const RE::BGSMaterialType* material = a_race ? a_race->bloodImpactMaterial : nullptr;
+			for (int depth = 0; material && depth < kMaxMaterialDepth; ++depth, material = material->parentType) {
+				switch (material->materialID) {
+				case Material::kBoneActor:
+				case Material::kBone:
+				case Material::kSkinSkeleton:
+					return Body::kBone;
+				case Material::kGhost:
+				case Material::kWard:
+				case Material::kWater:
+				case Material::kIce:
+				case Material::kIceForm:
+				case Material::kStone:
+				case Material::kStoneHeavy:
+				case Material::kStoneBroken:
+				case Material::kWood:
+				case Material::kWoodLight:
+				case Material::kWoodHeavy:
+				case Material::kMetalLight:
+				case Material::kMetalSolid:
+				case Material::kMetalHeavy:
+					return Body::kNone;
+				default:
+					break;
+				}
+			}
+			return Body::kFlesh;
+		}
+
 		bool GetBloodType(RE::Actor* a_actor, SplatType& o_type)
 		{
 			if (!a_actor || a_actor->IsGhost())
 				return false;
-			if (a_actor->HasKeywordString("ActorTypeDwarven"))
+			const auto* race = a_actor->GetRace();
+			if (race && race->data.flags.any(RE::RACE_DATA::Flag::kDontShowBloodSpray))
+				return false;
+			// Dwarven machines are metal by material but leak oil.
+			if (a_actor->HasKeywordString("ActorTypeDwarven")) {
 				o_type = SplatType::kOil;
-			else if (a_actor->HasKeywordString("ActorTypeUndead"))
+				return true;
+			}
+			const bool undead = a_actor->HasKeywordString("ActorTypeUndead");
+			switch (GetBody(race)) {
+			case Body::kNone:
+				return false;
+			case Body::kBone:
+				// Draugr share the skeletons' bone material and keep their dark blood; living bone bodies
+				// (spriggans, seekers) have none.
+				if (!undead)
+					return false;
 				o_type = SplatType::kDarkBlood;
-			else
-				o_type = SplatType::kBlood;
-			return true;
+				return true;
+			default:
+				o_type = undead ? SplatType::kDarkBlood : SplatType::kBlood;
+				return true;
+			}
 		}
 
 		float GetLife(SplatType a_type)
 		{
 			switch (a_type) {
 			case SplatType::kIce:
-				return 3.5f;
-			case SplatType::kFire:
-				return 1.3f;
-			case SplatType::kGrit:
 				return 3.0f;
+			case SplatType::kFire:
+				return 1.1f;
+			case SplatType::kGrit:
+				return 2.5f;
 			default:
-				return 8.0f;
+				return 6.0f;
 			}
 		}
 
@@ -129,15 +190,15 @@ namespace CameraFXLens
 		{
 			switch (a_type) {
 			case SplatType::kVenom:
-				return 0.14f;
+				return 0.12f;
 			case SplatType::kIce:
-				return 0.18f;
+				return 0.15f;
 			case SplatType::kFire:
-				return 0.2f;
+				return 0.13f;
 			case SplatType::kGrit:
-				return 0.16f;
+				return 0.13f;
 			default:
-				return 0.07f + 0.06f * std::clamp(a_strength, 0.0f, 1.0f);
+				return 0.06f + 0.05f * std::clamp(a_strength, 0.0f, 1.0f);
 			}
 		}
 
@@ -152,7 +213,9 @@ namespace CameraFXLens
 		auto* values = a_actor ? a_actor->AsActorValueOwner() : nullptr;
 		if (!values)
 			return 1.0f;
-		const float maximum = values->GetPermanentActorValue(RE::ActorValue::kHealth);
+		// The maximum the health bar shows, temporary modifiers included: Fortify Health potions and enchantments
+		// otherwise shifted the low-health threshold away from the game's own heartbeat.
+		const float maximum = a_actor->GetActorValueMax(RE::ActorValue::kHealth);
 		const float current = values->GetActorValue(RE::ActorValue::kHealth);
 		return std::isfinite(maximum) && maximum > 1.0f && std::isfinite(current) ? std::clamp(current / maximum, 0.0f, 1.0f) : 1.0f;
 	}
@@ -244,10 +307,10 @@ namespace CameraFXLens
 			hit.type = type;
 			if (!ProjectPoint(torso, hit.u, hit.v))
 				return;
-			hit.count = ranged ? 1 : (power ? 3 : 1 + (distance < 200.0f ? 1 : 0));
-			hit.strength = (ranged ? 0.6f : (power ? 1.2f : 0.9f)) * (1.0f - 0.5f * Util::Smoothstep(150.0f, maxDistance, distance));
+			hit.count = ranged ? 1 : (power ? 2 : 1 + (distance < 200.0f ? 1 : 0));
+			hit.strength = (ranged ? 0.5f : (power ? 1.0f : 0.75f)) * (1.0f - 0.5f * Util::Smoothstep(150.0f, maxDistance, distance));
 			if (power && weapon)
-				hit.flash = 0.12f;
+				hit.flash = 0.08f;
 			Queue(hit);
 			return;
 		}
@@ -260,11 +323,11 @@ namespace CameraFXLens
 		const bool big = dragon || (attacker && attacker->GetHeight() > kBigActorHeight);
 
 		if (options.shake) {
-			float strength = spell ? 0.0f : (bash ? 0.3f : (power ? 0.4f : 0.22f));
+			float strength = spell ? 0.0f : (bash ? 0.22f : (power ? 0.3f : 0.15f));
 			if (ranged && !spell)
-				strength = 0.12f;
+				strength = 0.08f;
 			if (big)
-				strength = std::max(strength, 0.55f);
+				strength = std::max(strength, 0.4f);
 			if (blocked)
 				strength *= 0.5f;
 			if (strength > 0.0f && Ready(kCoolShake, 0.15f))
@@ -280,11 +343,11 @@ namespace CameraFXLens
 
 		const Element element = ClassifySpell(spell);
 		if (options.hitBlur) {
-			float blur = spell ? (element != Element::kNone ? 0.3f : 0.0f) : (bash ? 0.6f : (power ? 0.75f : 0.45f));
+			float blur = spell ? (element != Element::kNone ? 0.2f : 0.0f) : (bash ? 0.42f : (power ? 0.55f : 0.3f));
 			if (ranged && !spell)
-				blur = 0.3f;
+				blur = 0.2f;
 			if (big)
-				blur = std::max(blur, spell ? 0.5f : 0.85f);
+				blur = std::max(blur, spell ? 0.35f : 0.65f);
 			if (blocked)
 				blur *= 0.4f;
 			if (blur > 0.0f && Ready(spell ? kCoolSpellBlur : kCoolBlur, spell ? kSpellBlurInterval : kBlurInterval)) {
@@ -294,32 +357,32 @@ namespace CameraFXLens
 			}
 		}
 
-		if (element != Element::kNone && options.elemental && Ready(kCoolElement, 0.2f)) {
+		if (element != Element::kNone && options.elemental && Ready(kCoolElement, spell ? kSpellElementInterval : kElementInterval)) {
 			switch (element) {
 			case Element::kFire:
 				hit.splat = true;
 				hit.type = SplatType::kFire;
 				hit.count = dragon ? 3 : 1;
-				hit.strength = dragon ? 1.3f : 0.9f;
-				hit.flash = 0.15f;
+				hit.strength = dragon ? 1.1f : 0.75f;
+				hit.flash = 0.1f;
 				hit.flashWarmth = 1.0f;
-				hit.fire = dragon ? 1.0f : 0.5f;
+				hit.fire = dragon ? 0.7f : 0.35f;
 				break;
 			case Element::kFrost:
 				hit.splat = true;
 				hit.type = SplatType::kIce;
 				hit.count = dragon ? 3 : 1;
-				hit.strength = dragon ? 1.2f : 0.9f;
-				hit.frost = dragon ? 0.8f : 0.35f;
+				hit.strength = dragon ? 1.0f : 0.75f;
+				hit.frost = dragon ? 0.6f : 0.25f;
 				break;
 			case Element::kShock:
-				hit.shock = 1.0f;
-				hit.flash = 0.1f;
+				hit.shock = 0.8f;
+				hit.flash = 0.06f;
 				break;
 			case Element::kPoison:
 				hit.splat = true;
 				hit.type = SplatType::kVenom;
-				hit.strength = 0.9f;
+				hit.strength = 0.75f;
 				break;
 			default:
 				break;
@@ -340,7 +403,7 @@ namespace CameraFXLens
 			hit.slashAngle = side * (0.6f + 0.4f * Random());
 		}
 		if (options.flash)
-			hit.flash = power ? 0.2f : 0.1f;
+			hit.flash = power ? 0.12f : 0.06f;
 		hit.flashWarmth = 0.6f;
 
 		if (options.blood && GetHealthFraction(player) < 0.5f && Random() < 0.5f && Ready(kCoolOwnBlood, 1.0f)) {
@@ -348,12 +411,12 @@ namespace CameraFXLens
 			hit.type = SplatType::kBlood;
 			hit.u = 0.2f + 0.6f * Random();
 			hit.v = 0.75f + 0.15f * Random();
-			hit.strength = 0.7f;
+			hit.strength = 0.55f;
 		} else if (big && options.elemental && Ready(kCoolGrit, 0.5f)) {
 			hit.splat = true;
 			hit.type = SplatType::kGrit;
 			hit.count = 2;
-			hit.strength = 1.0f;
+			hit.strength = 0.8f;
 		}
 		Queue(hit);
 	}
@@ -462,7 +525,7 @@ namespace CameraFXLens
 				continue;
 			switch (base->data.resistVariable) {
 			case RE::ActorValue::kResistFire:
-				persistentFire = std::min(persistentFire + 0.5f, 1.0f);
+				persistentFire = std::min(persistentFire + 0.35f, 0.7f);
 				break;
 			case RE::ActorValue::kResistFrost:
 				persistentFrost = std::min(persistentFrost + 0.4f, 1.0f);
@@ -483,7 +546,7 @@ namespace CameraFXLens
 		float staminaFraction = 1.0f;
 		if (player) {
 			if (auto* values = player->AsActorValueOwner()) {
-				const float maximum = values->GetPermanentActorValue(RE::ActorValue::kStamina);
+				const float maximum = player->GetActorValueMax(RE::ActorValue::kStamina);
 				const float current = values->GetActorValue(RE::ActorValue::kStamina);
 				if (std::isfinite(maximum) && maximum > 1.0f && std::isfinite(current))
 					staminaFraction = std::clamp(current / maximum, 0.0f, 1.0f);

@@ -246,7 +246,7 @@ namespace CameraFXLens
 			if (a_options.weatherFrost) {
 				const bool blizzard = sky->currentWeather && sky->currentWeather->data.flags.any(RE::TESWeather::WeatherDataFlag::kSnow) &&
 				                      ash < 0.5f && state.windSpeed >= kBlizzardWindSpeed;
-				targets.frost = std::max(snow * 0.35f, blizzard ? 0.75f : 0.0f) * a_options.weatherFrostStrength;
+				targets.frost = std::max(snow * 0.28f, blizzard ? 0.6f : 0.0f) * a_options.weatherFrostStrength;
 			}
 		}
 

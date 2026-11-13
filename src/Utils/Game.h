@@ -215,6 +215,9 @@ namespace Util
 	/** @brief Sun disc visibility in [0, 1] from its sky shader blend alpha; 0 when the sun is missing or hidden. */
 	float GetSunVisibility(const RE::Sun* a_sun);
 
+	/** @brief Half-angle tangent a sky billboard covers seen from a_viewer, or a_fallback when it has no usable bound. */
+	float GetBillboardHalfTan(const RE::NiAVObject* a_billboard, const RE::NiPoint3& a_viewer, float a_fallback);
+
 	/**
 	 * @brief Converts a 2D world position to cell coordinates.
 	 *

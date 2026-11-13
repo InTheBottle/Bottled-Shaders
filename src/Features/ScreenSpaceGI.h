@@ -1,7 +1,20 @@
 #pragma once
 
 #include "Buffer.h"
+#include "NRD.h"
+#include "NRDReblurIntegration.h"
 
+#include <NRDSettings.h>
+
+/**
+ * ScreenSpaceGI: indirect lighting and ambient occlusion via XeGTAO-style
+ * horizon scanning, optionally directional via spherical harmonics, denoised
+ * by NVIDIA REBLUR.
+ *
+ * Diffuse-only. Specular reflections live in the standalone
+ * ScreenSpaceReflections feature; denoising guides come from the core NRD
+ * service.
+ */
 struct ScreenSpaceGI : Feature
 {
 private:
@@ -18,12 +31,14 @@ public:
 	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
 	{
 		std::string desc = T("feature.screen_space_gi.description", "Screen Space Global Illumination adds realistic indirect lighting and ambient occlusion to the game. This technique simulates how light bounces off surfaces to illuminate other objects naturally.");
-		return { desc,
-			{ T("feature.screen_space_gi.key_feature_1", "Realistic indirect lighting"),
+		return std::make_pair(
+			desc,
+			std::vector<std::string>{
+				T("feature.screen_space_gi.key_feature_1", "Realistic indirect lighting"),
 				T("feature.screen_space_gi.key_feature_2", "Enhanced ambient occlusion"),
 				T("feature.screen_space_gi.key_feature_3", "Improved visual depth and atmosphere"),
-				T("feature.screen_space_gi.key_feature_4", "Temporal denoising for smooth results"),
-				T("feature.screen_space_gi.key_feature_5", "Configurable quality and performance settings") } };
+				T("feature.screen_space_gi.key_feature_4", "NVIDIA REBLUR temporal denoising"),
+				T("feature.screen_space_gi.key_feature_5", "Configurable quality and performance settings") });
 	}
 
 	/** @brief Resets all settings to their default values and flags shaders for recompilation. */
@@ -45,19 +60,17 @@ public:
 	/** @brief Checks whether all required compute shaders and the noise texture loaded successfully. */
 	bool ShadersOK();
 
-	/** @brief Executes the full SSGI pipeline: depth prefilter, radiance fetch, GI, blur, and upsample. */
+	/** @brief Executes the full SSGI pipeline: depth prefilter, radiance fetch, GI, and denoising. */
 	void DrawSSGI();
+	/** @brief Composites this frame's SSGI indirect diffuse lighting into the main render target before downstream screen-space passes. */
+	void Composite();
 	/** @brief Updates the SSGI constant buffer with current camera, resolution, and settings data. */
 	void UpdateSB();
+	void SetupNRDResources();
 
 	//////////////////////////////////////////////////////////////////////////////////
 
 	bool recompileFlag = false;
-	bool compiledWithGI = false;
-	uint outputAoIdx = 0;
-	uint outputIlIdx = 0;
-	Texture2D* outputAo = nullptr;
-	bool outputsCleared = false;
 
 	// Loading screen radiance decays at only 1/MaxAccumFrames per frame, bleeding the old scene
 	// into the new one for some frames.
@@ -75,109 +88,115 @@ public:
 	{
 		bool Enabled = true;
 		bool EnableGI = true;
-		bool EnableExperimentalSpecularGI = true;
 		bool EnableVanillaSSAO = false;
+		bool EnableSH = true;
 		// performance/quality
-		uint NumSlices = 4u;
 		uint NumSteps = 8u;
-		int ResolutionMode = 1;  // 0-full, 1-half, 2-quarter - DBF default
+		bool HalfRes = true;
+		bool QuarterRes = false;
 		// visual
-		float MinScreenRadius = 0.01f;
-		float AORadius = 256.f;
-		float GIRadius = 256.f;
-		float Thickness = 32.f;
-		float2 DepthFadeRange = { 4e4, 5e4 };
-		// gi
-		float GISaturation = 0.8f;
-		float GIDistanceCompensation = 0.f;
+		float Thickness = 0.1f;
 		// mix
 		float AOPower = 1.0f;
 		float GIStrength = 1.0f;
-		float SpecularStrength = 1.0f;
-		// denoise
-		bool EnableTemporalDenoiser = true;
-		bool EnableBlur = true;
-		float DepthDisocclusion = .1f;
-		float NormalDisocclusion = .1f;
-		uint MaxAccumFrames = 16;
-		float BlurRadius = 2.f;
-		float DistanceNormalisation = 2.f;
+		bool EnableMultiBounce = false;
+		bool UseDynamicCubemapsAsFallback = true;
+		float DiffuseCubemapMult = 1.0f;
+		// NRD REBLUR
+		bool EnableREBLUR = true;
+		NRD::REBLURSettings Reblur;
+		float DiffusePrepassBlurRadius = 30.0f;
+		float E11AOScale = 0.5f;
+		float E11ILScale = 0.2f;
+		float E11ILSaturation = 0.8f;
 	} settings;
+
+	/** @brief The settings as the user and the scene layers left them, before an Effects 11 preset overlays its own. */
+	Settings userSettings;
+
+	/** @brief The values an active Effects 11 preset drives: [EFFECT] EnableAmbientOcclusion and [SSAO_SSIL]. */
+	struct E11Overlay
+	{
+		bool active = false;
+		bool enabled = false;
+		bool indirectLighting = false;
+		float aoPower = 1.0f;
+		float giStrength = 1.0f;
+		bool operator==(const E11Overlay&) const = default;
+	};
+	E11Overlay appliedE11Overlay;
+
+	/** @brief Whether an active Effects 11 preset drives SSGI, i.e. it is not handed back to Bottled Shaders. */
+	bool IsManagedByE11() const;
+	/** @brief The overlay the active preset wants this frame, inactive when Effects 11 does not own SSGI. */
+	E11Overlay GetE11Overlay() const;
+	/** @brief Re-applies the settings when the preset's overlay changed since the last apply. Render thread. */
+	void RefreshE11Overlay();
 
 	struct alignas(16) SSGICB
 	{
-		float4x4 PrevInvViewMat;
-		float4 NDCToViewMul;
-		float4 NDCToViewAdd;
+		float2 NDCToViewMul;
+		float2 NDCToViewAdd;
 
 		float2 TexDim;
-		float2 RcpTexDim;  //
+		float2 RcpTexDim;
 		float2 FrameDim;
-		float2 RcpFrameDim;  //
-		float pad0;
+		float2 RcpFrameDim;
+		uint FrameIndex;
 
-		uint NumSlices;
 		uint NumSteps;
 
-		float MinScreenRadius;  //
-		float AORadius;
-		float GIRadius;
-		float EffectRadius;
-		float Thickness;  //
-		float2 DepthFadeRange;
-		float DepthFadeScaleConst;
+		float Thickness;
+		float AOPower;
 
-		float GISaturation;  //
-		float GIDistanceCompensation;
-		float GICompensationMaxDist;
-		float SpecularStrength;
-
-		float AOPower;  //
 		float GIStrength;
-
-		float DepthDisocclusion;
-		float NormalDisocclusion;
-		uint MaxAccumFrames;  //
-
-		float BlurRadius;
-		float DistanceNormalisation;
-
-		float2 pad;
+		float DiffuseCubemapMult;
+		uint UseDynamicCubemap;
+		uint MultiBounceMode;
 	};
 	STATIC_ASSERT_ALIGNAS_16(SSGICB);
 	eastl::unique_ptr<ConstantBuffer> ssgiCB;
 
+	struct alignas(16) SharedData
+	{
+		uint Enabled;
+		uint EnableIL;
+		uint ReplaceAmbient;
+		float AOPower;
+		float ILSaturation;
+		float pad0[3];
+	};
+
+	SharedData GetCommonBufferData();
+
+	/** @brief Whether missed IL rays fall back to dynamic cubemaps; off while Effects 11 owns IBL or the multiplier is zero. */
+	bool UsesCubemapFallback() const;
+	bool lastUsedCubemapFallback = false;
+
 	eastl::unique_ptr<Texture2D> texNoise = nullptr;
 	eastl::unique_ptr<Texture2D> texWorkingDepth = nullptr;
 	winrt::com_ptr<ID3D11UnorderedAccessView> uavWorkingDepth[5] = { nullptr };
-	eastl::unique_ptr<Texture2D> texPrevGeo = nullptr;
+	// Full-resolution geometry history is ping-ponged so radiance prefiltering can
+	// read the previous frame while the normal pass writes the current frame.
+	eastl::unique_ptr<Texture2D> texHistoryGeo[2] = { nullptr, nullptr };
+	uint historyGeoWriteIndex = 0;
+	bool hasMultiBounceHistory = false;
+	bool hasFullResolutionMultiBounceHistory = false;
+	bool multiBounceHistoryUsesNRDOutput = false;
+	uint32_t lastMultiBounceHistoryFrame = 0;
 	eastl::unique_ptr<Texture2D> texRadiance = nullptr;
-	eastl::unique_ptr<Texture2D> texRadianceTemp = nullptr;
 	winrt::com_ptr<ID3D11UnorderedAccessView> uavRadiance[5] = { nullptr };
 	eastl::unique_ptr<Texture2D> texNormal = nullptr;
 	winrt::com_ptr<ID3D11UnorderedAccessView> uavNormal[5] = { nullptr };
-	eastl::unique_ptr<Texture2D> texAccumFrames[2] = { nullptr };
-	eastl::unique_ptr<Texture2D> texAo[2] = { nullptr };
-	eastl::unique_ptr<Texture2D> texAoBlur = nullptr;
-	eastl::unique_ptr<Texture2D> texIlY[2] = { nullptr };
-	eastl::unique_ptr<Texture2D> texIlCoCg[2] = { nullptr };
-	eastl::unique_ptr<Texture2D> texGiSpecular[2] = { nullptr };
 
-	void EnsureGiSpecularTextures();
-	ID3D11ShaderResourceView* GiSpecularSRV(uint i) const { return texGiSpecular[i] ? texGiSpecular[i]->srv.get() : nullptr; }
-	ID3D11UnorderedAccessView* GiSpecularUAV(uint i) const { return texGiSpecular[i] ? texGiSpecular[i]->uav.get() : nullptr; }
+	// REBLUR diffuse radiance in/out (RGBA16F, full-res)
+	eastl::unique_ptr<Texture2D> texNRDInput = nullptr;
+	eastl::unique_ptr<Texture2D> texNRDOutput = nullptr;
+	eastl::unique_ptr<Texture2D> texNRDInputSH1 = nullptr;
+	eastl::unique_ptr<Texture2D> texNRDOutputSH1 = nullptr;
 
-	/** @brief Returns the current output SRVs for AO, indirect lighting Y/CoCg, and specular GI (or nullptrs if disabled). */
-	inline auto GetOutputTextures()
-	{
-		return (loaded && settings.Enabled && outputAo && ShadersOK()) ?
-		           std::make_tuple(
-					   outputAo->srv.get(),
-					   texIlY[outputIlIdx]->srv.get(),
-					   texIlCoCg[outputIlIdx]->srv.get(),
-					   GiSpecularSRV(outputAoIdx)) :
-		           std::make_tuple(nullptr, nullptr, nullptr, nullptr);
-	}
+	ID3D11ShaderResourceView* GetDiffuseOutputTexture();
+	ID3D11ShaderResourceView* GetDiffuseSH1Texture();
 
 	winrt::com_ptr<ID3D11SamplerState> linearClampSampler = nullptr;
 	winrt::com_ptr<ID3D11SamplerState> pointClampSampler = nullptr;
@@ -185,8 +204,14 @@ public:
 	winrt::com_ptr<ID3D11ComputeShader> prefilterDepthsCompute = nullptr;
 	winrt::com_ptr<ID3D11ComputeShader> prefilterRadianceCompute = nullptr;
 	winrt::com_ptr<ID3D11ComputeShader> prefilterNormalCompute = nullptr;
-	winrt::com_ptr<ID3D11ComputeShader> radianceDisoccCompute = nullptr;
 	winrt::com_ptr<ID3D11ComputeShader> giCompute = nullptr;
-	winrt::com_ptr<ID3D11ComputeShader> blurCompute = nullptr;
-	winrt::com_ptr<ID3D11ComputeShader> upsampleCompute = nullptr;
+	winrt::com_ptr<ID3D11ComputeShader> compositeCompute = nullptr;
+
+	NRDReblurIntegration nrdReblur;
+	nrd::ReblurSettings reblurSettings{};
+	bool resetReblurHistory = true;
+	bool nrdReblurUsesSH = false;
+	// Prevent downstream passes from sampling stale GI when this frame could not
+	// produce a complete SSGI output (disabled feature, shader failure, etc.).
+	bool outputReady = false;
 };

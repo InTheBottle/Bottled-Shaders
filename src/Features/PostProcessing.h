@@ -10,6 +10,7 @@
 #include "PostProcessing/ColorGrading.h"
 #include "PostProcessing/Composite.h"
 #include "PostProcessing/DoF.h"
+#include "PostProcessing/FireEffects.h"
 #include "PostProcessing/HistogramAutoExposure.h"
 #include "PostProcessing/ImageSpaceModifiers.h"
 #include "PostProcessing/LUT.h"
@@ -17,6 +18,7 @@
 #include "PostProcessing/LocalExposure.h"
 #include "PostProcessing/MotionBlur.h"
 #include "PostProcessing/PhysicalGlare.h"
+#include "PostProcessing/SunRays.h"
 #include "PostProcessing/Vignette.h"
 
 struct PostProcessing : Feature
@@ -50,6 +52,8 @@ struct PostProcessing : Feature
 	virtual void DrawSettings() override;
 	virtual void LoadSettings(json& o_json) override;
 	virtual void SaveSettings(json& o_json) override;
+	/** @brief Migrates each pipeline feature's legacy settings keys inside a full Post Processing settings document. */
+	virtual void MigrateLegacySettings(json& o_json) override;
 	virtual void RestoreDefaultSettings() override;
 	virtual void ApplyContextualDefaults(json& a_defaults) const override;
 
@@ -64,6 +68,20 @@ struct PostProcessing : Feature
 	 * Otherwise PreProcess draws no sub-features, so every other entry point must bail out too.
 	 */
 	bool IsPipelineRunning() const;
+
+	struct alignas(16) SharedData
+	{
+		uint EnableFire;
+		float FireIntensity;
+		float FireCurve;
+		float LightSpriteIntensity;
+		float LightSpriteCurve;
+		float pad0[3];
+	};
+	STATIC_ASSERT_ALIGNAS_16(SharedData);
+
+	/** @brief Fire and light sprite scaling for Effect.hlsl, live only while this pipeline owns the tonemap and Fire is enabled. */
+	SharedData GetCommonBufferData() const;
 
 	/**
 	 * @brief Whether Color Grading wants Pumbo AutoHDR this frame (SDR tonemapper + HDR Display).
@@ -84,6 +102,8 @@ struct PostProcessing : Feature
 
 	enum class FeaturePipelineIndex : size_t
 	{
+		Fire,
+		SunRays,
 		DoF,
 		Vignette,
 		LocalExposure,

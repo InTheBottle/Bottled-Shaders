@@ -116,6 +116,7 @@ namespace PBR
 		return color;
 	}
 
+#if defined(TRUE_PBR)
 	/// @brief Resolve the fuzz layer for a view angle
 	/// @param material Material with FuzzColor, FuzzWeight and FuzzRoughness (negative uses Roughness)
 	/// @param NdotV Dot product of normal and view direction
@@ -209,7 +210,7 @@ namespace PBR
 			float VdotH = saturate(dot(V, H));
 			float D = BRDF::D_GGX(material.Roughness, NdotH);
 
-#if defined(GLINT)
+#	if defined(GLINT)
 			[branch] if (material.GlintLogMicrofacetDensity > 1.1f)
 			{
 				float Dmax = BRDF::D_GGX(material.Roughness, 1.0f);
@@ -217,7 +218,7 @@ namespace PBR
 					material.GlintDensityRandomization, material.GlintCache, glintH, D, Dmax)
 				        .x;
 			}
-#endif
+#	endif
 			float visibility = BRDF::Vis_SmithJoint(material.Roughness, NdotV, max(specularNdotL, EPSILON_DOT_CLAMP));
 			float3 F = BRDF::F_Schlick(material.F0, VdotH);
 			float3 detailedLightColor = context.lightColor * context.detailedShadow;
@@ -252,11 +253,13 @@ namespace PBR
 		lobeWeights.specular = surface.specularAlbedo * material.Fuzz.specularThroughput *
 		                       SpecularOcclusion(NdotV, material.Roughness * material.Roughness, material.AO);
 	}
+#endif
 
 	void GetDirectLightInput(out DirectLightingOutput lightingOutput, DirectContext context, MaterialProperties material, float3x3 tbnTr, float2 uv)
 	{
 		lightingOutput = (DirectLightingOutput)0;
 
+#if defined(TRUE_PBR)
 		if (IsThinSurfaceMaterial(PBRFlags)) {
 			// Direct diffuse receives BaseColor at the call site.
 			ThinSurface surface = CreateThinSurface(material, saturate(abs(dot(context.worldNormal, context.viewDir))), true, false);
@@ -270,6 +273,7 @@ namespace PBR
 
 			return;
 		}
+#endif
 
 		const float3 detailedLightColor = context.lightColor * context.detailedShadow;
 		const float3 softLightColor = context.lightColor * context.softShadow;
@@ -279,10 +283,13 @@ namespace PBR
 		const float3 L = context.lightDir;
 		const float3 H = context.halfVector;
 
+#if defined(TRUE_PBR)
+		// Coat members exist only on the TRUE_PBR DirectContext.
 		const float3 coatN = context.coatWorldNormal;
 		const float3 coatV = context.coatViewDir;
 		const float3 coatL = context.coatLightDir;
 		const float3 coatH = context.coatHalfVector;
+#endif
 
 		float NdotL = dot(N, L);
 		float NdotV = dot(N, V);
@@ -304,7 +311,7 @@ namespace PBR
 		float specularNdotV = satNdotV;
 #endif
 
-#if !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
+#if defined(TRUE_PBR) && !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
 		[branch] if ((PBRFlags & Flags::HairMarschner) != 0)
 		{
 			lightingOutput.transmission += softLightColor * GetHairColorMarschner(N, V, L, NdotL, NdotV, VdotL, 0, 1, 0, material);
@@ -329,7 +336,7 @@ namespace PBR
 			lightingOutput.diffuse += detailedLightColor * satNdotL * BRDF::Diffuse_Lambert() * kD;
 			lightingOutput.specular += Fr * detailedLightColor * specularNdotL;
 
-#if !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
+#if defined(TRUE_PBR) && !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
 #	if !defined(TREE_ANIM)
 			[branch] if ((PBRFlags & Flags::Subsurface) != 0)
 			{
@@ -389,7 +396,9 @@ namespace PBR
 			float microShadow = lerp(1.0, ApproximateDirectOcculusion(material.AO, NdotL), SharedData::truePBRSettings.MicroShadowStrength);
 			lightingOutput.diffuse *= microShadow;
 			lightingOutput.specular *= microShadow;
+#if defined(TRUE_PBR)
 			lightingOutput.coatDiffuse *= microShadow;
+#endif
 		}
 	}
 
@@ -397,6 +406,7 @@ namespace PBR
 	{
 		lobeWeights = (IndirectLobeWeights)0;
 
+#if defined(TRUE_PBR)
 		if (IsThinSurfaceMaterial(PBRFlags)) {
 			float NdotV = saturate(abs(dot(context.worldNormal, context.viewDir)));
 			ThinSurface surface = CreateThinSurface(material, NdotV, true);
@@ -405,6 +415,7 @@ namespace PBR
 
 			return;
 		}
+#endif
 
 		const float3 N = context.worldNormal;
 		const float3 V = context.viewDir;
@@ -418,7 +429,7 @@ namespace PBR
 #endif
 		float NdotV = saturate(dot(specularN, V));
 
-#if !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
+#if defined(TRUE_PBR) && !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
 		[branch] if ((PBRFlags & Flags::HairMarschner) != 0)
 		{
 			float3 L = normalize(V - N * dot(V, N));
@@ -431,7 +442,7 @@ namespace PBR
 		{
 			lobeWeights.diffuse = material.BaseColor;
 
-#if !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
+#if defined(TRUE_PBR) && !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
 #	if !defined(TREE_ANIM)
 			[branch] if ((PBRFlags & Flags::Subsurface) != 0)
 			{
@@ -450,7 +461,7 @@ namespace PBR
 			[branch] if (SharedData::truePBRSettings.EnableMultiScatter != 0)
 				lobeWeights.specular *= SpecularMultiScatter(material.F0, material.Roughness, NdotV);
 
-#if !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
+#if defined(TRUE_PBR) && !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
 			[branch] if ((PBRFlags & Flags::TwoLayer) != 0)
 			{
 				float2 coatSpecularBRDF = BRDF::EnvBRDF(material.CoatRoughness, NdotV);
@@ -477,7 +488,7 @@ namespace PBR
 		[branch] if (SharedData::truePBRSettings.EnableHorizonOcclusion != 0)
 			lobeWeights.specular *= SpecularHorizonOcclusion(specularN, V, horizonN);
 
-#if !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
+#if defined(TRUE_PBR) && !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
 		[branch] if ((PBRFlags & Flags::Fuzz) != 0 && (PBRFlags & Flags::HairMarschner) == 0)
 		{
 			lobeWeights.diffuse = Color::LinearToPBRMaterial(Color::PBRMaterialToLinear(lobeWeights.diffuse) * (1.0f - material.Fuzz.weightedAlbedo) + material.Fuzz.weightedAlbedo * material.Fuzz.color * material.AO);

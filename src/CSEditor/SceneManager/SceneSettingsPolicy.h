@@ -48,10 +48,14 @@ namespace SceneSettingsPolicy
 		{ "PostProcessing", "Color Grading and Tone Mapping", "tonemapParams" },
 		{ "PostProcessing", "Motion Blur", "VelocityScale" },
 		// Shader defines: a change recompiles every SSGI compute shader on the render thread.
-		{ "ScreenSpaceGI", "ResolutionMode" },
+		{ "ScreenSpaceGI", "HalfRes" },
+		{ "ScreenSpaceGI", "QuarterRes" },
 		{ "ScreenSpaceGI", "EnableGI" },
-		{ "ScreenSpaceGI", "EnableTemporalDenoiser" },
-		{ "ScreenSpaceGI", "EnableExperimentalSpecularGI" },
+		{ "ScreenSpaceGI", "EnableSH" },
+		{ "ScreenSpaceGI", "EnableREBLUR" },
+		{ "ScreenSpaceReflections", "Enabled" },
+		{ "ScreenSpaceReflections", "HalfRes" },
+		{ "ScreenSpaceReflections", "EnableREBLUR" },
 		{ "VolumetricLighting" },
 	};
 
@@ -62,6 +66,7 @@ namespace SceneSettingsPolicy
 		{ "NeuralRendering" },
 		{ "PostProcessing" },
 		{ "ScreenSpaceGI" },
+		{ "ScreenSpaceReflections" },
 		{ "ScreenSpaceShadows" },
 		{ "SubsurfaceScattering" },
 	};

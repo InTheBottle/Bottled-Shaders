@@ -451,6 +451,7 @@ bool SkySync::Update(const RE::Sky* sky)
 		const bool resetFaderForCellChange = cell && prevCell &&
 		                                     (cell->IsInteriorCell() != currentCellInterior ||
 												 cell->GetRuntimeData().worldSpace != currentCellWorldspace);
+		// Crossing exterior cells must not cut a sun/moon fade short; only a new space or a first cell snaps it
 		resetTransition = !prevCell || resetFaderForCellChange;
 		if (cell)
 			SetSkyRotation(sky, cell);
@@ -500,8 +501,11 @@ bool SkySync::Update(const RE::Sky* sky)
 
 	const bool transitionCompleted = std::exchange(immediateTransitionReady, false);
 	const bool wasTransitioning = shadowFader.transitioning;
+	const Caster previousTarget = shadowFader.target;
 	shadowFader.Update(sky, directions, intensities, workingLightColors, settings.ShadowTransitionDuration, fadeAdvance, transitionCompleted || resetTransition);
-	const bool casterSettled = wasTransitioning && !shadowFader.transitioning;
+	// A finished caster fade counts as a completed transition, so cached shadows (terrain) refresh to the new caster.
+	// A swap can also start and finish in one update (zero duration), so a changed target counts too.
+	const bool casterSettled = (wasTransitioning || shadowFader.target != previousTarget) && !shadowFader.transitioning;
 
 	twilightCap = GetTwilightCap(climate->timing, hour, sunHeight);
 	UpdateMoonlightFade(fadeAdvance / SecondsPerGameHour, transitionCompleted);

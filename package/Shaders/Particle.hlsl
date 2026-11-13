@@ -357,7 +357,7 @@ float GetPointLightIntensity(LightLimitFix::Light light, float3 positionWS, out 
 	intensity *= light.fade;
 	if (intensity >= 1e-5) {
 		[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow)
-			intensity *= LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, positionWS, FrameBuffer::CameraPosAdjust.xyz, lightDirection, false, 0.0);
+			intensity *= LightLimitFix::GetLocalShadowWithLightFade(LinearSampler, light.localShadowIndex, positionWS, FrameBuffer::CameraPosAdjust.xyz, lightDirection, false, 0.0);
 	} else {
 		intensity = 0.0;
 	}
@@ -565,7 +565,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float3 ambientColor = max(0, SharedData::GetAmbient(float3(0, 0, 1)));
 #	if defined(IBL)
 	if (SharedData::iblSettings.EnableIBL) {
-		ambientColor = ImageBasedLighting::GetDiffuseIBL(ambientColor, float3(0, 0, -1));
+		ambientColor = ImageBasedLighting::GetDiffuseIBL(ambientColor, float3(0, 0, -1), positionWS.xyz);
 	}
 #	endif
 

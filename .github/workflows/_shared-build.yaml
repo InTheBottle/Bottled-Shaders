@@ -31,6 +31,10 @@ on:
                 description: "CMake configure/build preset for the C++ build (ALL = full LTCG shipping flags; PR = mild optimization without LTCG or full debug info)"
                 type: string
                 default: "ALL"
+            disable-warnings-as-errors:
+                description: "Disable treating MSVC compiler warnings as errors"
+                type: boolean
+                default: false
         outputs:
             version:
                 description: "CMake project version extracted from the build"
@@ -75,6 +79,8 @@ jobs:
 
             - name: Build using run-cmake
               uses: lukka/run-cmake@v10
+              env:
+                  _CL_: ${{ inputs.disable-warnings-as-errors && '/WX-' || '' }}
               with:
                   configurePreset: ${{ matrix.compiler.cmake-preset }}
                   buildPreset: ${{ matrix.compiler.cmake-preset }}

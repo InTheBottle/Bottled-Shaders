@@ -120,6 +120,8 @@ struct PostProcessFeature : public std::enable_shared_from_this<PostProcessFeatu
 
 	virtual void LoadSettings(json& o_json) = 0;
 	virtual void SaveSettings(json& o_json) = 0;
+	/// Rewrites settings keys from an older version into the current shape, in place.
+	virtual void MigrateLegacySettings(json& a_settings) { (void)a_settings; }
 	/// Rewrites defaults that depend on the current settings; a_settings is shaped like SaveSettings output.
 	virtual void ApplyContextualDefaults(json& a_settings) const { (void)a_settings; }
 	virtual void DrawSettings() = 0;

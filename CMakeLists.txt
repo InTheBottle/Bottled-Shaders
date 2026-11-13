@@ -160,6 +160,17 @@ if(DEVBENCH_BRIDGE)
 endif()
 add_subdirectory(${CMAKE_SOURCE_DIR}/cmake/Streamline)
 
+# NRD — NVIDIA Real-time Denoisers (DX11 via embedded DXBC shaders, no NRI)
+set(NRD_STATIC_LIBRARY ON CACHE BOOL "" FORCE)
+set(NRD_NRI OFF CACHE BOOL "" FORCE)
+set(NRD_EMBEDS_SPIRV_SHADERS OFF CACHE BOOL "" FORCE)
+set(NRD_EMBEDS_DXIL_SHADERS OFF CACHE BOOL "" FORCE)
+set(NRD_EMBEDS_DXBC_SHADERS ON CACHE BOOL "" FORCE)
+set(NRD_NORMAL_ENCODING "2" CACHE STRING "" FORCE)
+set(NRD_ROUGHNESS_ENCODING "1" CACHE STRING "" FORCE)
+set(REBLUR_PERFORMANCE_MODE ON CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_SOURCE_DIR}/extern/NRD EXCLUDE_FROM_ALL)
+
 find_path(DETOURS_INCLUDE_DIRS "detours/detours.h")
 find_library(DETOURS_LIBRARY detours REQUIRED)
 include(FidelityFX-SDK)
@@ -190,6 +201,7 @@ target_include_directories(
         ${CLIB_UTIL_INCLUDE_DIRS}
         "${CMAKE_SOURCE_DIR}/package/Shaders"
         "${CMAKE_SOURCE_DIR}/extern/sk_hdr_png/include"
+        "${CMAKE_SOURCE_DIR}/extern/NRD/Include"
         ${DETOURS_INCLUDE_DIRS}
 )
 
@@ -212,6 +224,7 @@ target_link_libraries(
         efsw::efsw
         Tracy::TracyClient
         Streamline
+        NRD
         d3d12.lib
         bcrypt.lib
         Microsoft::DirectX-Headers
@@ -914,16 +927,19 @@ if(AUTO_PLUGIN_DEPLOYMENT OR AIO_ZIP_TO_DIST)
         )
     endif()
 
-    # Only copy shaders when HLSL files change; copy individually so unchanged
-    # files do not get their timestamps updated.
+    # Only copy shaders when a copied file changes; copy individually so unchanged
+    # files do not get their timestamps updated. Depend on every copied file, the
+    # feature .ini files included, not just HLSL_FILES.
     file(
         GLOB_RECURSE _package_shaders
         LIST_DIRECTORIES FALSE
+        CONFIGURE_DEPENDS
         "${CMAKE_SOURCE_DIR}/package/Shaders/*"
     )
     # Exclude test files from production packages
     list(FILTER _package_shaders EXCLUDE REGEX "/Tests/")
     set(_shader_copy_cmds)
+    set(_shader_copy_inputs ${_package_shaders})
 
     set(_feature_shader_paths_file "${CMAKE_CURRENT_BINARY_DIR}/feature_shader_paths.txt")
     file(WRITE "${_feature_shader_paths_file}" "")
@@ -954,9 +970,11 @@ if(AUTO_PLUGIN_DEPLOYMENT OR AIO_ZIP_TO_DIST)
             file(
                 GLOB_RECURSE _feat_shaders
                 LIST_DIRECTORIES FALSE
+                CONFIGURE_DEPENDS
                 "${_fpath}/Shaders/*"
             )
             list(FILTER _feat_shaders EXCLUDE REGEX "/Tests/")
+            list(APPEND _shader_copy_inputs ${_feat_shaders})
             append_copy_if_different(_shader_copy_cmds _feat_shaders "${_fpath}/Shaders" "${AIO_DIR}/Shaders")
             list(APPEND _all_feature_shader_files ${_feat_shaders})
         endif()
@@ -970,8 +988,7 @@ if(AUTO_PLUGIN_DEPLOYMENT OR AIO_ZIP_TO_DIST)
         COMMAND ${CMAKE_COMMAND} -E touch copy_shaders.stamp
         DEPENDS
             ${HLSL_FILES}
-            ${_package_shaders}
-            ${_all_feature_shader_files}
+            ${_shader_copy_inputs}
             ${CMAKE_SOURCE_DIR}/cmake/CleanupStaleEntries.cmake
         COMMENT "Copying changed shaders into AIO/Shaders"
     )

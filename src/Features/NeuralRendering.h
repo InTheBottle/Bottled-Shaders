@@ -1,4 +1,5 @@
 #pragma once
+// One-time CI smoke test: no Neural Rendering behavior changes.
 
 #include "Buffer.h"
 #include "Feature.h"

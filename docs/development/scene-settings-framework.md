@@ -389,9 +389,10 @@ are **blocked** rather than clobbering it, and unknown fields on an entry are pr
       `LUT` (`LUT::LoadSettings` rereads its texture from disk), DoF `HighlightShape`, Motion Blur
       `VelocityScale`, and the Color Grading tonemapper selection (`enableTonemap`, `useOpenDrt`,
       `currentTonemapper`, `tonemapParams`), which recompiles shaders.
-    - `ScreenSpaceGI`'s `ResolutionMode`, `EnableGI`, `EnableTemporalDenoiser` and
-      `EnableExperimentalSpecularGI`: each is a shader define, so a change recompiles every SSGI compute
-      shader on the render thread and a location transition would hitch.
+    - `ScreenSpaceGI`'s `HalfRes`, `QuarterRes`, `EnableGI`, `EnableSH` and `EnableREBLUR`, and
+      `ScreenSpaceReflections`' `Enabled`, `HalfRes` and `EnableREBLUR`: each is a shader define or a
+      denoiser instance, so a change recompiles compute shaders or rebuilds REBLUR on the render thread
+      and a location transition would hitch.
     - `NeuralRendering`'s `showAdvanced` (panel layout), `debugCategoryView` and `rawModelOutput` (debug
       views), and `resolutionMode` / `resolutionScale` / `resolutionScaleX` / `resolutionScaleY`. The
       scales size the model raster, which the backend re-allocates once a 2-pixel-rounded extent holds

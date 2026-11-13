@@ -194,6 +194,18 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterBoolSetting("EnableMoonRays", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableDepthOfField", "EFFECT", false, false);
 	settingManager.RegisterBoolSetting("EnableWater", "EFFECT", false, false);
+	settingManager.RegisterBoolSetting("EnableAmbientOcclusion", "EFFECT", true, false);
+	settingManager.RegisterBoolSetting("EnableReflection", "EFFECT", false, false);
+
+	settingManager.RegisterBoolSetting("UseIndirectLighting", "SSAO_SSIL", false, false);
+	settingManager.RegisterFloatSetting("AOAmount", "SSAO_SSIL", 1.0f, 0.0f, 10.0f, 0.01f, false);
+	settingManager.RegisterFloatSetting("AOAmountInterior", "SSAO_SSIL", 1.0f, 0.0f, 10.0f, 0.01f, false);
+	settingManager.RegisterFloatSetting("ILAmount", "SSAO_SSIL", 1.0f, 0.0f, 10.0f, 0.01f, false);
+	settingManager.RegisterFloatSetting("ILAmountInterior", "SSAO_SSIL", 1.0f, 0.0f, 10.0f, 0.01f, false);
+
+	settingManager.RegisterBoolSetting("EnableInterior", "REFLECTION", false, false);
+	settingManager.RegisterFloatSetting("Amount", "REFLECTION", 1.0f, 0.0f, 1.0f, 0.01f, false);
+	settingManager.RegisterFloatSetting("AmountInterior", "REFLECTION", 1.0f, 0.0f, 1.0f, 0.01f, false);
 
 	settingManager.RegisterFloatSetting("Brightness", "COLORCORRECTION", 1.0f, 0.0f, 10000.0f, 0.01f, false);
 	settingManager.RegisterFloatSetting("GammaCurve", "COLORCORRECTION", 1.0f, 1.0f, 2.2f, 0.01f, false);
@@ -376,6 +388,8 @@ void EffectManager::RegisterSettings()
 	settingManager.SetCategoryDependency("SKYSCATTERING", "EnableCloudsScattering", "EFFECT");
 	settingManager.SetCategoryDependency("IMAGEBASEDLIGHTING", "EnableImageBasedLighting", "EFFECT");
 	settingManager.SetCategoryDependency("VOLUMETRICRAYS", "EnableVolumetricRays", "EFFECT");
+	settingManager.SetCategoryDependency("SSAO_SSIL", "EnableAmbientOcclusion", "EFFECT");
+	settingManager.SetCategoryDependency("REFLECTION", "EnableReflection", "EFFECT");
 
 	settingManager.SetSettingDependency("ProceduralGradientWeightCurve", "SKY", "UseProceduralGradientWeights", "SKY");
 	settingManager.SetSettingDependency("StarsAnimationTime", "SKY", "EnableAnimatedStars", "SKY");

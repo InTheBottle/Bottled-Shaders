@@ -90,6 +90,12 @@ void LocalExposure::LoadSettings(json& o_json)
 	settings = o_json;
 }
 
+void LocalExposure::MigrateLegacySettings(json& a_settings)
+{
+	if (a_settings.is_object())
+		a_settings.erase("BaseMip");
+}
+
 void LocalExposure::SaveSettings(json& o_json)
 {
 	o_json = settings;
