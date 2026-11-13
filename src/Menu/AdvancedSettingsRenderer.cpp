@@ -132,7 +132,12 @@ void AdvancedSettingsRenderer::RenderAdvancedSettings(
 		}
 
 		// Profiling Tab
-		if (MenuFonts::BeginTabItemWithFont(T("menu.advanced.tab_profiling", "Profiling"), Menu::FontRole::Subheading)) {
+		ImGuiTabItemFlags profilingFlags = ImGuiTabItemFlags_None;
+		if (g_pendingUtilityTab == MenuPageIds::kProfiling) {
+			profilingFlags |= ImGuiTabItemFlags_SetSelected;
+			g_pendingUtilityTab.clear();
+		}
+		if (MenuFonts::BeginTabItemWithFont(T("menu.advanced.tab_profiling", "Profiling"), Menu::FontRole::Subheading, profilingFlags)) {
 			globals::menu->IgnoreSettingEditsThisFrame();
 			if (ImGui::BeginChild("##ProfilingContent", ImVec2(0, 0), false)) {
 				ProfilingRenderer::RenderStatistics();
