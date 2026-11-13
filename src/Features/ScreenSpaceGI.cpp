@@ -729,6 +729,10 @@ void ScreenSpaceGI::CompileComputeShaders()
 	if (settings.EnableGI)
 		shaderInfos.push_back({ &compositeCompute, "composite.cs.hlsl", {} });
 
+	const bool canDenoise = CanDenoise();
+	tracedHalfRes = settings.HalfRes && canDenoise;
+	tracedQuarterRes = settings.QuarterRes && canDenoise;
+
 	for (auto& info : shaderInfos) {
 		if (info.programPtr == &compositeCompute) {
 			if (settings.EnableSH && settings.EnableGI)
@@ -742,9 +746,9 @@ void ScreenSpaceGI::CompileComputeShaders()
 			info.defines.push_back({ "GI", "" });
 		if (settings.EnableSH && settings.EnableGI)
 			info.defines.push_back({ "SSGI_SH", "" });
-		if (settings.QuarterRes)
+		if (tracedQuarterRes)
 			info.defines.push_back({ "SSGI_QUARTER", "" });
-		else if (settings.HalfRes)
+		else if (tracedHalfRes)
 			info.defines.push_back({ "SSGI_HALF", "" });
 		if (globals::features::dynamicCubemaps.loaded)
 			info.defines.push_back({ "DYNAMIC_CUBEMAPS", "" });
@@ -761,6 +765,11 @@ void ScreenSpaceGI::CompileComputeShaders()
 	}
 
 	recompileFlag = false;
+}
+
+bool ScreenSpaceGI::CanDenoise() const
+{
+	return settings.EnableREBLUR && nrdReblur.IsValid() && globals::features::nrd.CanDenoise();
 }
 
 bool ScreenSpaceGI::ShadersOK()
@@ -824,6 +833,11 @@ void ScreenSpaceGI::DrawSSGI()
 	const bool trackMultiBounce = settings.EnableGI && settings.EnableMultiBounce;
 	if (nrdReblurUsesSH != useSH)
 		SetupNRDResources();
+
+	if (const bool canDenoise = CanDenoise(); (settings.HalfRes && canDenoise) != tracedHalfRes || (settings.QuarterRes && canDenoise) != tracedQuarterRes) {
+		recompileFlag = true;
+		queuedResetHistory = true;
+	}
 
 	// Compile first: enabling GI may require creating the composite shader, so
 	// checking the old shader set before recompilation can otherwise deadlock the
@@ -983,7 +997,7 @@ void ScreenSpaceGI::DrawSSGI()
 
 		context->CSSetShaderResources(0, (uint)srvs.size(), srvs.data());
 		context->CSSetShaderResources(76, 1, &envIBLSrv);
-		if (settings.QuarterRes) {
+		if (tracedQuarterRes) {
 			const float clearColor[4] = {};
 			context->ClearUnorderedAccessViewFloat(texNRDInput->uav.get(), clearColor);
 			if (useSH && texNRDInputSH1)
@@ -992,8 +1006,8 @@ void ScreenSpaceGI::DrawSSGI()
 		context->CSSetUnorderedAccessViews(0, (uint)uavs.size(), uavs.data(), nullptr);
 		context->CSSetShader(giCompute.get(), nullptr, 0);
 
-		uint dispatchX = (settings.HalfRes || settings.QuarterRes) ? (resolution[0] + 1) / 2 : resolution[0];
-		uint dispatchY = settings.QuarterRes ? (resolution[1] + 1) / 2 : resolution[1];
+		uint dispatchX = (tracedHalfRes || tracedQuarterRes) ? (resolution[0] + 1) / 2 : resolution[0];
+		uint dispatchY = tracedQuarterRes ? (resolution[1] + 1) / 2 : resolution[1];
 		globals::profiler->BeginPass("ScreenSpaceGI::GI");
 		context->Dispatch((dispatchX + 7u) >> 3, (dispatchY + 7u) >> 3, 1);
 		globals::profiler->EndPass();
@@ -1016,11 +1030,11 @@ void ScreenSpaceGI::DrawSSGI()
 		nrdReblur.SetCommonSettings(commonSettings);
 
 		nrdSvc.ApplyReblurSettings(reblurSettings, settings.Reblur,
-			settings.HalfRes ? nrd::CheckerboardMode::BLACK : nrd::CheckerboardMode::OFF);
+			tracedHalfRes ? nrd::CheckerboardMode::BLACK : nrd::CheckerboardMode::OFF);
 		reblurSettings.hitDistanceParameters.A = 3.0f / Util::Units::GAME_UNIT_TO_M;
 		reblurSettings.hitDistanceParameters.B = 0.1f;
 		reblurSettings.diffusePrepassBlurRadius = settings.DiffusePrepassBlurRadius;
-		if (settings.QuarterRes) {
+		if (tracedQuarterRes) {
 			if (reblurSettings.hitDistanceReconstructionMode == nrd::HitDistanceReconstructionMode::OFF)
 				reblurSettings.hitDistanceReconstructionMode = nrd::HitDistanceReconstructionMode::AREA_3X3;
 			// Probabilistic inputs require spatial reuse to redistribute the
@@ -1056,7 +1070,7 @@ void ScreenSpaceGI::DrawSSGI()
 
 	if (trackMultiBounce) {
 		hasMultiBounceHistory = true;
-		hasFullResolutionMultiBounceHistory = (!settings.HalfRes && !settings.QuarterRes) || producedDenoisedHistory;
+		hasFullResolutionMultiBounceHistory = (!tracedHalfRes && !tracedQuarterRes) || producedDenoisedHistory;
 		multiBounceHistoryUsesNRDOutput = producedDenoisedHistory;
 		lastMultiBounceHistoryFrame = globals::state->frameCount;
 		historyGeoWriteIndex ^= 1;

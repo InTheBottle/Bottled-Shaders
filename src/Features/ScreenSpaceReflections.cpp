@@ -432,7 +432,8 @@ void ScreenSpaceReflections::CompileComputeShaders()
 	}
 	{
 		std::vector<std::pair<const char*, const char*>> defines;
-		if (settings.HalfRes)
+		tracedHalfRes = settings.HalfRes && CanDenoise();
+		if (tracedHalfRes)
 			defines.push_back({ "SSR_HALF", "" });
 		if (globals::features::dynamicCubemaps.loaded)
 			defines.push_back({ "DYNAMIC_CUBEMAPS", "" });
@@ -446,6 +447,11 @@ void ScreenSpaceReflections::CompileComputeShaders()
 	}
 
 	recompileFlag = false;
+}
+
+bool ScreenSpaceReflections::CanDenoise() const
+{
+	return settings.EnableREBLUR && nrdReblurSpecular.IsValid() && globals::features::nrd.CanDenoise();
 }
 
 bool ScreenSpaceReflections::ShadersOK()
@@ -490,6 +496,11 @@ void ScreenSpaceReflections::DrawSSR()
 		resetReblurHistory = true;
 		if (globals::deferred)
 			globals::deferred->ClearShaderCache();
+	}
+
+	if ((settings.HalfRes && CanDenoise()) != tracedHalfRes) {
+		recompileFlag = true;
+		resetReblurHistory = true;
 	}
 
 	if (recompileFlag)
@@ -628,7 +639,7 @@ void ScreenSpaceReflections::DrawSSR()
 		context->CSSetUnorderedAccessViews(0, 1, &specUAV, nullptr);
 		context->CSSetShader(specularGICompute.get(), nullptr, 0);
 
-		uint specDispatchX = settings.HalfRes ? (resolution[0] + 1) / 2 : resolution[0];
+		uint specDispatchX = tracedHalfRes ? (resolution[0] + 1) / 2 : resolution[0];
 		uint specDispatchY = resolution[1];
 		globals::profiler->BeginPass("ScreenSpaceReflections::SpecularGI");
 		context->Dispatch((specDispatchX + 7u) >> 3, (specDispatchY + 7u) >> 3, 1);
@@ -657,7 +668,7 @@ void ScreenSpaceReflections::DrawSSR()
 		nrdReblurSpecular.SetCommonSettings(commonSettings);
 
 		nrdSvc.ApplyReblurSettings(reblurSpecularSettings, settings.Reblur,
-			settings.HalfRes ? nrd::CheckerboardMode::BLACK : nrd::CheckerboardMode::OFF);
+			tracedHalfRes ? nrd::CheckerboardMode::BLACK : nrd::CheckerboardMode::OFF);
 		reblurSpecularSettings.hitDistanceParameters.A = settings.HitDistA;
 		reblurSpecularSettings.hitDistanceParameters.B = settings.HitDistB;
 		reblurSpecularSettings.hitDistanceParameters.C = settings.HitDistC;

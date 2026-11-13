@@ -48,6 +48,7 @@ struct ScreenSpaceReflections : Feature
 	virtual void ClearShaderCache() override;
 	void CompileComputeShaders();
 	bool ShadersOK();
+	bool CanDenoise() const;
 
 	void DrawSSR();
 	void UpdateSB();
@@ -57,6 +58,7 @@ struct ScreenSpaceReflections : Feature
 	//////////////////////////////////////////////////////////////////////////////////
 
 	bool recompileFlag = false;
+	bool tracedHalfRes = false;
 	/// Set off the render thread when Enabled changes; DrawSSR rebuilds the deferred composite that bakes the SSR define.
 	std::atomic<bool> queuedEnabledChange{ false };
 

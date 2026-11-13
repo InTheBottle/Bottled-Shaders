@@ -59,6 +59,7 @@ public:
 	void CompileComputeShaders();
 	/** @brief Checks whether all required compute shaders and the noise texture loaded successfully. */
 	bool ShadersOK();
+	bool CanDenoise() const;
 
 	/** @brief Executes the full SSGI pipeline: depth prefilter, radiance fetch, GI, and denoising. */
 	void DrawSSGI();
@@ -71,6 +72,8 @@ public:
 	//////////////////////////////////////////////////////////////////////////////////
 
 	bool recompileFlag = false;
+	bool tracedHalfRes = false;
+	bool tracedQuarterRes = false;
 
 	// Loading screen radiance decays at only 1/MaxAccumFrames per frame, bleeding the old scene
 	// into the new one for some frames.
