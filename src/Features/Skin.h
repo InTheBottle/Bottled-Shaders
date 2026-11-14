@@ -116,6 +116,9 @@ struct Skin : Feature
 	struct ActorWetnessCacheEntry
 	{
 		float4 wetness = { 0.0f, 0.0f, 0.0f, 0.0f };
+		float4 output = { 0.0f, 0.0f, 0.0f, 0.0f };
+		float externalSweat = 0.0f;
+		float externalWet = 0.0f;
 		uint frameCount = 0;
 	};
 
@@ -150,7 +153,7 @@ struct Skin : Feature
 	/**
 	 * @brief Computes per-geometry wetness data (sweat, water submersion, fade) for an actor.
 	 * @param geometry The geometry to retrieve wetness data for.
-	 * @return A float4 containing (sweat, waterWetness, positionZ, waterDepth).
+	 * @return A float4 containing (sweat, waterWetness, waterLineZ, wholeBodyWetness).
 	 */
 	float4 GetWetness(RE::BSGeometry* geometry);
 

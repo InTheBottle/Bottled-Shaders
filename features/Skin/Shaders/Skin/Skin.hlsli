@@ -221,13 +221,14 @@ namespace Skin
 
 	float2 GetWetness(float z, float3 modelNormal)
 	{
-		if (skinPerGeometry.x == 0.f && skinPerGeometry.y == 0.f)
+		if (!any(skinPerGeometry.xyw))
 			return 0.f;
 
 		float waterWet = 0.0f;
-		float waterLevel = skinPerGeometry.z + skinPerGeometry.w;
+		float waterLevel = skinPerGeometry.z;
 
 		waterWet = skinPerGeometry.y * (1 - smoothstep(waterLevel - 2.5f, waterLevel + 2.5f, z));
+		waterWet = max(waterWet, skinPerGeometry.w);
 
 		float sweatWet = skinPerGeometry.x;
 #if !defined(SKIN)

@@ -1071,7 +1071,7 @@ bool WetnessEffects::IsDry(RE::BSRenderPass* a_pass, uint32_t a_descriptor) cons
 		return false;
 
 	auto& skin = globals::features::skin;
-	if (skin.loaded && skin.settings.EnableSkin && (skin.currentWetness.x != 0.0f || skin.currentWetness.y != 0.0f))
+	if (skin.loaded && skin.settings.EnableSkin && (skin.currentWetness.x != 0.0f || skin.currentWetness.y != 0.0f || skin.currentWetness.w != 0.0f))
 		return false;
 
 	if (lastPerFrame.settings.MaxShoreWetness > 0.0f) {

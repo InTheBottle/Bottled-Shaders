@@ -346,7 +346,7 @@ float4 Skin::GetWetness(RE::BSGeometry* geometry)
 		auto [it, inserted] = actorWetnessMap.try_emplace(actorFormID);
 		auto& cached = it->second;
 		if (!inserted && cached.frameCount == currentFrame) {
-			return cached.wetness;
+			return cached.output;
 		}
 		cached.frameCount = currentFrame;
 
@@ -371,26 +371,18 @@ float4 Skin::GetWetness(RE::BSGeometry* geometry)
 			wetness.w = 0.0f;
 		}
 
-		// Another plugin's wetness for this actor: the stronger of the two wins.
+		ExternalWetness external;
 		{
-			ExternalWetness external;
-			{
-				std::scoped_lock lock(externalWetnessLock);
-				if (auto ext = externalWetnessMap.find(actorFormID); ext != externalWetnessMap.end())
-					external = ext->second;
-			}
-			wetness.x = std::max(wetness.x, external.sweat);
-			// Water wetness is a waterline at positionZ + depth; external wetness (rain) covers the
-			// whole body, so lift the line well above the head. 2.0 is the in-water strength.
-			const float externalWet = external.wet * 2.0f;
-			if (externalWet > wetness.y) {
-				wetness.y = externalWet;
-				wetness.w = 1000.0f;
-			}
+			std::scoped_lock lock(externalWetnessLock);
+			if (auto ext = externalWetnessMap.find(actorFormID); ext != externalWetnessMap.end())
+				external = ext->second;
 		}
+		const float externalWet = external.wet * 2.0f;
 
 		if (inserted) {
 			cached.wetness = wetness;
+			cached.externalSweat = external.sweat;
+			cached.externalWet = externalWet;
 		} else {
 			const float fadeTime = std::max(settings.WetFadeTime, 0.001f);
 			if (cached.wetness.x < wetness.x) {
@@ -426,7 +418,15 @@ float4 Skin::GetWetness(RE::BSGeometry* geometry)
 				wetness.w = cached.wetness.w;
 			}
 			cached.wetness = wetness;
+
+			const float fadeStep = std::max(*globals::game::deltaTime, 0.0f) / fadeTime;
+			cached.externalSweat += std::clamp(external.sweat - cached.externalSweat, -fadeStep, fadeStep);
+			cached.externalWet += std::clamp(externalWet - cached.externalWet, -fadeStep, fadeStep);
 		}
+
+		const float waterLine = wetness.y > 0.0f ? wetness.z + wetness.w : 0.0f;
+		cached.output = float4(std::max(wetness.x, cached.externalSweat), wetness.y, waterLine, cached.externalWet);
+		return cached.output;
 	}
 	return wetness;
 }
@@ -644,10 +644,17 @@ void Skin::Hooks::BSLightingShader_SetupGeometry::thunk(RE::BSShader* This, RE::
 
 void Skin::SetExternalWetness(uint32_t a_formID, float a_sweat, float a_wet)
 {
+	const float sweat = std::isnan(a_sweat) ? 0.0f : std::clamp(a_sweat, 0.0f, 1.0f);
+	const float wet = std::isnan(a_wet) ? 0.0f : std::clamp(a_wet, 0.0f, 1.0f);
+
 	std::scoped_lock lock(externalWetnessLock);
+	if (sweat == 0.0f && wet == 0.0f) {
+		externalWetnessMap.erase(a_formID);
+		return;
+	}
 	if (externalWetnessMap.size() > 1024 && !externalWetnessMap.contains(a_formID))
 		externalWetnessMap.clear();
-	externalWetnessMap[a_formID] = { std::clamp(a_sweat, 0.0f, 1.0f), std::clamp(a_wet, 0.0f, 1.0f) };
+	externalWetnessMap[a_formID] = { sweat, wet };
 }
 
 void Skin::ClearExternalWetness(uint32_t a_formID)
