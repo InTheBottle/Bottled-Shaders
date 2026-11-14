@@ -420,6 +420,10 @@ public:
 		NoFoliageTint = 1 << 9,
 		IsMoon = 1 << 11,
 		NoSkyScattering = 1 << 12,
+		// Humanoid (ActorTypeNPC) geometry, set by NeuralRendering::SetupGeometryCategory.
+		IsHumanoidActor = 1u << 31,
+		// Hair or facial-hair head part, set by NeuralRendering::SetupGeometryCategory.
+		IsHair = 1u << 30,
 		SnowRooftop = 1 << 13,
 		SnowLODTree = 1 << 14,
 		SourceAlphaBlend = 1 << 15,

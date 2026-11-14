@@ -15,6 +15,7 @@
 #include "Features/FurShells.h"
 #include "Features/IBL.h"
 #include "Features/NRD.h"
+#include "Features/NeuralRendering.h"
 #include "Features/ReverseZ.h"
 #include "Features/ScreenSpaceGI.h"
 #include "Features/ScreenSpaceReflections.h"
@@ -512,6 +513,10 @@ void Deferred::EndDeferred()
 
 	DeferredPasses();  // Perform deferred passes and composite forward buffers
 
+	// The composite has consumed the decal-blended AO; restore Masks2 for forward lighting categories.
+	if (globals::features::neuralRendering.loaded)
+		globals::features::neuralRendering.RestoreCategories();
+
 	stateUpdateFlags.set(RE::BSGraphics::ShaderFlags::DIRTY_RENDERTARGET);  // Run OMSetRenderTargets again
 
 	deferredPass = false;
@@ -807,6 +812,11 @@ void Deferred::Hooks::Main_RenderWorld_BlendedDecals::thunk(RE::BSShaderAccumula
 		if (terrainBlending.loaded && terrainBlending.settings.Enabled) {
 			terrainBlending.RenderTerrainBlendingPasses();
 		}
+
+		// Snapshot Masks2 categories before the blended decals alpha-blend into them.
+		auto& neuralRendering = globals::features::neuralRendering;
+		if (neuralRendering.loaded)
+			neuralRendering.CaptureCategories();
 	}
 
 	auto& furShells = globals::features::furShells;

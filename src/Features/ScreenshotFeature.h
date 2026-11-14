@@ -37,14 +37,27 @@ struct ScreenshotFeature : public Feature
 	/** @brief Called after all features are loaded (no-op for this feature). */
 	virtual void PostPostLoad() override;
 
-	/** @brief Captures a screenshot from the current back buffer and enqueues it for async encoding and save. */
-	void Capture();
+	/**
+	 * @brief Captures a screenshot from the current back buffer and queues its GPU readback for async encoding and save.
+	 * @param overridePath Optional path for Neural Rendering comparison captures; extension follows the format.
+	 * @param forceCleanNoUI Capture the uncropped post-processed frame before HUD/menu drawing.
+	 *        The caller must invoke this before the game UI renders.
+	 */
+	void Capture(std::filesystem::path overridePath = {}, bool forceCleanNoUI = false);
 	/** @brief Hands finished GPU readbacks to the worker, then executes Capture() if one is pending. Render thread only; call before the wrapped buffers are cleared. */
 	void ProcessCaptureRequest();
 	/** @brief Copies the scene before the HUD draws when an SDR capture is pending, so screenshots exclude the HUD and menu blur. */
 	void SnapshotCleanScene();
 	/** @brief Returns this frame's pre-UI snapshot, or nullptr if none was taken. */
 	ID3D11Texture2D* GetFreshCleanScene() const;
+
+	/**
+	 * @brief Builds the (extension-less, game-root-relative) path for one half of a Neural Rendering
+	 *        comparison pair: Data/DLSS 5 Screenshots/CS_<timestamp><suffix>.
+	 * @param timestamp Shared timestamp string so both halves of a pair sort together.
+	 * @param suffix Filename suffix, e.g. "_NR-off" / "_NR-on".
+	 */
+	static std::filesystem::path NeuralRenderingComparisonPath(const std::string& timestamp, const char* suffix);
 	bool applyCropToScreenshot = true;
 
 	// Settings

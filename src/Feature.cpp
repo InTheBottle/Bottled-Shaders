@@ -34,6 +34,7 @@
 #include "Features/LinearLighting.h"
 #include "Features/NightEye.h"
 #include "Features/PerformanceOverlay.h"
+#include "Features/NeuralRendering.h"
 #include "Features/PostProcessing.h"
 #include "Features/ProceduralLightning.h"
 #include "Features/ProceduralNightSky.h"
@@ -269,6 +270,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::heatHaze,
 		&globals::features::cameraFX,
 		&globals::features::capsuleShadows,
+		&globals::features::neuralRendering,
 		&globals::features::hairBacklighting,
 		&globals::features::nightEye,
 		&globals::features::furShells,

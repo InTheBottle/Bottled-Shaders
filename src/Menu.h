@@ -226,6 +226,10 @@ public:
 	bool settingScreenshotKey = false;       // Screenshot capture key
 	bool settingEffects11ToggleKey = false;  // Effects 11 toggle key
 	bool settingEffects11EditorKey = false;  // Effects 11 editor key
+	bool settingNeuralRenderingToggleKey = false;
+	bool settingNeuralRenderingCompareKey = false;
+	bool settingNeuralRenderingScaleUpKey = false;
+	bool settingNeuralRenderingScaleDownKey = false;
 
 	// Deferred reload systems (public for SettingsTabRenderer access)
 	bool pendingCursorReload = false;
@@ -463,6 +467,10 @@ public:
 		std::vector<InputCombo> ScreenshotKey = { InputCombo::Keyboard(VK_SNAPSHOT) };                                       // Screenshot capture key
 		std::vector<InputCombo> Effects11ToggleKey = { InputCombo::Keyboard(VK_SHIFT), InputCombo::Keyboard(VK_MULTIPLY) };  // Effects 11 toggle key
 		std::vector<InputCombo> Effects11EditorKey = { InputCombo::Keyboard(VK_SHIFT), InputCombo::Keyboard(VK_RETURN) };    // Effects 11 editor key
+		std::vector<InputCombo> NeuralRenderingToggleKey = { InputCombo::Keyboard(VK_F6) };
+		std::vector<InputCombo> NeuralRenderingCompareKey = {};
+		std::vector<InputCombo> NeuralRenderingScaleUpKey = {};
+		std::vector<InputCombo> NeuralRenderingScaleDownKey = {};
 		bool EnableShaderBlocking = false;                                                                                   // Enable shader blocking hotkeys for debugging
 		bool FirstTimeSetupCompleted = false;                                                                                // Track if first-time setup has been completed
 		bool SkipClearCacheConfirmation = false;                                                                             // Skip confirmation dialog when clearing shader cache

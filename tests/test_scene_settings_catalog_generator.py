@@ -1246,9 +1246,9 @@ class SceneSettingsCatalogGeneratorTests(unittest.TestCase):
             ("ExponentialHeightFog", "", "volumetricFogDistance")]
         debug = self.entries_by_id[
             ("ExponentialHeightFog", "", "volumetricGridSizeZ")]
-        self.assertEqual(root["displayPath"], "")
-        self.assertEqual(volumetric["displayPath"], "Volumetric Fog")
-        self.assertEqual(debug["displayPath"], "Debug")
+        self.assertEqual(root["displayPath"], "Density and Height")
+        self.assertEqual(volumetric["displayPath"], "")
+        self.assertEqual(debug["displayPath"], "Quality and Temporal Filtering")
         self.assertIn("SceneControllable", debug["flags"])
 
     def test_safe_editor_metadata(self):
@@ -1369,8 +1369,16 @@ class SceneSettingsCatalogGeneratorTests(unittest.TestCase):
             int(entry.get("aggregateCount", 0)) <= 1)
         survivors = [entry for entry in self.entries if entry is not dropped]
         GENERATOR.validate_entries(survivors, *CMAKE_CATALOG_FLOORS)
-        with self.assertRaises(ValueError):
-            GENERATOR.validate_entries(survivors, *CMAKE_CATALOG_FLOORS, FEATURE_FLOORS)
+        # Pin the test floor to this fixture's current count, not a shipping
+        # floor that intentionally allows headroom as upstream adds controls.
+        fixture_floors = dict(FEATURE_FLOORS)
+        fixture_floors["PostProcessing"] = sum(
+            entry["feature"] == "PostProcessing" and
+            CONTROLLABLE_FLAG in entry.get("flags", "")
+            for entry in self.entries)
+        GENERATOR.validate_entries(self.entries, *CMAKE_CATALOG_FLOORS, fixture_floors)
+        with self.assertRaisesRegex(ValueError, "PostProcessing has"):
+            GENERATOR.validate_entries(survivors, *CMAKE_CATALOG_FLOORS, fixture_floors)
 
     def test_catalog_validation_rejects_lost_scene_bindings(self):
         # Persisted-but-hidden entries alone must not satisfy the gate.
@@ -1389,8 +1397,14 @@ class SceneSettingsCatalogGeneratorTests(unittest.TestCase):
         padding = [
             dict(entry, key=f"{entry['key']}Pad{index}")
             for index, entry in enumerate(survivors[:len(self.entries) - len(survivors)])]
-        with self.assertRaises(ValueError):
-            GENERATOR.validate_entries(survivors + padding, *CMAKE_CATALOG_FLOORS)
+        # The production aggregate floor has headroom; use the fixture's
+        # actual feature count to exercise losing exactly one whole feature.
+        feature_count = len({entry["feature"] for entry in self.entries
+                             if CONTROLLABLE_FLAG in entry.get("flags", "")})
+        floors = (*CMAKE_CATALOG_FLOORS[:2], feature_count)
+        GENERATOR.validate_entries(self.entries, *floors)
+        with self.assertRaisesRegex(ValueError, "features with scene-controllable entries"):
+            GENERATOR.validate_entries(survivors + padding, *floors)
 
     def test_settings_component_discovery_is_feature_agnostic(self):
         with tempfile.TemporaryDirectory() as directory:

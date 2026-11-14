@@ -1025,6 +1025,14 @@ void SettingsTabRenderer::RenderKeybindingsSection(SettingsState& state)
 		KeybindingRow(T("menu.settings.screenshot_key", "Screenshot Key:"), settings.ScreenshotKey, defaults.ScreenshotKey, state.settingScreenshotKey, "Change##Screenshot");
 	}
 
+	{
+		Util::SectionCard card("##KeysNeuralRendering", ICON_TI_SPARKLES, T("menu.settings.keys_neural_rendering", "Neural Rendering"));
+		KeybindingRow(T("menu.settings.neural_rendering_toggle_key", "Neural Rendering Toggle Key:"), settings.NeuralRenderingToggleKey, defaults.NeuralRenderingToggleKey, state.settingNeuralRenderingToggleKey, "Change##NeuralRenderingToggle");
+		KeybindingRow(T("menu.settings.neural_rendering_compare_key", "Neural Rendering Compare Screenshot Key:"), settings.NeuralRenderingCompareKey, defaults.NeuralRenderingCompareKey, state.settingNeuralRenderingCompareKey, "Change##NeuralRenderingCompare");
+		KeybindingRow(T("menu.settings.neural_rendering_scale_up_key", "Neural Rendering Scale Up Key:"), settings.NeuralRenderingScaleUpKey, defaults.NeuralRenderingScaleUpKey, state.settingNeuralRenderingScaleUpKey, "Change##NeuralRenderingScaleUp");
+		KeybindingRow(T("menu.settings.neural_rendering_scale_down_key", "Neural Rendering Scale Down Key:"), settings.NeuralRenderingScaleDownKey, defaults.NeuralRenderingScaleDownKey, state.settingNeuralRenderingScaleDownKey, "Change##NeuralRenderingScaleDown");
+	}
+
 	Util::SectionCard card("##KeysDebug", ICON_TI_FLASK, T("menu.settings.keys_debug", "Debug"));
 	KeybindingRow(T("menu.settings.effect_toggle_key", "Effect Toggle Key:"), settings.EffectToggleKey, defaults.EffectToggleKey, state.settingsEffectsToggle, "Change##EffectToggle");
 	KeybindingRow(T("menu.settings.effects11_toggle_key", "Effects 11 Toggle Key:"), settings.Effects11ToggleKey, defaults.Effects11ToggleKey, state.settingEffects11ToggleKey, "Change##Effects11Toggle");

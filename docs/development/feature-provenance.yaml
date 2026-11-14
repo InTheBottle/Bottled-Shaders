@@ -1,0 +1,131 @@
+# Feature provenance: where code on the Personal branch came from.
+#
+# Answers "where did this come from?" only. What Personal is compared against and
+# kept in sync with lives in maintenance-policy.yaml. Neither file carries the
+# other's fields.
+#
+# Schema (see docs/development/maintainability.md):
+#   <FeatureName>:                     # the feature's GetShortName()
+#     status: present
+#     personal_original: true | false  # true ONLY if no upstream contributed implementation
+#     provenance:
+#       - source: <upstreams.yaml key | personal>
+#         role: <short label>          # implementation, base-feature, design-reference, ...
+#         confidence: confirmed | likely | unresolved
+#         evidence: [<short sha>, ...] # optional; Personal and/or upstream commits
+#         note: <one line; required when unresolved>
+#     components:                      # only when parts genuinely have different sources
+#       <component>:
+#         personal_original: true | false
+#         provenance: [ ...same entry shape... ]
+#
+# A design-reference entry does not by itself make personal_original false.
+# Never infer provenance from a path, a commit author or a generic "feat:" subject.
+#
+# Since the 2026-09-26 simplification Personal is Bottle-Compendium plus the entries below; every
+# other feature is Bottle's, unmodified. Hair Backlighting and the background compile overlay
+# toggle started here and were handed over to Bottle (978eb4d9f2); their entries say Bottle
+# is now the source and the maintainer of record. Provenance of removed features is kept in this file at
+# commit 84783ba220 (see removed-features.md).
+
+features:
+  NeuralRendering:
+    status: present
+    personal_original: true
+    provenance:
+      - source: personal
+        role: implementation
+        confidence: likely
+        note: confirm no code (as opposed to design) was lifted from the two NR design references
+      - source: optiscaler_dlssnr
+        role: design-reference     # Separate Upscaling deferred-residual design
+        confidence: confirmed
+        evidence: [a1eb303df8]
+      - source: dlssnr_cost_scaler
+        role: design-reference     # proxy raster / kMinimumModelExtent in Backend.cpp
+        confidence: confirmed
+
+  HairBacklighting:
+    status: present
+    personal_original: false          # handed over: Bottle owns and maintains it since 978eb4d9f2
+    provenance:
+      - source: bottle
+        role: implementation          # merged into Bottle-Compendium as PR #3; authored on Personal (cavy8, 2026-09-26)
+        confidence: confirmed
+        evidence: [7849b92fa6, 30804f25f6, 0068892624, 9c214a87c5, 6eddd23129]
+      - source: bottle
+        role: design-reference        # lobe shape follows Foliage Lighting's GetFoliageTransmission(); no code copied
+        confidence: confirmed
+
+  Screenshot:
+    status: present
+    personal_original: false
+    provenance:
+      - source: mainline
+        role: base-feature
+        confidence: confirmed
+    components:
+      srgb_fix:
+        personal_original: true
+        provenance:
+          - source: personal
+            role: bug-fix           # WIC_FLAGS_FORCE_SRGB for double-encoded SDR PNGs
+            confidence: confirmed
+            evidence: [7607769991]
+      nr_comparison_capture:
+        personal_original: true
+        provenance:
+          - source: personal
+            role: implementation    # Neural Rendering's A/B capture path
+            confidence: confirmed
+            evidence: [7b0ffa8f1f]
+
+  PostProcessing:
+    status: present
+    personal_original: false
+    provenance:
+      - source: bottle
+        role: base-feature
+        confidence: unresolved
+        note: shipped by the pinned Bottle; authorship before Bottle not traced
+    components:
+      default_states:
+        personal_original: true
+        provenance:
+          - source: personal
+            role: default-states    # P1: feature on, every pipeline effect off, DisableVanillaTonemapping 0
+            confidence: confirmed
+            evidence: [90e57b9855]
+      dof_active_target_gate:
+        personal_original: true
+        provenance:
+          - source: personal
+            role: bug-fix           # P2: DoF target focus only while a dialogue/TDM lock/console target is live
+            confidence: confirmed
+            evidence: [a7e142722c]
+
+core:
+  # Non-feature code that differs from Bottle; same entry shape as features.
+  upscaling_dilated_motion_vectors:
+    status: present
+    personal_original: true
+    provenance:
+      - source: personal
+        role: implementation       # Upscaling fix F1: Streamline motionVectorsDilated = eTrue
+        confidence: confirmed
+        evidence: [5947cf63af]
+  background_compile_overlay:
+    status: present
+    personal_original: false          # handed over: Bottle owns and maintains it since 978eb4d9f2
+    provenance:
+      - source: bottle
+        role: implementation       # "Show Background Compile Overlay" setting; merged into Bottle-Compendium as PR #4, authored on Personal (cavy8)
+        confidence: confirmed
+        evidence: [11190a9b8b, a192a5a527]
+  neural_rendering_hotkeys:
+    status: present
+    personal_original: true
+    provenance:
+      - source: personal
+        role: implementation       # Menu toggle/compare/scale hotkeys for Neural Rendering
+        confidence: confirmed
