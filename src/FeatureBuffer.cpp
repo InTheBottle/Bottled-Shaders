@@ -19,6 +19,7 @@
 #include "Features/LinearLighting.h"
 #include "Features/NightEye.h"
 #include "Features/PostProcessing.h"
+#include "Features/ProceduralAurora.h"
 #include "Features/ProceduralNightSky.h"
 #include "Features/ProceduralSun.h"
 #include "Features/RainRefraction.h"
@@ -88,5 +89,6 @@ std::pair<unsigned char*, size_t> GetFeatureBufferData(bool a_inWorld)
 		globals::features::screenSpaceGI.GetCommonBufferData(),
 		globals::features::screenSpaceReflections.GetCommonBufferData(),
 		globals::features::postProcessing.GetCommonBufferData(),
-		globals::features::cloudRelight.GetCommonBufferData());
+		globals::features::cloudRelight.GetCommonBufferData(),
+		globals::features::proceduralAurora.GetCommonBufferData());
 }

@@ -33,6 +33,7 @@
 #include "Features/SnowDeformation.h"
 #include "Features/TerrainBlending.h"
 #include "Features/TerrainHelper.h"
+#include "Features/TreeWind.h"
 #include "Features/Upscaling.h"
 #include "Features/VolumetricShadows.h"
 #include "Features/WetnessEffects.h"
@@ -208,6 +209,11 @@ void State::Draw()
 		if (truePBR.loaded) {
 			ZoneScopedN("TruePBR::SetShaderResources");
 			truePBR.SetShaderResources(context);
+		}
+
+		if (globals::features::treeWind.loaded) {
+			ZoneScopedN("TreeWind::SetShaderResources");
+			globals::features::treeWind.SetShaderResources(context);
 		}
 
 		if (permutationData != permutationDataPrevious) {

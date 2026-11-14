@@ -31,6 +31,7 @@ struct SubsurfaceScattering;
 struct TerrainBlending;
 struct TerrainHelper;
 struct TerrainShadows;
+struct TreeWind;
 struct UnifiedWater;
 struct VanillaFresnel;
 struct VolumetricLighting;
@@ -62,6 +63,7 @@ struct DetailMaps;
 struct LandscapeSeams;
 struct SnowDeformation;
 struct SceneManager;
+struct ProceduralAurora;
 
 class State;
 class Deferred;
@@ -143,6 +145,7 @@ namespace globals
 		extern TerrainBlending terrainBlending;
 		extern TerrainHelper terrainHelper;
 		extern TerrainShadows terrainShadows;
+		extern TreeWind treeWind;
 		extern UnifiedWater unifiedWater;
 		extern VanillaFresnel vanillaFresnel;
 		extern VolumetricLighting volumetricLighting;
@@ -178,6 +181,7 @@ namespace globals
 		extern LandscapeSeams landscapeSeams;
 		extern SnowDeformation snowDeformation;
 		extern SceneManager sceneManager;
+		extern ProceduralAurora proceduralAurora;
 
 	}
 

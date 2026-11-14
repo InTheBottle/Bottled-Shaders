@@ -47,6 +47,7 @@ namespace SceneSettingsPolicy
 		{ "ScreenSpaceReflections", "Enabled" },
 		{ "ScreenSpaceReflections", "HalfRes" },
 		{ "ScreenSpaceReflections", "EnableREBLUR" },
+		{ "Upscaling", "streamlineLogLevel" },
 		{ "VolumetricLighting" },
 	};
 
