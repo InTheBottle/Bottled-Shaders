@@ -739,6 +739,7 @@ bool Hooks::InstallBeforeInputPoll()
 	return BSInputDeviceManager_BeforeInputPoll::func.address() != 0;
 }
 
+/** @brief Whether the input event chain holds a mouse wheel button event. */
 static bool HasMouseWheelEvent(const RE::InputEvent* a_event)
 {
 	for (; a_event; a_event = a_event->next) {

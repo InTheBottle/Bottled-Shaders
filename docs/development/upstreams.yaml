@@ -15,7 +15,7 @@ upstreams:
         branch: Bottle-Compendium
         # Last Bottle commit Personal is synchronized to. Sync deliberately with `git merge` and update
         # this pin in the same change; newer Bottle commits are reported as upstream drift.
-        sha: f829a59f0e1bc4008796799d62b1051399b3cbc8
+        sha: 8f8f407997dc792004d77306d99f9aae52a03be6
         role: primary-maintenance-baseline
     mainline:
         repository: community-shaders/skyrim-community-shaders

@@ -32,6 +32,8 @@ public:
 	};
 
 	bool HasShaderDefine(RE::BSShader::Type) override { return true; };
+	virtual std::vector<std::pair<std::string_view, std::string_view>> GetShaderDefineOptions() override;
+	bool IsRainFlowCompiled();
 
 	struct Settings
 	{
@@ -65,6 +67,15 @@ public:
 		float RippleBreadth = .5f;
 		float RippleLifetime = .5f;
 		float TopDownVisibility = 1.0f;
+		float WallRainDensity = 1.0f;
+		float WallRainDropSize = 1.0f;
+		float WallRainSpeed = 1.0f;
+		float WallRainLayering = 1.0f;
+		float WallRainNormalStrength = 2.0f;
+		float WallRainWetness = 1.0f;
+		float WallRainDarkening = 0.65f;
+		uint EnableWallRain = false;
+		float WallRainTrailLength = 1.0f;
 	};
 
 	struct alignas(16) PerFrame
@@ -75,8 +86,14 @@ public:
 		float Wetness;
 		float PuddleWetness;
 		Settings settings;
+		uint pad0[3];
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
+	bool rainFlowLatched = false;
+	bool rainFlowAtBoot = false;
+	static_assert(sizeof(Settings) == 148);
+	static_assert(offsetof(PerFrame, settings) == 80);
+	static_assert(sizeof(PerFrame) == 240);
 
 	struct DebugSettings
 	{
@@ -128,6 +145,8 @@ public:
 
 	/** @brief Draws the ImGui settings panel for wetness effects configuration. */
 	virtual void DrawSettings() override;
+	virtual bool HasDebugSection() const override { return true; }
+	virtual void DrawDebugSection() override;
 
 	virtual void LoadSettings(json& o_json) override;
 	virtual void SaveSettings(json& o_json) override;

@@ -83,7 +83,7 @@ features:
               anchor: "DLSS reset request consumed by Streamline frame constants"
               match:
                   [
-                      "rebuild. Neural Rendering also sets it to reset DLSS history on the same frame as its",
+                      "Requests a DLSS history reset alongside Neural Rendering",
                       "model; Streamline frame constants consume that request.",
                       "pendingDLSSReset",
                   ]
@@ -192,6 +192,24 @@ features:
                 paths: ["src/Features/ScreenshotFeature.cpp", "src/Features/ScreenshotFeature.h"]
 
 shared_integrations:
+    cmake/scene_settings_catalog_floors.json:
+        nr_scene_catalog:
+            source: personal
+            anchor: "Minimum scene-controllable Neural Rendering bindings"
+            match: ['"NeuralRendering": 60,']
+    src/CSEditor/SceneManager/SceneSettingsPolicy.h:
+        scene_debug_exclusions:
+            source: personal
+            anchor: "Keep footstep test overrides and Streamline logging out of scene looks"
+            match:
+                [
+                    '{ "FootstepParticles", "SurfaceOverride" }',
+                    '{ "Upscaling", "streamlineLogLevel" }',
+                ]
+        nr_scene_policy:
+            source: personal
+            anchor: "Neural Rendering scene eligibility and exclusions for layout, debug views and raster resizing"
+            match: ['"NeuralRendering"']
     .github/workflows/_shared-build.yaml:
         neural_rendering_build_warnings:
             source: personal
@@ -286,6 +304,10 @@ shared_integrations:
             match: ["settingNeuralRendering"]
 
 repository:
+    scene_catalog_tests:
+        source: personal
+        reason: "Keep catalogue regression fixtures aligned with current upstream UI and test gate boundaries independently of shipping floor headroom"
+        paths: [tests/test_scene_settings_catalog_generator.py]
     neural_rendering_ci:
         source: personal
         reason: "Neural Rendering automatic prerelease build and release retention workflows"
@@ -313,6 +335,7 @@ repository:
                 docs/development/maintenance-policy.yaml,
                 docs/development/upstreams.yaml,
                 docs/development/maintainability.md,
+                docs/development/scene-settings-framework.md,
                 docs/development/removed-features.md,
                 docs/development/history/,
             ]

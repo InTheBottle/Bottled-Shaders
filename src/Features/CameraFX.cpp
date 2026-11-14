@@ -12,6 +12,7 @@
 #include "Globals.h"
 #include "State.h"
 #include "Utils/D3D.h"
+#include "Utils/DebugSection.h"
 #include "Utils/Game.h"
 #include "Utils/MathUtils.h"
 #include "Utils/Moon.h"

@@ -9,6 +9,7 @@
 #include "State.h"
 
 #include "I18n/I18n.h"
+#include "Utils/DebugSection.h"
 #include "Utils/UI.h"
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
@@ -178,6 +179,13 @@ void Skin::DrawSettings()
 	if (Util::Button(T("feature.skin.reload_skin_detail_texture", "Reload Skin Detail Texture"))) {
 		ReloadSkinDetail();
 	}
+}
+
+void Skin::DrawDebugSection()
+{
+	Util::DebugSection section;
+	if (!section)
+		return;
 
 	BUFFER_VIEWER_NODE(texSkinDetail, 1.0f)
 }
@@ -346,7 +354,7 @@ float4 Skin::GetWetness(RE::BSGeometry* geometry)
 		auto [it, inserted] = actorWetnessMap.try_emplace(actorFormID);
 		auto& cached = it->second;
 		if (!inserted && cached.frameCount == currentFrame) {
-			return cached.wetness;
+			return cached.output;
 		}
 		cached.frameCount = currentFrame;
 
@@ -371,15 +379,25 @@ float4 Skin::GetWetness(RE::BSGeometry* geometry)
 			wetness.w = 0.0f;
 		}
 
+		ExternalWetness external;
+		{
+			std::scoped_lock lock(externalWetnessLock);
+			if (auto ext = externalWetnessMap.find(actorFormID); ext != externalWetnessMap.end())
+				external = ext->second;
+		}
+		const float externalWet = external.wet * 2.0f;
+
 		if (inserted) {
 			cached.wetness = wetness;
+			cached.externalSweat = external.sweat;
+			cached.externalWet = externalWet;
 		} else {
 			const float fadeTime = std::max(settings.WetFadeTime, 0.001f);
 			if (cached.wetness.x < wetness.x) {
 				cached.wetness.x = wetness.x;
 			} else if (cached.wetness.x > wetness.x) {
 				cached.wetness.x -= *globals::game::deltaTime / fadeTime;
-				cached.wetness.x = std::max(cached.wetness.x, 0.0f);
+				cached.wetness.x = std::max(cached.wetness.x, wetness.x);  // dry down to the target, not past it
 			}
 			wetness.x = cached.wetness.x;
 
@@ -392,7 +410,7 @@ float4 Skin::GetWetness(RE::BSGeometry* geometry)
 				}
 			} else if (cached.wetness.y > wetness.y) {
 				cached.wetness.y -= *globals::game::deltaTime / fadeTime;
-				cached.wetness.y = std::max(cached.wetness.y, 0.0f);
+				cached.wetness.y = std::max(cached.wetness.y, wetness.y);
 				wetness.y = cached.wetness.y;
 				if (wetness.y == 0.0f) {
 					wetness.w = 0.0f;
@@ -408,7 +426,15 @@ float4 Skin::GetWetness(RE::BSGeometry* geometry)
 				wetness.w = cached.wetness.w;
 			}
 			cached.wetness = wetness;
+
+			const float fadeStep = std::max(*globals::game::deltaTime, 0.0f) / fadeTime;
+			cached.externalSweat += std::clamp(external.sweat - cached.externalSweat, -fadeStep, fadeStep);
+			cached.externalWet += std::clamp(externalWet - cached.externalWet, -fadeStep, fadeStep);
 		}
+
+		const float waterLine = wetness.y > 0.0f ? wetness.z + wetness.w : 0.0f;
+		cached.output = float4(std::max(wetness.x, cached.externalSweat), wetness.y, waterLine, cached.externalWet);
+		return cached.output;
 	}
 	return wetness;
 }
@@ -622,4 +648,42 @@ void Skin::Hooks::BSLightingShader_SetupGeometry::thunk(RE::BSShader* This, RE::
 	auto& skin = globals::features::skin;
 	skin.BSLightingShader_SetupGeometry(Pass);
 	return func(This, Pass, RenderFlags);
+}
+
+void Skin::SetExternalWetness(uint32_t a_formID, float a_sweat, float a_wet)
+{
+	const float sweat = std::isnan(a_sweat) ? 0.0f : std::clamp(a_sweat, 0.0f, 1.0f);
+	const float wet = std::isnan(a_wet) ? 0.0f : std::clamp(a_wet, 0.0f, 1.0f);
+
+	std::scoped_lock lock(externalWetnessLock);
+	if (sweat == 0.0f && wet == 0.0f) {
+		externalWetnessMap.erase(a_formID);
+		return;
+	}
+	if (externalWetnessMap.size() > 1024 && !externalWetnessMap.contains(a_formID))
+		externalWetnessMap.clear();
+	externalWetnessMap[a_formID] = { sweat, wet };
+}
+
+void Skin::ClearExternalWetness(uint32_t a_formID)
+{
+	std::scoped_lock lock(externalWetnessLock);
+	externalWetnessMap.erase(a_formID);
+}
+
+// Plugin API: other SKSE plugins find these with GetProcAddress on this DLL.
+// Values are targets; the skin still eases toward them using the Wetness Fade Out Time.
+extern "C" __declspec(dllexport) uint32_t BottledShaders_WetnessAPIVersion()
+{
+	return 1;
+}
+
+extern "C" __declspec(dllexport) void BottledShaders_SetActorWetness(uint32_t a_formID, float a_sweat, float a_wet)
+{
+	globals::features::skin.SetExternalWetness(a_formID, a_sweat, a_wet);
+}
+
+extern "C" __declspec(dllexport) void BottledShaders_ClearActorWetness(uint32_t a_formID)
+{
+	globals::features::skin.ClearExternalWetness(a_formID);
 }

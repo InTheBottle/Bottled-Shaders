@@ -125,6 +125,7 @@ void NRD::CompileComputeShaders()
 	auto path = std::filesystem::path("Data\\Shaders\\NRD") / "prepareNRDGuides.cs.hlsl";
 	if (auto rawPtr = reinterpret_cast<ID3D11ComputeShader*>(Util::CompileShader(path.c_str(), defines, "cs_5_0")))
 		prepareNRDGuidesCompute.attach(rawPtr);
+	guideShaderFailed = !prepareNRDGuidesCompute;
 }
 
 void NRD::PrepareGuides(bool a_requested)

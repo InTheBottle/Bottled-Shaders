@@ -8,9 +8,13 @@
 #include "../Upscaling.h"
 #include "FidelityFX.h"
 #include "Streamline.h"
+#include "Utils/D3D.h"
 
 void DX12SwapChain::CreateD3D12Device(IDXGIAdapter* a_adapter)
 {
+	if (d3d12Device)
+		return;
+
 	DX::ThrowIfFailed(D3D12CreateDevice(a_adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&d3d12Device)));
 
 	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
@@ -314,7 +318,7 @@ HANDLE DX12SwapChain::GetFrameLatencyWaitableObject()
 	return swapChain->GetFrameLatencyWaitableObject();
 }
 
-WrappedResource::WrappedResource(D3D11_TEXTURE2D_DESC a_texDesc, ID3D11Device5* a_d3d11Device, ID3D12Device* a_d3d12Device)
+WrappedResource::WrappedResource(D3D11_TEXTURE2D_DESC a_texDesc, ID3D11Device5* a_d3d11Device, ID3D12Device* a_d3d12Device, const std::string& a_name)
 {
 	// Create D3D11 shared texture directly instead of wrapping D3D12 resource
 	a_texDesc.MiscFlags |= D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
@@ -365,6 +369,17 @@ WrappedResource::WrappedResource(D3D11_TEXTURE2D_DESC a_texDesc, ID3D11Device5* 
 		rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
 		rtvDesc.Texture2D.MipSlice = 0;
 		DX::ThrowIfFailed(a_d3d11Device->CreateRenderTargetView(resource11, &rtvDesc, &rtv));
+	}
+
+	if (!a_name.empty()) {
+		Util::SetResourceName(resource11, "%s", a_name.c_str());
+		resource->SetName(winrt::to_hstring(a_name).c_str());
+		if (srv)
+			Util::SetResourceName(srv, "%s SRV", a_name.c_str());
+		if (uav)
+			Util::SetResourceName(uav, "%s UAV", a_name.c_str());
+		if (rtv)
+			Util::SetResourceName(rtv, "%s RTV", a_name.c_str());
 	}
 }
 

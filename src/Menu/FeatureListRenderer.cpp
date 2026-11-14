@@ -571,6 +571,8 @@ void FeatureListRenderer::DrawFeatureBody(Feature* feat)
 		const bool editedBefore = WasItemEditedThisFrame();
 		SettingReveal::BeginFeatureBody(feat);
 		feat->DrawSettings();
+		if (feat->HasDebugSection())
+			feat->DrawDebugSection();
 		SettingReveal::EndFeatureBody();
 		if (feat->UsesMainSettings()) {
 			auto* state = globals::state;
@@ -1567,6 +1569,15 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureHeader(Feature* feat, bo
 		ImGui::SetCursorScreenPos(cursorAfterTitle);
 	}
 
+	if (!isDisabled && isLoaded) {
+		const bool inlineWithoutChip = titleWidth + style.ItemSpacing.x * 2.0f + actionsWidth <= availableWidth;
+		const float chipRightLimit = titleStartPos.x + availableWidth - (inlineWithoutChip ? actionsWidth + style.ItemSpacing.x * 2.0f : 0.0f);
+		ImGui::SetCursorScreenPos(ImVec2(titleStartPos.x + titleWidth + style.ItemSpacing.x, titleStartPos.y + title.height - frameHeight));
+		if (ProfilingRenderer::RenderFeatureCostChip(featureName, chipRightLimit))
+			titleWidth = std::max(titleWidth, ImGui::GetItemRectMax().x - titleStartPos.x);
+		ImGui::SetCursorScreenPos(cursorAfterTitle);
+	}
+
 	const bool actionsInline = titleWidth + style.ItemSpacing.x * 2.0f + actionsWidth <= availableWidth;
 	if (actionsInline) {
 		ImGui::SetCursorScreenPos(ImVec2(titleStartPos.x + availableWidth - actionsWidth, titleStartPos.y + (title.height - frameHeight) * 0.5f));
@@ -1597,11 +1608,6 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureSettings(Feature* feat, 
 	} else {
 		if (isLoaded) {
 			DrawFeatureBody(feat);
-
-			if (feat != &globals::features::csEditor && ProfilingRenderer::HasFeatureTimers(feat->GetShortName())) {
-				ImGui::SeparatorText(T("menu.features.profiling", "Profiling"));
-				ProfilingRenderer::RenderFeatureTimers(feat->GetShortName());
-			}
 		} else {
 			if (FeatureIssues::IsObsoleteFeature(feat->GetShortName())) {
 				feat->DrawUnloadedUI();

@@ -26,6 +26,8 @@ namespace SceneSettingsPolicy
 		{ "ImageBasedLighting", "DisableInWorldMap" },
 		{ "ImageBasedLighting", "DisableInLoadingScreen" },
 		// Debug visualisation, never a look
+		{ "FootstepParticles", "SurfaceOverride" },
+		{ "Upscaling", "streamlineLogLevel" },
 		{ "LightLimitFix", "EnableLightsVisualisation" },
 		{ "LightLimitFix", "LightsVisualisationMode" },
 		// Panel layout and debug views, never a look

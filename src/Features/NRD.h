@@ -56,6 +56,7 @@ struct NRD : Feature
 	// should skip their dispatches if guides aren't ready (e.g. world not
 	// loaded, shader failed to compile).
 	bool AreGuidesReady() const { return guidesReadyThisFrame; }
+	bool CanDenoise() const { return loaded && settings.Enabled && !guideShaderFailed; }
 
 	// Build a CommonSettings block shared by every denoiser instance this
 	// frame. Centralizing this guarantees frameIndex and prev-frame matrices
@@ -130,6 +131,7 @@ struct NRD : Feature
 	eastl::unique_ptr<Texture2D> texNRDMV = nullptr;
 
 	winrt::com_ptr<ID3D11ComputeShader> prepareNRDGuidesCompute = nullptr;
+	bool guideShaderFailed = false;
 };
 
 // REBLURSettings is consumed by every feature that owns an NRDReblurIntegration

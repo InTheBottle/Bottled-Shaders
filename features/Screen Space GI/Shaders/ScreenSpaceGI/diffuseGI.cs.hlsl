@@ -185,7 +185,7 @@ void IntegrateBitfield(
 }
 
 #if defined(DYNAMIC_CUBEMAPS)
-float3 SampleDiffuseFallbackCubemap(float3 worldPos, float3 worldNormal, float3 worldDir)
+float3 SampleDiffuseFallbackCubemap(float3 worldPos, float3 worldNormal, float3 worldDir, float3 iblRatio)
 {
 	float3 envSampleRaw = EnvTexture.SampleLevel(samplerLinearClamp, worldDir, SSGI_FALLBACK_MIP);
 	float3 envColor = envSampleRaw;
@@ -213,8 +213,7 @@ float3 SampleDiffuseFallbackCubemap(float3 worldPos, float3 worldNormal, float3 
 		} else {
 			// Mode 0/1: ratio-based
 			float3 saturatedEnv = Color::Saturation(envSampleRaw, SharedData::iblSettings.EnvIBLSaturation);
-			float3 ratio = ImageBasedLighting::GetIBLRatio();
-			envColor = saturatedEnv * ratio * SharedData::iblSettings.EnvIBLScale;
+			envColor = saturatedEnv * iblRatio * SharedData::iblSettings.EnvIBLScale;
 		}
 
 		float3 reflectionColor = 0;
@@ -380,6 +379,11 @@ void CalculateGI(
 		if (UseDynamicCubemap != 0) {
 			float3 worldPos = ViewToWorldPosition(pixCenterPos, FrameBuffer::CameraViewInverse);
 			float3 worldNormal = ViewToWorldVector(viewspaceNormal, FrameBuffer::CameraViewInverse);
+			float3 iblRatio = 1.0;
+#	if defined(IBL)
+			[branch] if (SharedData::iblSettings.EnableIBL && SharedData::iblSettings.DALCMode < 2)
+				iblRatio = ImageBasedLighting::GetIBLRatio();
+#	endif
 			[unroll] for (uint j = 0; j < SSGI_FALLBACK_SAMPLE_COUNT; j++)
 			{
 				uint maskSize = SSGI_MAX_RAY / SSGI_FALLBACK_SAMPLE_COUNT;
@@ -400,7 +404,7 @@ void CalculateGI(
 
 				float3 rayDir = normalize(openDirectionWeight / openWeight);
 				float3 worldDir = ViewToWorldVector(rayDir, FrameBuffer::CameraViewInverse);
-				float3 fallbackSample = SampleDiffuseFallbackCubemap(worldPos, worldNormal, worldDir);
+				float3 fallbackSample = SampleDiffuseFallbackCubemap(worldPos, worldNormal, worldDir, iblRatio);
 				float3 contrib = fallbackSample * openWeight;
 				fallbackRadiance += contrib;
 #	ifdef SSGI_SH

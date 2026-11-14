@@ -1206,7 +1206,39 @@ class SceneSettingsCatalogGeneratorTests(unittest.TestCase):
         samples = self.entries_by_id[("SubsurfaceScattering", "", "BurleySamples")]
         self.assertEqual(base["displayPath"], "Base Profile")
         self.assertEqual(human["displayPath"], "Human Profile")
-        self.assertEqual(samples["displayPath"], "Settings")
+        self.assertEqual(samples["displayPath"], "")
+
+    def test_persistent_categories_restore_the_enclosing_scope(self):
+        for heading in ("", 'ImGui::SeparatorText(T(TKEY("outer"), "Outer"));'):
+            source = """
+            #define I18N_KEY_PREFIX "feature.example."
+            void Example::DrawSettings()
+            {
+                OUTER_HEADING
+                if (settings.Enabled) {
+                    ImGui::SeparatorText(T(TKEY("inner"), "Inner"));
+                    ImGui::SliderFloat("Inside", &settings.Inside, 0.f, 1.f);
+                    if (settings.Nested) {
+                        ImGui::SliderFloat("Nested", &settings.NestedValue, 0.f, 1.f);
+                    }
+                    ImGui::SliderFloat("Same Scope", &settings.SameScope, 0.f, 1.f);
+                } else {
+                    ImGui::SliderFloat("Sibling", &settings.Sibling, 0.f, 1.f);
+                }
+                ImGui::SliderFloat("After", &settings.After, 0.f, 1.f);
+            }
+            """.replace("OUTER_HEADING", heading)
+            with self.subTest(heading=heading), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "Example.cpp"
+                path.write_text(source, encoding="utf-8")
+                index = GENERATOR.collect_control_index([path])
+                for key in ("Inside", "NestedValue", "SameScope"):
+                    self.assertEqual(index.bindings[("Example", (key,))].category,
+                                     GENERATOR.LocalizedText("Inner", "feature.example.inner"))
+                outer = (GENERATOR.LocalizedText("Outer", "feature.example.outer")
+                         if heading else GENERATOR.LocalizedText())
+                for key in ("Sibling", "After"):
+                    self.assertEqual(index.bindings[("Example", (key,))].category, outer)
 
     def test_brace_scoped_categories_match_exponential_height_fog(self):
         root = self.entries_by_id[("ExponentialHeightFog", "", "fogDensity")]
@@ -1214,9 +1246,9 @@ class SceneSettingsCatalogGeneratorTests(unittest.TestCase):
             ("ExponentialHeightFog", "", "volumetricFogDistance")]
         debug = self.entries_by_id[
             ("ExponentialHeightFog", "", "volumetricGridSizeZ")]
-        self.assertEqual(root["displayPath"], "")
-        self.assertEqual(volumetric["displayPath"], "Volumetric Fog")
-        self.assertEqual(debug["displayPath"], "Debug")
+        self.assertEqual(root["displayPath"], "Density and Height")
+        self.assertEqual(volumetric["displayPath"], "")
+        self.assertEqual(debug["displayPath"], "Quality and Temporal Filtering")
         self.assertIn("SceneControllable", debug["flags"])
 
     def test_safe_editor_metadata(self):
@@ -1337,8 +1369,16 @@ class SceneSettingsCatalogGeneratorTests(unittest.TestCase):
             int(entry.get("aggregateCount", 0)) <= 1)
         survivors = [entry for entry in self.entries if entry is not dropped]
         GENERATOR.validate_entries(survivors, *CMAKE_CATALOG_FLOORS)
-        with self.assertRaises(ValueError):
-            GENERATOR.validate_entries(survivors, *CMAKE_CATALOG_FLOORS, FEATURE_FLOORS)
+        # Pin the test floor to this fixture's current count, not a shipping
+        # floor that intentionally allows headroom as upstream adds controls.
+        fixture_floors = dict(FEATURE_FLOORS)
+        fixture_floors["PostProcessing"] = sum(
+            entry["feature"] == "PostProcessing" and
+            CONTROLLABLE_FLAG in entry.get("flags", "")
+            for entry in self.entries)
+        GENERATOR.validate_entries(self.entries, *CMAKE_CATALOG_FLOORS, fixture_floors)
+        with self.assertRaisesRegex(ValueError, "PostProcessing has"):
+            GENERATOR.validate_entries(survivors, *CMAKE_CATALOG_FLOORS, fixture_floors)
 
     def test_catalog_validation_rejects_lost_scene_bindings(self):
         # Persisted-but-hidden entries alone must not satisfy the gate.
@@ -1357,8 +1397,14 @@ class SceneSettingsCatalogGeneratorTests(unittest.TestCase):
         padding = [
             dict(entry, key=f"{entry['key']}Pad{index}")
             for index, entry in enumerate(survivors[:len(self.entries) - len(survivors)])]
-        with self.assertRaises(ValueError):
-            GENERATOR.validate_entries(survivors + padding, *CMAKE_CATALOG_FLOORS)
+        # The production aggregate floor has headroom; use the fixture's
+        # actual feature count to exercise losing exactly one whole feature.
+        feature_count = len({entry["feature"] for entry in self.entries
+                             if CONTROLLABLE_FLAG in entry.get("flags", "")})
+        floors = (*CMAKE_CATALOG_FLOORS[:2], feature_count)
+        GENERATOR.validate_entries(self.entries, *floors)
+        with self.assertRaisesRegex(ValueError, "features with scene-controllable entries"):
+            GENERATOR.validate_entries(survivors + padding, *floors)
 
     def test_settings_component_discovery_is_feature_agnostic(self):
         with tempfile.TemporaryDirectory() as directory:

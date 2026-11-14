@@ -54,6 +54,9 @@ namespace
 		DXGI_FORMAT_R9G9B9E5_SHAREDEXP,
 	};
 	static_assert(ARRAYSIZE(kNRDFormatTable) == static_cast<uint32_t>(nrd::Format::MAX_NUM));
+
+	constexpr uint32_t kMaxRangeSRVs = 32;
+	constexpr uint32_t kMaxRangeUAVs = 16;
 }
 
 DXGI_FORMAT NRDReblurIntegration::NRDFormatToDXGI(nrd::Format fmt)
@@ -249,21 +252,23 @@ void NRDReblurIntegration::Dispatch()
 
 			if (range.descriptorType == nrd::DescriptorType::TEXTURE) {
 				// SRVs
-				eastl::vector<ID3D11ShaderResourceView*> srvs(range.descriptorsNum, nullptr);
+				ID3D11ShaderResourceView* srvs[kMaxRangeSRVs] = {};
+				const uint32_t count = std::min(range.descriptorsNum, kMaxRangeSRVs);
 				for (uint32_t k = 0; k < range.descriptorsNum; k++, resIdx++) {
-					auto* view = ResolveResource(dispatch.resources[resIdx]);
-					srvs[k] = static_cast<ID3D11ShaderResourceView*>(view);
+					if (k < count)
+						srvs[k] = static_cast<ID3D11ShaderResourceView*>(ResolveResource(dispatch.resources[resIdx]));
 				}
-				context->CSSetShaderResources(srvSlot, range.descriptorsNum, srvs.data());
+				context->CSSetShaderResources(srvSlot, count, srvs);
 				srvSlot += range.descriptorsNum;
 			} else {
 				// UAVs
-				eastl::vector<ID3D11UnorderedAccessView*> uavs(range.descriptorsNum, nullptr);
+				ID3D11UnorderedAccessView* uavs[kMaxRangeUAVs] = {};
+				const uint32_t count = std::min(range.descriptorsNum, kMaxRangeUAVs);
 				for (uint32_t k = 0; k < range.descriptorsNum; k++, resIdx++) {
-					auto* view = ResolveResource(dispatch.resources[resIdx]);
-					uavs[k] = static_cast<ID3D11UnorderedAccessView*>(view);
+					if (k < count)
+						uavs[k] = static_cast<ID3D11UnorderedAccessView*>(ResolveResource(dispatch.resources[resIdx]));
 				}
-				context->CSSetUnorderedAccessViews(uavSlot, range.descriptorsNum, uavs.data(), nullptr);
+				context->CSSetUnorderedAccessViews(uavSlot, count, uavs, nullptr);
 				uavSlot += range.descriptorsNum;
 			}
 		}
@@ -272,10 +277,11 @@ void NRDReblurIntegration::Dispatch()
 
 		// Clear bindings
 		{
-			static ID3D11ShaderResourceView* nullSRVs[32] = {};
-			static ID3D11UnorderedAccessView* nullUAVs[16] = {};
-			context->CSSetShaderResources(instanceDesc.resourcesBaseRegisterIndex, srvSlot, nullSRVs);
-			context->CSSetUnorderedAccessViews(instanceDesc.resourcesBaseRegisterIndex, uavSlot, nullUAVs, nullptr);
+			static ID3D11ShaderResourceView* nullSRVs[kMaxRangeSRVs] = {};
+			static ID3D11UnorderedAccessView* nullUAVs[kMaxRangeUAVs] = {};
+			const uint32_t base = instanceDesc.resourcesBaseRegisterIndex;
+			context->CSSetShaderResources(base, std::min(srvSlot - base, kMaxRangeSRVs), nullSRVs);
+			context->CSSetUnorderedAccessViews(base, std::min(uavSlot - base, kMaxRangeUAVs), nullUAVs, nullptr);
 		}
 	}
 

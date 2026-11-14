@@ -64,8 +64,10 @@ namespace Util
 	static int g_lastWindowWidth = 0;
 	static int g_lastWindowHeight = 0;
 
+	// Matches the Win32 backend, which marks a stick key down only past 0.10 but still queues the analog value below it.
 	static constexpr float kGamepadStickPressThreshold = 0.10f;
 
+	/** @brief Zeroes queued stick values short of a press and rescales the rest from 0, so a resting stick does not drift nav. */
 	static void FilterGamepadStickEvents()
 	{
 		for (auto& event : ImGui::GetCurrentContext()->InputEventsQueue) {
@@ -194,25 +196,6 @@ namespace Util
 		// NewFrame copies ActiveId into ActiveIdPreviousFrame, so a change since then is an item letting go.
 		const auto& context = *ImGui::GetCurrentContext();
 		return context.ActiveIdPreviousFrame != 0 && context.ActiveId != context.ActiveIdPreviousFrame;
-	}
-
-	namespace
-	{
-		bool debugSectionsHidden = false;
-	}
-
-	HideDebugSectionsGuard::HideDebugSectionsGuard(bool hide) :
-		previous(std::exchange(debugSectionsHidden, hide))
-	{}
-
-	HideDebugSectionsGuard::~HideDebugSectionsGuard()
-	{
-		debugSectionsHidden = previous;
-	}
-
-	bool ShowDebugSections()
-	{
-		return !debugSectionsHidden;
 	}
 
 	void StepFade(float& fade, bool visible, float deltaTime)

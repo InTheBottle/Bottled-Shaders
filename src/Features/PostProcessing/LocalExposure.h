@@ -104,6 +104,8 @@ struct LocalExposure : public PostProcessFeature
 	/** @brief Drops BaseMip, which the Local Exposure rewrite replaced. */
 	virtual void MigrateLegacySettings(json& a_settings) override;
 	virtual void DrawSettings() override;
+	virtual bool HasDebugSection() const override { return true; }
+	virtual void DrawDebugSection() override;
 
 	virtual void Draw(TextureInfo&) override;
 

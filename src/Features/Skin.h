@@ -35,6 +35,8 @@ struct Skin : Feature
 	virtual void RestoreDefaultSettings() override;
 	/** @brief Draws the ImGui settings panel for Advanced Skin configuration. */
 	virtual void DrawSettings() override;
+	virtual bool HasDebugSection() const override { return true; }
+	virtual void DrawDebugSection() override;
 
 	virtual void LoadSettings(json& o_json) override;
 	virtual void SaveSettings(json& o_json) override;
@@ -116,8 +118,24 @@ struct Skin : Feature
 	struct ActorWetnessCacheEntry
 	{
 		float4 wetness = { 0.0f, 0.0f, 0.0f, 0.0f };
+		float4 output = { 0.0f, 0.0f, 0.0f, 0.0f };
+		float externalSweat = 0.0f;
+		float externalWet = 0.0f;
 		uint frameCount = 0;
 	};
+
+	// Wetness other plugins ask for (survival mods: rain, heat, dehydration), keyed by actor formID.
+	// Written from the game thread through the exported API at the end of Skin.cpp, read on the render thread.
+	struct ExternalWetness
+	{
+		float sweat = 0.0f;  // 0..1, same scale as stamina sweat
+		float wet = 0.0f;    // 0..1, whole-body water wetness (1 = as wet as standing in water)
+	};
+	std::mutex externalWetnessLock;
+	std::unordered_map<uint32_t, ExternalWetness> externalWetnessMap;
+
+	void SetExternalWetness(uint32_t a_formID, float a_sweat, float a_wet);
+	void ClearExternalWetness(uint32_t a_formID);
 
 	eastl::unique_ptr<Texture2D> texSkinDetail = nullptr;
 	std::unordered_map<uint32_t, ExtraTextures> skinExtraTextures;
@@ -137,7 +155,7 @@ struct Skin : Feature
 	/**
 	 * @brief Computes per-geometry wetness data (sweat, water submersion, fade) for an actor.
 	 * @param geometry The geometry to retrieve wetness data for.
-	 * @return A float4 containing (sweat, waterWetness, positionZ, waterDepth).
+	 * @return A float4 containing (sweat, waterWetness, waterLineZ, wholeBodyWetness).
 	 */
 	float4 GetWetness(RE::BSGeometry* geometry);
 
