@@ -371,6 +371,24 @@ float4 Skin::GetWetness(RE::BSGeometry* geometry)
 			wetness.w = 0.0f;
 		}
 
+		// Another plugin's wetness for this actor: the stronger of the two wins.
+		{
+			ExternalWetness external;
+			{
+				std::scoped_lock lock(externalWetnessLock);
+				if (auto ext = externalWetnessMap.find(actorFormID); ext != externalWetnessMap.end())
+					external = ext->second;
+			}
+			wetness.x = std::max(wetness.x, external.sweat);
+			// Water wetness is a waterline at positionZ + depth; external wetness (rain) covers the
+			// whole body, so lift the line well above the head. 2.0 is the in-water strength.
+			const float externalWet = external.wet * 2.0f;
+			if (externalWet > wetness.y) {
+				wetness.y = externalWet;
+				wetness.w = 1000.0f;
+			}
+		}
+
 		if (inserted) {
 			cached.wetness = wetness;
 		} else {
@@ -622,4 +640,35 @@ void Skin::Hooks::BSLightingShader_SetupGeometry::thunk(RE::BSShader* This, RE::
 	auto& skin = globals::features::skin;
 	skin.BSLightingShader_SetupGeometry(Pass);
 	return func(This, Pass, RenderFlags);
+}
+
+void Skin::SetExternalWetness(uint32_t a_formID, float a_sweat, float a_wet)
+{
+	std::scoped_lock lock(externalWetnessLock);
+	if (externalWetnessMap.size() > 1024 && !externalWetnessMap.contains(a_formID))
+		externalWetnessMap.clear();
+	externalWetnessMap[a_formID] = { std::clamp(a_sweat, 0.0f, 1.0f), std::clamp(a_wet, 0.0f, 1.0f) };
+}
+
+void Skin::ClearExternalWetness(uint32_t a_formID)
+{
+	std::scoped_lock lock(externalWetnessLock);
+	externalWetnessMap.erase(a_formID);
+}
+
+// Plugin API: other SKSE plugins find these with GetProcAddress on this DLL.
+// Values are targets; the skin still eases toward them using the Wetness Fade Out Time.
+extern "C" __declspec(dllexport) uint32_t BottledShaders_WetnessAPIVersion()
+{
+	return 1;
+}
+
+extern "C" __declspec(dllexport) void BottledShaders_SetActorWetness(uint32_t a_formID, float a_sweat, float a_wet)
+{
+	globals::features::skin.SetExternalWetness(a_formID, a_sweat, a_wet);
+}
+
+extern "C" __declspec(dllexport) void BottledShaders_ClearActorWetness(uint32_t a_formID)
+{
+	globals::features::skin.ClearExternalWetness(a_formID);
 }

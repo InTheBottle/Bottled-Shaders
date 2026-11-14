@@ -119,6 +119,19 @@ struct Skin : Feature
 		uint frameCount = 0;
 	};
 
+	// Wetness other plugins ask for (survival mods: rain, heat, dehydration), keyed by actor formID.
+	// Written from the game thread through the exported API at the end of Skin.cpp, read on the render thread.
+	struct ExternalWetness
+	{
+		float sweat = 0.0f;  // 0..1, same scale as stamina sweat
+		float wet = 0.0f;    // 0..1, whole-body water wetness (1 = as wet as standing in water)
+	};
+	std::mutex externalWetnessLock;
+	std::unordered_map<uint32_t, ExternalWetness> externalWetnessMap;
+
+	void SetExternalWetness(uint32_t a_formID, float a_sweat, float a_wet);
+	void ClearExternalWetness(uint32_t a_formID);
+
 	eastl::unique_ptr<Texture2D> texSkinDetail = nullptr;
 	std::unordered_map<uint32_t, ExtraTextures> skinExtraTextures;
 	std::unordered_map<uint32_t, ActorWetnessCacheEntry> actorWetnessMap;  // keyed by actor formID
