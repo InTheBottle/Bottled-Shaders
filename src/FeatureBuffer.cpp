@@ -2,6 +2,7 @@
 
 #include <array>
 
+#include "Features/CloudRelight.h"
 #include "Features/CloudShadows.h"
 #include "Features/DynamicCubemaps.h"
 #include "Features/Effects11.h"
@@ -86,5 +87,6 @@ std::pair<unsigned char*, size_t> GetFeatureBufferData(bool a_inWorld)
 		globals::features::proceduralNightSky.GetCommonBufferData(),
 		globals::features::screenSpaceGI.GetCommonBufferData(),
 		globals::features::screenSpaceReflections.GetCommonBufferData(),
-		globals::features::postProcessing.GetCommonBufferData());
+		globals::features::postProcessing.GetCommonBufferData(),
+		globals::features::cloudRelight.GetCommonBufferData());
 }

@@ -6,6 +6,7 @@
 #include "Features/CSEditor.h"
 #include "Features/CameraFX.h"
 #include "Features/CapsuleShadows.h"
+#include "Features/CloudRelight.h"
 #include "Features/CloudShadows.h"
 #include "Features/DetailMaps.h"
 #include "Features/DeveloperTools.h"
@@ -82,6 +83,7 @@ namespace globals
 	{
 		CloudShadows cloudShadows{};
 		ProceduralSun proceduralSun{};
+		CloudRelight cloudRelight{};
 		DynamicCubemaps dynamicCubemaps{};
 		VolumetricShadows volumetricShadows{};
 		ExtendedMaterials extendedMaterials{};

@@ -6,6 +6,7 @@
 #include "Features/CSEditor.h"
 #include "Features/CameraFX.h"
 #include "Features/CapsuleShadows.h"
+#include "Features/CloudRelight.h"
 #include "Features/CloudShadows.h"
 #include "Features/DetailMaps.h"
 #include "Features/DeveloperTools.h"
@@ -227,6 +228,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::dynamicCubemaps,
 		&globals::features::cloudShadows,
 		&globals::features::proceduralSun,
+		&globals::features::cloudRelight,
 		&globals::features::waterEffects,
 		&globals::features::performanceOverlay,
 		&globals::features::subsurfaceScattering,

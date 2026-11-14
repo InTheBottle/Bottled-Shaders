@@ -10,6 +10,7 @@ struct SunRays : public PostProcessFeature
 	virtual inline std::string GetDisplayName() const override { return T("feature.post_processing.sun_rays.name", "Sun and Moon Rays"); }
 	virtual inline std::string GetDesc() const override { return T("feature.post_processing.sun_rays.description", "Light shafts that stream from the sun or moon past clouds and the horizon, blurred toward the light on screen."); }
 	virtual inline bool DisableInMainLoadingMenu() const override { return true; }
+	virtual inline bool DrawBeforeUpscaling() const override { return true; }
 
 	struct Settings
 	{
@@ -18,8 +19,6 @@ struct SunRays : public PostProcessFeature
 		float SunRaysMultiplier = 1.0f;
 		float MoonRaysMultiplier = 1.0f;
 		float SkyColorAmount = 0.0f;
-		float CloudGapRays = 1.0f;
-		float CloudGapRaysSpread = 30.0f;
 		int Quality = 1;
 		int Type = 0;
 		int MoonType = 0;
@@ -42,13 +41,9 @@ struct SunRays : public PostProcessFeature
 		uint WeightedSteps;
 		uint UseNoise;
 		float InvScreenWidth;
-		float CloudGapIntensity;
-		float CloudGapExponent;
-		float LightDiscTan;
 		uint ReverseZ;
 		float2 DynRes;
 		uint FrameCount;
-		float pad0;
 	};
 	STATIC_ASSERT_ALIGNAS_16(SunRaysCB);
 

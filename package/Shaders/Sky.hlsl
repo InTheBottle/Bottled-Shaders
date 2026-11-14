@@ -224,6 +224,11 @@ cbuffer AlphaTestRefCB : register(b11)
 #		include "CloudShadows/CloudShadows.hlsli"
 #	endif
 
+#	if defined(CLOUD_RELIGHT) && defined(CLOUD_SHADOWS) && defined(TEX) && defined(CLOUDS)
+#		define CLOUD_RELIGHT_CLOUDS
+#		include "CloudRelight/CloudRelight.hlsli"
+#	endif
+
 #	if defined(EFFECTS11) && (defined(HORIZFADE) || (defined(TEX) && !defined(DITHER) && !defined(CLOUDS)))
 #		define EFFECTS11_CELESTIAL_EXTINCTION
 #	endif
@@ -313,6 +318,11 @@ PS_OUTPUT main(PS_INPUT input)
 	blendColor.xyz = ColorManagement::TextureToWorking(blendColor.xyz);
 	baseColor.xyz = ColorManagement::TextureToWorking(baseColor.xyz);
 	baseColor = PParams.xxxx * (-baseColor + blendColor) + baseColor;
+#		endif
+
+#		if defined(CLOUD_RELIGHT_CLOUDS)
+	[branch] if (SharedData::cloudRelightSettings.enabled && baseColor.w > 0.0)
+		baseColor.xyz = CloudRelight::RelightCloud(baseColor, normalize(input.WorldPosition.xyz), SampBaseSampler);
 #		endif
 
 #		if defined(PROCEDURAL_SUN) && defined(TEX) && defined(DEFERRED) && !defined(DITHER) && !defined(CLOUDS) && !defined(MOONMASK)

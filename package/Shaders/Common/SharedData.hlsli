@@ -477,6 +477,16 @@ namespace SharedData
 		float3 pad0;
 	};
 
+	struct CloudRelightSettings
+	{
+		uint enabled;
+		float cloudRelightMix;
+		float cloudOriginalMix;
+		float silverLiningMix;
+		float silverLiningSpread;
+		float3 pad0;
+	};
+
 	struct ExponentialHeightFogSettings
 	{
 		uint enabled;
@@ -740,6 +750,7 @@ namespace SharedData
 		SSGISettings ssgiSettings;
 		SSRSettings ssrSettings;
 		PostProcessingSettings postProcessingSettings;
+		CloudRelightSettings cloudRelightSettings;
 	};
 
 	Texture2D<float4> DepthTexture : register(t17);

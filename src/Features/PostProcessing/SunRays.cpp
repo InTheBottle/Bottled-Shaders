@@ -23,8 +23,6 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	SunRaysMultiplier,
 	MoonRaysMultiplier,
 	SkyColorAmount,
-	CloudGapRays,
-	CloudGapRaysSpread,
 	Quality,
 	Type,
 	MoonType,
@@ -66,10 +64,6 @@ void SunRays::DrawSettings()
 	ImGui::SliderFloat(T("feature.post_processing.sun_rays.sky_color_amount", "Sky Colour Amount"), &settings.SkyColorAmount, 0.0f, 10.0f, "%.2f");
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::TextUnformatted(T("feature.post_processing.sun_rays.sky_color_amount_tooltip", "Adds the horizon sky colour to the sun rays."));
-	ImGui::SliderFloat(T("feature.post_processing.sun_rays.cloud_gap_rays", "Cloud Gap Rays"), &settings.CloudGapRays, 0.0f, 10.0f, "%.2f");
-	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::TextUnformatted(T("feature.post_processing.sun_rays.cloud_gap_rays_tooltip", "Rays breaking through gaps when clouds cover the sun. Needs Cloud Shadows."));
-	ImGui::SliderFloat(T("feature.post_processing.sun_rays.cloud_gap_rays_spread", "Cloud Gap Spread"), &settings.CloudGapRaysSpread, 5.0f, 80.0f, "%.0f°");
 
 	const char* qualityNames[] = {
 		T("feature.post_processing.sun_rays.quality_low", "Low"),
@@ -107,8 +101,6 @@ void SunRays::LoadSettings(json& o_json)
 	settings.SunRaysMultiplier = Util::ClampFinite(settings.SunRaysMultiplier, defaults.SunRaysMultiplier, 0.0f, 100.0f);
 	settings.MoonRaysMultiplier = Util::ClampFinite(settings.MoonRaysMultiplier, defaults.MoonRaysMultiplier, 0.0f, 100.0f);
 	settings.SkyColorAmount = Util::ClampFinite(settings.SkyColorAmount, defaults.SkyColorAmount, 0.0f, 100.0f);
-	settings.CloudGapRays = Util::ClampFinite(settings.CloudGapRays, defaults.CloudGapRays, 0.0f, 10.0f);
-	settings.CloudGapRaysSpread = Util::ClampFinite(settings.CloudGapRaysSpread, defaults.CloudGapRaysSpread, 5.0f, 80.0f);
 	settings.Quality = std::clamp(settings.Quality, 0, kQualityLevels - 1);
 	settings.Type = std::clamp(settings.Type, 0, kTypeCount - 1);
 	settings.MoonType = std::clamp(settings.MoonType, 0, kTypeCount - 1);
@@ -311,7 +303,6 @@ void SunRays::Draw(TextureInfo& inout_tex)
 	const UINT halfDynHeight = (static_cast<UINT>(resolution.y) + 1) / 2;
 	const int quality = std::clamp(settings.Quality, 0, kQualityLevels - 1);
 	const int type = std::clamp(light.isSun ? settings.Type : settings.MoonType, 0, kTypeCount - 1);
-	const float gapSpread = DirectX::XMConvertToRadians(std::clamp(settings.CloudGapRaysSpread, 5.0f, 80.0f));
 
 	SunRaysCB data{};
 	data.InvViewProj = globals::game::frameBufferCached.GetCameraViewProjInverse();
@@ -324,9 +315,6 @@ void SunRays::Draw(TextureInfo& inout_tex)
 	data.MaskBrightness = lightPeak;
 	data.MaskExponent = light.maskExponent;
 	data.InvScreenWidth = 1.0f / std::max(resolution.x, 1.0f);
-	data.CloudGapIntensity = light.isSun ? std::max(settings.CloudGapRays, 0.0f) : 0.0f;
-	data.CloudGapExponent = std::log(0.5f) / std::log(std::cos(gapSpread));
-	data.LightDiscTan = std::sqrt(1.0f - std::pow(0.5f, 1.0f / light.maskExponent)) * light.billboardTan;
 	data.ReverseZ = globals::features::reverseZ.IsActive() ? 1u : 0u;
 	data.DynRes = resolution;
 	data.FrameCount = globals::state->frameCount;

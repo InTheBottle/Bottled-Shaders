@@ -11,7 +11,7 @@ SamplerState LinearSampler : register(s0);
 
 cbuffer SunRaysCB : register(b1)
 {
-	float4x4 InvViewProj;
+	row_major float4x4 InvViewProj;
 	float2 LightUV;
 	float2 UVScale;
 	float2 UVMax;
@@ -25,13 +25,9 @@ cbuffer SunRaysCB : register(b1)
 	uint WeightedSteps;
 	uint UseNoise;
 	float InvScreenWidth;
-	float CloudGapIntensity;
-	float CloudGapExponent;
-	float LightDiscTan;
 	uint ReverseZ;
 	float2 DynRes;
 	uint FrameCount;
-	float SunRaysPad0;
 };
 
 float SampleRays(float2 uv)
@@ -41,7 +37,8 @@ float SampleRays(float2 uv)
 
 float GetNoise(float2 pixel)
 {
-	float2 shifted = pixel + 5.588238 * float(FrameCount % 64);
+	float frameStep = float(FrameCount % 16) * 0.0625;
+	float2 shifted = pixel + frameStep * float2(4.7526, 3.1914);
 	float noise = frac(52.9829189 * frac(dot(shifted, float2(0.06711056, 0.00583715))));
 	return UseNoise ? noise : 0.5;
 }
@@ -66,16 +63,6 @@ float GetCloudTransmittance(float3 direction)
 {
 	return saturate(1.0 - CloudShadowsTexture.SampleLevel(LinearSampler, direction, 0));
 }
-
-float GetLightTransmittance()
-{
-	float3 tangent = normalize(cross(abs(LightDirection.z) < 0.999 ? float3(0, 0, 1) : float3(1, 0, 0), LightDirection)) * LightDiscTan;
-	float3 bitangent = cross(LightDirection, tangent);
-	float transmittance = 2.0 * GetCloudTransmittance(LightDirection);
-	transmittance += GetCloudTransmittance(LightDirection + tangent) + GetCloudTransmittance(LightDirection - tangent);
-	transmittance += GetCloudTransmittance(LightDirection + bitangent) + GetCloudTransmittance(LightDirection - bitangent);
-	return transmittance / 6.0;
-}
 #	endif
 
 float4 main(FullscreenTriangleVSOutput input) : SV_Target
@@ -97,11 +84,6 @@ float4 main(FullscreenTriangleVSOutput input) : SV_Target
 	float tanAngleSq = max(1.0 - cosAngle * cosAngle, 0.0) / (cosAngle * cosAngle);
 	float radiusSq = tanAngleSq / max(LightBillboardTan * LightBillboardTan, 1e-8);
 	float source = pow(saturate(1.0 - radiusSq), MaskExponent);
-
-#	if defined(CLOUD_SHADOWS)
-	[branch] if (CloudGapIntensity > 0.0)
-		source += CloudGapIntensity * (1.0 - GetLightTransmittance()) * pow(saturate(cosAngle), CloudGapExponent);
-#	endif
 
 	float mask = MaskBrightness * source;
 
