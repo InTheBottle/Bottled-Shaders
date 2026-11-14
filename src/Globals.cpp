@@ -6,7 +6,6 @@
 #include "Features/CSEditor.h"
 #include "Features/CameraFX.h"
 #include "Features/CapsuleShadows.h"
-#include "Features/CloudRelight.h"
 #include "Features/CloudShadows.h"
 #include "Features/DetailMaps.h"
 #include "Features/DeveloperTools.h"
@@ -40,7 +39,6 @@
 #include "Features/ProceduralAurora.h"
 #include "Features/ProceduralLightning.h"
 #include "Features/ProceduralNightSky.h"
-#include "Features/ProceduralSun.h"
 #include "Features/RainRefraction.h"
 #include "Features/RemoteControl.h"
 #include "Features/RenderDoc.h"
@@ -86,8 +84,6 @@ namespace globals
 	namespace features
 	{
 		CloudShadows cloudShadows{};
-		ProceduralSun proceduralSun{};
-		CloudRelight cloudRelight{};
 		DynamicCubemaps dynamicCubemaps{};
 		VolumetricShadows volumetricShadows{};
 		ExtendedMaterials extendedMaterials{};

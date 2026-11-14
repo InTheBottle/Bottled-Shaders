@@ -253,7 +253,7 @@ LinearLighting::PerFrameData LinearLighting::GetCommonBufferData()
 	if (globals::features::physicalSky.loaded && globals::features::skySync.loaded) {
 		auto& physicalSky = globals::features::physicalSky;
 		auto& skySync = globals::features::skySync;
-		physicalSkyEnabled = physicalSky.settings.enabled && physicalSky.settings.overrideDirLight && skySync.loaded && skySync.settings.Enabled;
+		physicalSkyEnabled = physicalSky.cbData.enabled && physicalSky.settings.overrideDirLight && skySync.settings.Enabled;
 	}
 
 	data.directionalLightMult = (physicalSkyEnabled ? 1.0f : RE::NI_PI) * settings.directionalLightMult;

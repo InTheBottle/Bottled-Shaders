@@ -208,24 +208,6 @@ namespace SharedData
 		float2 pad0;
 	};
 
-	struct ProceduralSunSettings
-	{
-		uint enabled;
-		float sunDiskCos;
-		float diskIntensity;
-		float edgeSoftness;
-
-		uint haloEnabled;
-		float sunHaloCos;
-		float haloIntensity;
-		float haloFalloff;
-
-		float cloudExtinction;
-		float sunVisibility;
-		float radianceLimit;
-		float pad0;
-	};
-
 	struct LODBlendingSettings
 	{
 		float LODTerrainBrightness;
@@ -478,16 +460,6 @@ namespace SharedData
 		float FireCurve;
 		float LightSpriteIntensity;
 		float LightSpriteCurve;
-		float3 pad0;
-	};
-
-	struct CloudRelightSettings
-	{
-		uint enabled;
-		float cloudRelightMix;
-		float cloudOriginalMix;
-		float silverLiningMix;
-		float silverLiningSpread;
 		float3 pad0;
 	};
 
@@ -783,15 +755,6 @@ namespace SharedData
 		float starTwinkle;
 		float radianceLimit;
 
-		float3 auroraLowColor;
-		float auroraIntensity;
-
-		float3 auroraHighColor;
-		float auroraSpeed;
-
-		float auroraLighting;
-		float3 pad0;
-
 		float3 shootingStarHead;
 		float shootingStarIntensity;
 
@@ -837,7 +800,6 @@ namespace SharedData
 		WetnessEffectsSettings wetnessEffectsSettings;
 		SkylightingSettings skylightingSettings;
 		CloudShadowsSettings cloudShadowsSettings;
-		ProceduralSunSettings proceduralSunSettings;
 		LODBlendingSettings lodBlendingSettings;
 		HairSpecularSettings hairSpecularSettings;
 		TerrainVariationSettings terrainVariationSettings;
@@ -860,7 +822,6 @@ namespace SharedData
 		SSGISettings ssgiSettings;
 		SSRSettings ssrSettings;
 		PostProcessingSettings postProcessingSettings;
-		CloudRelightSettings cloudRelightSettings;
 		ProceduralAuroraSettings proceduralAuroraSettings;
 		PhysSkyData physSkyData;
 		ViewAtmosphereSettings viewAtmosphereSettings;

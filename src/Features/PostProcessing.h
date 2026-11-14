@@ -18,7 +18,6 @@
 #include "PostProcessing/LocalExposure.h"
 #include "PostProcessing/MotionBlur.h"
 #include "PostProcessing/PhysicalGlare.h"
-#include "PostProcessing/SunRays.h"
 #include "PostProcessing/Vignette.h"
 
 struct PostProcessing : Feature
@@ -111,7 +110,6 @@ struct PostProcessing : Feature
 	enum class FeaturePipelineIndex : size_t
 	{
 		Fire,
-		SunRays,
 		DoF,
 		Vignette,
 		LocalExposure,

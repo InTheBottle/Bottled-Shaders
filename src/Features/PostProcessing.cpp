@@ -447,7 +447,6 @@ void PostProcessing::ApplyContextualDefaults(json& a_defaults) const
 void PostProcessing::BuildPipeline()
 {
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::Fire)] = std::make_shared<FireEffects>();
-	pipeline[static_cast<size_t>(FeaturePipelineIndex::SunRays)] = std::make_shared<SunRays>();
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::LocalExposure)] = std::make_shared<LocalExposure>();
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::AutoExposure)] = std::make_shared<HistogramAutoExposure>();
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::ColorGrading)] = std::make_shared<ColorGrading>();
@@ -467,7 +466,7 @@ void PostProcessing::BuildPipeline()
 void PostProcessing::ApplyDefaultEnabledStates()
 {
 	using enum FeaturePipelineIndex;
-	constexpr std::array kOffByDefault = { Fire, SunRays, LUT, MotionBlur, PhysicalGlare, Camera, Border };
+	constexpr std::array kOffByDefault = { Fire, LUT, MotionBlur, PhysicalGlare, Camera, Border };
 	for (size_t index = 0; index < pipeline.size(); ++index) {
 		if (auto& pipe = pipeline[index]; pipe && !pipe->IsAutoEnabled())
 			pipe->enabled = std::ranges::find(kOffByDefault, static_cast<FeaturePipelineIndex>(index)) == kOffByDefault.end();

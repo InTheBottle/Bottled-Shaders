@@ -5,7 +5,7 @@
 #include "Features/LinearLighting.h"
 #include "Features/PostProcessing.h"
 #include "Features/PostProcessing/ImageSpaceModifiers.h"
-#include "Features/ProceduralSun.h"
+#include "Utils/Sun.h"
 #include "Features/ReverseZ.h"
 #include "Features/SkySync.h"
 #include "Features/Upscaling.h"
@@ -1060,7 +1060,7 @@ void CameraFX::UpdateFrame(float a_deltaTime, bool a_hasDepth)
 			const float height = sunDirection.z;
 			const float low = Util::Smoothstep(-0.03f, 0.06f, height) * (1.0f - Util::Smoothstep(0.15f, std::max(settings.SunMaxHeight, kMinSunMaxHeight), height));
 			const float glare = BlendWeathers(sky, GetSunGlare);
-			sunTarget = ProceduralSun::GetSunVisibility() * clearSky * std::lerp(0.5f, 1.0f, glare) * low * settings.SunLensStrength;
+			sunTarget = Util::Sun::GetVisibility() * clearSky * std::lerp(0.5f, 1.0f, glare) * low * settings.SunLensStrength;
 		}
 		if (settings.MoonLens) {
 			const float night = Util::Smoothstep(0.0f, 0.1f, -sunDirection.z);

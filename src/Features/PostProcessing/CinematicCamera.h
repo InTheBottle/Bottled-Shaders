@@ -23,9 +23,7 @@ namespace CinematicCamera
 	// a 180 deg shutter (see the Motion Blur adapter).
 	constexpr float kMotionBlurReferenceScale = 300.0f;
 
-	// Saturation-based ISO: Lmax = 78 / (100 * q) * 2^EV100 cd/m^2, with q = 0.65.
-	// https://google.github.io/filament/Filament.html#imagingpipeline/physicallybasedcamera/exposure
-	constexpr float kExposureCalibration = 1.2f;
+	constexpr float kReferenceEV100 = 8.5573427f;
 
 	enum class FilmbackPreset : int
 	{

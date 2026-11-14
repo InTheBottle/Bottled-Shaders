@@ -239,11 +239,6 @@ cbuffer AlphaTestRefCB : register(b11)
 #		include "CloudShadows/CloudShadows.hlsli"
 #	endif
 
-#	if defined(CLOUD_RELIGHT) && defined(CLOUD_SHADOWS) && defined(TEX) && defined(CLOUDS)
-#		define CLOUD_RELIGHT_CLOUDS
-#		include "CloudRelight/CloudRelight.hlsli"
-#	endif
-
 #	if defined(EFFECTS11) && (defined(HORIZFADE) || (defined(TEX) && !defined(DITHER) && !defined(CLOUDS)))
 #		define EFFECTS11_CELESTIAL_EXTINCTION
 #	endif
@@ -254,10 +249,6 @@ cbuffer AlphaTestRefCB : register(b11)
 
 #	if defined(EFFECTS11) && (defined(CLOUDS) || defined(EFFECTS11_CELESTIAL_EXTINCTION) || defined(EFFECTS11_SKY_GRADIENT))
 #		include "Effects11/SkyScattering.hlsli"
-#	endif
-
-#	if defined(PROCEDURAL_SUN)
-#		include "ProceduralSun/ProceduralSun.hlsli"
 #	endif
 
 #	if defined(PROCEDURAL_NIGHT_SKY) && (defined(HORIZFADE) || (defined(DITHER) && !defined(TEX)))
@@ -374,72 +365,6 @@ PS_OUTPUT main(PS_INPUT input)
 	bool enableProceduralSun = false;
 #		endif
 
-#		if defined(CLOUD_RELIGHT_CLOUDS)
-	[branch] if (SharedData::cloudRelightSettings.enabled && !SharedData::physSkyData.enabled && baseColor.w > 0.0)
-		baseColor.xyz = CloudRelight::RelightCloud(baseColor, normalize(input.WorldPosition.xyz), SampBaseSampler);
-#		endif
-
-#		if defined(PROCEDURAL_SUN) && defined(TEX) && defined(DEFERRED) && !defined(DITHER) && !defined(CLOUDS) && !defined(MOONMASK)
-	bool proceduralSunActive = !enableProceduralSun && SharedData::proceduralSunSettings.enabled &&
-	                           (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsSun) &&
-	                           (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InWorld);
-	[branch] if (proceduralSunActive) {
-		float3 viewDirection = normalize(input.WorldPosition.xyz);
-		float cosTheta = clamp(dot(viewDirection, SharedData::SunDirection.xyz), -1.0, 1.0);
-
-		float influenceCos = ProceduralSun::GetInfluenceCos(
-			SharedData::proceduralSunSettings.sunDiskCos,
-			SharedData::proceduralSunSettings.haloEnabled,
-			SharedData::proceduralSunSettings.sunHaloCos,
-			SharedData::proceduralSunSettings.haloIntensity);
-
-		float3 proceduralSunColor = 0.0;
-		float sunCoverage = 0.0;
-
-		[branch] if (cosTheta > influenceCos) {
-			float3 limbDarkening;
-			float discCoverage;
-			ProceduralSun::EvaluateDisc(
-				cosTheta,
-				SharedData::proceduralSunSettings.sunDiskCos,
-				SharedData::proceduralSunSettings.edgeSoftness,
-				limbDarkening,
-				discCoverage);
-
-			float haloProfile = 0.0;
-			if (SharedData::proceduralSunSettings.haloEnabled) {
-				haloProfile = ProceduralSun::EvaluateHalo(
-					cosTheta,
-					SharedData::proceduralSunSettings.sunDiskCos,
-					SharedData::proceduralSunSettings.sunHaloCos,
-					SharedData::proceduralSunSettings.haloFalloff);
-			}
-
-			ProceduralSun::ComposeDiscAndHalo(
-				limbDarkening,
-				discCoverage,
-				SharedData::proceduralSunSettings.diskIntensity,
-				haloProfile,
-				SharedData::proceduralSunSettings.haloIntensity,
-				proceduralSunColor,
-				sunCoverage);
-
-#			if defined(CLOUD_SHADOWS)
-			float cloudExtinction = SharedData::proceduralSunSettings.cloudExtinction * sunCoverage;
-			[branch] if (cloudExtinction > 0.0) {
-				float capturedCloudOcclusion = CloudShadows::CloudShadowsTexture.SampleLevel(SampBaseSampler, viewDirection, 0).x;
-				proceduralSunColor *= ProceduralSun::GetCloudTransmission(capturedCloudOcclusion, cloudExtinction);
-			}
-#			endif
-		}
-
-		baseColor.xyz = proceduralSunColor;
-		baseColor.w = sunCoverage * saturate(TexBaseSampler.SampleLevel(SampBaseSampler, 0.5, 0).w);
-
-		skyScale = 0.0;
-	}
-#		endif
-
 #		if defined(HDR_OUTPUT)
 	float hdrSunGain = HDRSun::GetHdrSunGain(input.TexCoord0.xy, baseColor);
 	baseColor.xyz *= hdrSunGain;
@@ -484,12 +409,6 @@ PS_OUTPUT main(PS_INPUT input)
 	psout.Color.xyz *= 1.0 + noiseGrad;
 	psout.Color.w = baseColor.w * input.Color.w;
 
-#				if defined(PROCEDURAL_SUN) && defined(CLOUD_SHADOWS) && defined(DEFERRED)
-	if (SharedData::proceduralSunSettings.enabled && SharedData::proceduralSunSettings.cloudExtinction > 0.0) {
-		float capturedCloudOcclusion = CloudShadows::CloudShadowsTexture.SampleLevel(SampBaseSampler, SharedData::SunDirection.xyz, 0).x;
-		psout.Color.w *= ProceduralSun::GetGlareCloudTransmission(capturedCloudOcclusion, SharedData::proceduralSunSettings.cloudExtinction);
-	}
-#				endif
 #			else
 	float3 skyGradientColor = input.Color.xyz;
 
@@ -503,13 +422,6 @@ PS_OUTPUT main(PS_INPUT input)
 		skyGradientColor = SkyScattering::ApplySkyScattering(skyGradientColor, input.SkyBlendColor2.xyz, viewDirection) + SkyScattering::GetMoonGlow(viewDirection);
 #				endif
 	psout.Color.xyz = skyGradientColor + skyScale;
-
-#				if defined(PROCEDURAL_NIGHT_SKY)
-	float3 auroraView = normalize(input.WorldPosition.xyz);
-	bool proceduralAuroraActive = SharedData::proceduralNightSkySettings.auroraIntensity > 0.0 && auroraView.z > 0.0 && (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection);
-	[branch] if (proceduralAuroraActive)
-		psout.Color.xyz += ProceduralNightSky::EvaluateAurora(auroraView, Random::InterleavedGradientNoise(input.Position.xy, SharedData::FrameCount));
-#				endif
 
 #				if defined(PROCEDURAL_AURORA)
 	// Drawn on the sky dome so stars, moons and clouds still draw over it. The gradient is taken outside the branch.
@@ -567,11 +479,6 @@ PS_OUTPUT main(PS_INPUT input)
 
 	psout.Color.w = input.Color.w * baseColor.w;
 	psout.Color.xyz = input.Color.xyz * baseColor.xyz + skyScale;
-
-#			if defined(PROCEDURAL_SUN) && defined(TEX) && defined(DEFERRED) && !defined(DITHER) && !defined(CLOUDS) && !defined(MOONMASK)
-	[branch] if (proceduralSunActive)
-		psout.Color = ProceduralSun::ToAdditiveBlend(psout.Color, SharedData::proceduralSunSettings.radianceLimit);
-#			endif
 
 #			if defined(CLOUDS) && defined(EFFECTS11)
 	[branch] if (SharedData::enbSettings.Enable)
@@ -726,9 +633,6 @@ PS_OUTPUT main(PS_INPUT input)
 #	if defined(ENABLE_LL)
 #		if (defined(TEX) || defined(HORIZFADE)) && !defined(MOONMASK) && !defined(CLOUDS)
 	bool linearizeAlpha = (!Permutation::RenderToUI || inReflection) && !SharedData::physSkyData.enabled;
-#			if defined(PROCEDURAL_SUN) && defined(TEX) && defined(DEFERRED) && !defined(DITHER) && !defined(OCCLUSION)
-	linearizeAlpha = linearizeAlpha && !proceduralSunActive;
-#			endif
 #			if defined(PROCEDURAL_NIGHT_SKY) && defined(HORIZFADE)
 	linearizeAlpha = linearizeAlpha && !proceduralNightSkyActive;
 #			endif

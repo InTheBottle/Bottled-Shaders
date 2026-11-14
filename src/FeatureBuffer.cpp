@@ -2,7 +2,6 @@
 
 #include <array>
 
-#include "Features/CloudRelight.h"
 #include "Features/CloudShadows.h"
 #include "Features/DynamicCubemaps.h"
 #include "Features/Effects11.h"
@@ -22,7 +21,6 @@
 #include "Features/PostProcessing.h"
 #include "Features/ProceduralAurora.h"
 #include "Features/ProceduralNightSky.h"
-#include "Features/ProceduralSun.h"
 #include "Features/RainRefraction.h"
 #include "Features/ScreenSpaceGI.h"
 #include "Features/ScreenSpaceReflections.h"
@@ -68,7 +66,6 @@ std::pair<unsigned char*, size_t> GetFeatureBufferData(bool a_inWorld)
 		globals::features::wetnessEffects.GetCommonBufferData(),
 		globals::features::skylighting.GetCommonBufferData(a_inWorld),
 		globals::features::cloudShadows.GetCommonBufferData(),
-		globals::features::proceduralSun.GetCommonBufferData(),
 		globals::features::lodBlending.settings,
 		globals::features::hairSpecular.settings,
 		globals::features::terrainVariation.settings,
@@ -91,7 +88,6 @@ std::pair<unsigned char*, size_t> GetFeatureBufferData(bool a_inWorld)
 		globals::features::screenSpaceGI.GetCommonBufferData(),
 		globals::features::screenSpaceReflections.GetCommonBufferData(),
 		globals::features::postProcessing.GetCommonBufferData(),
-		globals::features::cloudRelight.GetCommonBufferData(),
 		globals::features::proceduralAurora.GetCommonBufferData(),
 		globals::features::physicalSky.cbData,
 		globals::features::viewAtmosphere.settings);

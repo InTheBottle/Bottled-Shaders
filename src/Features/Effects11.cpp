@@ -18,7 +18,7 @@
 #include "PostProcessingMode.h"
 #include "Presets/UnifiedPresetCatalog.h"
 #include "ProceduralAurora.h"
-#include "ProceduralSun.h"
+#include "Utils/Sun.h"
 #include "ShaderCache.h"
 #include "SkySync.h"
 #include "State.h"
@@ -121,7 +121,7 @@ namespace
 	{
 		const auto& skySync = globals::features::skySync;
 
-		if (a_sunRays && ProceduralSun::GetSunVisibility() > 0.0f && a_sky->sun && a_sky->sun->sunBase) {
+		if (a_sunRays && Util::Sun::GetVisibility() > 0.0f && a_sky->sun && a_sky->sun->sunBase) {
 			if (const auto prop = skyrim_cast<RE::BSSkyShaderProperty*>(a_sky->sun->sunBase->GetGeometryRuntimeData().shaderProperty.get())) {
 				const auto& blend = prop->kBlendColor;
 				a_light = { float3(blend.red, blend.green, blend.blue) * blend.alpha, skySync.GetCelestialDirection(a_sky, SkySync::Caster::Sun), a_perFrame.SunBillboardTan, 32.0f, true };
@@ -171,7 +171,7 @@ void Effects11::UpdateSkyScattering(PerFrame& a_data)
 	auto sky = globals::game::sky;
 	if (sky && sky->sun) {
 		auto direction = globals::features::skySync.GetCelestialDirection(sky, SkySync::Caster::Sun);
-		if (ProceduralSun::GetSunVisibility() <= 0.0f && direction.z > 0.0f)
+		if (Util::Sun::GetVisibility() <= 0.0f && direction.z > 0.0f)
 			direction.z = -direction.z;
 		scatteringSunDirection = { direction.x, direction.y, direction.z };
 	}
@@ -483,7 +483,6 @@ void Effects11::ClearShaderCache()
 	}
 
 	auto& effectManager = EffectManager::GetSingleton();
-	effectManager.enbAdaptation.ClearShaderCache();
 	effectManager.enbEffectPrePass.ClearShaderCache();
 	effectManager.enbSunSprite.ClearShaderCache();
 	if (effectManager.IsInitialized())
@@ -1124,7 +1123,7 @@ void Effects11::DrawVolumetricRays()
 
 	// The apply pass lights the rays with SunColor, which is premultiplied by the sun's visibility, so with
 	// the sun faded out (overcast, rain, fog, night) the raymarch and blurs would only ever add black.
-	if (!volumetricRays || ProceduralSun::GetSunVisibility() <= 0.0f || GetCommonBufferData().VolumetricRaysIntensity == 0.0f)
+	if (!volumetricRays || Util::Sun::GetVisibility() <= 0.0f || GetCommonBufferData().VolumetricRaysIntensity == 0.0f)
 		return;
 
 	auto& effectManager = EffectManager::GetSingleton();

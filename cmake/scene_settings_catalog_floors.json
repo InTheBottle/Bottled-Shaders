@@ -2,7 +2,6 @@
     "_comment": "Minimum scene-controllable catalog entries per feature. A parser change that stops binding part of a feature fails the build here. Lower a floor only when the feature really lost those settings.",
     "features": {
         "CameraFX": 46,
-        "CloudRelight": 4,
         "CloudShadows": 1,
         "DynamicCubemaps": 2,
         "ExponentialHeightFog": 46,
@@ -22,7 +21,6 @@
         "PerformanceOverlay": 12,
         "PhysicalSky": 163,
         "PostProcessing": 297,
-        "ProceduralSun": 9,
         "ScreenSpaceGI": 22,
         "ScreenSpaceReflections": 26,
         "ScreenSpaceShadows": 5,

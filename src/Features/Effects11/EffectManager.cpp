@@ -4,7 +4,7 @@
 #include "Editor/Effects11Editor.h"
 #include "Features/Effects11.h"
 #include "Features/LinearLighting.h"
-#include "Features/ProceduralSun.h"
+#include "Utils/Sun.h"
 #include "Features/RainRefraction.h"
 #include "Features/ReverseZ.h"
 #include "Features/SkySync.h"
@@ -1095,7 +1095,7 @@ void EffectManager::UpdateLightParameters()
 	if (!sky || !sky->sun || !sky->sun->root || !sky->root)
 		return;
 
-	const float visibility = ProceduralSun::GetSunVisibility();
+	const float visibility = Util::Sun::GetVisibility();
 	if (visibility <= 0.0f)
 		return;
 

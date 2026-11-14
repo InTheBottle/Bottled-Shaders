@@ -52,10 +52,8 @@ HistogramAutoExposure::ExposureParameters HistogramAutoExposure::GetExposurePara
 		.CompensationEV = settings.ExposureCompensation,
 	};
 	if (const auto* cam = owner ? owner->GetActivePhysicalCameraState() : nullptr) {
-		// With K = 12.5, a correctly metered scene has L = 0.125 * 2^EV100.
-		// Saturation-based exposure maps it to 0.125 / 1.2, not to 18% reflectance.
-		parameters.ExposureTarget = 0.125f / CinematicCamera::kExposureCalibration;
-		parameters.ExposureAtISO100 = cam->ShutterTimeS / (cam->FNumber * cam->FNumber * CinematicCamera::kExposureCalibration);
+		const float exposureDeltaEV = CinematicCamera::kReferenceEV100 - cam->EV100;
+		parameters.ExposureAtISO100 = exp2(exposureDeltaEV) * 100.0f / cam->ISO;
 		if (cam->Exposure == CinematicCamera::ExposureMode::AutoISO) {
 			parameters.CompensationEV = cam->ExposureCompensationEV;
 			const float targetLuminance = parameters.ExposureTarget * exp2(parameters.CompensationEV);
@@ -63,9 +61,8 @@ HistogramAutoExposure::ExposureParameters HistogramAutoExposure::GetExposurePara
 			const float maxExposure = parameters.ExposureAtISO100 * cam->MaxISO / 100.0f;
 			parameters.LuminanceRange = { targetLuminance / maxExposure, targetLuminance / minExposure };
 		} else {
-			parameters.CompensationEV = 0.0f;
-			const float meteredLuminance = exp2(cam->EV100 - 3.0f);
-			parameters.LuminanceRange = { meteredLuminance, meteredLuminance };
+			parameters.CompensationEV = exposureDeltaEV;
+			parameters.LuminanceRange = { parameters.ExposureTarget, parameters.ExposureTarget };
 		}
 	}
 	return parameters;

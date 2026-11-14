@@ -150,7 +150,7 @@ float4 LightningChannel(float3 direction, float sceneDistance, float footprint, 
 	RWLightningColor[pixel] = float4(min(cloud.rgb, 65504.0), cloud.a);
 	const float3 ray = CloudScreenRay(pixel);
 	const float deviceDepth = TexDepth[pixel];
-	const float sceneDistance = deviceDepth >= 1.0 - 1e-6 ? info.rayMarchRange :
+	const float sceneDistance = FrameBuffer::ToStandardDepth(deviceDepth) >= 1.0 - 1e-6 ? info.rayMarchRange :
 	                                                        SharedData::GetScreenDepth(deviceDepth) / max(abs(mul(FrameBuffer::CameraView, float4(ray, 0)).z), 1e-6);
 	const float footprint = 2.0 / max(abs(FrameBuffer::CameraProj[1][1]) * info.activeFrameDim.y, 1.0);
 	float4 channel = LightningChannel(ray, sceneDistance, footprint, SharedData::physSkyData.lightningColorIntensity.w);

@@ -1066,7 +1066,15 @@ PS_OUTPUT main(PS_INPUT input)
 	                (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InWorld) != 0 &&
 	                (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection) == 0;
 	if (composeMedium) {
+#		if defined(SKY_OBJECT)
+		ViewAtmosphere::Medium medium = ViewMedium::SampleViewMedium(input.WorldPosition.xyz, screenUV, SampBaseSampler, true);
+#			if defined(PHYSICAL_SKY)
+		if (SharedData::physSkyData.enabled)
+			medium.transmittance *= PhysSky::SampleViewCelestialTr(normalize(input.WorldPosition.xyz), SampBaseSampler);
+#			endif
+#		else
 		const ViewAtmosphere::Medium medium = ViewMedium::SampleViewMedium(input.WorldPosition.xyz, screenUV, SampBaseSampler);
+#		endif
 #		if defined(ADDBLEND)
 		blendedColor = Color::AdditiveEffect(blendedColor, isFire, isLightSprite);
 		blendedColor = ColorManagement::SceneColor::ScaleByLinear(blendedColor, medium.transmittance);

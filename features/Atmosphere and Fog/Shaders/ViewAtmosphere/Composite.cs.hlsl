@@ -22,7 +22,7 @@ RWTexture2D<float4> MainRW : register(u0);
 		return;
 	const float2 uv = FrameBuffer::GetDynamicResolutionUnadjustedScreenPosition((float2(pixel) + 0.5) / float2(size));
 	const float depth = TexMediumDepth[pixel];
-	const bool fullCloudRay = depth >= 1.0 - 1e-6;
+	const bool fullCloudRay = FrameBuffer::ToStandardDepth(depth) >= 1.0 - 1e-6;
 	float4 position = mul(FrameBuffer::CameraViewProjInverse, float4(uv * float2(2, -2) + float2(-1, 1), depth, 1));
 	position.xyz /= position.w;
 	float4 color = MainRW[pixel];

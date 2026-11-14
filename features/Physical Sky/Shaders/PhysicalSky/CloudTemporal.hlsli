@@ -27,10 +27,14 @@ float CloudSceneDeviceDepth(uint2 pixel, uint footprint)
 {
 	const uint2 origin = (pixel / footprint) * footprint;
 	const uint2 maximum = uint2(VolumetricCloudBuffer[0].activeFrameDim) - 1u;
-	float depth = 0.0;
+	float depth = FrameBuffer::ToNativeDepth(0.0);
 	[unroll] for (uint y = 0u; y < footprint; ++y)
 		[unroll] for (uint x = 0u; x < footprint; ++x)
+#ifdef REVERSE_Z
+			depth = min(depth, TexDepth[min(origin + uint2(x, y), maximum)]);
+#else
 			depth = max(depth, TexDepth[min(origin + uint2(x, y), maximum)]);
+#endif
 	return depth;
 }
 
@@ -334,7 +338,7 @@ cbuffer CloudDispatch : register(b3) { uint4 StormScreenRect; };
 	// surface in its 4x4 tile. A sky neighbour must not expose clouds behind terrain.
 	const float deviceDepth = CloudSceneDeviceDepth(pixel, 1u);
 	const float linearDepth = SharedData::GetScreenDepth(deviceDepth);
-	const float sceneDistance = deviceDepth >= 1.0 - 1e-6 ? 0.0 :
+	const float sceneDistance = FrameBuffer::ToStandardDepth(deviceDepth) >= 1.0 - 1e-6 ? 0.0 :
 	                                                        linearDepth / max(abs(mul(FrameBuffer::CameraView, float4(ray, 0)).z), 1e-6);
 	const float3 eye = FrameBuffer::CameraPosAdjust.xyz - float3(0, 0, info.bottomZ);
 	const float2 jitter = float2(CloudTemporalMarchHash(pixel, info.cloudFrameIndex), CloudSpatialMarchHash(pixel));
@@ -367,7 +371,7 @@ void RenderUpperViewPixel(uint2 tid)
 	const uint2 pixel = tid * 4u + CloudPhaseOffset();
 	const float3 direction = CloudScreenRay(pixel);
 	const float deviceDepth = CloudSceneDeviceDepth(pixel, 1u);
-	const float sceneDistance = deviceDepth >= 1.0 - 1e-6 ? 0.0 : SharedData::GetScreenDepth(deviceDepth) / max(abs(mul(FrameBuffer::CameraView, float4(direction, 0)).z), 1e-6);
+	const float sceneDistance = FrameBuffer::ToStandardDepth(deviceDepth) >= 1.0 - 1e-6 ? 0.0 : SharedData::GetScreenDepth(deviceDepth) / max(abs(mul(FrameBuffer::CameraView, float4(direction, 0)).z), 1e-6);
 	const float3 eye = FrameBuffer::CameraPosAdjust.xyz - float3(0, 0, info.bottomZ);
 	// Integrate middle segments deterministically; the checkerboard already
 	// moves the view ray. Filter noise by the screen footprint, not march length.

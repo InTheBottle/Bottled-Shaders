@@ -115,24 +115,30 @@ namespace ExponentialHeightFog
 float4 AnalyticalFogSource(float3 position, float3 materialPosition, float visibility)
 {
 	const SharedData::ExponentialHeightFogSettings fog = SharedData::exponentialHeightFogSettings;
-	if (length(materialPosition) < fog.startDistance)
+	const bool weatherFog = fog.useVanillaFogSettings != 0;
+	const float materialDistance = length(materialPosition);
+	if (materialDistance < fog.startDistance)
 		return 0.0;
 	const float height = materialPosition.z + FrameBuffer::CameraPosAdjust.z;
-	const float density = 0.001 * (fog.fogDensity * exp2(-fog.fogHeightFalloff * 0.001 * max(height - fog.fogHeight, 0.0)) +
-									  fog.fogDensity2 * exp2(-fog.fogHeightFalloff2 * 0.001 * max(height - fog.fogHeight2, 0.0)));
+	const float densityScale = weatherFog ? fog.volumetricFogExtinctionScale : 1.0;
+	const float density = densityScale * (ExponentialHeightFog::GetHeightFogDensity() * exp2(-fog.fogHeightFalloff * 0.001 * max(height - fog.fogHeight, 0.0)) +
+											 ExponentialHeightFog::GetHeightFogDensity2() * exp2(-fog.fogHeightFalloff2 * 0.001 * max(height - fog.fogHeight2, 0.0)));
 	const float extinction = density * 0.48045301392;
 	if (extinction <= 0.0)
 		return 0.0;
 	float3 color = fog.fogInscatteringColor.rgb * fog.fogInscatteringColor.a;
+	if (weatherFog)
+		color += ExponentialHeightFog::GetFogAmbientColor(materialDistance);
 	const float3 direction = normalize(position);
 	const float3 cubeDirection = normalize(lerp(position, float3(0, 0, 1), saturate((fog.cubemapMipLevel + 1.0) / 9.0)));
 	float3 environment = 0.0;
-	if (!SharedData::InInterior && fog.useSkyIBL && VolumetricFogHasIBL)
+	if (!weatherFog && !SharedData::InInterior && fog.useSkyIBL && VolumetricFogHasIBL)
 		environment = ImageBasedLighting::GetSkyIBLColor(cubeDirection);
-	if (SharedData::InInterior && fog.useDynamicCubemaps && (ViewAtmosphere::Data[0].flags.z & 1024u))
+	if (!weatherFog && SharedData::InInterior && fog.useDynamicCubemaps && (ViewAtmosphere::Data[0].flags.z & 1024u))
 		environment = MediumEnvironment.SampleLevel(LinearSampler, cubeDirection, fog.cubemapMipLevel).rgb;
 	color += environment * fog.inscatteringTint.rgb * fog.inscatteringTint.a;
-	color += ComputeDirectionalLightColor(position) * ExponentialHeightFog::HenyeyGreenstein(dot(GetFogLightDirection(), direction), fog.directionalInscatteringAnisotropy) * fog.directionalInscatteringMultiplier * visibility;
+	const float directionalScale = fog.directionalInscatteringMultiplier * (weatherFog ? fog.fogLightingInfluence : 1.0);
+	color += ComputeDirectionalLightColor(position) * ExponentialHeightFog::HenyeyGreenstein(dot(GetFogLightDirection(), direction), fog.directionalInscatteringAnisotropy) * directionalScale * visibility;
 	return float4(max(ColorManagement::SceneToLinear(color), 0.0) * extinction, extinction);
 }
 #endif
@@ -182,8 +188,10 @@ float3 AtmosphereLight(float3 position, float3 direction, float3 lightDir, float
 		float4 fog;
 		if (SharedData::exponentialHeightFogSettings.volumetricFogEnabled) {
 			fog = ComputeLightScattering(coord, offset, visibility, center);
-			const float fade = saturate((length(center) - SharedData::exponentialHeightFogSettings.volumetricFogStartDistance) /
-										max(SharedData::exponentialHeightFogSettings.volumetricFogNearFadeInDistance, 1.0));
+			float fade = 1.0;
+			if (SharedData::exponentialHeightFogSettings.useVanillaFogSettings == 0)
+				fade = saturate((length(center) - SharedData::exponentialHeightFogSettings.volumetricFogStartDistance) /
+								max(SharedData::exponentialHeightFogSettings.volumetricFogNearFadeInDistance, 1.0));
 			fog *= fade;
 		} else {
 			fog = AnalyticalFogSource(position, center, visibility);

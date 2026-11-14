@@ -253,7 +253,18 @@ float4 ComputeLightScattering(uint3 coord, float3 cellOffset
 	float3 positionWS = ExponentialHeightFog::ComputeCellWorldPosition(coord, cellOffset, viewDepth);
 
 #ifdef VIEW_ATMOSPHERE_INJECTION
-	const float fogExtinction = ExponentialHeightFog::EvaluateHeightFogExtinction(materialPosition, FrameBuffer::CameraPosAdjust.xyz);
+	float fogExtinction;
+	[branch] if (SharedData::exponentialHeightFogSettings.useVanillaFogSettings != 0 && SharedData::exponentialHeightFogSettings.startDistance > 0.0f)
+	{
+		float boundaryDepth;
+		const float nearDistance = length(ExponentialHeightFog::ComputeCellWorldPosition(coord, float3(0.5f, 0.5f, 0.0f), boundaryDepth));
+		const float farDistance = length(ExponentialHeightFog::ComputeCellWorldPosition(coord, float3(0.5f, 0.5f, 1.0f), boundaryDepth));
+		fogExtinction = ExponentialHeightFog::EvaluateFogExtinctionSegment(nearDistance, farDistance, materialPosition, FrameBuffer::CameraPosAdjust.xyz);
+	}
+	else
+	{
+		fogExtinction = ExponentialHeightFog::EvaluateHeightFogExtinction(materialPosition, FrameBuffer::CameraPosAdjust.xyz);
+	}
 	const float3 fogAlbedo = saturate(SharedData::exponentialHeightFogSettings.volumetricFogAlbedo.rgb) * SharedData::exponentialHeightFogSettings.volumetricFogAlbedo.a;
 	float4 materialScatteringAndExtinction = float4(fogExtinction * fogAlbedo, fogExtinction);
 #else

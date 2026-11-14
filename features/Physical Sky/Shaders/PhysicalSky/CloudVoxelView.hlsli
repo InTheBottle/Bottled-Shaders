@@ -56,7 +56,7 @@ void StoreVoxelCloudSample(uint2 tid, float4 voxelColor, float voxelDepth)
 	const float3 eye = FrameBuffer::CameraPosAdjust.xyz - float3(0, 0, info.bottomZ);
 	// Depth belongs to this phase's ray, not a min/max neighbour in the tile.
 	const float deviceDepth = CloudSceneDeviceDepth(pixel, 1u);
-	const float sceneDistance = deviceDepth >= 1.0 - 1e-6 ? info.rayMarchRange :
+	const float sceneDistance = FrameBuffer::ToStandardDepth(deviceDepth) >= 1.0 - 1e-6 ? info.rayMarchRange :
 	                                                        SharedData::GetScreenDepth(deviceDepth) / max(abs(mul(FrameBuffer::CameraView, float4(direction, 0)).z), 1e-6);
 	const float rangeEnd = sceneDistance;
 	float cursor = 0.0;

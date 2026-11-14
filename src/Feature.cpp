@@ -6,12 +6,10 @@
 #include "Features/CSEditor.h"
 #include "Features/CameraFX.h"
 #include "Features/CapsuleShadows.h"
-#include "Features/CloudRelight.h"
 #include "Features/CloudShadows.h"
 #include "Features/DetailMaps.h"
 #include "Features/DeveloperTools.h"
 #include "Features/DynamicCubemaps.h"
-#include "Features/ProceduralSun.h"
 #include "Features/Effects11.h"
 #include "Features/ExponentialHeightFog.h"
 #include "Features/ExtendedMaterials.h"
@@ -231,8 +229,6 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::lightLimitFix,
 		&globals::features::dynamicCubemaps,
 		&globals::features::cloudShadows,
-		&globals::features::proceduralSun,
-		&globals::features::cloudRelight,
 		&globals::features::waterEffects,
 		&globals::features::performanceOverlay,
 		&globals::features::subsurfaceScattering,

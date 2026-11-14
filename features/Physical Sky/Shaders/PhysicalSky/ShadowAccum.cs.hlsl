@@ -29,7 +29,7 @@ float TraceShadow(float2 pixelCenter, float depth, float jitter)
 {
 	const SharedData::PhysSkyData data = SharedData::physSkyData;
 	const float2 uv = FrameBuffer::GetDynamicResolutionUnadjustedScreenPosition(pixelCenter * data.rcpTexDim);
-	const bool skyRay = depth >= 1.0;
+	const bool skyRay = FrameBuffer::ToStandardDepth(depth) >= 1.0;
 	float4 posWorld = float4(2 * float2(uv.x, -uv.y + 1) - 1, skyRay ? 0.5 : depth, 1);
 	posWorld = mul(FrameBuffer::CameraViewProjInverse, posWorld);
 	posWorld.xyz /= posWorld.w;

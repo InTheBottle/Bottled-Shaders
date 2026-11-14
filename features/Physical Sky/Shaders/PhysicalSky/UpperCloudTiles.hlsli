@@ -15,7 +15,7 @@ groupshared uint UpperTileActive;
 		const uint2 pixel = tid * 4u + CloudPhaseOffset();
 		const float3 direction = CloudScreenRay(pixel);
 		const float deviceDepth = CloudSceneDeviceDepth(pixel, 1u);
-		const float sceneDistance = deviceDepth >= 1.0 - 1e-6 ? 0.0 : SharedData::GetScreenDepth(deviceDepth) / max(abs(mul(FrameBuffer::CameraView, float4(direction, 0)).z), 1e-6);
+		const float sceneDistance = FrameBuffer::ToStandardDepth(deviceDepth) >= 1.0 - 1e-6 ? 0.0 : SharedData::GetScreenDepth(deviceDepth) / max(abs(mul(FrameBuffer::CameraView, float4(direction, 0)).z), 1e-6);
 		const float3 eye = FrameBuffer::CameraPosAdjust.xyz - float3(0, 0, info.bottomZ);
 		const float first = UpperCloudFirstDistance(eye, direction, sceneDistance);
 		if (first < 1e30 && (TexVolLowTr[tid] > 0.0 || !UpperCloudOccluded(first, TexVolLowAux[tid].x)))

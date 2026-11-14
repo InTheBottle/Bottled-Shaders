@@ -90,14 +90,12 @@ namespace SceneSettingsPolicy
 	};
 
 	inline const std::vector<SettingPolicyPath> kTimeOfDayFeatureWhitelist = {
-		{ "CloudRelight" },
 		{ "CloudShadows" },
 		{ "ExponentialHeightFog" },
 		{ "GrassLighting" },
 		{ "ImageBasedLighting" },
 		{ "PhysicalSky" },
 		{ "PostProcessing" },
-		{ "ProceduralSun" },
 		{ "ScreenSpaceGI" },
 		{ "ScreenSpaceShadows" },
 		{ "Skylighting" },
