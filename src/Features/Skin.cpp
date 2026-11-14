@@ -379,7 +379,7 @@ float4 Skin::GetWetness(RE::BSGeometry* geometry)
 				cached.wetness.x = wetness.x;
 			} else if (cached.wetness.x > wetness.x) {
 				cached.wetness.x -= *globals::game::deltaTime / fadeTime;
-				cached.wetness.x = std::max(cached.wetness.x, 0.0f);
+				cached.wetness.x = std::max(cached.wetness.x, wetness.x);  // dry down to the target, not past it
 			}
 			wetness.x = cached.wetness.x;
 
@@ -392,7 +392,7 @@ float4 Skin::GetWetness(RE::BSGeometry* geometry)
 				}
 			} else if (cached.wetness.y > wetness.y) {
 				cached.wetness.y -= *globals::game::deltaTime / fadeTime;
-				cached.wetness.y = std::max(cached.wetness.y, 0.0f);
+				cached.wetness.y = std::max(cached.wetness.y, wetness.y);
 				wetness.y = cached.wetness.y;
 				if (wetness.y == 0.0f) {
 					wetness.w = 0.0f;
