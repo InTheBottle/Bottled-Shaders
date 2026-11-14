@@ -10,6 +10,7 @@
 #include "Menu/ThemeManager.h"
 #include "Shadercache.h"
 #include "State.h"
+#include "Utils/DebugSection.h"
 #include "Utils/Logging.h"
 
 #include <bit>
@@ -119,8 +120,6 @@ void LightLimitFix::DrawLightAttachSettings()
 
 void LightLimitFix::DrawSettings()
 {
-	auto shaderCache = globals::shaderCache;
-
 	ImGui::Checkbox(T(TKEY("enable_particle_lights"), "Enable Particle Lights"), &settings.EnableParticleLights);
 
 	ImGui::Spacing();
@@ -178,10 +177,16 @@ void LightLimitFix::DrawSettings()
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T(TKEY("light_source_size_tooltip"), "Gives local lights a physical size, so their highlights on polished and wet surfaces have a shape instead of a pinpoint. 0 turns it off."));
 	}
+}
 
-	ImGui::Spacing();
+void LightLimitFix::DrawDebugSection()
+{
+	Util::DebugSection section;
+	if (!section)
+		return;
 
-	ImGui::SeparatorText(T(TKEY("statistics"), "Statistics"));
+	auto shaderCache = globals::shaderCache;
+
 	ImGui::Text("%s", std::vformat(T(TKEY("clustered_light_count"), "Clustered Light Count : {}"), std::make_format_args(lightCount)).c_str());
 	ImGui::Text("%s", std::vformat(T(TKEY("particle_light_count"), "Particle Lights : {}"), std::make_format_args(particleLightCount)).c_str());
 	if (IsLocalShadowsEnabled()) {
@@ -196,7 +201,7 @@ void LightLimitFix::DrawSettings()
 							  .c_str());
 	}
 
-	ImGui::SeparatorText(T(TKEY("debug"), "Debug"));
+	ImGui::Spacing();
 
 	ImGui::Checkbox(T(TKEY("enable_lights_vis"), "Enable Lights Visualisation"), &settings.EnableLightsVisualisation);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -204,7 +209,12 @@ void LightLimitFix::DrawSettings()
 	}
 
 	{
-		const char* comboOptions[] = { T(TKEY("lights_vis_mode_light_limit"), "Light Limit"), T(TKEY("lights_vis_mode_strict_count"), "Strict Lights Count"), T(TKEY("lights_vis_mode_clustered_count"), "Clustered Lights Count"), T(TKEY("lights_vis_mode_shadow_mask"), "Shadow Mask") };
+		const char* comboOptions[] = {
+			T(TKEY("lights_vis_mode_light_limit"), "Light Limit"),
+			T(TKEY("lights_vis_mode_strict_lights"), "Strict Lights Count"),
+			T(TKEY("lights_vis_mode_clustered_lights"), "Clustered Lights Count"),
+			T(TKEY("lights_vis_mode_shadow_mask"), "Shadow Mask")
+		};
 		ImGui::Combo(T(TKEY("lights_vis_mode"), "Lights Visualisation Mode"), (int*)&settings.LightsVisualisationMode, comboOptions, 4);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T(TKEY("lights_vis_mode_tooltip"),

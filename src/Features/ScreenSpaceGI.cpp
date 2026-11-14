@@ -17,6 +17,7 @@
 #include "Upscaling.h"
 #include "Util.h"
 #include "Utils/MathUtils.h"
+#include "Utils/DebugSection.h"
 
 #define I18N_KEY_PREFIX "feature.screen_space_gi."
 
@@ -279,38 +280,38 @@ void ScreenSpaceGI::DrawSettings()
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text("%s", T(TKEY("e11_il_saturation_tooltip"), "Colour of the bounce light while a preset drives SSGI. Below 1 keeps strongly coloured surfaces from tinting the preset's grade."));
 	}
+}
 
+void ScreenSpaceGI::DrawDebugSection()
+{
 	// The buffer viewer has no scene-context meaning, so hide it while a Scene Manager replica
 	// is borrowing this panel to author overrides.
 	if (SceneWidgetInterceptor::IsArmed())
 		return;
 
-	///////////////////////////////
-	ImGui::SeparatorText(T(TKEY("debug"), "Debug"));
+	Util::DebugSection section;
+	if (!section)
+		return;
 
-	if (ImGui::TreeNode(T(TKEY("buffer_viewer"), "Buffer Viewer"))) {
-		static float debugRescale = .3f;
-		ImGui::SliderFloat(T(TKEY("view_resize"), "View Resize"), &debugRescale, 0.f, 1.f);
+	static float debugRescale = .3f;
+	ImGui::SliderFloat(T(TKEY("view_resize"), "View Resize"), &debugRescale, 0.f, 1.f);
 
-		BUFFER_VIEWER_NODE(texNoise, debugRescale)
-		BUFFER_VIEWER_NODE(texWorkingDepth, debugRescale)
-		BUFFER_VIEWER_NODE(texHistoryGeo[0], debugRescale)
-		BUFFER_VIEWER_NODE(texHistoryGeo[1], debugRescale)
-		BUFFER_VIEWER_NODE(texRadiance, debugRescale)
-		BUFFER_VIEWER_NODE(texNRDInput, debugRescale)
-		BUFFER_VIEWER_NODE(texNRDOutput, debugRescale)
-		if (texNRDInputSH1)
-			BUFFER_VIEWER_NODE(texNRDInputSH1, debugRescale)
-		if (texNRDOutputSH1)
-			BUFFER_VIEWER_NODE(texNRDOutputSH1, debugRescale)
-		if (auto validation = settings.Reblur.EnableValidation ? nrdReblur.GetValidationSRV() : nullptr) {
-			if (ImGui::TreeNode(T(TKEY("nrd_validation"), "NRD Validation"))) {
-				ImGui::Image(validation, { nrdReblur.GetWidth() * debugRescale, nrdReblur.GetHeight() * debugRescale });
-				ImGui::TreePop();
-			}
+	BUFFER_VIEWER_NODE(texNoise, debugRescale)
+	BUFFER_VIEWER_NODE(texWorkingDepth, debugRescale)
+	BUFFER_VIEWER_NODE(texHistoryGeo[0], debugRescale)
+	BUFFER_VIEWER_NODE(texHistoryGeo[1], debugRescale)
+	BUFFER_VIEWER_NODE(texRadiance, debugRescale)
+	BUFFER_VIEWER_NODE(texNRDInput, debugRescale)
+	BUFFER_VIEWER_NODE(texNRDOutput, debugRescale)
+	if (texNRDInputSH1)
+		BUFFER_VIEWER_NODE(texNRDInputSH1, debugRescale)
+	if (texNRDOutputSH1)
+		BUFFER_VIEWER_NODE(texNRDOutputSH1, debugRescale)
+	if (auto validation = settings.Reblur.EnableValidation ? nrdReblur.GetValidationSRV() : nullptr) {
+		if (ImGui::TreeNode(T(TKEY("nrd_validation"), "NRD Validation"))) {
+			ImGui::Image(validation, { nrdReblur.GetWidth() * debugRescale, nrdReblur.GetHeight() * debugRescale });
+			ImGui::TreePop();
 		}
-
-		ImGui::TreePop();
 	}
 }
 

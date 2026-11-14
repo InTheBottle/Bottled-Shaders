@@ -67,6 +67,8 @@ float2 UpsampleCapsuleOcclusion(uint2 pixel)
 
 #if defined(SKYLIGHTING)
 #	define SKYLIGHTING_PROBE_REGISTER t8
+#	define SKYLIGHTING_COVERAGE_REGISTER t18
+#	define SKYLIGHTING_ZENITH_REGISTER t19
 #	include "Skylighting/Skylighting.hlsli"
 #endif
 
@@ -174,6 +176,12 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 	float3 linDiffuseColor = ColorManagement::SceneToLinear(diffuseColor);
 	float3 normalWS = normalize(mul(FrameBuffer::CameraViewInverse, float4(normalVS, 0)).xyz);
 
+#if defined(SKYLIGHTING)
+	float3 positionMS = positionWS.xyz;
+	// Normal-biased, like forward Lighting.hlsl: a reflection-vector bias slides along grazing surfaces and shows the probe grid.
+	sh2 skylightingSH = Skylighting::Sample(positionMS, normalWS);
+#endif
+
 	float ssgiAo = 1.0;
 
 #if defined(SSGI)
@@ -204,8 +212,6 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 				float3 vanillaDALC = Color::Ambient(max(0, SharedData::GetAmbient(normalWS)));
 
 #		if defined(SKYLIGHTING)
-				float3 positionMS = positionWS.xyz;
-				sh2 skylightingSH = Skylighting::Sample(positionMS.xyz, normalWS);
 				float skylightingDiffuse = Skylighting::EvaluateDiffuse(skylightingSH, normalWS, Skylighting::GetFadeOutFactor(positionMS));
 				directionalAmbientColor = ImageBasedLighting::GetDiffuseIBLOccluded(vanillaDALC, -normalWS, skylightingDiffuse, positionWS.xyz) * albedo;
 #		else
@@ -276,12 +282,10 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 			float directionalAmbientColorSpecular = Color::RGBToLuminance(Color::Ambient(max(0, SharedData::GetAmbient(R)))) * Color::ReflectionNormalisationScale;
 
 #	if defined(SKYLIGHTING)
-			float3 positionMS = positionWS.xyz;
-
-			sh2 skylightingSH = Skylighting::Sample(Skylighting::ClampToArrayHeight(positionMS), R);
+			sh2 skylightingSpecularSH = Skylighting::SampleSpecular(skylightingSH, positionMS);
 			float skylightingFadeOut = Skylighting::GetHorizontalFadeOutFactor(positionMS);
-			float skylightingSpecular = Skylighting::EvaluateSpecular(skylightingSH, specularLobe, skylightingFadeOut);
-			float skylightingVisibility = Skylighting::EvaluateVisibility(skylightingSH, skylightingFadeOut);
+			float skylightingSpecular = Skylighting::EvaluateSpecular(skylightingSpecularSH, specularLobe, skylightingFadeOut);
+			float skylightingVisibility = Skylighting::EvaluateVisibility(skylightingSpecularSH, skylightingFadeOut);
 #	endif
 
 #	if defined(IBL)

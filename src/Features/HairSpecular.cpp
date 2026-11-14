@@ -3,6 +3,7 @@
 #include "../I18n/I18n.h"
 #include "Utils/D3D.h"
 #include "Utils/MathUtils.h"
+#include "Utils/Serialize.h"
 #include <DirectXTex.h>
 
 #define I18N_KEY_PREFIX "feature.hair_specular."
