@@ -123,6 +123,8 @@ struct PS_OUTPUT
 #ifdef PSHADER
 SamplerState SampDiffuse : register(s0);
 
+SamplerState SampShadowMaskSampler : register(s14);
+
 Texture2D<float4> TexDiffuse : register(t0);
 
 cbuffer AlphaTestRefCB : register(b11)
@@ -173,6 +175,10 @@ const static float DepthOffsets[16] = {
 #	if defined(EXP_HEIGHT_FOG)
 #		define SampColorSampler SampDiffuse
 #		include "ExponentialHeightFog/ExponentialHeightFog.hlsli"
+#	endif
+
+#	if defined(PHYSICAL_SKY)
+#		include "PhysicalSky/Common.hlsli"
 #	endif
 
 #	define LinearSampler SampDiffuse
@@ -277,6 +283,12 @@ PS_OUTPUT main(PS_INPUT input)
 	}
 #			endif
 
+#			if defined(PHYSICAL_SKY)
+	if (SharedData::physSkyData.enabled)
+		diffuseColor *= PhysSky::SampleTr(normalize(SharedData::DirLightDirection.xyz), SampShadowMaskSampler);
+	diffuseColor *= PhysSky::GetDirlightTransmittance(input.WorldPosition.xyz + FrameBuffer::CameraPosAdjust.xyz, SampShadowMaskSampler, true);
+#			endif
+
 #			if defined(SNOW_COVER)
 	if (SharedData::snowCoverSettings.EnableSnowCover) {
 		// A LOD billboard is a vertical quad, so the raw geometric normal has z == 0 and the angle mask rejects it outright.
@@ -307,6 +319,18 @@ PS_OUTPUT main(PS_INPUT input)
 	psout.Diffuse.xyz = diffuseColor * baseColor.xyz;
 	psout.Diffuse.w = 1;
 
+#			if !defined(DEFERRED) && defined(PHYSICAL_SKY)
+	if (SharedData::physSkyData.enabled) {
+		float3 physSkyViewPosition = mul(FrameBuffer::CameraView, float4(input.WorldPosition.xyz, 1)).xyz;
+		float2 physSkyScreenUV = FrameBuffer::ViewToUV(physSkyViewPosition, true);
+		const float3 physSkyViewDir = normalize(input.WorldPosition.xyz);
+		if (inReflection)
+			psout.Diffuse.xyz = PhysSky::CompositeAerialPerspectiveReflection(psout.Diffuse.xyz, physSkyViewDir, length(input.WorldPosition.xyz), SampColorSampler);
+		else
+			psout.Diffuse.xyz = PhysSky::CompositeAerialPerspective(psout.Diffuse.xyz, physSkyViewDir, input.Position.xy, physSkyScreenUV, length(input.WorldPosition.xyz), SampColorSampler);
+	}
+#			endif
+
 #			if defined(EXP_HEIGHT_FOG)
 	if (inReflection && SharedData::exponentialHeightFogSettings.enabled) {
 		ApplyReflectionExponentialHeightFog(psout.Diffuse.xyz, input.WorldPosition.xyz, input.Position);
@@ -335,6 +359,12 @@ PS_OUTPUT main(PS_INPUT input)
 	if (SharedData::exponentialHeightFogSettings.enabled) {
 		diffuseColor *= ExponentialHeightFog::GetSunlightFogAttenuation(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz);
 	}
+#			endif
+
+#			if defined(PHYSICAL_SKY)
+	if (SharedData::physSkyData.enabled)
+		diffuseColor *= PhysSky::SampleTr(normalize(SharedData::DirLightDirection.xyz), SampShadowMaskSampler);
+	diffuseColor *= PhysSky::GetDirlightTransmittance(input.WorldPosition.xyz + FrameBuffer::CameraPosAdjust.xyz, SampShadowMaskSampler, true);
 #			endif
 
 #			if defined(SNOW_COVER)
@@ -374,6 +404,9 @@ PS_OUTPUT main(PS_INPUT input)
 #		endif  // DEFERRED
 #	endif      // RENDER_DEPTH
 
+#	if !defined(RENDER_DEPTH)
+	psout.Diffuse.rgb = PreExposure::EncodeScene(psout.Diffuse.rgb);
+#	endif
 	return psout;
 }
 #endif  // PSHADER

@@ -86,7 +86,6 @@
     "cs_editor.drag_colours_here": "Przeciągnij kolory żeby zapisać jako ulubione.",
     "cs_editor.drag_to_favourites": "Przeciągnij kolor tutaj aby dodać go do ulubionych",
     "feature.exp_height_fog.color_lighting": "Kolor i oświetlenie",
-    "feature.exp_height_fog.debug": "Jakość i filtrowanie czasowe",
     "feature.exp_height_fog.density_height": "Gęstość i wysokość",
     "feature.exp_height_fog.distance_haze": "Zamglenie odległościowe",
     "feature.exp_height_fog.distance_haze_fade_distance": "Dystans narastania zamglenia",
@@ -102,5 +101,6 @@
     "feature.exp_height_fog.vanilla_fog": "Mgła podstawowej gry",
     "feature.exp_height_fog.vanilla_strength": "Siła mgły pogodowej",
     "feature.exp_height_fog.volumetric_extinction_scale": "Skala ekstynkcji",
-    "feature.exp_height_fog.volumetric_extinction_scale_tooltip": "Skaluje gęstość mgły podczas dopasowywania do mgły podstawowej gry, nawet gdy mgła wolumetryczna jest wyłączona. W trybie ręcznym wpływa tylko na mgłę wolumetryczną."
+    "feature.exp_height_fog.volumetric_extinction_scale_tooltip": "Skaluje gęstość mgły podczas dopasowywania do mgły podstawowej gry, nawet gdy mgła wolumetryczna jest wyłączona. W trybie ręcznym wpływa tylko na mgłę wolumetryczną.",
+    "feature.exp_height_fog.debug": "Jakość i filtrowanie czasowe"
 }

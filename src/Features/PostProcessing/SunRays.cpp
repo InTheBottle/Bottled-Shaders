@@ -311,7 +311,7 @@ void SunRays::Draw(TextureInfo& inout_tex)
 	data.UVMax = { (halfDynWidth - 0.5f) / halfTexWidth, (halfDynHeight - 0.5f) / halfTexHeight };
 	data.LightDirection = { light.direction.x, light.direction.y, light.direction.z };
 	data.LightBillboardTan = light.billboardTan;
-	data.RaysColor = raysColor;
+	data.RaysColor = raysColor * globals::state->preExposure;
 	data.MaskBrightness = lightPeak;
 	data.MaskExponent = light.maskExponent;
 	data.InvScreenWidth = 1.0f / std::max(resolution.x, 1.0f);

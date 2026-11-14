@@ -10,7 +10,6 @@
     "cs_editor.active": "Aktiv:",
     "cs_editor.add_new_marker": "Neues Kennzeichen hinzufügen",
     "feature.exp_height_fog.color_lighting": "Farbe und Beleuchtung",
-    "feature.exp_height_fog.debug": "Qualität und zeitliche Filterung",
     "feature.exp_height_fog.density_height": "Dichte und Höhe",
     "feature.exp_height_fog.distance_haze": "Entfernungsdunst",
     "feature.exp_height_fog.distance_haze_fade_distance": "Dunsteinblendstrecke",
@@ -26,5 +25,6 @@
     "feature.exp_height_fog.vanilla_fog": "Vanilla-Nebel",
     "feature.exp_height_fog.vanilla_strength": "Stärke des Wetternebels",
     "feature.exp_height_fog.volumetric_extinction_scale": "Extinktionsfaktor",
-    "feature.exp_height_fog.volumetric_extinction_scale_tooltip": "Skaliert die Nebeldichte beim Folgen des Vanilla-Nebels, auch wenn volumetrischer Nebel deaktiviert ist. Im manuellen Modus wirkt sich dies nur auf volumetrischen Nebel aus."
+    "feature.exp_height_fog.volumetric_extinction_scale_tooltip": "Skaliert die Nebeldichte beim Folgen des Vanilla-Nebels, auch wenn volumetrischer Nebel deaktiviert ist. Im manuellen Modus wirkt sich dies nur auf volumetrischen Nebel aus.",
+    "feature.exp_height_fog.debug": "Qualität und zeitliche Filterung"
 }

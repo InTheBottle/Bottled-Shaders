@@ -22,7 +22,6 @@
     "cs_editor.color_moon_glare": "ムーングレア",
     "cs_editor.currently_exterior_cell": "現在は屋外セルにいます",
     "feature.exp_height_fog.color_lighting": "色とライティング",
-    "feature.exp_height_fog.debug": "品質と時間フィルタリング",
     "feature.exp_height_fog.density_height": "密度と高さ",
     "feature.exp_height_fog.distance_haze": "遠景のもや",
     "feature.exp_height_fog.distance_haze_fade_distance": "もやのフェード距離",
@@ -53,5 +52,6 @@
     "ui.copy": "コピー",
     "ui.dont_ask_again": "もう表示しない",
     "ui.search": "検索…",
-    "ui.search_features": "機能を検索…"
+    "ui.search_features": "機能を検索…",
+    "feature.exp_height_fog.debug": "品質と時間フィルタリング"
 }

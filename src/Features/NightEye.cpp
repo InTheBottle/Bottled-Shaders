@@ -69,7 +69,7 @@ namespace
 	constexpr std::uint32_t kEnemyAffiliation = 1;
 	constexpr std::uint32_t kAllyAffiliation = 2;
 
-	constexpr UINT kEyeshineMaskSlot = 127;
+	constexpr UINT kEyeshineMaskSlot = 124;
 	constexpr std::size_t kMaximumEyeMasks = 64;
 	constexpr UINT kMaximumMaskDimension = 2048;
 	constexpr auto kMaskDirectory = "Data\\Shaders\\NightEye\\Eyeshine";

@@ -7,6 +7,7 @@
 #include "Deferred.h"
 #include "I18n/I18n.h"
 #include "LinearLighting.h"
+#include "PhysicalSky.h"
 #include "ShaderCache.h"
 #include "State.h"
 #include "Utils/D3D.h"
@@ -400,7 +401,11 @@ void DynamicCubemaps::Inferrence(bool a_reflections)
 
 	auto& cubemap = renderer->GetRendererData().cubemapRenderTargets[RE::RENDER_TARGETS_CUBEMAP::kREFLECTIONS];
 
-	ID3D11ShaderResourceView* srvs[3] = { (a_reflections ? envCaptureReflectionsTexture : envCaptureTexture)->srv.get(), cubemap.SRV, defaultCubemap };
+	ID3D11ShaderResourceView* srvs[3] = {
+		(a_reflections ? envCaptureReflectionsTexture : envCaptureTexture)->srv.get(),
+		cubemap.SRV,
+		defaultCubemap
+	};
 	context->CSSetShaderResources(0, 3, srvs);
 
 	context->CSSetSamplers(0, 1, &computeSampler);

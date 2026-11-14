@@ -1628,7 +1628,7 @@ bool FidelityFX::DispatchRuntimeUpscalerSingle(uint32_t a_contextIndex, ID3D11Re
 			dispatchParameters.enableSharpening = true;
 			dispatchParameters.sharpness = a_sharpness;
 			dispatchParameters.frameTimeDelta = *globals::game::deltaTime * 1000.f;
-			dispatchParameters.preExposure = 1.0f;
+			dispatchParameters.preExposure = globals::state->preExposure;
 			// Menus produce no fresh motion vectors or depth; reset the history there
 			// rather than accumulating against stale reprojection data.
 			dispatchParameters.reset = state->IsMainOrLoadingMenuOpen() || state->ShouldResetHistory();
@@ -1891,7 +1891,7 @@ bool FidelityFX::UpscaleRegion(uint32_t a_contextIndex, ID3D11Resource* a_color,
 	if (runtimeFallbackReset)
 		runtimeFallbackResetDispatchesRemaining--;
 	dispatchParameters.reset = state->IsMainOrLoadingMenuOpen() || state->ShouldResetHistory() || runtimeFallbackReset;
-	dispatchParameters.preExposure = 1.0f;
+	dispatchParameters.preExposure = globals::state->preExposure;
 	dispatchParameters.flags = 0;
 
 	const bool dispatchOK = DispatchHostFsr3UpscaleProtected(fsrContext[a_contextIndex], dispatchParameters);

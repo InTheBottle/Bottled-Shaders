@@ -115,7 +115,6 @@
     "cs_editor.force_this_weather": "Forcez cette météo",
     "cs_editor.form_id": "ID du formulaire",
     "feature.exp_height_fog.color_lighting": "Couleur et éclairage",
-    "feature.exp_height_fog.debug": "Qualité et filtrage temporel",
     "feature.exp_height_fog.density_height": "Densité et hauteur",
     "feature.exp_height_fog.distance_haze": "Brume de distance",
     "feature.exp_height_fog.distance_haze_fade_distance": "Distance de transition de la brume",
@@ -131,5 +130,6 @@
     "feature.exp_height_fog.vanilla_fog": "Brouillard d’origine",
     "feature.exp_height_fog.vanilla_strength": "Intensité du brouillard météo",
     "feature.exp_height_fog.volumetric_extinction_scale": "Facteur d’extinction",
-    "feature.exp_height_fog.volumetric_extinction_scale_tooltip": "Ajuste la densité du brouillard lorsque le brouillard d’origine est suivi, même si le brouillard volumétrique est désactivé. En mode manuel, affecte uniquement le brouillard volumétrique."
+    "feature.exp_height_fog.volumetric_extinction_scale_tooltip": "Ajuste la densité du brouillard lorsque le brouillard d’origine est suivi, même si le brouillard volumétrique est désactivé. En mode manuel, affecte uniquement le brouillard volumétrique.",
+    "feature.exp_height_fog.debug": "Qualité et filtrage temporel"
 }

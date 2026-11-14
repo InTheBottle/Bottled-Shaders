@@ -35,6 +35,7 @@
 #include "Features/NRD.h"
 #include "Features/NightEye.h"
 #include "Features/PerformanceOverlay.h"
+#include "Features/PhysicalSky.h"
 #include "Features/PostProcessing.h"
 #include "Features/ProceduralAurora.h"
 #include "Features/ProceduralLightning.h"
@@ -61,6 +62,7 @@
 #include "Features/UnifiedWater.h"
 #include "Features/Upscaling.h"
 #include "Features/VanillaFresnel.h"
+#include "Features/ViewAtmosphere.h"
 #include "Features/VolumetricLighting.h"
 #include "Features/VolumetricShadows.h"
 #include "Features/WaterEffects.h"
@@ -100,6 +102,7 @@ namespace globals
 		HiZOcclusion hiZOcclusion{};
 		HorizonFix horizonFix{};
 		InteriorSun interiorSun{};
+		PhysicalSky physicalSky{};
 		RainRefraction rainRefraction{};
 		NRD nrd{};
 		ScreenSpaceGI screenSpaceGI{};
@@ -116,6 +119,7 @@ namespace globals
 		UnifiedWater unifiedWater{};
 		VanillaFresnel vanillaFresnel{};
 		VolumetricLighting volumetricLighting{};
+		ViewAtmosphere viewAtmosphere{};
 		WaterEffects waterEffects{};
 		PerformanceOverlay performanceOverlay{};
 		WetnessEffects wetnessEffects{};
@@ -282,6 +286,7 @@ namespace globals
 		using namespace game;
 		RefreshTES();
 		player = RE::PlayerCharacter::GetSingleton();
+		tes = RE::TES::GetSingleton();
 		sky = RE::Sky::GetSingleton();
 		utilityShader = RE::BSUtilityShader::GetSingleton();
 		imageSpaceManager = RE::ImageSpaceManager::GetSingleton();

@@ -12,7 +12,6 @@
     "cs_editor.apply": "Toepassen",
     "cs_editor.apply_changes": "Pas veranderingen toe op het spel",
     "feature.exp_height_fog.color_lighting": "Kleur en belichting",
-    "feature.exp_height_fog.debug": "Kwaliteit en temporele filtering",
     "feature.exp_height_fog.density_height": "Dichtheid en hoogte",
     "feature.exp_height_fog.distance_haze": "Afstandsnevel",
     "feature.exp_height_fog.distance_haze_fade_distance": "Overgangsafstand van nevel",
@@ -28,5 +27,6 @@
     "feature.exp_height_fog.vanilla_fog": "Vanillamist",
     "feature.exp_height_fog.vanilla_strength": "Sterkte van weersmist",
     "feature.exp_height_fog.volumetric_extinction_scale": "Extinctieschaal",
-    "feature.exp_height_fog.volumetric_extinction_scale_tooltip": "Schaalt de mistdichtheid bij het volgen van vanillamist, ook wanneer volumetrische mist is uitgeschakeld. In de handmatige modus heeft dit alleen invloed op volumetrische mist."
+    "feature.exp_height_fog.volumetric_extinction_scale_tooltip": "Schaalt de mistdichtheid bij het volgen van vanillamist, ook wanneer volumetrische mist is uitgeschakeld. In de handmatige modus heeft dit alleen invloed op volumetrische mist.",
+    "feature.exp_height_fog.debug": "Kwaliteit en temporele filtering"
 }
