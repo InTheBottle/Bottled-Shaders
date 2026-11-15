@@ -17,9 +17,10 @@
 #include "Features/LightLimitFix.h"
 #include "Features/LinearLighting.h"
 #include "Features/NightEye.h"
+#include "Features/PhysicalSky.h"
 #include "Features/PostProcessing.h"
+#include "Features/ProceduralAurora.h"
 #include "Features/ProceduralNightSky.h"
-#include "Features/ProceduralSun.h"
 #include "Features/RainRefraction.h"
 #include "Features/ScreenSpaceGI.h"
 #include "Features/ScreenSpaceReflections.h"
@@ -30,6 +31,7 @@
 #include "Features/TerrainShadows.h"
 #include "Features/TerrainVariation.h"
 #include "Features/VanillaFresnel.h"
+#include "Features/ViewAtmosphere.h"
 #include "Features/VolumetricLighting.h"
 #include "Features/WetnessEffects.h"
 #include "TruePBR.h"
@@ -64,7 +66,6 @@ std::pair<unsigned char*, size_t> GetFeatureBufferData(bool a_inWorld)
 		globals::features::wetnessEffects.GetCommonBufferData(),
 		globals::features::skylighting.GetCommonBufferData(a_inWorld),
 		globals::features::cloudShadows.GetCommonBufferData(),
-		globals::features::proceduralSun.GetCommonBufferData(),
 		globals::features::lodBlending.settings,
 		globals::features::hairSpecular.settings,
 		globals::features::terrainVariation.settings,
@@ -86,5 +87,8 @@ std::pair<unsigned char*, size_t> GetFeatureBufferData(bool a_inWorld)
 		globals::features::proceduralNightSky.GetCommonBufferData(),
 		globals::features::screenSpaceGI.GetCommonBufferData(),
 		globals::features::screenSpaceReflections.GetCommonBufferData(),
-		globals::features::postProcessing.GetCommonBufferData());
+		globals::features::postProcessing.GetCommonBufferData(),
+		globals::features::proceduralAurora.GetCommonBufferData(),
+		globals::features::physicalSky.cbData,
+		globals::features::viewAtmosphere.settings);
 }

@@ -201,5 +201,5 @@ float4 main(PS_INPUT input) : SV_Target
 	alpha *= 1.0 - heightFogFactor;
 	coverage *= 1.0 - heightFogFactor;
 
-	return float4(max(color * alpha + highlight * coverage * saturate(input.Color.a * 2.0), 0.0), alpha);
+	return float4(PreExposure::Encode(max(color * alpha + highlight * coverage * saturate(input.Color.a * 2.0), 0.0)), alpha);
 }

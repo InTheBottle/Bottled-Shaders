@@ -10,7 +10,6 @@
 #include "Features/DetailMaps.h"
 #include "Features/DeveloperTools.h"
 #include "Features/DynamicCubemaps.h"
-#include "Features/ProceduralSun.h"
 #include "Features/Effects11.h"
 #include "Features/ExponentialHeightFog.h"
 #include "Features/ExtendedMaterials.h"
@@ -35,7 +34,9 @@
 #include "Features/NightEye.h"
 #include "Features/PerformanceOverlay.h"
 #include "Features/NeuralRendering.h"
+#include "Features/PhysicalSky.h"
 #include "Features/PostProcessing.h"
+#include "Features/ProceduralAurora.h"
 #include "Features/ProceduralLightning.h"
 #include "Features/ProceduralNightSky.h"
 #include "Features/RainRefraction.h"
@@ -54,9 +55,11 @@
 #include "Features/TerrainHelper.h"
 #include "Features/TerrainShadows.h"
 #include "Features/TerrainVariation.h"
+#include "Features/TreeWind.h"
 #include "Features/UnifiedWater.h"
 #include "Features/Upscaling.h"
 #include "Features/VanillaFresnel.h"
+#include "Features/ViewAtmosphere.h"
 #include "Features/VolumetricLighting.h"
 #include "Features/VolumetricShadows.h"
 #include "Features/ReverseZ.h"
@@ -227,7 +230,6 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::lightLimitFix,
 		&globals::features::dynamicCubemaps,
 		&globals::features::cloudShadows,
-		&globals::features::proceduralSun,
 		&globals::features::waterEffects,
 		&globals::features::performanceOverlay,
 		&globals::features::subsurfaceScattering,
@@ -241,6 +243,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::terrainHelper,
 		&globals::features::vanillaFresnel,
 		&globals::features::volumetricLighting,
+		&globals::features::viewAtmosphere,
 		&globals::features::lodBlending,
 		&globals::features::hairSpecular,
 		&globals::features::interiorSun,
@@ -259,8 +262,10 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::rainRefraction,
 		&globals::features::unifiedWater,
 		&globals::features::horizonFix,
+		&globals::features::treeWind,
 		&globals::features::exponentialHeightFog,
 		&globals::features::hdrDisplay,
+		&globals::features::physicalSky,
 		&globals::features::postProcessing,
 		&globals::features::skin,
 		&globals::features::snowCover,
@@ -276,7 +281,8 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::furShells,
 		&globals::features::detailMaps,
 		&globals::features::landscapeSeams,
-		&globals::features::snowDeformation
+		&globals::features::snowDeformation,
+		&globals::features::proceduralAurora
 	};
 
 	return features;

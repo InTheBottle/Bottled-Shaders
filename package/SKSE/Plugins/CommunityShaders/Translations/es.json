@@ -104,7 +104,6 @@
     "cs_editor.drag_to_favourites": "Arrastre un color aquí para añadir a favoritos",
     "cs_editor.edit_current_cell_lighting": "Editar Iluminación de Celda Actual",
     "feature.exp_height_fog.color_lighting": "Color e iluminación",
-    "feature.exp_height_fog.debug": "Calidad y filtrado temporal",
     "feature.exp_height_fog.density_height": "Densidad y altura",
     "feature.exp_height_fog.distance_haze": "Bruma por distancia",
     "feature.exp_height_fog.distance_haze_fade_distance": "Distancia de transición de la bruma",

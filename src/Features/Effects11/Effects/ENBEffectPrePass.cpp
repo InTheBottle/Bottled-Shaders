@@ -3,7 +3,7 @@
 #include "../EffectManager.h"
 #include "../TextureManager.h"
 #include "Deferred.h"
-#include "Features/ProceduralSun.h"
+#include "Utils/Sun.h"
 #include "Features/SkySync.h"
 #include "Features/Upscaling.h"
 #include "Globals.h"
@@ -41,7 +41,7 @@ void ENBEffectPrePass::UpdateEffectVariables()
 	float4 sunColor{};
 	auto sky = globals::game::sky;
 	if (sky && sky->sun && sky->sun->light) {
-		const float visibility = ProceduralSun::GetSunVisibility();
+		const float visibility = Util::Sun::GetVisibility();
 		const auto direction = globals::features::skySync.GetCelestialDirection(sky, SkySync::Caster::Sun);
 		const auto view = globals::game::frameBufferCached.GetCameraView().Transpose();
 		const auto viewDirection = DirectX::SimpleMath::Vector4::Transform(DirectX::SimpleMath::Vector4(direction.x, direction.y, direction.z, 0.0f), view);

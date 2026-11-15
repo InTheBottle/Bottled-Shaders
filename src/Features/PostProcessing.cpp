@@ -447,7 +447,6 @@ void PostProcessing::ApplyContextualDefaults(json& a_defaults) const
 void PostProcessing::BuildPipeline()
 {
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::Fire)] = std::make_shared<FireEffects>();
-	pipeline[static_cast<size_t>(FeaturePipelineIndex::SunRays)] = std::make_shared<SunRays>();
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::LocalExposure)] = std::make_shared<LocalExposure>();
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::AutoExposure)] = std::make_shared<HistogramAutoExposure>();
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::ColorGrading)] = std::make_shared<ColorGrading>();
@@ -467,7 +466,7 @@ void PostProcessing::BuildPipeline()
 void PostProcessing::ApplyDefaultEnabledStates()
 {
 	using enum FeaturePipelineIndex;
-	constexpr std::array kOffByDefault = { Fire, SunRays, LUT, MotionBlur, PhysicalGlare, Camera, Border };
+	constexpr std::array kOffByDefault = { Fire, LUT, MotionBlur, PhysicalGlare, Camera, Border };
 	for (size_t index = 0; index < pipeline.size(); ++index) {
 		if (auto& pipe = pipeline[index]; pipe && !pipe->IsAutoEnabled())
 			pipe->enabled = std::ranges::find(kOffByDefault, static_cast<FeaturePipelineIndex>(index)) == kOffByDefault.end();
@@ -590,7 +589,7 @@ void PostProcessing::CopyToRenderTarget(
 	ID3D11Texture2D* srcTex,
 	ID3D11ShaderResourceView* srcSRV, const CopyCB& conversion)
 {
-	const bool convert = conversion.gamma != 1.f || conversion.inputGamut != conversion.outputGamut;
+	const bool convert = conversion.scale != 1.f || conversion.gamma != 1.f || conversion.inputGamut != conversion.outputGamut;
 	if (!targetRT.texture || !srcTex || (!convert && targetRT.texture == srcTex))
 		return;
 
@@ -757,17 +756,24 @@ void PostProcessing::PreProcess(RE::RENDER_TARGET a_input)
 
 	// go through each fx
 	bool colorGraded = false;
+	bool exposureResolved = !linear || globals::state->preExposure == 1.0f;
 	for (auto& pipe : pipeline) {
 		if (pipe && !bypass && pipe->IsActive() && !pipe->DrawAfterColorGrading() && !(inMainLoadingMenu && pipe->DisableInMainLoadingMenu()) && (!pipe->DrawBeforeUpscaling() || !upscaling.loaded)) {
 			auto* input = lastTexColor.tex;
+			// A failed/not-yet-compiled composite cannot hand scaled radiance to
+			// display transforms. The final copy below provides the identity fallback.
+			if (!exposureResolved && pipe == pipeline[static_cast<size_t>(FeaturePipelineIndex::ColorGrading)])
+				continue;
 			DrawFeature(*pipe, lastTexColor);
+			if (!exposureResolved && pipe == pipeline[static_cast<size_t>(FeaturePipelineIndex::Composite)])
+				exposureResolved = lastTexColor.tex != input;
 			if (pipe == pipeline[static_cast<size_t>(FeaturePipelineIndex::ColorGrading)])
 				colorGraded = lastTexColor.tex != input;
 		}
 	}
 
 	for (auto& pipe : pipeline) {
-		if (!bypass && pipe && pipe->IsActive() && pipe->DrawAfterColorGrading() && !(inMainLoadingMenu && pipe->DisableInMainLoadingMenu()) && (!pipe->DrawBeforeUpscaling() || !upscaling.loaded)) {
+		if (!bypass && exposureResolved && pipe && pipe->IsActive() && pipe->DrawAfterColorGrading() && !(inMainLoadingMenu && pipe->DisableInMainLoadingMenu()) && (!pipe->DrawBeforeUpscaling() || !upscaling.loaded)) {
 			DrawFeature(*pipe, lastTexColor);
 		}
 	}
@@ -781,7 +787,8 @@ void PostProcessing::PreProcess(RE::RENDER_TARGET a_input)
 	const CopyCB conversion{
 		.inputGamut = colorGraded ? displayGamut : sceneGamut,
 		.outputGamut = sceneOutput ? sceneGamut : displayGamut,
-		.gamma = sceneOutput && !linear ? Util::ColorSpace::GAME_GAMMA_INV : 1.f
+		.gamma = sceneOutput && !linear ? Util::ColorSpace::GAME_GAMMA_INV : 1.f,
+		.scale = exposureResolved ? 1.f : 1.f / globals::state->preExposure
 	};
 	CopyToRenderTarget(gameTexMain, useMainCopy ? mainCopyConvertTex : mainConvertTex, lastTexColor.tex, lastTexColor.srv, conversion);
 	CopyToRenderTarget(gameTexMainAlt, useMainCopy ? mainConvertTex : mainCopyConvertTex, gameTexMain.texture, gameTexMain.SRV, CopyCB{});
@@ -883,15 +890,9 @@ void PostProcessing::UpdateVanillaEffects(bool active)
 
 void PostProcessing::Prepass()
 {
-	if (!pendingSettings.empty()) {
-		logger::info("Processing pending post processing settings...");
-		ProcessSettings(pendingSettings);
-		pendingSettings = {};
-		UpdateVanillaEffects(globals::state->GetTonemapOwner() == State::TonemapOwner::kPostProcessing);
-	}
-
 	if (auto* lut = GetPipelineFeature<::LUT>(FeaturePipelineIndex::LUT))
 		lut->UpdateTexture();
+	UpdateVanillaEffects(globals::state->GetTonemapOwner() == State::TonemapOwner::kPostProcessing);
 
 	{
 		auto graphicsState = globals::game::graphicsState;

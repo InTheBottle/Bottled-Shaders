@@ -626,21 +626,13 @@ void ScreenSpaceGI::SetupNRDResources()
 	hasFullResolutionMultiBounceHistory = false;
 	multiBounceHistoryUsesNRDOutput = false;
 	const bool useSH = settings.EnableGI && settings.EnableSH;
+	const bool modeChanged = nrdReblurUsesSH != useSH || !texNRDInput;
 	if (nrdReblurUsesSH != useSH)
 		recompileFlag = true;
 
-	uint32_t fullW, fullH;
-	if (texRadiance) {
-		fullW = texRadiance->desc.Width;
-		fullH = texRadiance->desc.Height;
-	} else {
-		auto renderer = globals::game::renderer;
-		auto mainTex = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
-		D3D11_TEXTURE2D_DESC mainDesc;
-		mainTex.texture->GetDesc(&mainDesc);
-		fullW = mainDesc.Width;
-		fullH = mainDesc.Height;
-	}
+	uint32_t fullW = 0;
+	uint32_t fullH = 0;
+	GetNRDResourceSize(fullW, fullH);
 
 	D3D11_TEXTURE2D_DESC texDesc{
 		.Width = fullW,
@@ -694,7 +686,26 @@ void ScreenSpaceGI::SetupNRDResources()
 	nrdReblur.Init(fullW, fullH, denoiser, 0);
 	nrdReblurUsesSH = useSH;
 
-	globals::deferred->ClearShaderCache();
+	if (modeChanged)
+		globals::deferred->ClearShaderCache();
+}
+
+void ScreenSpaceGI::GetNRDResourceSize(uint32_t& a_width, uint32_t& a_height) const
+{
+	const auto& nrdSvc = globals::features::nrd;
+	const bool multiBounce = settings.EnableGI && settings.EnableMultiBounce;
+	if (!multiBounce && nrdSvc.loaded && nrdSvc.GetResourceExtent(a_width, a_height))
+		return;
+	if (texRadiance) {
+		a_width = texRadiance->desc.Width;
+		a_height = texRadiance->desc.Height;
+	} else {
+		auto mainTex = globals::game::renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
+		D3D11_TEXTURE2D_DESC mainDesc;
+		mainTex.texture->GetDesc(&mainDesc);
+		a_width = mainDesc.Width;
+		a_height = mainDesc.Height;
+	}
 }
 
 void ScreenSpaceGI::ClearShaderCache()
@@ -832,7 +843,10 @@ void ScreenSpaceGI::DrawSSGI()
 
 	const bool useSH = settings.EnableGI && settings.EnableSH;
 	const bool trackMultiBounce = settings.EnableGI && settings.EnableMultiBounce;
-	if (nrdReblurUsesSH != useSH)
+	uint32_t nrdWidth = 0;
+	uint32_t nrdHeight = 0;
+	GetNRDResourceSize(nrdWidth, nrdHeight);
+	if (nrdReblurUsesSH != useSH || !texNRDInput || texNRDInput->desc.Width != nrdWidth || texNRDInput->desc.Height != nrdHeight)
 		SetupNRDResources();
 
 	if (const bool canDenoise = CanDenoise(); (settings.HalfRes && canDenoise) != tracedHalfRes || (settings.QuarterRes && canDenoise) != tracedQuarterRes) {

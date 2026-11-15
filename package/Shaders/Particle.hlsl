@@ -5,6 +5,9 @@
 #include "Common/FrameBuffer.hlsli"
 #include "Common/Game.hlsli"
 #include "Common/SharedData.hlsli"
+#if defined(PHYSICAL_SKY) && defined(RAIN)
+#	include "PhysicalSky/Lightning.hlsli"
+#endif
 
 #if !defined(DYNAMIC_CUBEMAPS) && defined(IBL)
 #	undef IBL
@@ -317,7 +320,7 @@ float3 GetRaindropExitDirection(float3 rayDirection, float3 normalWS, float ior)
 float3 SampleRainBackground(float2 screenUV, float2 gradientX, float2 gradientY)
 {
 	float2 textureUV = FrameBuffer::GetDynamicResolutionAdjustedScreenPosition(saturate(screenUV));
-	return ColorManagement::SceneToLinear(TexRainBackground.SampleGrad(SampSourceTexture, textureUV, gradientX, gradientY).xyz);
+	return ColorManagement::SceneToLinear(PreExposure::Decode(TexRainBackground.SampleGrad(SampSourceTexture, textureUV, gradientX, gradientY).xyz));
 }
 #	endif
 
@@ -378,6 +381,7 @@ void ApplyLinearLightingOutput(inout PS_OUTPUT psout)
 	if (Permutation::RenderToUI && !(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection))
 		psout.Color.rgb = ColorManagement::WorkingToUI(psout.Color.rgb);
 #	endif
+	psout.Color.rgb = PreExposure::EncodeScene(psout.Color.rgb);
 }
 
 PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
@@ -519,6 +523,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	psout.Color.xyz = ColorManagement::LinearToScene(raindropColor * SharedData::rainRefractionSettings.Brightness);
     psout.Color.w = alpha;
     psout.Normal = float4(0, 1, 0, alpha);
+	psout.Color.rgb = PreExposure::EncodeScene(psout.Color.rgb);
     return psout;
 }
 #	endif
@@ -562,6 +567,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	positionWS.xyz = positionWS.xyz / positionWS.w;
 
 	float3 dirLightColor = GetDirLightColor(positionWS.xyz);
+#	if defined(PHYSICAL_SKY) && defined(RAIN)
+	dirLightColor = ColorManagement::SceneColor::ScaleAndAddLinear(dirLightColor, 1.0, Lightning::Incident(positionWS.xyz + FrameBuffer::CameraPosAdjust.xyz) * (1.0 / 3.14159265));
+#	endif
 	float3 ambientColor = max(0, SharedData::GetAmbient(float3(0, 0, 1)));
 #	if defined(IBL)
 	if (SharedData::iblSettings.EnableIBL) {

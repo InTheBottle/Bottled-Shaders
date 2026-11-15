@@ -3,6 +3,7 @@
 #include "Common/FrameBuffer.hlsli"
 #include "Common/Math.hlsli"
 #include "Common/Permutation.hlsli"
+#include "Common/Random.hlsli"
 #include "Common/SharedData.hlsli"
 
 typedef VS_OUTPUT PS_INPUT;
@@ -153,6 +154,9 @@ PS_OUTPUT main(PS_INPUT input)
 	if (SharedData::TonemapOwner == SharedData::TonemapOwnerPostProcessing) {
 		if (!isHDR) {
 			inputColor = TransferFunctions::LinearToGamma22(inputColor);
+			float ditherNoise = Random::InterleavedGradientNoise(input.Position.xy, SharedData::FrameCount) +
+			                    Random::InterleavedGradientNoise(input.Position.yx + 19.19f, SharedData::FrameCount) - 1.0f;
+			inputColor += ditherNoise * min(inputColor * 255.0f, 1.0f) / 255.0f;
 		}
 
 		psout.Color = float4(inputColor, 1.0);

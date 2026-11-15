@@ -3,7 +3,6 @@
 #include <atomic>
 
 struct CloudShadows;
-struct ProceduralSun;
 struct DynamicCubemaps;
 struct VolumetricShadows;
 struct ExtendedMaterials;
@@ -18,6 +17,7 @@ struct LightLimitFix;
 struct LinearLighting;
 struct LODBlending;
 struct InteriorSun;
+struct PhysicalSky;
 struct RainRefraction;
 struct NRD;
 struct ScreenSpaceGI;
@@ -30,9 +30,11 @@ struct SubsurfaceScattering;
 struct TerrainBlending;
 struct TerrainHelper;
 struct TerrainShadows;
+struct TreeWind;
 struct UnifiedWater;
 struct VanillaFresnel;
 struct VolumetricLighting;
+class ViewAtmosphere;
 struct WaterEffects;
 struct PerformanceOverlay;
 struct WetnessEffects;
@@ -62,6 +64,7 @@ struct DetailMaps;
 struct LandscapeSeams;
 struct SnowDeformation;
 struct SceneManager;
+struct ProceduralAurora;
 
 class State;
 class Deferred;
@@ -115,7 +118,6 @@ namespace globals
 	namespace features
 	{
 		extern CloudShadows cloudShadows;
-		extern ProceduralSun proceduralSun;
 		extern DynamicCubemaps dynamicCubemaps;
 		extern VolumetricShadows volumetricShadows;
 		extern ExtendedMaterials extendedMaterials;
@@ -130,6 +132,7 @@ namespace globals
 		extern LinearLighting linearLighting;
 		extern LODBlending lodBlending;
 		extern InteriorSun interiorSun;
+		extern PhysicalSky physicalSky;
 		extern RainRefraction rainRefraction;
 		extern NRD nrd;
 		extern ScreenSpaceGI screenSpaceGI;
@@ -142,9 +145,11 @@ namespace globals
 		extern TerrainBlending terrainBlending;
 		extern TerrainHelper terrainHelper;
 		extern TerrainShadows terrainShadows;
+		extern TreeWind treeWind;
 		extern UnifiedWater unifiedWater;
 		extern VanillaFresnel vanillaFresnel;
 		extern VolumetricLighting volumetricLighting;
+		extern ViewAtmosphere viewAtmosphere;
 		extern WaterEffects waterEffects;
 		extern PerformanceOverlay performanceOverlay;
 		extern WetnessEffects wetnessEffects;
@@ -178,6 +183,7 @@ namespace globals
 		extern LandscapeSeams landscapeSeams;
 		extern SnowDeformation snowDeformation;
 		extern SceneManager sceneManager;
+		extern ProceduralAurora proceduralAurora;
 
 	}
 

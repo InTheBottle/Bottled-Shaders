@@ -5,7 +5,7 @@
 
 namespace NightEye
 {
-	Texture2D<float> EyeshineMask : register(t127);
+	Texture2D<float> EyeshineMask : register(t124);
 
 	static const float kInfraredMode = 1.0;
 	static const float kPredatorMode = 2.0;

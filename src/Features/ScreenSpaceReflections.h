@@ -45,6 +45,7 @@ struct ScreenSpaceReflections : Feature
 	virtual void SaveSettings(json& o_json) override;
 
 	virtual void SetupResources() override;
+	void SetupNRDResources(uint32_t a_width, uint32_t a_height);
 	virtual void ClearShaderCache() override;
 	void CompileComputeShaders();
 	bool ShadersOK();

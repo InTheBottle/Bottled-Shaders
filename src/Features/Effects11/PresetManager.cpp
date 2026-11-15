@@ -2,6 +2,7 @@
 
 #include "EffectManager.h"
 #include "I18n/I18n.h"
+#include "Overlays/PresetOverlays.h"
 #include "Presets/UnifiedPresetCatalog.h"
 #include "SettingManager.h"
 #include "Utils/FileSystem.h"
@@ -255,13 +256,11 @@ bool PresetManager::SwitchPreset(const std::string& id, bool saveCurrent)
 	if (!target || !target->valid)
 		return false;
 
-	auto& settingManager = SettingManager::GetSingleton();
-	auto& effectManager = EffectManager::GetSingleton();
-
 	if (saveCurrent) {
-		if (const auto* current = FindPreset(activePresetId); current && current->valid) {
-			settingManager.Save();
-			effectManager.Save();
+		// Switching reloads from disk, so a failed write would lose its edits
+		if (const auto* current = FindPreset(activePresetId); current && current->valid && !Overlays::Manager::GetSingleton().SavePreset()) {
+			logger::error("[Effects11] Preset switch stopped: the preset or an overlay could not be saved");
+			return false;
 		}
 	}
 
@@ -300,9 +299,9 @@ bool PresetManager::ExportActivePresetTo(const std::filesystem::path& destRoot, 
 		return false;
 	}
 
-	if (saveCurrent) {
-		SettingManager::GetSingleton().Save();
-		EffectManager::GetSingleton().Save();
+	if (saveCurrent && !Overlays::Manager::GetSingleton().SavePreset()) {
+		logger::error("[Effects11] Export failed: the preset or an overlay could not be saved");
+		return false;
 	}
 
 	const auto sourceRoot = GetActivePresetRoot();

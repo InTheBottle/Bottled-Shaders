@@ -86,7 +86,6 @@
     "cs_editor.drag_colours_here": "Przeciągnij kolory żeby zapisać jako ulubione.",
     "cs_editor.drag_to_favourites": "Przeciągnij kolor tutaj aby dodać go do ulubionych",
     "feature.exp_height_fog.color_lighting": "Kolor i oświetlenie",
-    "feature.exp_height_fog.debug": "Jakość i filtrowanie czasowe",
     "feature.exp_height_fog.density_height": "Gęstość i wysokość",
     "feature.exp_height_fog.distance_haze": "Zamglenie odległościowe",
     "feature.exp_height_fog.distance_haze_fade_distance": "Dystans narastania zamglenia",

@@ -129,6 +129,14 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 #	endif
 #endif
 
+#if defined(PHYSICAL_SKY)
+#	define PS_DEFERRED_RSRCS
+#	define PS_DEFERRED_SAMPLERS
+#	include "PhysicalSky/Common.hlsli"
+// Texture3D<float4> TexApLut : register(t15);
+// SamplerState SampSv : register(s2);
+#endif
+
 [numthreads(8, 8, 1)] void main(uint3 dispatchID : SV_DispatchThreadID) {
 	// Early exit if dispatch thread is outside screen bounds
 	if (any(dispatchID.xy >= uint2(SharedData::BufferDim.xy)))
@@ -143,8 +151,8 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 	float3 normalGlossiness = NormalRoughnessTexture[dispatchID.xy];
 	float3 normalVS = GBuffer::DecodeNormal(normalGlossiness.xy);
 
-	float3 diffuseColor = MainRW[dispatchID.xy].xyz;
-	float3 specularColor = SpecularTexture[dispatchID.xy];
+	float3 diffuseColor = PreExposure::Decode(MainRW[dispatchID.xy].xyz);
+	float3 specularColor = PreExposure::Decode(SpecularTexture[dispatchID.xy]);
 #if defined(CAPSULE_SHADOWS)
 	specularColor *= capsuleVisibility.y;
 #endif
@@ -385,6 +393,12 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 
 	color = ColorManagement::LinearToScene(color);
 
+#if defined(PHYSICAL_SKY)
+	if (SharedData::physSkyData.enabled && depth < 1 - 1e-6) {
+		color.xyz = PhysSky::CompositeAerialPerspective(color.xyz, normalize(positionWS.xyz), dispatchID.xy, length(positionWS.xyz), PhysSky::SampSv);
+	}
+#endif
+
 #if defined(DEBUG)
 
 	if (uv.x < 0.5 && uv.y < 0.5) {
@@ -454,6 +468,6 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 
 #endif
 
-	MainRW[dispatchID.xy] = float4(color, 1.0);
+	MainRW[dispatchID.xy] = float4(PreExposure::Encode(color), 1.0);
 	NormalTAAMaskSpecularMaskRW[dispatchID.xy] = float4(GBuffer::EncodeNormalVanilla(normalVS), 0.0, 0.0);
 }

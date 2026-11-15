@@ -115,7 +115,6 @@
     "cs_editor.force_this_weather": "Forcez cette météo",
     "cs_editor.form_id": "ID du formulaire",
     "feature.exp_height_fog.color_lighting": "Couleur et éclairage",
-    "feature.exp_height_fog.debug": "Qualité et filtrage temporel",
     "feature.exp_height_fog.density_height": "Densité et hauteur",
     "feature.exp_height_fog.distance_haze": "Brume de distance",
     "feature.exp_height_fog.distance_haze_fade_distance": "Distance de transition de la brume",

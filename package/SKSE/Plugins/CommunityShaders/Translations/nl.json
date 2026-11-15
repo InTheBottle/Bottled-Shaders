@@ -12,7 +12,6 @@
     "cs_editor.apply": "Toepassen",
     "cs_editor.apply_changes": "Pas veranderingen toe op het spel",
     "feature.exp_height_fog.color_lighting": "Kleur en belichting",
-    "feature.exp_height_fog.debug": "Kwaliteit en temporele filtering",
     "feature.exp_height_fog.density_height": "Dichtheid en hoogte",
     "feature.exp_height_fog.distance_haze": "Afstandsnevel",
     "feature.exp_height_fog.distance_haze_fade_distance": "Overgangsafstand van nevel",

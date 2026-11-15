@@ -1,3 +1,4 @@
+#include "Common/PreExposure.hlsli"
 /// By ProfJack/五脚猫, 2024-2-17 UTC
 /// ref:
 /// https://bruop.github.io/exposure/
@@ -73,7 +74,7 @@ float4 ComputeBoxBounds(float2 dims)
 
 	if (inBox) {
 		float3 color = TexColor[pxCoord].rgb;
-		float luma = Color::RGBToLuminance(color);
+		float luma = PreExposure::Decode(Color::RGBToLuminance(color));
 
 		// Optimized bin calculation - avoid unnecessary saturate
 		if (luma > 1e-10) {
@@ -115,6 +116,7 @@ float4 ComputeBoxBounds(float2 dims)
 			float highCut = totalWeight * HighPercent;
 			float weightedLogLum = 0.0;
 			float keptWeight = 0.0;
+			float highLogLum = MinLogLum;
 
 			[loop] for (uint bin = FirstLuminanceBin; bin < HistogramBins; ++bin)
 			{
@@ -132,10 +134,15 @@ float4 ComputeBoxBounds(float2 dims)
 				float logLum = histogramPos * LogLumRange + MinLogLum;
 				weightedLogLum += logLum * binWeight;
 				keptWeight += binWeight;
+				if (binWeight > 0.0)
+					highLogLum = logLum;
 			}
 
-			if (keptWeight > 0.0)
-				avgLum = exp2(weightedLogLum / keptWeight);
+			if (keptWeight > 0.0) {
+				float avgLogLum = weightedLogLum / keptWeight;
+				avgLogLum += max(highLogLum - log2(HighlightLimit) - avgLogLum, 0.0) * HighlightProtection;
+				avgLum = exp2(avgLogLum);
+			}
 		}
 
 		float adaptedLum = lerp(max(1e-5, RWBufferAdaptation[0]), avgLum, AdaptLerp);

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include "Effects/ENBAdaptation.h"
 #include "Effects/ENBBloom.h"
 #include "Effects/ENBDepthOfField.h"
@@ -54,7 +56,8 @@ public:
 
 	void Apply();
 	void Load();
-	void Save();
+	/** @brief Saves every effect. @return False when any write failed. */
+	bool Save();
 
 	void RegisterSettings();
 
@@ -71,6 +74,9 @@ public:
 	ENBEffect enbEffect;
 	ENBUnderwater enbUnderwater;
 	ENBEffectPostPass enbEffectPostPass;
+
+	/** @brief Every preset effect, in execution order. */
+	auto AllEffects() { return std::to_array<EffectBase*>({ &enbEffectPrePass, &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbSunSprite, &enbEffect, &enbUnderwater, &enbEffectPostPass }); }
 
 	// Common resources shared across effects
 	void CreateCommonResources();

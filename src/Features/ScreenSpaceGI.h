@@ -70,6 +70,7 @@ public:
 	/** @brief Updates the SSGI constant buffer with current camera, resolution, and settings data. */
 	void UpdateSB();
 	void SetupNRDResources();
+	void GetNRDResourceSize(uint32_t& a_width, uint32_t& a_height) const;
 
 	//////////////////////////////////////////////////////////////////////////////////
 

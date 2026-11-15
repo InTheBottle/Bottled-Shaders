@@ -200,12 +200,8 @@ shared_integrations:
     src/CSEditor/SceneManager/SceneSettingsPolicy.h:
         scene_debug_exclusions:
             source: personal
-            anchor: "Keep footstep test overrides and Streamline logging out of scene looks"
-            match:
-                [
-                    '{ "FootstepParticles", "SurfaceOverride" }',
-                    '{ "Upscaling", "streamlineLogLevel" }',
-                ]
+            anchor: "Keep footstep test overrides out of scene looks; Streamline logging is now excluded by Bottle"
+            match: ['{ "FootstepParticles", "SurfaceOverride" }']
         nr_scene_policy:
             source: personal
             anchor: "Neural Rendering scene eligibility and exclusions for layout, debug views and raster resizing"

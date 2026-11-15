@@ -169,8 +169,17 @@ float2 GetTreeShiftVector(float4 position, float4 color)
 }
 #	endif  // TREE_ANIM
 
-#	if defined(FUR_SHELLS)
+#	if defined(TREE_WIND) && defined(VC) && !defined(TREE_ANIM) && !defined(LOD) && !defined(LODLANDSCAPE) && !defined(LANDSCAPE) && !defined(SKINNED) && !defined(EYE)
+#		define TREE_WIND_VS
+#		include "TreeWind/TreeWind.hlsli"
+#	endif
+
+#	if defined(FUR_SHELLS) && defined(TREE_WIND_VS)
+VS_OUTPUT main(VS_INPUT input, uint instanceID : SV_InstanceID, uint vertexID : SV_VertexID)
+#	elif defined(FUR_SHELLS)
 VS_OUTPUT main(VS_INPUT input, uint instanceID : SV_InstanceID)
+#	elif defined(TREE_WIND_VS)
+VS_OUTPUT main(VS_INPUT input, uint vertexID : SV_VertexID)
 #	else
 VS_OUTPUT main(VS_INPUT input)
 #	endif
@@ -206,6 +215,14 @@ VS_OUTPUT main(VS_INPUT input)
 	previousInputPosition.xyz += normal.xyz * treeShiftVector.y;
 #	endif
 
+#	if defined(TREE_WIND_VS)
+	if (TreeWind::IsEnabled()) {
+		float nearScale = TreeWind::GetNearScale(World, input.Position.xyz);
+		inputPosition.xy += TreeWind::GetOffset(input.Position.xyz, TreeWind::Wind.x, vertexID, nearScale);
+		previousInputPosition.xy += TreeWind::GetOffset(input.Position.xyz, TreeWind::Wind.y, vertexID, nearScale);
+	}
+#	endif
+
 #	if defined(SKINNED)
 	precise int4 actualIndices = 765.01.xxxx * input.BoneIndices.xyzw;
 
@@ -225,8 +242,12 @@ VS_OUTPUT main(VS_INPUT input)
 #		endif
 
 	float4 viewPos = mul(ViewProj, worldPosition);
-#	else   // !SKINNED
+#	else  // !SKINNED
+#		if defined(TREE_WIND_VS)
+	precise float4 previousWorldPosition = float4(mul(PreviousWorld, previousInputPosition), 1);
+#		else
 	precise float4 previousWorldPosition = float4(mul(PreviousWorld, inputPosition), 1);
+#		endif
 	precise float4 worldPosition = float4(mul(World, inputPosition), 1);
 	precise float4x4 world4x4 = float4x4(World[0], World[1], World[2], float4(0, 0, 0, 1));
 	precise float4x4 modelView = mul(ViewProj, world4x4);
@@ -1061,6 +1082,10 @@ bool UseSkylightingShadowVisibility()
 #		include "Skin/Skin.hlsli"
 #	endif
 
+#	if defined(PHYSICAL_SKY)
+#		include "PhysicalSky/Common.hlsli"
+#	endif
+
 #	define LinearSampler SampColorSampler
 
 #	include "Common/ShadowSampling.hlsli"
@@ -1071,6 +1096,10 @@ bool UseSkylightingShadowVisibility()
 
 #	if defined(EXP_HEIGHT_FOG)
 #		include "ExponentialHeightFog/ExponentialHeightFog.hlsli"
+#	endif
+
+#	if defined(PHYSICAL_SKY) || defined(EXP_HEIGHT_FOG)
+#		include "Common/ViewMedium.hlsli"
 #	endif
 
 #	include "Common/LightingEval.hlsli"
@@ -2818,6 +2847,13 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	}
 #	endif
 
+#	if defined(PHYSICAL_SKY)
+	if (SharedData::physSkyData.enabled) {
+		dirLightColor *= PhysSky::SampleTr(normalize(DirLightDirection.xyz), SampShadowMaskSampler);
+		dirLightColor *= PhysSky::GetDirlightTransmittance(input.WorldPosition.xyz + FrameBuffer::CameraPosAdjust.xyz, SampColorSampler, true);
+	}
+#	endif
+
 	float3 cloudScatterColor = dirLightColor;
 	float cloudScatter = 0.0;
 
@@ -3123,6 +3159,11 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		float3 lightColor = Color::PointLight(light.color.xyz) * intensityMultiplier * light.fade;
 		float lightShadow = 1.0;
 		float3 normalizedLightDirection = normalize(lightDirection);
+
+#			if defined(SKYLIGHTING)
+		if (light.lightFlags & LightLimitFix::LightFlags::Lightning)
+			lightColor *= Skylighting::EvaluateDiffuse(skylightingSH, normalizedLightDirection, Skylighting::GetFadeOutFactor(positionMSSkylight));
+#			endif
 
 		float shadowComponent = 1.0;
 		[branch] if (light.lightFlags & LightLimitFix::LightFlags::LocalShadow)
@@ -3593,45 +3634,67 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		endif
 
 	color.xyz = ColorManagement::LinearToScene(color.xyz);
-	float3 fogColor = input.FogParam.xyz;
-	float fogFactor = input.FogParam.w;
+#		if defined(PHYSICAL_SKY)
+	if (SharedData::physSkyData.enabled && (inWorld || inReflection)) {
+		const float3 physSkyViewDir = normalize(input.WorldPosition.xyz);
+		if (inReflection && ViewAtmosphere::ReflectionEnabled() && (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::AdditiveLighting)) {
+			const ViewAtmosphere::Medium medium = PhysSky::SampleReflectionMedium(physSkyViewDir, length(input.WorldPosition.xyz), SampColorSampler, false);
+			color.xyz = ColorManagement::SceneColor::ScaleByLinear(color.xyz, medium.transmittance);
+		} else if (inReflection)
+			color.xyz = PhysSky::CompositeAerialPerspectiveReflection(color.xyz, physSkyViewDir, length(input.WorldPosition.xyz), SampColorSampler);
+		else
+			color.xyz = PhysSky::CompositeAerialPerspective(color.xyz, physSkyViewDir, input.Position.xy, screenUV, length(input.WorldPosition.xyz), SampColorSampler);
+	}
+#		endif
+
+#		if defined(PHYSICAL_SKY) || defined(EXP_HEIGHT_FOG)
+	if (SharedData::PostWaterComposite && inWorld && !inReflection) {
+		const ViewAtmosphere::Medium medium = ViewMedium::SampleViewMedium(input.WorldPosition.xyz, screenUV, SampColorSampler);
+		const bool additive = (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::AdditiveLighting) != 0;
+		color.xyz = ColorManagement::SceneColor::ScaleAndAddLinear(color.xyz, medium.transmittance, additive ? 0.0.xxx : medium.luminance);
+	} else
+#		endif
+	{
+		float3 fogColor = input.FogParam.xyz;
+		float fogFactor = input.FogParam.w;
 #		if defined(IBL)
-	if (SharedData::iblSettings.EnableIBL) {
-		fogColor = ImageBasedLighting::GetFogIBLColor(fogColor, input.WorldPosition.xyz);
-	}
-#		endif
-#		if defined(EXP_HEIGHT_FOG)
-	float3 vanillaFogColor = fogColor;
-	float vanillaFogFactor = fogFactor;
-	if (SharedData::exponentialHeightFogSettings.enabled) {
-		float4 exponentialHeightFog = ExponentialHeightFog::GetExponentialHeightFogInternal(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, fogColor, true, float4(input.Position.xy * FrameBuffer::DynamicResolutionParams2.xy, input.Position.z, 1), !inReflection);
-		fogColor = exponentialHeightFog.xyz;
-		fogFactor = exponentialHeightFog.w;
-	}
-#		endif
-	if ((Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::AdditiveLighting) != 0) {
-#		if defined(EXP_HEIGHT_FOG)
-		vanillaFogColor = 0.0;
-#		endif
-		fogColor = 0.0;
-	}
-	if ((FrameBuffer::FrameParams.y && FrameBuffer::FrameParams.z) || inReflection) {
-		// ISSAOComposite's fade (FogColor.w = 1 / frame buffer range); reflections skip the composite.
-		float fogFade = inReflection ? 1.0 : FogColor.w;
-#		if defined(EXP_HEIGHT_FOG)
-		if (SharedData::exponentialHeightFogSettings.enabled) {
-			fogFade = ExponentialHeightFog::GetVanillaFogFade(fogFade);
-			if (!ExponentialHeightFog::ShouldDisableVanillaFog()) {
-				color.xyz = lerp(color.xyz, vanillaFogColor, vanillaFogFactor);
-			}
-			color.xyz = lerp(color.xyz, fogColor, fogFactor);
-		} else {
-			color.xyz = lerp(color.xyz, fogColor, fogFactor);
+		if (SharedData::iblSettings.EnableIBL) {
+			fogColor = ImageBasedLighting::GetFogIBLColor(fogColor, input.WorldPosition.xyz);
 		}
-#		else
-		color.xyz = lerp(color.xyz, fogColor, fogFactor);
 #		endif
-		color.xyz *= fogFade;
+#		if defined(EXP_HEIGHT_FOG)
+		float3 vanillaFogColor = fogColor;
+		float vanillaFogFactor = fogFactor;
+		if (SharedData::exponentialHeightFogSettings.enabled) {
+			float4 exponentialHeightFog = ExponentialHeightFog::GetExponentialHeightFogInternal(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, fogColor, true, float4(input.Position.xy * FrameBuffer::DynamicResolutionParams2.xy, input.Position.z, 1), !inReflection);
+			fogColor = exponentialHeightFog.xyz;
+			fogFactor = exponentialHeightFog.w;
+		}
+#		endif
+		if ((Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::AdditiveLighting) != 0) {
+#		if defined(EXP_HEIGHT_FOG)
+			vanillaFogColor = 0.0;
+#		endif
+			fogColor = 0.0;
+		}
+		if ((FrameBuffer::FrameParams.y && FrameBuffer::FrameParams.z) || inReflection) {
+			// ISSAOComposite's fade (FogColor.w = 1 / frame buffer range); reflections skip the composite.
+			float fogFade = inReflection ? 1.0 : FogColor.w;
+#		if defined(EXP_HEIGHT_FOG)
+			if (SharedData::exponentialHeightFogSettings.enabled) {
+				fogFade = ExponentialHeightFog::GetVanillaFogFade(fogFade);
+				if (!ExponentialHeightFog::ShouldDisableVanillaFog()) {
+					color.xyz = lerp(color.xyz, vanillaFogColor, vanillaFogFactor);
+				}
+				color.xyz = lerp(color.xyz, fogColor, fogFactor);
+			} else {
+				color.xyz = lerp(color.xyz, fogColor, fogFactor);
+			}
+#		else
+			color.xyz = lerp(color.xyz, fogColor, fogFactor);
+#		endif
+			color.xyz *= fogFade;
+		}
 	}
 #	endif
 
@@ -3911,6 +3974,13 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		undef LANDSCAPE_PARALLAX_ENABLED
 #	endif
 
+	psout.Diffuse.rgb = PreExposure::EncodeScene(psout.Diffuse.rgb);
+#	if defined(DEFERRED)
+	psout.Specular.rgb = PreExposure::EncodeScene(psout.Specular.rgb);
+#	else
+	if (outputColorToAuxiliaryTarget)
+		psout.NormalGlossiness.rgb = PreExposure::EncodeScene(psout.NormalGlossiness.rgb);
+#	endif
 #	if defined(FUR_SHELLS_DEPTH)
 	psout = (PS_OUTPUT)0;
 #	endif

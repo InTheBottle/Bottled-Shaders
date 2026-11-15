@@ -432,7 +432,7 @@ float SSRT_ValidateHit(float3 hit,
 	float screenConfidence = isBackfaceHit ? traceWeight : confidence;
 	float3 sampleColor = 0;
 	if (confidence > 0.0f) {
-		sampleColor = ColorManagement::SceneToLinear(ScreenColorTexture.SampleLevel(LinearSampler, hit.xy * FrameBuffer::DynamicResolutionParams1.xy, 0).xyz);
+		sampleColor = ColorManagement::SceneToLinear(PreExposure::Decode(ScreenColorTexture.SampleLevel(LinearSampler, hit.xy * FrameBuffer::DynamicResolutionParams1.xy, 0).xyz));
 		sampleColor *= SharedData::ssrSettings.SpecularMult;
 	}
 

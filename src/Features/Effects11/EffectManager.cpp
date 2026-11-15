@@ -4,12 +4,13 @@
 #include "Editor/Effects11Editor.h"
 #include "Features/Effects11.h"
 #include "Features/LinearLighting.h"
-#include "Features/ProceduralSun.h"
+#include "Utils/Sun.h"
 #include "Features/RainRefraction.h"
 #include "Features/ReverseZ.h"
 #include "Features/SkySync.h"
 #include "Globals.h"
 #include "Menu.h"
+#include "Overlays/PresetOverlays.h"
 #include "State.h"
 #include "Utils/Game.h"
 
@@ -122,6 +123,9 @@ void EffectManager::LogPresetStatus() const
 
 void EffectManager::Apply()
 {
+	// Overlays must be read before compiling, since #define values are taken from them while preprocessing
+	Overlays::Manager::GetSingleton().LoadFiles();
+	Overlays::Manager::GetSingleton().ClearCompiledDefines();
 	if (auto& rainRefraction = globals::features::rainRefraction; rainRefraction.loaded)
 		rainRefraction.LoadPresetRaindrops(PresetManager::GetSingleton().GetENBSeriesPath());
 
@@ -136,20 +140,20 @@ void EffectManager::Apply()
 	enbEffectPostPass.Apply();
 
 #ifdef ENABLE_ENB_EXTENDER
-	EffectBase* allEffects[] = { &enbEffectPrePass, &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbSunSprite, &enbEffect, &enbUnderwater, &enbEffectPostPass };
-	for (auto* effect : allEffects) {
+	for (auto* effect : AllEffects()) {
 		if (effect->IsCompiled())
 			effect->LoadWeatherData();
 	}
 #endif
 
+	Overlays::Manager::GetSingleton().OnStoresLoaded();
 	LogPresetStatus();
 }
 
 void EffectManager::Load()
 {
-	EffectBase* allEffects[] = { &enbEffectPrePass, &enbDepthOfField, &enbBloom, &enbLens, &enbAdaptation, &enbSunSprite, &enbEffect, &enbUnderwater, &enbEffectPostPass };
-	for (auto* effect : allEffects) {
+	Overlays::Manager::GetSingleton().LoadFiles();
+	for (auto* effect : AllEffects()) {
 		effect->Load();
 #ifdef ENABLE_ENB_EXTENDER
 		if (effect->IsCompiled())
@@ -157,19 +161,15 @@ void EffectManager::Load()
 #endif
 		effect->UpdateUIVariables();
 	}
+	Overlays::Manager::GetSingleton().OnStoresLoaded();
 }
 
-void EffectManager::Save()
+bool EffectManager::Save()
 {
-	enbEffectPrePass.Save();
-	enbDepthOfField.Save();
-	enbBloom.Save();
-	enbLens.Save();
-	enbAdaptation.Save();
-	enbSunSprite.Save();
-	enbEffect.Save();
-	enbUnderwater.Save();
-	enbEffectPostPass.Save();
+	bool ok = true;
+	for (auto* effect : AllEffects())
+		ok &= effect->Save();
+	return ok;
 }
 
 void EffectManager::RegisterSettings()
@@ -378,8 +378,6 @@ void EffectManager::RegisterSettings()
 	settingManager.RegisterTimeOfDaySetting("SunRaysMultiplier", "RAYS", 1.0f, 0.0f, 30000.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("MoonRaysMultiplier", "RAYS", 1.0f, 0.0f, 30000.0f, 0.01f, true);
 	settingManager.RegisterTimeOfDaySetting("SkyColorAmount", "RAYS", 0.0f, 0.0f, 100.0f, 0.01f, true);
-	settingManager.RegisterTimeOfDaySetting("CloudGapRays", "RAYS", 1.0f, 0.0f, 10.0f, 0.01f, true);
-	settingManager.RegisterFloatSetting("CloudGapRaysSpread", "RAYS", 30.0f, 5.0f, 80.0f, 1.0f, false);
 
 	settingManager.SetCategoryDependency("BLOOM", "EnableBloom", "EFFECT");
 	settingManager.SetCategoryDependency("LENS", "EnableLens", "EFFECT");
@@ -1097,7 +1095,7 @@ void EffectManager::UpdateLightParameters()
 	if (!sky || !sky->sun || !sky->sun->root || !sky->root)
 		return;
 
-	const float visibility = ProceduralSun::GetSunVisibility();
+	const float visibility = Util::Sun::GetVisibility();
 	if (visibility <= 0.0f)
 		return;
 

@@ -347,40 +347,7 @@ void ScreenSpaceReflections::SetupResources()
 			}
 		}
 
-		// NRD input/output (RGBA16F, full-res)
-		{
-			D3D11_TEXTURE2D_DESC specDesc{
-				.Width = fullW,
-				.Height = fullH,
-				.MipLevels = 1,
-				.ArraySize = 1,
-				.Format = DXGI_FORMAT_R16G16B16A16_FLOAT,
-				.SampleDesc = { 1, 0 },
-				.Usage = D3D11_USAGE_DEFAULT,
-				.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS,
-			};
-			D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
-				.Format = specDesc.Format,
-				.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
-				.Texture2D = { .MostDetailedMip = 0, .MipLevels = 1 }
-			};
-			D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {
-				.Format = specDesc.Format,
-				.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D,
-				.Texture2D = { .MipSlice = 0 }
-			};
-
-			texNRDSpecInput = eastl::make_unique<Texture2D>(specDesc, "SSR::NRDInput");
-			texNRDSpecInput->CreateSRV(srvDesc);
-			texNRDSpecInput->CreateUAV(uavDesc);
-
-			texNRDSpecOutput = eastl::make_unique<Texture2D>(specDesc, "SSR::NRDOutput");
-			texNRDSpecOutput->CreateSRV(srvDesc);
-			texNRDSpecOutput->CreateUAV(uavDesc);
-
-			nrdReblurSpecular.Shutdown();
-			nrdReblurSpecular.Init(fullW, fullH, nrd::Denoiser::REBLUR_SPECULAR, 0);
-		}
+		SetupNRDResources(fullW, fullH);
 	}
 
 	logger::debug("ScreenSpaceReflections: creating samplers");
@@ -403,6 +370,44 @@ void ScreenSpaceReflections::SetupResources()
 	}
 
 	CompileComputeShaders();
+}
+
+void ScreenSpaceReflections::SetupNRDResources(uint32_t a_width, uint32_t a_height)
+{
+	D3D11_TEXTURE2D_DESC specDesc{
+		.Width = a_width,
+		.Height = a_height,
+		.MipLevels = 1,
+		.ArraySize = 1,
+		.Format = DXGI_FORMAT_R16G16B16A16_FLOAT,
+		.SampleDesc = { 1, 0 },
+		.Usage = D3D11_USAGE_DEFAULT,
+		.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS,
+	};
+	D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
+		.Format = specDesc.Format,
+		.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+		.Texture2D = { .MostDetailedMip = 0, .MipLevels = 1 }
+	};
+	D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {
+		.Format = specDesc.Format,
+		.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D,
+		.Texture2D = { .MipSlice = 0 }
+	};
+
+	resetReblurHistory = true;
+	outputReady = false;
+
+	texNRDSpecInput = eastl::make_unique<Texture2D>(specDesc, "SSR::NRDInput");
+	texNRDSpecInput->CreateSRV(srvDesc);
+	texNRDSpecInput->CreateUAV(uavDesc);
+
+	texNRDSpecOutput = eastl::make_unique<Texture2D>(specDesc, "SSR::NRDOutput");
+	texNRDSpecOutput->CreateSRV(srvDesc);
+	texNRDSpecOutput->CreateUAV(uavDesc);
+
+	nrdReblurSpecular.Shutdown();
+	nrdReblurSpecular.Init(a_width, a_height, nrd::Denoiser::REBLUR_SPECULAR, 0);
 }
 
 void ScreenSpaceReflections::ClearShaderCache()
@@ -496,6 +501,15 @@ void ScreenSpaceReflections::DrawSSR()
 		resetReblurHistory = true;
 		if (globals::deferred)
 			globals::deferred->ClearShaderCache();
+	}
+
+	if (texNRDSpecInput) {
+		uint32_t nrdWidth = 0;
+		uint32_t nrdHeight = 0;
+		const auto& nrdSvc = globals::features::nrd;
+		if (nrdSvc.loaded && nrdSvc.GetResourceExtent(nrdWidth, nrdHeight) &&
+			(texNRDSpecInput->desc.Width != nrdWidth || texNRDSpecInput->desc.Height != nrdHeight))
+			SetupNRDResources(nrdWidth, nrdHeight);
 	}
 
 	if ((settings.HalfRes && CanDenoise()) != tracedHalfRes) {

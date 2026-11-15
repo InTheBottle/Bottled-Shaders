@@ -50,7 +50,9 @@ struct NRD : Feature
 	// Per-frame service entry point. Called once at the start of the deferred
 	// pass so every consumer sees consistent guides for this frame.
 	/** @brief Prepares this frame's guides; a_requested false only clears the per-frame state, so no consumer reads stale guides. */
-	void PrepareGuides(bool a_requested);
+	void PrepareGuides(bool a_requested, bool a_fullExtent = false);
+	void EnsureResourceExtent(bool a_fullExtent);
+	bool GetResourceExtent(uint32_t& a_width, uint32_t& a_height) const;
 
 	// True when PrepareGuides has run successfully for this frame. Consumers
 	// should skip their dispatches if guides aren't ready (e.g. world not
@@ -124,6 +126,7 @@ struct NRD : Feature
 	float smoothedFps = 60.0f;
 	uint16_t prevResourceSize[2] = {};
 	uint16_t prevRectSize[2] = {};
+	uint32_t resourceExtent[2] = {};
 
 	// Shared guide textures owned by NRD.
 	eastl::unique_ptr<Texture2D> texNRDViewZ = nullptr;

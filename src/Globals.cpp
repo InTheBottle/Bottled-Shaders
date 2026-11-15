@@ -35,10 +35,11 @@
 #include "Features/NightEye.h"
 #include "Features/PerformanceOverlay.h"
 #include "Features/NeuralRendering.h"
+#include "Features/PhysicalSky.h"
 #include "Features/PostProcessing.h"
+#include "Features/ProceduralAurora.h"
 #include "Features/ProceduralLightning.h"
 #include "Features/ProceduralNightSky.h"
-#include "Features/ProceduralSun.h"
 #include "Features/RainRefraction.h"
 #include "Features/RemoteControl.h"
 #include "Features/RenderDoc.h"
@@ -56,9 +57,11 @@
 #include "Features/TerrainHelper.h"
 #include "Features/TerrainShadows.h"
 #include "Features/TerrainVariation.h"
+#include "Features/TreeWind.h"
 #include "Features/UnifiedWater.h"
 #include "Features/Upscaling.h"
 #include "Features/VanillaFresnel.h"
+#include "Features/ViewAtmosphere.h"
 #include "Features/VolumetricLighting.h"
 #include "Features/VolumetricShadows.h"
 #include "Features/WaterEffects.h"
@@ -82,7 +85,6 @@ namespace globals
 	namespace features
 	{
 		CloudShadows cloudShadows{};
-		ProceduralSun proceduralSun{};
 		DynamicCubemaps dynamicCubemaps{};
 		VolumetricShadows volumetricShadows{};
 		ExtendedMaterials extendedMaterials{};
@@ -97,6 +99,7 @@ namespace globals
 		HiZOcclusion hiZOcclusion{};
 		HorizonFix horizonFix{};
 		InteriorSun interiorSun{};
+		PhysicalSky physicalSky{};
 		RainRefraction rainRefraction{};
 		NRD nrd{};
 		ScreenSpaceGI screenSpaceGI{};
@@ -109,9 +112,11 @@ namespace globals
 		TerrainBlending terrainBlending{};
 		TerrainHelper terrainHelper{};
 		TerrainShadows terrainShadows{};
+		TreeWind treeWind{};
 		UnifiedWater unifiedWater{};
 		VanillaFresnel vanillaFresnel{};
 		VolumetricLighting volumetricLighting{};
+		ViewAtmosphere viewAtmosphere{};
 		WaterEffects waterEffects{};
 		PerformanceOverlay performanceOverlay{};
 		WetnessEffects wetnessEffects{};
@@ -144,6 +149,7 @@ namespace globals
 		LandscapeSeams landscapeSeams{};
 		SnowDeformation snowDeformation{};
 		SceneManager sceneManager{};
+		ProceduralAurora proceduralAurora{};
 
 		namespace llf
 		{
@@ -278,6 +284,7 @@ namespace globals
 		using namespace game;
 		RefreshTES();
 		player = RE::PlayerCharacter::GetSingleton();
+		tes = RE::TES::GetSingleton();
 		sky = RE::Sky::GetSingleton();
 		utilityShader = RE::BSUtilityShader::GetSingleton();
 		imageSpaceManager = RE::ImageSpaceManager::GetSingleton();

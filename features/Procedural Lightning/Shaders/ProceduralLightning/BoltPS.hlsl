@@ -83,7 +83,7 @@ PS_OUTPUT main(ProceduralLightning::VertexOutput input)
 		discard;
 
 	float3 color = lerp(input.Tint.rgb, 1.0, WhiteCore) * core + input.Tint.rgb * glow * GlowAmount;
-	output.Color = float4(min(color * amount, MaxRadiance), 0.0);
+	output.Color = float4(PreExposure::Encode(min(color * amount, MaxRadiance)), 0.0);
 	output.Mask = float4(0.0, saturate(core * energy * revealed * 3.0), 0.0, 0.0);
 	return output;
 }

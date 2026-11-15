@@ -4,7 +4,7 @@
         "CameraFX": 46,
         "CloudShadows": 1,
         "DynamicCubemaps": 2,
-        "ExponentialHeightFog": 58,
+        "ExponentialHeightFog": 46,
         "ExtendedMaterials": 6,
         "ExtendedTranslucency": 5,
         "GrassCollision": 1,
@@ -20,8 +20,8 @@
         "LinearLighting": 16,
         "NeuralRendering": 60,
         "PerformanceOverlay": 12,
+        "PhysicalSky": 163,
         "PostProcessing": 297,
-        "ProceduralSun": 9,
         "ScreenSpaceGI": 22,
         "ScreenSpaceReflections": 26,
         "ScreenSpaceShadows": 5,
@@ -34,6 +34,7 @@
         "TerrainVariation": 2,
         "TruePBR": 3,
         "Upscaling": 15,
+        "ViewAtmosphere": 13,
         "VolumetricLighting": 4,
         "WetnessEffects": 27
     }

@@ -68,15 +68,46 @@ void NRD::SetupResources()
 	lastCommonGameFrame = 0;
 	prevResourceSize[0] = prevResourceSize[1] = 0;
 	prevRectSize[0] = prevRectSize[1] = 0;
+	resourceExtent[0] = resourceExtent[1] = 0;
+	texNRDMV = nullptr;
+	texNRDViewZ = nullptr;
+	texNRDNormalRoughness = nullptr;
 
-	auto renderer = globals::game::renderer;
-	auto mainTex = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
+	CompileComputeShaders();
+}
+
+bool NRD::GetResourceExtent(uint32_t& a_width, uint32_t& a_height) const
+{
+	if (!texNRDViewZ || !resourceExtent[0] || !resourceExtent[1])
+		return false;
+	a_width = resourceExtent[0];
+	a_height = resourceExtent[1];
+	return true;
+}
+
+void NRD::EnsureResourceExtent(bool a_fullExtent)
+{
+	auto mainTex = globals::game::renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
+	if (!mainTex.texture)
+		return;
 	D3D11_TEXTURE2D_DESC mainDesc;
 	mainTex.texture->GetDesc(&mainDesc);
 
+	uint32_t width = mainDesc.Width;
+	uint32_t height = mainDesc.Height;
+	if (!a_fullExtent) {
+		const float2 dynres = Util::ConvertToDynamic(float2{ (float)globals::game::graphicsState->screenWidth, (float)globals::game::graphicsState->screenHeight });
+		width = std::min(width, ((uint32_t)std::ceil(std::max(dynres.x, 1.0f)) + 15u) & ~15u);
+		height = std::min(height, ((uint32_t)std::ceil(std::max(dynres.y, 1.0f)) + 15u) & ~15u);
+	}
+	width = std::max(width, resourceExtent[0]);
+	height = std::max(height, resourceExtent[1]);
+	if (texNRDViewZ && width == resourceExtent[0] && height == resourceExtent[1])
+		return;
+
 	D3D11_TEXTURE2D_DESC texDesc{
-		.Width = mainDesc.Width,
-		.Height = mainDesc.Height,
+		.Width = width,
+		.Height = height,
 		.MipLevels = 1,
 		.ArraySize = 1,
 		.Format = DXGI_FORMAT_R16G16_FLOAT,
@@ -95,21 +126,31 @@ void NRD::SetupResources()
 		.Texture2D = { .MipSlice = 0 }
 	};
 
-	texNRDMV = eastl::make_unique<Texture2D>(texDesc, "NRD::MV");
-	texNRDMV->CreateSRV(srvDesc);
-	texNRDMV->CreateUAV(uavDesc);
+	guidesReadyThisFrame = false;
+	try {
+		texNRDMV = eastl::make_unique<Texture2D>(texDesc, "NRD::MV");
+		texNRDMV->CreateSRV(srvDesc);
+		texNRDMV->CreateUAV(uavDesc);
 
-	srvDesc.Format = uavDesc.Format = texDesc.Format = DXGI_FORMAT_R32_FLOAT;
-	texNRDViewZ = eastl::make_unique<Texture2D>(texDesc, "NRD::ViewZ");
-	texNRDViewZ->CreateSRV(srvDesc);
-	texNRDViewZ->CreateUAV(uavDesc);
+		srvDesc.Format = uavDesc.Format = texDesc.Format = DXGI_FORMAT_R32_FLOAT;
+		texNRDViewZ = eastl::make_unique<Texture2D>(texDesc, "NRD::ViewZ");
+		texNRDViewZ->CreateSRV(srvDesc);
+		texNRDViewZ->CreateUAV(uavDesc);
 
-	srvDesc.Format = uavDesc.Format = texDesc.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
-	texNRDNormalRoughness = eastl::make_unique<Texture2D>(texDesc, "NRD::NormalRoughness");
-	texNRDNormalRoughness->CreateSRV(srvDesc);
-	texNRDNormalRoughness->CreateUAV(uavDesc);
-
-	CompileComputeShaders();
+		srvDesc.Format = uavDesc.Format = texDesc.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
+		texNRDNormalRoughness = eastl::make_unique<Texture2D>(texDesc, "NRD::NormalRoughness");
+		texNRDNormalRoughness->CreateSRV(srvDesc);
+		texNRDNormalRoughness->CreateUAV(uavDesc);
+	} catch (const std::exception& e) {
+		logger::error("[NRD] Failed to create the guide textures ({})", e.what());
+		texNRDMV = nullptr;
+		texNRDViewZ = nullptr;
+		texNRDNormalRoughness = nullptr;
+		resourceExtent[0] = resourceExtent[1] = 0;
+		return;
+	}
+	resourceExtent[0] = width;
+	resourceExtent[1] = height;
 }
 
 void NRD::ClearShaderCache()
@@ -128,10 +169,11 @@ void NRD::CompileComputeShaders()
 	guideShaderFailed = !prepareNRDGuidesCompute;
 }
 
-void NRD::PrepareGuides(bool a_requested)
+void NRD::PrepareGuides(bool a_requested, bool a_fullExtent)
 {
 	commonSettingsValidThisFrame = false;
 	guidesReadyThisFrame = false;
+	EnsureResourceExtent(a_fullExtent);
 
 	if (!a_requested || !settings.Enabled || !prepareNRDGuidesCompute || !texNRDViewZ || !texNRDNormalRoughness || !texNRDMV)
 		return;
@@ -176,7 +218,8 @@ void NRD::PrepareGuides(bool a_requested)
 
 	// Motion Vector is used as both SRV and UAV by ReBLUR; snapshot the game's
 	// MV target so we can rebind it through NRD's UAV slot without aliasing.
-	context->CopyResource(texNRDMV->resource.get(), motion.texture);
+	const D3D11_BOX motionBox{ 0, 0, 0, resourceExtent[0], resourceExtent[1], 1 };
+	context->CopySubresourceRegion(texNRDMV->resource.get(), 0, 0, 0, 0, motion.texture, 0, &motionBox);
 
 	guidesReadyThisFrame = true;
 }
