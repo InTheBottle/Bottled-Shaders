@@ -10,10 +10,6 @@
 #include "Common/Random.hlsli"
 #include "Common/SharedData.hlsli"
 
-#if defined(PROCEDURAL_AURORA)
-#	include "ProceduralAurora/ProceduralAurora.hlsli"
-#endif
-
 #if defined(VSHADER)
 struct VS_INPUT
 {
@@ -423,17 +419,6 @@ PS_OUTPUT main(PS_INPUT input)
 #				endif
 	psout.Color.xyz = skyGradientColor + skyScale;
 
-#				if defined(PROCEDURAL_AURORA)
-	// Drawn on the sky dome so stars, moons and clouds still draw over it. The gradient is taken outside the branch.
-	const float3 auroraDirection = normalize(input.WorldPosition.xyz);
-	const float auroraPixelAngle = length(fwidth(auroraDirection));
-	[branch] if (SharedData::proceduralAuroraSettings.Enabled && SharedData::proceduralAuroraSettings.Atmosphere.x > 0.0 && auroraDirection.z > -0.03)
-	{
-		float3 aurora = ColorManagement::SRGBToWorking(ProceduralAurora::Render(auroraDirection, auroraPixelAngle));
-		psout.Color.xyz += aurora;
-	}
-#				endif
-
 #				if defined(EFFECTS11)
 	[branch] if (SharedData::enbSettings.Enable && SharedData::enbSettings.FixBlackCrush) {
 		float3 additiveDither = max(psout.Color.xyz + noiseGrad * 0.1, 0.0);
@@ -581,6 +566,19 @@ PS_OUTPUT main(PS_INPUT input)
 			psout.Color.xyz = inReflection ? PhysSky::CompositeVolumetricCloudsCube(psout.Color.xyz, physSkyViewDir, PhysSky::SampSv) : PhysSky::CompositeVolumetricCloudsUv(psout.Color.xyz, physSkyScreenUV, PhysSky::SampSv);
 		}
 #		endif
+	}
+#	endif
+
+#	if defined(PROCEDURAL_NIGHT_SKY) && defined(DITHER) && !defined(TEX)
+	float3 auroraView = normalize(input.WorldPosition.xyz);
+	[branch] if (inReflection && SharedData::proceduralNightSkySettings.auroraIntensity > 0.0 && auroraView.z > 0.0)
+	{
+		float3 aurora = ProceduralNightSky::EvaluateAurora(auroraView);
+#		if defined(PHYSICAL_SKY)
+		if (SharedData::physSkyData.enabled)
+			aurora *= PhysSky::SampleViewCelestialTr(auroraView, PhysSky::SampSv);
+#		endif
+		psout.Color.xyz += aurora;
 	}
 #	endif
 

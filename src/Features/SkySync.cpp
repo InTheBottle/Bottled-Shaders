@@ -10,6 +10,7 @@
 #define I18N_KEY_PREFIX "feature.sky_sync."
 
 #include "PhysicalSky.h"
+#include "ProceduralNightSky.h"
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	SkySync::Settings,
@@ -905,6 +906,12 @@ void SkySync::ShadowFader::SetLighting(const RE::Sky* sky, RE::NiPoint3 dir, flo
 
 	if (color.has_value()) {
 		*color *= intensity;
+		if (const auto& working = globals::features::skySync.workingLightColors) {
+			const auto& masser = (*working)[static_cast<size_t>(Caster::Masser)];
+			const auto& secunda = (*working)[static_cast<size_t>(Caster::Secunda)];
+			const auto& moonlight = secunda.red + secunda.green + secunda.blue > masser.red + masser.green + masser.blue ? secunda : masser;
+			*color += globals::features::proceduralNightSky.GetAuroraWorkingLight(*color, moonlight);
+		}
 		globals::features::linearLighting.SetSunlightColor(sky->sun->light.get(), *color);
 	} else {
 		globals::features::linearLighting.ClearSunlightColor(sky->sun->light.get());

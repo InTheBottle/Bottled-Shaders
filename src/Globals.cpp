@@ -37,7 +37,6 @@
 #include "Features/NeuralRendering.h"
 #include "Features/PhysicalSky.h"
 #include "Features/PostProcessing.h"
-#include "Features/ProceduralAurora.h"
 #include "Features/ProceduralLightning.h"
 #include "Features/ProceduralNightSky.h"
 #include "Features/RainRefraction.h"
@@ -67,6 +66,7 @@
 #include "Features/WaterEffects.h"
 #include "Features/ReverseZ.h"
 #include "Features/WetnessEffects.h"
+#include "HiZPyramid.h"
 #include "Menu.h"
 #include "ShaderCache.h"
 #include "State.h"
@@ -149,7 +149,6 @@ namespace globals
 		LandscapeSeams landscapeSeams{};
 		SnowDeformation snowDeformation{};
 		SceneManager sceneManager{};
-		ProceduralAurora proceduralAurora{};
 
 		namespace llf
 		{
@@ -222,6 +221,8 @@ namespace globals
 
 	static Profiler profilerInstance;
 	Profiler* profiler = &profilerInstance;
+	static HiZPyramid hiZPyramidInstance;
+	HiZPyramid* hiZPyramid = &hiZPyramidInstance;
 
 	void OnInit()
 	{

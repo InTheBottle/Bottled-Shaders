@@ -17,7 +17,6 @@
 #include "PostProcessing.h"
 #include "PostProcessingMode.h"
 #include "Presets/UnifiedPresetCatalog.h"
-#include "ProceduralAurora.h"
 #include "Utils/Sun.h"
 #include "ShaderCache.h"
 #include "SkySync.h"

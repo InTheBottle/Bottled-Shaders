@@ -397,7 +397,7 @@ are **blocked** rather than clobbering it, and unknown fields on an entry are pr
       views), and `resolutionMode` / `resolutionScale` / `resolutionScaleX` / `resolutionScaleY`. The
       scales size the model raster, which the backend re-allocates once a 2-pixel-rounded extent holds
       for 12 frames, so a blend would re-allocate at every step.
-- `kLocationFeatureWhitelist` (8) and `kTimeOfDayFeatureWhitelist` (12): which features those scene types
+- `kLocationFeatureWhitelist` (11) and `kTimeOfDayFeatureWhitelist` (12): which features those scene types
   may target.
 
 `NeuralRendering` takes part in every scene type. Its `LoadSettings` must stay cheap for the same reason as

@@ -28,7 +28,7 @@
 #include "Features/NeuralRendering.h"
 #include "Features/NightEye.h"
 #include "Features/PostProcessing.h"
-#include "Features/ProceduralAurora.h"
+#include "Features/ProceduralNightSky.h"
 #include "Features/RainRefraction.h"
 #include "Features/RemoteControl/FrameRecorder.h"
 #include "Features/ReverseZ.h"
@@ -423,13 +423,14 @@ namespace WeatherExtensions
 			globals::features::volumetricLighting.DetectNightRenderData();
 			if (globals::features::effects11.loaded)
 				globals::features::effects11.OnSkyUpdateColors(sky);
+			const RE::NiColor undimmedSunlight = sky->skyColor[RE::TESWeather::ColorTypes::kSunlight];
 			globals::features::skySync.OnSkyUpdateColors(sky);
+			globals::features::proceduralNightSky.ApplyAuroraSunlight(sky, undimmedSunlight);
 			if (globals::features::effects11.loaded)
 				globals::features::effects11.FinishSkyUpdateColors(sky);
 			if (globals::features::volumetricLighting.loaded)
 				globals::features::volumetricLighting.ApplyGodRaySettings();
 			globals::features::volumetricLighting.FinishSkyUpdate(sky);
-			globals::features::proceduralAurora.OnSkyUpdate(sky);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};

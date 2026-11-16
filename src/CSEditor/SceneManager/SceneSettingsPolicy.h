@@ -63,6 +63,8 @@ namespace SceneSettingsPolicy
 		{ "NeuralRendering", "resolutionScale" },
 		{ "NeuralRendering", "resolutionScaleX" },
 		{ "NeuralRendering", "resolutionScaleY" },
+		{ "LinearLighting", "enableACEScg" },
+		{ "LinearLighting", "useWithEffects11" },
 		{ "PostProcessing", "Border" },
 		// Auto-enabled each frame from its inputs, so a scene value would never be retained.
 		{ "PostProcessing", "Composite" },
@@ -92,6 +94,7 @@ namespace SceneSettingsPolicy
 		{ "HorizonFix" },
 		{ "ImageBasedLighting" },
 		{ "NeuralRendering" },
+		{ "LinearLighting" },
 		{ "PhysicalSky" },
 		{ "PostProcessing" },
 		{ "ScreenSpaceGI" },

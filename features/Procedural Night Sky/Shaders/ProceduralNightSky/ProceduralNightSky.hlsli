@@ -7,6 +7,13 @@
 namespace ProceduralNightSky
 {
 	static const float MaxStarRadius = 0.2;
+	static const uint AuroraSteps = 8;
+	static const float AuroraHeight = 1.1;
+	static const float AuroraHorizonBend = 0.26;
+	static const float AuroraArcSpacing = 1.7;
+	static const float AuroraSheetThickness = 0.075;
+	static const float AuroraHazeWidth = 0.5;
+	static const float AuroraPeriod = 256.0;
 
 	float Hash12(float2 p)
 	{
@@ -20,6 +27,34 @@ namespace ProceduralNightSky
 		float3 q = frac(p.xyx * float3(0.1031, 0.1030, 0.0973));
 		q += dot(q, q.yzx + 33.33);
 		return frac((q.xx + q.yz) * q.zy);
+	}
+
+	float2 WrapCell(float2 cell)
+	{
+		return cell - AuroraPeriod * floor(cell / AuroraPeriod);
+	}
+
+	float GradientNoise(float2 p)
+	{
+		float2 cell = floor(p);
+		float2 offset = p - cell;
+		float2 blend = offset * offset * offset * (offset * (offset * 6.0 - 15.0) + 10.0);
+
+		float2 low = WrapCell(cell);
+		float2 high = WrapCell(cell + 1.0);
+		float bottom = lerp(dot(Hash22(low) * 2.0 - 1.0, offset), dot(Hash22(float2(high.x, low.y)) * 2.0 - 1.0, offset - float2(1.0, 0.0)), blend.x);
+		float top = lerp(dot(Hash22(float2(low.x, high.y)) * 2.0 - 1.0, offset - float2(0.0, 1.0)), dot(Hash22(high) * 2.0 - 1.0, offset - 1.0), blend.x);
+		return lerp(bottom, top, blend.y);
+	}
+
+	float RibbonNoise(float x, float row)
+	{
+		float cell = floor(x);
+		float blend = x - cell;
+		blend = blend * blend * blend * (blend * (blend * 6.0 - 15.0) + 10.0);
+
+		float2 wrapped = WrapCell(float2(cell, cell + 1.0));
+		return lerp(Hash12(float2(wrapped.x, row)), Hash12(float2(wrapped.y, row)), blend);
 	}
 
 	float2 ToOctahedron(float3 direction)
@@ -74,6 +109,69 @@ namespace ProceduralNightSky
 		return lerp(float3(1.0, 0.62, 0.35), float3(0.85, 0.95, 1.0), along) * core * along * along;
 	}
 
+	float AuroraFold(float2 p, float timer)
+	{
+		float2 drift = float2(timer * 0.021, -timer * 0.009);
+		float2 warp = float2(GradientNoise(p * 0.23 + drift.yx + 31.0), GradientNoise(p * 0.23 - drift + 57.0));
+		float broad = GradientNoise(p * 0.31 + drift + warp * 0.35);
+		float curl = GradientNoise(p * 0.83 + float2(-timer * 0.033, timer * 0.017 + 9.0) + warp * 0.5);
+		float ripple = GradientNoise(p * 2.1 + float2(timer * 0.05, 21.0));
+		return broad * 3.4 + curl * 1.1 + ripple * 0.3;
+	}
+
+	float3 Aurora(float3 view, float timer, float3 lowColor, float3 highColor)
+	{
+		float2 plane = view.xy / (view.z + AuroraHorizonBend);
+		float foldLow = AuroraFold(plane, timer);
+		float foldHigh = AuroraFold(plane * (1.0 + AuroraHeight), timer);
+
+		// Each step stands for a slice of altitude: the sheet is widened by how far it moves across the slice and the
+		// height profile is averaged over it, so the sum needs no dither and has no grain
+		float stepSize = 1.0 / float(AuroraSteps);
+		float stepLength = abs(plane.y * AuroraHeight + foldHigh - foldLow) * stepSize;
+		float spread = sqrt(AuroraSheetThickness * AuroraSheetThickness + stepLength * stepLength);
+		// Rays finer than the distance a slice travels along the curtain would alias into stripes, so they fade to their mean
+		float alongStep = (plane.x * AuroraHeight + 0.6 * (foldHigh - foldLow)) * stepSize;
+		alongStep = sqrt(alongStep * alongStep + 0.04 * stepLength * stepLength);
+		float3 detail = saturate(1.8 - alongStep * float3(6.5, 13.7, 29.0) * 2.4);
+
+		float3 glow = 0.0;
+		for (uint i = 0; i < AuroraSteps; i++) {
+			float sliceLow = float(i) * stepSize;
+			float altitude = sliceLow + 0.5 * stepSize;
+			float2 p = plane * (1.0 + altitude * AuroraHeight);
+			float fold = lerp(foldLow, foldHigh, altitude);
+
+			float phase = (p.y + fold + timer * 0.012) / AuroraArcSpacing;
+			float arc = floor(phase + 0.5);
+			float offset = (phase - arc) * AuroraArcSpacing;
+			float sheet = exp(-offset * offset / (spread * spread)) * 2.2 * AuroraSheetThickness / spread;
+			float haze = exp(-offset * offset / (AuroraHazeWidth * AuroraHazeWidth)) * 0.2;
+			// Each arc has its own pattern, so it has to reach zero where the nearest arc changes
+			float window = smoothstep(0.5, 0.36, abs(phase - arc));
+
+			float along = p.x + fold * 0.6 + arc * 17.3;
+			float presence = 0.42 + 0.58 * smoothstep(-0.12, 0.2, GradientNoise(float2(along * 0.17 + timer * 0.013, arc * 3.7 + 40.0)));
+			float pulse = 0.8 + 0.4 * RibbonNoise(along * 0.45 - timer * 0.09, arc + 50.0);
+			float base = 0.03 + 0.16 * RibbonNoise(along * 0.9 + timer * 0.04, arc + 60.0);
+			float rays = lerp(0.5, RibbonNoise(along * 6.5 + timer * 0.21, arc + 70.0), detail.x);
+			float strands = lerp(0.5, RibbonNoise(along * 13.7 - timer * 0.33, arc + 75.0), detail.y);
+			float fine = lerp(0.5, RibbonNoise(along * 29.0 - timer * 0.47, arc + 80.0), detail.z);
+			float streak = 0.12 + 1.5 * rays * rays * rays + 0.5 * strands * strands * (0.25 + rays) + 0.7 * fine * fine * fine * (0.3 + rays);
+
+			// Brighter rays reach higher
+			float falloff = 3.6 / (0.7 + 0.6 * rays);
+			float from = max(sliceLow - base, 0.0);
+			float to = max(sliceLow + stepSize - base, 0.0);
+			float profile = (exp(-from * falloff) - exp(-to * falloff)) / (falloff * stepSize);
+			float lift = 0.5 * (from + to);
+			glow += lerp(lowColor, highColor * 0.75, saturate(lift * 1.9)) * (sheet + haze) * window * presence * pulse * streak * profile;
+		}
+
+		float slant = sqrt(1.0 + dot(plane, plane));
+		return glow * slant * smoothstep(0.0, 0.2, view.z) / float(AuroraSteps);
+	}
+
 	float4 ToAdditiveBlend(float3 emitted, float radianceLimit)
 	{
 		emitted = max(emitted, 0.0);
@@ -84,6 +182,15 @@ namespace ProceduralNightSky
 			result = float4(emitted / alpha, alpha);
 		}
 		return result;
+	}
+
+	float3 EvaluateAurora(float3 view)
+	{
+		const SharedData::ProceduralNightSkySettings settings = SharedData::proceduralNightSkySettings;
+
+		float3 lowColor = ColorManagement::SRGBToWorking(settings.auroraLowColor);
+		float3 highColor = ColorManagement::SRGBToWorking(settings.auroraHighColor);
+		return Aurora(view, settings.auroraTime, lowColor, highColor) * settings.auroraIntensity;
 	}
 
 	float4 Shade(float3 starDirection, float3 view, float pixelAngle, float3 starTint, float horizon)

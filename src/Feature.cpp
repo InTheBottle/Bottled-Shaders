@@ -36,7 +36,6 @@
 #include "Features/NeuralRendering.h"
 #include "Features/PhysicalSky.h"
 #include "Features/PostProcessing.h"
-#include "Features/ProceduralAurora.h"
 #include "Features/ProceduralLightning.h"
 #include "Features/ProceduralNightSky.h"
 #include "Features/RainRefraction.h"
@@ -281,8 +280,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::furShells,
 		&globals::features::detailMaps,
 		&globals::features::landscapeSeams,
-		&globals::features::snowDeformation,
-		&globals::features::proceduralAurora
+		&globals::features::snowDeformation
 	};
 
 	return features;
