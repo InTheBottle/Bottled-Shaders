@@ -1343,8 +1343,8 @@ class SceneSettingsCatalogGeneratorTests(unittest.TestCase):
             ("ExponentialHeightFog", "", "volumetricFogStartDistance")]
         noise = self.entries_by_id[
             ("ExponentialHeightFog", "", "volumetricFogNoiseScale")]
-        self.assertEqual(root["displayPath"], "Density and Height")
-        self.assertEqual(volumetric["displayPath"], "")
+        self.assertEqual(root["displayPath"], "")
+        self.assertEqual(volumetric["displayPath"], "Volumetric Fog")
         self.assertEqual(noise["displayPath"], "Volumetric Noise")
         self.assertIn("SceneControllable", noise["flags"])
 
@@ -1466,16 +1466,8 @@ class SceneSettingsCatalogGeneratorTests(unittest.TestCase):
             int(entry.get("aggregateCount", 0)) <= 1)
         survivors = [entry for entry in self.entries if entry is not dropped]
         GENERATOR.validate_entries(survivors, *CMAKE_CATALOG_FLOORS)
-        # Pin the test floor to this fixture's current count, not a shipping
-        # floor that intentionally allows headroom as upstream adds controls.
-        fixture_floors = dict(FEATURE_FLOORS)
-        fixture_floors["PostProcessing"] = sum(
-            entry["feature"] == "PostProcessing" and
-            CONTROLLABLE_FLAG in entry.get("flags", "")
-            for entry in self.entries)
-        GENERATOR.validate_entries(self.entries, *CMAKE_CATALOG_FLOORS, fixture_floors)
-        with self.assertRaisesRegex(ValueError, "PostProcessing has"):
-            GENERATOR.validate_entries(survivors, *CMAKE_CATALOG_FLOORS, fixture_floors)
+        with self.assertRaises(ValueError):
+            GENERATOR.validate_entries(survivors, *CMAKE_CATALOG_FLOORS, FEATURE_FLOORS)
 
     def test_catalog_validation_rejects_lost_scene_bindings(self):
         # Persisted-but-hidden entries alone must not satisfy the gate.

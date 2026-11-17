@@ -51,7 +51,6 @@ namespace SceneSettingsPolicy
 		{ "PhysicalSky", "cloudMap", "procedural", "parameters", "modelingGain", "exponent" },
 		{ "PhysicalSky", "cloudMap", "procedural", "parameters", "heightVariation", "noise" },
 		// Debug visualisation, never a look
-		{ "FootstepParticles", "SurfaceOverride" },
 		{ "LightLimitFix", "EnableLightsVisualisation" },
 		{ "LightLimitFix", "LightsVisualisationMode" },
 		// Panel layout and debug views, never a look

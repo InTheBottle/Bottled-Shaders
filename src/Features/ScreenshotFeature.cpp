@@ -165,15 +165,6 @@ namespace
 			return sourceImage.GetImage(0, 0, 0);
 		}
 
-		// Plain UNORM (not _SRGB): DirectXTex's ConvertScanline() derives its
-		// TEX_FILTER_SRGB_IN/OUT flags purely from the DXGI format, not from
-		// whether the data is actually linear. Converting into a _SRGB target
-		// therefore re-encodes these already gamma-encoded pixels through the
-		// sRGB curve a second time - a real value change (not just metadata)
-		// that washed out both PNG and BMP output alike. The correct sRGB tag
-		// for PNG is applied separately via WIC_FLAGS_FORCE_SRGB below, which
-		// only touches the written metadata. X8 (not A8) still discards alpha
-		// on write.
 		if (SUCCEEDED(DirectX::Convert(
 				sourceImage.GetImages(),
 				sourceImage.GetImageCount(),
@@ -599,11 +590,6 @@ namespace
 		const GUID& codec = saveAsPng ?
 		                        DirectX::GetWICCodec(DirectX::WIC_CODEC_PNG) :
 		                        DirectX::GetWICCodec(DirectX::WIC_CODEC_BMP);
-		// FORCE_SRGB writes the PNG sRGB chunk (correct, since saveImage's pixels
-		// are already gamma-encoded) without touching pixel values - unlike
-		// tagging the source DXGI format as _SRGB, which would make DirectXTex's
-		// Convert() actually re-encode the data (see PrepareBmpImage). BMP has no
-		// such metadata, so the flag is a no-op for that codec.
 		return SUCCEEDED(DirectX::SaveToWICFile(
 			*saveImage,
 			DirectX::WIC_FLAGS_FORCE_SRGB,
