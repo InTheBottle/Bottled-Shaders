@@ -158,7 +158,7 @@ private:
 		float Progress(float fadeDuration) const { return fadeDuration > 0.0f ? fadeTimer / fadeDuration : 1.0f; }
 
 		void Update(const RE::Sky* sky, RE::NiPoint3 dirs[], float intensities[], std::optional<std::array<RE::NiColor, 3>> colors, float fadeDuration, float fadeAdvance, bool a_immediateTransition);
-		static void SetLighting(const RE::Sky* sky, RE::NiPoint3 dir, float intensity, std::optional<RE::NiColor> color);
+		static void SetLighting(const RE::Sky* sky, RE::NiPoint3 dir, std::optional<RE::NiColor> color);
 		static void SetDirection(RE::NiPoint3& dir, float headingRadians, float elevRadians);
 		static void SetElevation(RE::NiPoint3& dir, float elevRadians);
 		static void ClampDirection(RE::NiPoint3& dir);
