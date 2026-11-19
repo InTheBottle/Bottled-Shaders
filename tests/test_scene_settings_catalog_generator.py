@@ -1343,10 +1343,16 @@ class SceneSettingsCatalogGeneratorTests(unittest.TestCase):
             ("ExponentialHeightFog", "", "volumetricFogStartDistance")]
         noise = self.entries_by_id[
             ("ExponentialHeightFog", "", "volumetricFogNoiseScale")]
-        self.assertEqual(root["displayPath"], "")
-        self.assertEqual(volumetric["displayPath"], "Volumetric Fog")
+        self.assertEqual(root["displayPath"], "Density and Height")
+        self.assertEqual(volumetric["displayPath"], "")
         self.assertEqual(noise["displayPath"], "Volumetric Noise")
         self.assertIn("SceneControllable", noise["flags"])
+
+    def test_debug_section_settings_use_debug_display_path(self):
+        debug = self.entries_by_id[
+            ("LightLimitFix", "", "EnableLightsVisualisation")]
+        self.assertEqual(debug["displayPath"], "Debug")
+        self.assertIn("SceneControllable", debug["flags"])
 
     def test_safe_editor_metadata(self):
         ripple_lifetime = self.entries_by_id[
@@ -1466,8 +1472,15 @@ class SceneSettingsCatalogGeneratorTests(unittest.TestCase):
             int(entry.get("aggregateCount", 0)) <= 1)
         survivors = [entry for entry in self.entries if entry is not dropped]
         GENERATOR.validate_entries(survivors, *CMAKE_CATALOG_FLOORS)
-        with self.assertRaises(ValueError):
-            GENERATOR.validate_entries(survivors, *CMAKE_CATALOG_FLOORS, FEATURE_FLOORS)
+        # The fixture grows independently of the shipping floor's headroom.
+        fixture_floors = dict(FEATURE_FLOORS)
+        fixture_floors["PostProcessing"] = sum(
+            entry["feature"] == "PostProcessing" and
+            CONTROLLABLE_FLAG in entry.get("flags", "")
+            for entry in self.entries)
+        GENERATOR.validate_entries(self.entries, *CMAKE_CATALOG_FLOORS, fixture_floors)
+        with self.assertRaisesRegex(ValueError, "PostProcessing has"):
+            GENERATOR.validate_entries(survivors, *CMAKE_CATALOG_FLOORS, fixture_floors)
 
     def test_catalog_validation_rejects_lost_scene_bindings(self):
         # Persisted-but-hidden entries alone must not satisfy the gate.
