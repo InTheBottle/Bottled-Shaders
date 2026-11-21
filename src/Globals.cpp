@@ -35,6 +35,7 @@
 #include "Features/NRD.h"
 #include "Features/NightEye.h"
 #include "Features/PerformanceOverlay.h"
+#include "Features/NeuralRendering.h"
 #include "Features/PhysicalSky.h"
 #include "Features/PostProcessing.h"
 #include "Features/ProceduralLightning.h"
@@ -142,6 +143,7 @@ namespace globals
 		Rainbows rainbows{};
 		CameraFX cameraFX{};
 		CapsuleShadows capsuleShadows{};
+		NeuralRendering neuralRendering{};
 		HairBacklighting hairBacklighting{};
 		NightEye nightEye{};
 		FurShells furShells{};

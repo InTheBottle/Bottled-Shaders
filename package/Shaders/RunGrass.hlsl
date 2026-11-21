@@ -8,6 +8,7 @@
 #include "Common/LightDisk.hlsli"
 #include "Common/Math.hlsli"
 #include "Common/MotionBlur.hlsli"
+#include "Common/NeuralRenderingCategories.hlsli"
 #include "Common/Permutation.hlsli"
 #include "Common/Random.hlsli"
 #include "Common/SharedData.hlsli"
@@ -1348,7 +1349,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 	psout.Specular = float4(specularColor, 1);
 	psout.Masks = float4(0, 0, Color::RGBToYCoCg(directionalAmbientColor).x, 0);
-	psout.Masks2 = float4(1.0 - vertexAO, 0, 0, 0);
+	psout.Masks2 = float4(NeuralRenderingCategories::Pack(1.0 - vertexAO, NeuralRenderingCategories::Foliage), 0, 0, 0);
 #			endif
 #			if !defined(RENDER_DEPTH)
 	psout.Diffuse.rgb = PreExposure::EncodeScene(psout.Diffuse.rgb);
@@ -1540,7 +1541,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 	psout.Albedo = float4(albedo, 1);
 	psout.Masks = float4(0, 0, Color::RGBToYCoCg(directionalAmbientColor).x, 0);
-	psout.Masks2 = float4(1.0 - vertexAO, 0, 0, 0);
+	psout.Masks2 = float4(NeuralRenderingCategories::Pack(1.0 - vertexAO, NeuralRenderingCategories::Foliage), 0, 0, 0);
 #		endif
 
 #		if !defined(RENDER_DEPTH)

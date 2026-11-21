@@ -57,6 +57,7 @@ struct HeatHaze;
 struct Rainbows;
 struct CameraFX;
 struct CapsuleShadows;
+struct NeuralRendering;
 struct HairBacklighting;
 struct NightEye;
 struct FurShells;
@@ -176,6 +177,7 @@ namespace globals
 		extern Rainbows rainbows;
 		extern CameraFX cameraFX;
 		extern CapsuleShadows capsuleShadows;
+		extern NeuralRendering neuralRendering;
 		extern HairBacklighting hairBacklighting;
 		extern NightEye nightEye;
 		extern FurShells furShells;
