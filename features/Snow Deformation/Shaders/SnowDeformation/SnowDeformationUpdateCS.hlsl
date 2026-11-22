@@ -208,12 +208,15 @@ float StampDistance(float2 delta, float4 stamp, float4 shape)
 			snowCover = SnowCoverAt(worldPosition, windowPosition, surface.x, surface.y);
 
 		const float snow = max(motion.z, snowCover);
+		// motion.w is the global blanket height. Limit it to the blanket that exists at this texel: carving the full
+		// height where the blanket is absent (indoors, fire melt, shoreline) left a negative field that the pixel
+		// shader tints as packed snow on bare ground.
 		float carve = motion.w;
-		[branch] if (surface.w > 0.5)
+		[branch] if (surface.w > 0.5 || carve > 0.0)
 		{
 			if (raise < 0.0)
 				raise = RaiseAt(worldPosition);
-			carve = max(raise - (surface.w - 1.0), 0.0);
+			carve = surface.w > 0.5 ? max(raise - (surface.w - 1.0), 0.0) : min(carve, raise);
 		}
 		if (keep < 0.0)
 			keep = 1.0 - RoadAt(worldPosition);
