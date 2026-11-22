@@ -8,7 +8,7 @@ struct SnowDeformation : Feature
 	virtual inline std::string GetName() override { return "Snow Deformation"; }
 	virtual std::string GetDisplayName() override { return T("feature.snow_deformation.name", "Snow Deformation"); }
 	virtual inline std::string GetShortName() override { return "SnowDeformation"; }
-	virtual std::string_view GetCategory() const override { return FeatureCategories::kLandscapeAndTextures; }
+	virtual std::string_view GetCategory() const override { return FeatureCategories::kSkyAndWeather; }
 
 	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
 	{

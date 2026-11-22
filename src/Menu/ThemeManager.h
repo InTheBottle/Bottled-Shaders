@@ -245,7 +245,7 @@ public:
 		static constexpr float SELECTED_OUTLINE_ALPHA = 0.7f;            // ... its outline alpha
 		static constexpr float HOVER_FILL_ALPHA = 0.06f;                 // Hovered row fill, as a share of the text colour
 		static constexpr float STATUS_DOT_RATIO = 0.12f;                 // Radius of an accent status dot, per frame height
-		static constexpr float AUTOHIDE_PANEL_WIDTH_RATIO = 0.2f;        // Auto-hide list width as a share of the pane (the pinned list's column ratio)
+		static constexpr float AUTOHIDE_PANEL_WIDTH_RATIO = 0.23f;       // Auto-hide list width as a share of the pane (the pinned list's column ratio)
 		static constexpr float AUTOHIDE_PANEL_MIN_WIDTH = 240.0f;        // ... never narrower than this
 		static constexpr float AUTOHIDE_ACTIVATION_ZONE_WIDTH = 28.0f;   // Width of the left edge strip that reveals the auto-hide list
 		static constexpr float AUTOHIDE_OPEN_DELAY = 0.12f;              // Seconds the cursor must rest on the edge before the list opens
@@ -264,8 +264,10 @@ public:
 		static constexpr float SIDE_PANEL_MIN_WIDTH_EM = 22.0f;
 		static constexpr float SIDE_PANEL_MARGIN = 12.0f;
 		static constexpr float NARROW_LAYOUT_WIDTH_EM = 44.0f;
-		static constexpr float FEATURE_LIST_WIDTH_WEIGHT = 2.0f;
-		static constexpr float FEATURE_PAGE_WIDTH_WEIGHT = 8.0f;
+		static constexpr float FEATURE_LIST_WIDTH_WEIGHT = 2.3f;    // Feature list column: room for the longest name plus its badge and dots
+		static constexpr float FEATURE_PAGE_WIDTH_WEIGHT = 7.7f;    // ... and the feature page beside it
+		static constexpr float FEATURE_LIST_SECTION_GAP = 8.0f;     // Extra room above each category header in the feature list (1080p baseline)
+		static constexpr float FEATURE_LIST_HINT_INDENT_EM = 0.7f;  // A search hit's setting hint, indented past its feature name, in font sizes
 		static constexpr float NAVIGATOR_POPUP_HEIGHT_RATIO = 0.75f;
 		static constexpr size_t MAX_PINNED_FEATURES = 32;
 		static constexpr size_t MIN_SETTING_SEARCH_LENGTH = 3;

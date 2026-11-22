@@ -30,7 +30,6 @@ struct SubsurfaceScattering;
 struct TerrainBlending;
 struct TerrainHelper;
 struct TerrainShadows;
-struct TreeWind;
 struct UnifiedWater;
 struct VanillaFresnel;
 struct VolumetricLighting;
@@ -145,7 +144,6 @@ namespace globals
 		extern TerrainBlending terrainBlending;
 		extern TerrainHelper terrainHelper;
 		extern TerrainShadows terrainShadows;
-		extern TreeWind treeWind;
 		extern UnifiedWater unifiedWater;
 		extern VanillaFresnel vanillaFresnel;
 		extern VolumetricLighting volumetricLighting;

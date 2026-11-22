@@ -1068,6 +1068,12 @@ namespace Util
 	void DrawCategoryLabel(const char* displayName);
 
 	/**
+	 * @brief How far a category header's label sits from the row's left edge, for the current font: the
+	 * gutter kept for its disclosure triangle. Rows listed under a header start here to line up with it.
+	 */
+	float CategoryLabelInset();
+
+	/**
 	 * Draws a custom styled section header with lines extending from both sides
 	 * @param sectionName The name of the section to display
 	 * @param useWhiteText Whether to use white text (for differentiation)
@@ -1303,12 +1309,20 @@ namespace Util
 	/**
 	 * @brief Checks if a feature matches the search query.
 	 * Case-insensitively (ASCII) searches the short name, English name, translated display name and
-	 * translated category label.
+	 * translated category label, then the feature's search keywords (GetFeatureSearchKeywords).
 	 * @param feat The feature to check
 	 * @param searchQuery The search query string
 	 * @return True if the feature matches the search query
 	 */
 	bool FeatureMatchesSearch(Feature* feat, const std::string& searchQuery);
+
+	/**
+	 * @brief What people type for a feature whose name does not say it: abbreviations, the technique's
+	 * common name and the effects it produces ("dlss", "ambient occlusion", "god rays").
+	 * @param shortName The feature's short name
+	 * @return Lower-case English words separated by single spaces; empty when the feature has none
+	 */
+	std::string_view GetFeatureSearchKeywords(std::string_view shortName);
 
 	/**
 	 * @brief Generic case-insensitive string matching for search functionality.

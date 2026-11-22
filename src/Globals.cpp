@@ -56,7 +56,6 @@
 #include "Features/TerrainHelper.h"
 #include "Features/TerrainShadows.h"
 #include "Features/TerrainVariation.h"
-#include "Features/TreeWind.h"
 #include "Features/UnifiedWater.h"
 #include "Features/Upscaling.h"
 #include "Features/VanillaFresnel.h"
@@ -112,7 +111,6 @@ namespace globals
 		TerrainBlending terrainBlending{};
 		TerrainHelper terrainHelper{};
 		TerrainShadows terrainShadows{};
-		TreeWind treeWind{};
 		UnifiedWater unifiedWater{};
 		VanillaFresnel vanillaFresnel{};
 		VolumetricLighting volumetricLighting{};

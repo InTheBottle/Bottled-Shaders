@@ -2066,6 +2066,11 @@ namespace Util
 		ImGui::Dummy(ImVec2(availableWidth, 0.0f));
 	}
 
+	float CategoryLabelInset()
+	{
+		return ImGui::GetFontSize() * kCategoryArrowSlotRatio;
+	}
+
 	bool DrawSectionHeader(const char* sectionName, bool useWhiteText, bool isCollapsible, bool* isExpanded)
 	{
 		bool stateChanged = false;
@@ -2304,6 +2309,84 @@ namespace Util
 			return badColor;
 	}
 
+	namespace
+	{
+		// Keyed by short name. Lower case, single spaces; a phrase is simply its words in order.
+		// Only terms the feature's name, category and setting labels do not already carry.
+		constexpr std::pair<std::string_view, std::string_view> kFeatureSearchKeywords[] = {
+			{ "CameraFX", "lens flare dirt motion blur screen effects blood frost" },
+			{ "CapsuleShadows", "character shadows npc shadows soft shadows" },
+			{ "DetailMaps", "micro detail close-up textures" },
+			{ "DynamicCubemaps", "reflections environment map envmap" },
+			{ "Effects11", "enb enbseries fx preset" },
+			{ "ExponentialHeightFog", "mist ground fog" },
+			{ "ExtendedMaterials", "parallax pom complex material displacement" },
+			{ "ExtendedTranslucency", "transparency cloth fabric glass alpha" },
+			{ "FootstepParticles", "dust splashes footprints" },
+			{ "FurShells", "cloaks creatures" },
+			{ "GrassCollision", "bending trample" },
+			{ "GrassOptimizations", "performance fps culling" },
+			{ "HDRDisplay", "brightness nits paper white" },
+			{ "HeatHaze", "shimmer distortion fire" },
+			{ "HiZOcclusion", "hi-z performance fps" },
+			{ "ImageBasedLighting", "ibl ambient light environment lighting" },
+			{ "InteriorSun", "windows sunlight indoors" },
+			{ "LandscapeSeams", "terrain quad borders texture limit" },
+			{ "LightLimitFix", "llf light count particle lights" },
+			{ "LinearLighting", "gamma srgb color space colour space" },
+			{ "LODBlending", "lod pop transition distant" },
+			{ "NightEye", "night vision" },
+			{ "NRD", "denoiser denoise nvidia reblur" },
+			{ "PerformanceOverlay", "fps frame time vram benchmark" },
+			{ "PhysicalSky", "atmosphere clouds sun moon stars" },
+			{ "PostProcessing", "bloom tonemap tonemapping lut color grading colour grading dof depth of field exposure vignette" },
+			{ "ProceduralLightning", "thunder storm bolts" },
+			{ "ProceduralNightSky", "stars aurora" },
+			{ "RainRefraction", "raindrops droplets" },
+			{ "ReverseZ", "z-fighting depth precision flicker" },
+			{ "ScreenSpaceGI", "ssgi ao ambient occlusion global illumination indirect light bounce" },
+			{ "ScreenSpaceReflections", "ssr" },
+			{ "ScreenSpaceShadows", "contact shadows" },
+			{ "Skin", "face pores" },
+			{ "Skylighting", "sky occlusion ambient shadow" },
+			{ "SnowDeformation", "footprints trails tracks" },
+			{ "SubsurfaceScattering", "sss skin" },
+			{ "TerrainBlending", "ground mesh blending" },
+			{ "TerrainShadows", "mountain shadows distant shadows heightmap" },
+			{ "TerrainVariation", "tiling repetition repeating" },
+			{ "UnifiedWater", "water lod seams" },
+			{ "Upscaling", "dlss dlaa fsr taa anti-aliasing antialiasing aa frame generation reflex resolution performance fps" },
+			{ "ViewAtmosphere", "haze aerial perspective" },
+			{ "VolumetricLighting", "god rays light shafts" },
+			{ "WaterEffects", "caustics underwater" },
+			{ "WetnessEffects", "rain puddles wet ripples" },
+		};
+
+		// Shorter queries match too much of a keyword list to be useful.
+		constexpr size_t kMinKeywordQueryLength = 2;
+
+		/** @brief True when the query, already lower case, starts at a word boundary of the keywords. */
+		bool KeywordsMatchSearch(std::string_view keywords, std::string_view loweredQuery)
+		{
+			if (loweredQuery.size() < kMinKeywordQueryLength)
+				return false;
+			for (size_t pos = keywords.find(loweredQuery); pos != std::string_view::npos; pos = keywords.find(loweredQuery, pos + 1)) {
+				if (pos == 0 || keywords[pos - 1] == ' ')
+					return true;
+			}
+			return false;
+		}
+	}
+
+	std::string_view GetFeatureSearchKeywords(std::string_view shortName)
+	{
+		for (const auto& [name, keywords] : kFeatureSearchKeywords) {
+			if (name == shortName)
+				return keywords;
+		}
+		return {};
+	}
+
 	bool FeatureMatchesSearch(Feature* feat, const std::string& searchQuery)
 	{
 		if (searchQuery.empty())
@@ -2316,10 +2399,16 @@ namespace Util
 		};
 
 		// The list shows the (possibly translated) display name and category label, so match those as well as the English names
-		return contains(feat->GetShortName()) ||
-		       contains(feat->GetName()) ||
-		       contains(feat->GetDisplayName()) ||
-		       contains(FeatureListRenderer::TranslateCategory(feat->GetCategory()));
+		const std::string shortName = feat->GetShortName();
+		if (contains(shortName) ||
+			contains(feat->GetName()) ||
+			contains(feat->GetDisplayName()) ||
+			contains(FeatureListRenderer::TranslateCategory(feat->GetCategory())))
+			return true;
+
+		std::string loweredQuery(searchQuery);
+		std::ranges::transform(loweredQuery, loweredQuery.begin(), lowerAscii);
+		return KeywordsMatchSearch(GetFeatureSearchKeywords(shortName), loweredQuery);
 	}
 
 	bool StringMatchesSearch(const std::string& text, const std::string& searchQuery)

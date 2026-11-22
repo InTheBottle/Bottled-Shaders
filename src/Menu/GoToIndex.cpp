@@ -188,6 +188,8 @@ namespace GoToIndex
 				entry.breadcrumb = category;
 				// The English name too, so English guides keep working in other locales
 				entry.haystack = shortName + " " + category + " " + feature->GetName();
+				if (const auto keywords = Util::GetFeatureSearchKeywords(shortName); !keywords.empty())
+					entry.haystack.append(" ").append(keywords);
 				entry.filterBits = FeatureListRenderer::GetFilterBits(feature);
 				if (!feature->loaded) {
 					entry.dimmed = true;
