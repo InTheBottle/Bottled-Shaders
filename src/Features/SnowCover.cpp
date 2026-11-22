@@ -163,7 +163,7 @@ void SnowCover::DrawSettings()
 			if (auto _tt = Util::HoverTooltipWrapper()) {
 				ImGui::Text("How far below/above the snow line should the foliage color start changing?");
 			}
-			ImGui::SliderFloat("Blend smoothness", &wsettings.BlendSmoothness, 1.f, 10000.0f);
+			ImGui::SliderFloat("Blend smoothness", &wsettings.BlendSmoothness, 1.f, 10000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
 			if (auto _tt = Util::HoverTooltipWrapper()) {
 				ImGui::Text("How gradual the snow transition is.");
 			}
@@ -571,7 +571,8 @@ void SnowCover::Reload()
 		mapMax = float2(config["MapMax"][0], config["MapMax"][1]);
 		UpdateMapTransform();
 		wsettings.mapZscale = config["MapZscale"];
-		wsettings.BlendSmoothness = config["BlendSmoothness"];
+		// Divisor of the snow-line blend everywhere; the other consumers already floor it at 1.
+		wsettings.BlendSmoothness = std::max(1.0f, config["BlendSmoothness"].get<float>());
 		// Shipped worldspace configs predate the distance knobs; operator[] would throw on them.
 		wsettings.WeatherFadeStart = config.value("WeatherFadeStart", DEFAULT_WEATHER_FADE_START);
 		wsettings.WeatherFadeEnd = config.value("WeatherFadeEnd", DEFAULT_WEATHER_FADE_END);
