@@ -2712,6 +2712,15 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		material.Shininess *= lerp(1.0, 1.3, packedSnow);
 #		endif
 	}
+	else if (input.LandBlendWeights2.z < 0.0)
+	{
+		float pressedWet = saturate(-input.LandBlendWeights2.z);
+		material.BaseColor *= lerp(1.0, 0.72, pressedWet);
+		material.Roughness *= lerp(1.0, 0.6, pressedWet);
+#		if !defined(TRUE_PBR)
+		material.Shininess *= lerp(1.0, 1.6, pressedWet);
+#		endif
+	}
 #	endif
 
 	float2 uvOriginal_ddx = ddx(uvOriginal);
