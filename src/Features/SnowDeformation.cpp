@@ -1904,7 +1904,10 @@ void SnowDeformation::UpdateLevel(uint32_t a_index, const RE::NiPoint3& a_positi
 
 		updateParams.Control = { a_decay, static_cast<float>(frameStampCount), level.cellSize, kShoulder };
 		updateParams.Shape = { kRimWidth, kRimNoise, kChurn, std::lerp(kReposeSlope, kSnowfallReposeSlope, a_snowfall) };
-		updateParams.Options = { a_gateSnowCover ? 1.0f : 0.0f, a_skylightingReady ? 1.0f : 0.0f, seeding ? 1.0f : 0.0f, std::lerp(kReposeRate, kSnowfallReposeRate, a_snowfall) };
+		// The repose rates are per step at 60 fps. Scale by frame time so print walls slump at the same speed at any
+		// frame rate and hold still while the game is paused; 1 is the stable limit of the four-neighbour relaxation.
+		const float reposeStep = std::clamp(std::lerp(kReposeRate, kSnowfallReposeRate, a_snowfall) * a_deltaTime * 60.0f, 0.0f, 1.0f);
+		updateParams.Options = { a_gateSnowCover ? 1.0f : 0.0f, a_skylightingReady ? 1.0f : 0.0f, seeding ? 1.0f : 0.0f, reposeStep };
 		updateParams.EyeOffset = { static_cast<float>(originX - snapshotEye.x), static_cast<float>(originY - snapshotEye.y), -snapshotEye.z, 0.0f };
 		updateParams.Probe = { level.tileSize * 0.5f, level.fadeStart, 1.0f / (level.fadeEnd - level.fadeStart), kProbeSpan };
 		updateParams.OriginCell[0] = tileX * static_cast<int32_t>(kTileTexels);
