@@ -126,6 +126,13 @@ namespace SIE
 		std::vector<uint8_t> bytes;
 	};
 
+	// Capacity of the preprocessor-define arrays handed to the per-type GetXShaderDefines writers, none of which
+	// bounds-check. A Lighting permutation with every feature loaded already uses about 50 entries, so 64 left
+	// room for only a handful of user "Shader Defines" before the writers ran off the end of the stack array.
+	constexpr size_t kMaxShaderDefines = 128;
+	// User defines sit in front of the generated ones; cap them so the generated set always fits behind.
+	constexpr size_t kMaxUserShaderDefines = 32;
+
 	namespace SShaderCache
 	{
 		static void GetShaderDefines(const RE::BSShader&, uint32_t, D3D_SHADER_MACRO*);
@@ -1268,7 +1275,7 @@ namespace SIE
 			return -1;
 		}
 
-		static std::string MergeDefinesString(std::array<D3D_SHADER_MACRO, 64>& defines, bool a_sort = false)
+		static std::string MergeDefinesString(std::array<D3D_SHADER_MACRO, kMaxShaderDefines>& defines, bool a_sort = false)
 		{
 			std::string result;
 			if (a_sort)
@@ -1476,7 +1483,7 @@ namespace SIE
 		static std::string GetShaderString(ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor, bool hashkey)
 		{
 			auto sourceShaderFile = shader.fxpFilename;
-			std::array<D3D_SHADER_MACRO, 64> defines{};
+			std::array<D3D_SHADER_MACRO, kMaxShaderDefines> defines{};
 			SIE::SShaderCache::GetShaderDefines(shader, descriptor, std::span{ defines });
 			std::string result;
 			if (hashkey)  // generate hashkey so don't include descriptor
@@ -1540,7 +1547,7 @@ namespace SIE
 			const bool debugCompile = ShaderCache::IsDebugCompile();
 
 			// prepare preprocessor defines
-			std::array<D3D_SHADER_MACRO, 64> defines{};
+			std::array<D3D_SHADER_MACRO, kMaxShaderDefines> defines{};
 			auto lastIndex = 0;
 			if (shaderClass == ShaderClass::Vertex) {
 				defines[lastIndex++] = { "VSHADER", nullptr };
@@ -1555,7 +1562,12 @@ namespace SIE
 			}
 			auto shaderDefines = globals::state->GetDefines();
 			if (!shaderDefines->empty()) {
-				for (unsigned int i = 0; i < shaderDefines->size(); i++)
+				const size_t userDefineCount = std::min(shaderDefines->size(), kMaxUserShaderDefines);
+				if (userDefineCount < shaderDefines->size()) {
+					static std::once_flag warned;
+					std::call_once(warned, [&] { logger::warn("Shader Defines lists {} entries; only the first {} are used", shaderDefines->size(), kMaxUserShaderDefines); });
+				}
+				for (size_t i = 0; i < userDefineCount; i++)
 					defines[lastIndex++] = { shaderDefines->at(i).first.c_str(), shaderDefines->at(i).second.c_str() };
 			}
 			defines[lastIndex] = { nullptr, nullptr };  // do final entry
@@ -3143,7 +3155,7 @@ namespace SIE
 
 	std::string ShaderCache::GetDefinesString(const RE::BSShader& shader, uint32_t descriptor)
 	{
-		std::array<D3D_SHADER_MACRO, 64> defines{};
+		std::array<D3D_SHADER_MACRO, kMaxShaderDefines> defines{};
 		SIE::SShaderCache::GetShaderDefines(shader, descriptor, std::span{ defines });
 
 		return SIE::SShaderCache::MergeDefinesString(defines, true);
