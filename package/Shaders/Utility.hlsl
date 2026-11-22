@@ -372,10 +372,10 @@ float SampleShadow3x3(Texture2DArray<float4> tex, SamplerComparisonState samp, f
 
 float GetSunTanAngularRadius()
 {
-#	if defined(PHYSICAL_SKY)
-	if (SharedData::physSkyData.enabled)
+	// Utility is compiled without the general feature defines, so this cannot sit behind PHYSICAL_SKY.
+	// The feature buffer always carries physSkyData; it is zeroed while Physical Sky is not loaded.
+	if (SharedData::physSkyData.enabled && SharedData::physSkyData.diskAngularRadius.w > 0.0)
 		return tan(SharedData::physSkyData.diskAngularRadius.w);
-#	endif
 	return 0.00465;
 }
 
