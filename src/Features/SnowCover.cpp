@@ -346,8 +346,11 @@ SnowCover::PerFrame SnowCover::GetCommonBufferData()
 		snowingDensity = 0;
 	}
 	if (auto calendar = RE::Calendar::GetSingleton()) {
-		auto h = calendar->GetHour();
-		auto diff = h < lastHour ? h + 24 - lastHour : h - lastHour;
+		// Elapsed game hours from the absolute clock. The hour of day alone reads a load to an earlier time as
+		// nearly a whole day (instantly burying or clearing everything) and a 24 h wait as no time at all.
+		const float hoursPassed = calendar->GetHoursPassed();
+		const float diff = (lastHoursPassed >= 0.0f && hoursPassed > lastHoursPassed) ? hoursPassed - lastHoursPassed : 0.0f;
+		lastHoursPassed = hoursPassed;
 		if (snowing)
 			timeSnowing += diff * snowing_speed;
 		else if (raining) {
@@ -361,7 +364,6 @@ SnowCover::PerFrame SnowCover::GetCommonBufferData()
 		}
 
 		timeSnowing = std::clamp(timeSnowing, -2.0f, 2.0f);
-		lastHour = h;
 
 		auto time = calendar->GetTime();
 		perFrame.Month = static_cast<float>(time.tm_mon + (time.tm_mday + (time.tm_hour + (time.tm_min + time.tm_sec / 60.0) / 60.0) / 24.0) / 32.0);
@@ -383,8 +385,13 @@ SnowCover::PerFrame SnowCover::GetCommonBufferData()
 void SnowCover::SetupResources()
 {
 	Reload();
-	if (auto calendar = RE::Calendar::GetSingleton())
-		lastHour = calendar->GetHour();
+}
+
+void SnowCover::GameReset()
+{
+	// Accumulated snowfall belongs to the session being left; the next frame restarts the clock.
+	lastHoursPassed = -1.0f;
+	timeSnowing = 0.0f;
 }
 
 const char* GetWorldspace()
