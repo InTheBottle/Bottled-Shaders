@@ -40,6 +40,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 
 void ScreenSpaceReflections::RestoreDefaultSettings()
 {
+	const bool wasEnabled = settings.Enabled;
 	settings = {};
 	userSettings = settings;
 	appliedE11Overlay = GetE11Overlay();
@@ -50,6 +51,9 @@ void ScreenSpaceReflections::RestoreDefaultSettings()
 	recompileFlag = true;
 	resetReblurHistory = true;
 	outputReady = false;
+	// The SSR define is baked into the deferred composite; DrawSSR rebuilds it on the render thread.
+	if (settings.Enabled != wasEnabled)
+		queuedEnabledChange = true;
 }
 
 void ScreenSpaceReflections::DrawSettings()
