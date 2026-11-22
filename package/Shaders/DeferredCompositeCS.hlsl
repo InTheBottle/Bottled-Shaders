@@ -322,7 +322,11 @@ void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out fl
 					skySpecular = 0;
 				}
 
-				finalIrradiance = envSpecular + skySpecular;
+				float3 reflectionsSpecular = ColorManagement::SceneToLinear(fullSample) * SharedData::iblSettings.SkySpecularIBLScale;
+#		if defined(SKYLIGHTING)
+				reflectionsSpecular *= skylightingSpecular;
+#		endif
+				finalIrradiance = ImageBasedLighting::ApplyAmbientReflectionFallback(envSpecular, skySpecular, reflectionsSpecular, positionWS.xyz);
 			} else
 #	endif
 			{

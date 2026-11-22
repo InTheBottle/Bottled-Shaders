@@ -536,8 +536,6 @@ public:
 	/** @brief The menu's keyboard shortcut table; empty until the first frame is drawn. */
 	const std::vector<MenuShortcuts::Shortcut>& GetShortcuts() const { return shortcuts; }
 
-	bool overlayVisible = false;
-
 public:
 	// Move KeyEvent struct here
 	class CharEvent : public RE::InputEvent
