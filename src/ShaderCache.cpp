@@ -3950,7 +3950,8 @@ namespace SIE
 		std::scoped_lock lock(compilationMutex);
 		availableTasks.clear();
 		demandedTasks.clear();
-		pendingAuxTasks.clear();
+		// Aux closures are kept: their owners are promised exactly one callback and discard stale results themselves.
+		// Dropping them here left standalone compiles (Physical Sky, Post Processing) pending for the whole session.
 		tasksInProgress.clear();
 		processedTasks.clear();
 		totalTasks = 0;
