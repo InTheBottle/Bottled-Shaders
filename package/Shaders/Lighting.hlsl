@@ -1997,6 +1997,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	else
 	float3 worldNormal = normalize(mul(tbn, normal.xyz));
 #		if defined(TREE_ANIM) && !defined(TRUE_PBR)
+#			if defined(SNOW_COVER)
+#				define TREE_SNOW_COVERAGE_NORMAL
+	float3 treeSnowCoverageNormal = worldNormal;
+#			endif
 	float3 viewNormal = normalize(FrameBuffer::WorldToView(worldNormal, false));
 	viewNormal = float3(viewNormal.xy, -abs(viewNormal.z));
 	worldNormal = normalize(FrameBuffer::ViewToWorld(viewNormal, false));
@@ -2091,6 +2095,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		if defined(LODOBJECTSHD)
 	projWeight += (-0.5 + input.Color.w) * 2.5;
 #		endif  // LODOBJECTSHD
+#		if defined(TREE_SNOW_COVERAGE_NORMAL)
+	const float treeSnowProjWeight = projWeight + (dot(treeSnowCoverageNormal, texProj) - dot(worldNormal.xyz, texProj)) * vertexAlpha;
+#		endif
 #		if defined(SPARKLE)
 	if (projWeight < 0)
 		discard;
@@ -2139,6 +2146,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		projBaseColor.xyz = pow(abs(projBaseColor.xyz), SharedData::lodBlendingSettings.LODObjectSnowGamma) * SharedData::lodBlendingSettings.LODObjectSnowBrightness;
 #			endif  // LOD_BLENDING
 		float3 projectedWorldNormal = normalize(mul(transpose(tbnTr), finalProjNormal));
+#			if defined(TREE_SNOW_COVERAGE_NORMAL)
+		treeSnowCoverageNormal = normalize(lerp(treeSnowCoverageNormal, projectedWorldNormal, smoothstep(0, 1, 5 * (0.1 + treeSnowProjWeight))));
+#			endif
 		worldNormal = normalize(lerp(worldNormal, projectedWorldNormal, projectedMaterialWeight));
 		baseColor.xyz = lerp(baseColor.xyz, projBaseColor, projectedMaterialWeight);
 
@@ -2200,8 +2210,13 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		[branch] if (buriedDepth > 0.0)
 		{
 			// A downward normal passes through zero halfway, so fall back to up there instead of normalizing it
-			const float3 blendedNormal = lerp(worldNormal, float3(0, 0, 1), saturate(buriedDepth / 10.0));
+			const float normalBlend = saturate(buriedDepth / 10.0);
+			const float3 blendedNormal = lerp(worldNormal, float3(0, 0, 1), normalBlend);
 			worldNormal = dot(blendedNormal, blendedNormal) > 1e-6 ? normalize(blendedNormal) : float3(0, 0, 1);
+#		if defined(TREE_SNOW_COVERAGE_NORMAL)
+			const float3 treeSnowBlendedNormal = lerp(treeSnowCoverageNormal, float3(0, 0, 1), normalBlend);
+			treeSnowCoverageNormal = dot(treeSnowBlendedNormal, treeSnowBlendedNormal) > 1e-6 ? normalize(treeSnowBlendedNormal) : float3(0, 0, 1);
+#		endif
 		}
 	}
 #	endif
@@ -2642,6 +2657,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		if defined(TREE_ANIM)
 		snowNormal = normalize(snowNormal + float3(0, 0, 0.5));
 		float3 treeSnowNormal = snowNormal;
+#			if defined(TREE_SNOW_COVERAGE_NORMAL)
+		snowNormal = normalize(treeSnowCoverageNormal + float3(0, 0, 0.5));
+#			endif
 		if (SharedData::snowCoverSettings.AffectTreeTint && !(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::NoFoliageTint))
 			SnowCover::ApplyFoliageColor(material.BaseColor, SnowCover::GetEnvironmentalMultiplier(adjustedWorldPos));
 #		elif defined(DO_ALPHA_TEST)
