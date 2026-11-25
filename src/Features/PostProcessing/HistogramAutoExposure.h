@@ -27,6 +27,7 @@ struct HistogramAutoExposure : public PostProcessFeature
 		// auto exposure
 		float2 AdaptationRange = { -2.f, 6.f };  // Scene EV100: L = 2^(EV100 - 3) cd/m^2, K = 12.5.
 		float2 AdaptArea = { .6f, .6f };
+		float InteriorBrightening = 2.f;
 
 		float AdaptSpeed = 1.5f;
 

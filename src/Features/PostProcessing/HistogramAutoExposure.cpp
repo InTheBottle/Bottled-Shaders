@@ -13,6 +13,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	ExposureCompensation,
 	AdaptationRange,
 	AdaptArea,
+	InteriorBrightening,
 	AdaptSpeed,
 	BrightSceneCompression,
 	BrightSceneKneeEV,
@@ -56,8 +57,9 @@ float HistogramAutoExposure::GetPreExposure()
 
 HistogramAutoExposure::ExposureParameters HistogramAutoExposure::GetExposureParameters() const
 {
+	const float interiorBrightening = Util::IsInterior() ? std::max(settings.InteriorBrightening, 0.0f) : 0.0f;
 	ExposureParameters parameters{
-		.LuminanceRange = { exp2(std::min(settings.AdaptationRange.x, settings.AdaptationRange.y) - 3.0f), exp2(std::max(settings.AdaptationRange.x, settings.AdaptationRange.y) - 3.0f) },
+		.LuminanceRange = { exp2(std::min(settings.AdaptationRange.x, settings.AdaptationRange.y) - interiorBrightening - 3.0f), exp2(std::max(settings.AdaptationRange.x, settings.AdaptationRange.y) - 3.0f) },
 		.CompensationEV = settings.ExposureCompensation,
 	};
 	if (const auto* cam = owner ? owner->GetActivePhysicalCameraState() : nullptr) {
@@ -140,6 +142,10 @@ void HistogramAutoExposure::DrawSettings()
 			T("feature.post_processing.histogram_auto_exposure.min_max_the_average_scene_luminance_will_be",
 				"[Min, Max] The average scene luminance will be clamped between them when doing auto exposure. "
 				"Turning up the minimum, for example, makes it adapt less to darkness and therefore prevents over-brightening of dark scenes."));
+	ImGui::SliderFloat(T("feature.post_processing.histogram_auto_exposure.interior_brightening", "Interior Brightening"), &settings.InteriorBrightening, 0.f, 5.f, "%.2f EV", ImGuiSliderFlags_AlwaysClamp);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextUnformatted(T("feature.post_processing.histogram_auto_exposure.interior_brightening_tooltip",
+			"Lowers the Adaptation Range minimum by this many stops in interiors, so dark caves and dungeons can brighten further while night exteriors stay dark. 0 uses the same minimum everywhere."));
 	ImGui::EndDisabled();
 
 	ImGui::BeginDisabled(cam != nullptr);
