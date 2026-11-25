@@ -121,7 +121,14 @@ namespace Skin
 		       BRDF::F_Schlick(material.FuzzColor, saturate(dot(V, H))) * NdotL;
 	}
 
-	float NormalMapShadow(Texture2D<float4> normalTexture, SamplerState normalSampler, float2 uv, float3x3 decode, float3x3 frame, float3 lightDir, float worldPerUV, float footprint, float noise, float4 shadowParams)
+	float FilterRoughness(float roughness, float3 normalDx, float3 normalDy)
+	{
+		const float variance = 0.25 * (dot(normalDx, normalDx) + dot(normalDy, normalDy));
+		const float alpha = roughness * roughness;
+		return sqrt(sqrt(saturate(alpha * alpha + min(2.0 * variance, 0.18))));
+	}
+
+	float NormalMapShadow(Texture2D<float4> normalTexture, SamplerState normalSampler, float2 uv, float3x3 decode, float3x3 frame, float3 lightDir, float worldPerUV, float footprint, float4 shadowParams)
 	{
 		const float maxSlope = 2.7;
 		const float3 localLight = mul(frame, lightDir);
@@ -149,7 +156,7 @@ namespace Skin
 			const float t = (float)i / (float)stepCount;
 			const float end = traceLength * t * t;
 			const float stepLength = end - previousEnd;
-			const float2 sampleUV = uv + dir * ((previousEnd + stepLength * noise) * uvPerWorld);
+			const float2 sampleUV = uv + dir * ((previousEnd + stepLength * 0.5) * uvPerWorld);
 			const float mipLevel = log2(max(max(footprint, stepLength * uvPerWorld) * texDim, 1.0));
 			const float3 encoded = normalTexture.SampleLevel(normalSampler, sampleUV, mipLevel).xyz;
 #	if defined(MODELSPACENORMALS)
