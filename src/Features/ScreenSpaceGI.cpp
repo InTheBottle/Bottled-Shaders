@@ -1018,6 +1018,7 @@ void ScreenSpaceGI::DrawSSGI()
 
 		resetViews();
 		srvs.at(0) = texWorkingDepth->srv.get();
+		srvs.at(1) = renderer->GetRuntimeData().renderTargets[MASKS].SRV;
 		srvs.at(2) = texRadiance->srv.get();
 		srvs.at(3) = texNoise->srv.get();
 		if (dynamicCubemaps.loaded) {
