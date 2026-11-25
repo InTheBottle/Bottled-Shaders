@@ -206,6 +206,8 @@ private:
 	std::unordered_map<RE::BSGeometry*, GeometryEntry> geometries;
 	std::unordered_map<std::string, std::shared_ptr<TextureEntry>> textures;
 	std::unordered_map<std::string, SkinLibrary::Pointer> library;
+	std::unordered_map<std::string, bool> conventionResources;
+	static constexpr std::array<std::string_view, 2> ConventionSuffixes{ "_rfaos.dds", "_wet.dds" };
 	std::unordered_map<uint32_t, ActorWetnessCacheEntry> actorWetnessMap;
 	std::array<winrt::com_ptr<ID3D11ShaderResourceView>, SkinMaterials::TextureCount> pendingViews;
 	ID3D11ShaderResourceView* pendingSubsurface = nullptr;
@@ -222,6 +224,7 @@ private:
 	void Invalidate(bool a_resources = false);
 	std::shared_ptr<TextureEntry> RequestTexture(const std::string& a_path);
 	SkinLibrary::Pointer FindMaterial(const std::string& a_key);
+	std::string ConventionTexture(const GeometryEntry& a_entry, std::string_view a_suffix);
 	SkinMaterials::Material BaseMaterial(const std::string& a_key);
 	bool HasMaterialOverride(const std::string& a_key);
 	bool HasOverride(const std::string& a_key, const SkinCharacters::Customization* a_customization);

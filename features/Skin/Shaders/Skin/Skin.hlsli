@@ -123,11 +123,9 @@ namespace Skin
 
 	float3 PenumbraScattering(float shadow)
 	{
-		const float3 sharpness = float3(0.64, 0.91, 0.94);
-		const float s = clamp(shadow, 1e-4, 1.0 - 1e-4);
-		const float3 lit = pow(s.xxx, sharpness);
-		const float3 shadowed = pow((1.0 - s).xxx, sharpness);
-		return max(shadow.xxx, lit / (lit + shadowed));
+		const float3 bleed = float3(0.6, 0.15, 0.1);
+		const float s = saturate(shadow);
+		return s + bleed * s * (1.0 - s);
 	}
 
 	void SkinDirectLightInput(

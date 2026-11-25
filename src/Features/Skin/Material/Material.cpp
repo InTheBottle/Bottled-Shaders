@@ -254,8 +254,10 @@ namespace SkinMaterials
 			}
 		for (size_t i = 0; i < a_changes.textures.size(); ++i) {
 			const auto& texture = a_changes.textures[i];
-			if (texture.mode != TextureMode::Inherit)
+			if (texture.mode != TextureMode::Inherit) {
 				a_base.textures[i] = texture.mode == TextureMode::Resource ? texture.path : "";
+				a_base.textureSpecified[i] = true;
+			}
 		}
 		a_base.enabled = true;
 		return a_base;
@@ -266,8 +268,10 @@ namespace SkinMaterials
 		for (size_t i = 0; i < ParameterCount; ++i)
 			if (!a_material.enabled || !a_material.specified[i])
 				a_material.parameters.values[i] = a_defaults.values[i];
-		if (!a_material.enabled)
+		if (!a_material.enabled) {
 			a_material.textures = {};
+			a_material.textureSpecified = {};
+		}
 		a_material.specified.fill(true);
 		a_material.enabled = true;
 		return a_material;
@@ -314,6 +318,8 @@ namespace SkinMaterials
 		for (size_t i = 0; i < TextureCount; ++i)
 			if (!a_material.textures[i].empty())
 				changes.textures[i] = { TextureMode::Resource, a_material.textures[i] };
+			else if (a_material.textureSpecified[i])
+				changes.textures[i] = { TextureMode::Default, {} };
 		const auto body = Encode(changes);
 		nlohmann::ordered_json result{ { "format", Format }, { "version", Version } };
 		result["parameters"] = body.at("parameters");

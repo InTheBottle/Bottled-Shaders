@@ -70,6 +70,8 @@ namespace SkinMaterials
 		Parameters parameters;
 		std::array<bool, ParameterCount> specified{};
 		std::array<std::string, TextureCount> textures;
+		/// A layer chose this texture, including an explicit "none"; unset inputs fall back to the naming convention.
+		std::array<bool, TextureCount> textureSpecified{};
 		bool enabled = false;
 		bool operator==(const Material&) const = default;
 		bool Empty() const

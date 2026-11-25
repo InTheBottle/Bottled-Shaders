@@ -112,6 +112,8 @@ All extension channels are sampled as linear data, including files tagged sRGB.
 | `wet`      | Wet surface          | RGB tangent normal, A wet response mask                         |
 | `detail`   | Detail               | RGB tangent normal, A main-UV region strength                   |
 
+When no layer sets `controls` or `wet`, the feature looks for `<diffuse>_rfaos.dds` and `<diffuse>_wet.dds` beside the diffuse (a `_d` suffix is dropped), then beside the normal map (`_msn` or `_n` dropped). An explicit empty path in a material file turns this lookup off for that input.
+
 The native textures keep their native meaning and are never replaced by this feature. The native skin texture (mesh slot 2) drives transmission thickness: `thickness = 1 - saturate(R)`, so white is thin.
 
 Without RFAOS, the two lobes use their independent roughness values and the original specular-map multiplier adjusts the first lobe. With RFAOS, R is multiplied separately by the two physical roughness multipliers. Extra Edge Roughness applies to both, and the result is clamped to 0.02–1. Secondary Specular Strength controls the lobe mix. Without RFAOS, F0 uses Reflectance; with RFAOS it uses `0.08 * A * PhysicalSpecularStrength`. Missing wet input uses a flat normal and a white mask. AO affects indirect lighting.
