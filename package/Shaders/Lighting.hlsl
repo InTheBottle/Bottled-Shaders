@@ -2016,8 +2016,21 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float3 skinWetNormal = worldNormal.xyz;
 	float skinWetness = 0.0f;
 #		endif
+	const float3 skinShadowNormal = worldNormal.xyz;
+	float3x3 skinShadowFrame = float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1);
+	float skinWorldPerUV = 1.0;
+	float skinUVFootprint = 0.0;
 	[branch] if (skinEnabled)
 	{
+		{
+			const float3 skinPositionDX = ddx(input.WorldPosition.xyz);
+			const float3 skinPositionDY = ddy(input.WorldPosition.xyz);
+			const float2 skinUVDX = ddx(uv);
+			const float2 skinUVDY = ddy(uv);
+			const float skinUVArea = abs(skinUVDX.x * skinUVDY.y - skinUVDX.y * skinUVDY.x);
+			skinWorldPerUV = sqrt(length(cross(skinPositionDX, skinPositionDY)) / max(skinUVArea, 1e-12));
+			skinUVFootprint = max(length(skinUVDX), length(skinUVDY));
+		}
 #		if defined(WETNESS_EFFECTS)
 #			if defined(FACEGEN)
 		float2 wetUV = uv;
@@ -2033,8 +2046,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		const float3x3 tbnTr = Skin::SurfaceBasis(input.WorldPosition.xyz, worldNormal, uv);
 		const float3x3 tbn = transpose(tbnTr);
 		const float3 tangentNormal = mul(tbnTr, worldNormal.xyz);
+		skinShadowFrame = tbnTr;
 #		else
 		const float3 tangentNormal = normal.xyz;
+		skinShadowFrame = Skin::SurfaceBasis(input.WorldPosition.xyz, worldNormal.xyz, uv);
 #		endif  // MODELSPACENORMALS
 		float3 combinedTangentNormal = tangentNormal;
 		if (skinData.skinDetailParams.w > 0.0f) {
@@ -2923,10 +2938,18 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		endif
 		{
 			float2 screenSpaceShadows = ScreenSpaceShadows::GetScreenSpaceShadows(input.Position.xyz, screenUV, screenNoise);
-#		if defined(SKINNED) || defined(SKIN) || defined(HAIR)
-			screenSpaceShadows.x = lerp(1.0, screenSpaceShadows.x, saturate(4.0 * dirLightAngle));
+			float contactLightAngle = dirLightAngle;
+			float contactStrength = 1.0;
+#		if defined(CS_SKIN_SHADING)
+			if (skinEnabled) {
+				contactLightAngle = dot(skinShadowNormal, DirLightDirection.xyz);
+				contactStrength = skinData.shadowParams.w;
+			}
 #		endif
-			if (dirLightAngle >= 0.0)
+#		if defined(SKINNED) || defined(SKIN) || defined(HAIR)
+			screenSpaceShadows.x = lerp(1.0, screenSpaceShadows.x, saturate(4.0 * contactLightAngle) * contactStrength);
+#		endif
+			if (contactLightAngle >= 0.0)
 				dirDetailedShadow *= screenSpaceShadows.x;
 			dirTransmissionContactShadow = dirLightAngle >= 0.0 ? screenSpaceShadows.x : screenSpaceShadows.y;
 		}
@@ -2970,6 +2993,21 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		endif  // LANDSCAPE
 	}
 #	endif  // defined(EMAT) && (defined(SKINNED) || !defined(MODELSPACENORMALS))
+
+#	if defined(CS_SKIN_SHADING)
+	[branch] if (skinEnabled && inWorld && !inReflection && skinData.shadowParams.x > 0.0 && dirDetailedShadow > 0.0 && dot(skinShadowNormal, DirLightDirection.xyz) > 0.0)
+	{
+		float4 skinShadowParams = skinData.shadowParams;
+		skinShadowParams.x *= 1.0 - smoothstep(512.0, 1024.0, viewPosition.z);
+#		if defined(MODELSPACENORMALS) && !defined(SKINNED)
+		const float3x3 skinShadowDecode = float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1);
+#		else
+		const float3x3 skinShadowDecode = tbn;
+#		endif
+		[branch] if (skinShadowParams.x > 0.0)
+			dirDetailedShadow *= Skin::NormalMapShadow(TexNormalSampler, SampNormalSampler, uv, skinShadowDecode, skinShadowFrame, DirLightDirection.xyz, skinWorldPerUV, skinUVFootprint, screenNoise, skinShadowParams);
+	}
+#	endif
 
 #	if defined(EMAT_NMS)
 	[branch] if (nmsStrength > 0.0 && dirLightAngle > 0.0 && dirDetailedShadow > 0.0)

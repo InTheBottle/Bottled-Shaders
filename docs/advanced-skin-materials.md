@@ -99,6 +99,10 @@ A file is applied as a whole or not at all. A syntax error, an unknown parameter
 | DetailTiling                      |          10.0 | 0.1–100.0 |
 | BodyTilingMultiplier              |           2.0 | 0.1–5.0   |
 | WetResponse                       |           1.0 | 0.0–1.0   |
+| NormalShadowStrength              |           0.6 | 0.0–1.0   |
+| NormalShadowLength                |           1.5 | 0.1–4.0   |
+| NormalShadowHardness              |           6.0 | 1.0–32.0  |
+| ContactShadowStrength             |           0.5 | 0.0–1.0   |
 
 Factory values are the defaults of the common settings, not values baked into a material.
 
@@ -121,6 +125,8 @@ Without RFAOS, the two lobes use their independent roughness values and the orig
 Extension textures use an independent 2D DDS loader. RGBA8 and BC1/2/3/7 are supported, with BC7 or uncompressed RGBA8 preferred for masks. BC5 UNORM is supported only for detail: positive Z is reconstructed and the mask is 1. Signed BC5, arrays, volumes and cubemaps are rejected. A broken explicit texture disables that input rather than substituting another one.
 
 Detail RGB samples the transformed main UV multiplied by detail tiling, with a wrap sampler. Alpha samples the transformed main UV separately, so mask regions do not move when tiling changes. Tangent-space detail is composed using RNM; model-space base normals use a surface basis derived from world position and main UV. An empty detail input uses the global detail texture. Body tiling applies outside the head.
+
+Normal map shadows trace the sun for `NormalShadowLength` game units across the base normal map (model-space or tangent-space; the detail texture is excluded) and fade out between 512 and 1024 units from the camera. `ContactShadowStrength` scales screen-space contact shadows on skin; their light-angle fade uses the normal before detail is applied.
 
 Post-process SSS continues to receive the scalar `baseColor.a * SSSAmount` through the existing render target and keeps the existing SSS feature and profile. Transmission is a separate direct-light term.
 

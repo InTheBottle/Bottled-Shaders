@@ -59,6 +59,14 @@ namespace SkinMaterials
 			return T("feature.skin.transmission_enabled", "Enable transmission");
 		case Parameter::BodyTilingMultiplier:
 			return T("feature.skin.body_tiling_multiplier", "Body Tiling Multiplier");
+		case Parameter::NormalShadowStrength:
+			return T("feature.skin.normal_shadow_strength", "Normal map shadow strength");
+		case Parameter::NormalShadowLength:
+			return T("feature.skin.normal_shadow_length", "Normal map shadow length");
+		case Parameter::NormalShadowHardness:
+			return T("feature.skin.normal_shadow_hardness", "Normal map shadow hardness");
+		case Parameter::ContactShadowStrength:
+			return T("feature.skin.contact_shadow_strength", "Screen-space shadow strength");
 		default:
 			return "";
 		}
@@ -66,7 +74,7 @@ namespace SkinMaterials
 	const char* SettingName(size_t a_index)
 	{
 		static constexpr std::array<const char*, ParameterCount> names{
-			"SkinMainRoughness", "F0", "FuzzStrength", "EnableSkinDetail", "SkinDetailStrength", "SkinDetailTiling", "SSSAmount", "Translucency", "sssWidth", "WetResponse", "SkinSecondRoughness", "SkinSpecularTexMultiplier", "SecondarySpecularStrength", "BaseColorMultiplier", "PhysicalMainRoughnessMultiplier", "PhysicalSecondRoughnessMultiplier", "PhysicalSpecularStrength", "ExtraEdgeRoughness", "FuzzRoughness", "FuzzF0", "UseSSS", "BodyTilingMultiplier"
+			"SkinMainRoughness", "F0", "FuzzStrength", "EnableSkinDetail", "SkinDetailStrength", "SkinDetailTiling", "SSSAmount", "Translucency", "sssWidth", "WetResponse", "SkinSecondRoughness", "SkinSpecularTexMultiplier", "SecondarySpecularStrength", "BaseColorMultiplier", "PhysicalMainRoughnessMultiplier", "PhysicalSecondRoughnessMultiplier", "PhysicalSpecularStrength", "ExtraEdgeRoughness", "FuzzRoughness", "FuzzF0", "UseSSS", "BodyTilingMultiplier", "NormalShadowStrength", "NormalShadowLength", "NormalShadowHardness", "ContactShadowStrength"
 		};
 		return names.at(a_index);
 	}

@@ -83,6 +83,7 @@ struct Skin : Feature
 		float4 fuzzParams;
 		float4 physicalParams;
 		float4 wetParams;
+		float4 shadowParams;
 	};
 	struct alignas(16) PerGeometryData
 	{
@@ -90,8 +91,8 @@ struct Skin : Feature
 		float4 materialFlags;
 		SkinData profile;
 	};
-	static_assert(sizeof(SkinData) == 112);
-	static_assert(sizeof(PerGeometryData) == 144);
+	static_assert(sizeof(SkinData) == 128);
+	static_assert(sizeof(PerGeometryData) == 160);
 	SkinData GetCommonBufferData();
 
 	enum class Layer

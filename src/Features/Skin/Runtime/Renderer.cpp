@@ -318,6 +318,7 @@ Skin::SkinData Skin::MakeData(const SkinMaterials::Material& a_material, bool a_
 	data.fuzzParams = { p[Parameter::Fuzz], p[Parameter::FuzzRoughness], p[Parameter::FuzzF0], p[Parameter::ExtraEdgeRoughness] };
 	data.physicalParams = { p[Parameter::PhysicalMainRoughnessMultiplier], p[Parameter::PhysicalSecondRoughnessMultiplier], p[Parameter::PhysicalSpecularStrength], p[Parameter::WetResponse] };
 	data.wetParams = settings.WetParams;
+	data.shadowParams = { p[Parameter::NormalShadowStrength], p[Parameter::NormalShadowLength], p[Parameter::NormalShadowHardness], p[Parameter::ContactShadowStrength] };
 	return data;
 }
 
