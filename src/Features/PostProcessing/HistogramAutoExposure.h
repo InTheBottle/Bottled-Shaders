@@ -34,6 +34,12 @@ struct HistogramAutoExposure : public PostProcessFeature
 		float BrightSceneCompression = 0.f;
 		float BrightSceneKneeEV = 3.f;  // Scene EV100, same calibration as AdaptationRange.
 
+		float BrightSurfaceCompensation = 1.f;
+		float SkyMeteringWeight = 0.5f;
+
+		float ExteriorAdaptationStrength = 0.35f;
+		float ExteriorSettleTime = 40.f;
+
 		// purkinje
 		float PurkinjeStartEV = 1.5f;  // Scene EV100 before exposure, same calibration as AdaptationRange.
 		float PurkinjeMaxEV = -1.f;    // Scene EV100 before exposure.
@@ -54,10 +60,20 @@ struct HistogramAutoExposure : public PostProcessFeature
 
 		float BrightSceneKneeLogLum;
 		float BrightSceneCompression;
+
+		float2 GBufferScale;
+		float BrightSurfaceCompensation;
+		float SkyMeteringWeight;
+
+		float AdaptationStrength;
+		float BaselineLerp;
+		float2 Padding;
 	};
-	static_assert(sizeof(AutoExposureCB) == 48);
+	static_assert(sizeof(AutoExposureCB) == 80);
 	static_assert(offsetof(AutoExposureCB, ExposureTarget) == 36);
 	static_assert(offsetof(AutoExposureCB, BrightSceneKneeLogLum) == 40);
+	static_assert(offsetof(AutoExposureCB, GBufferScale) == 48);
+	static_assert(offsetof(AutoExposureCB, AdaptationStrength) == 64);
 	std::unique_ptr<ConstantBuffer> autoExposureCB = nullptr;
 	std::unique_ptr<StructuredBuffer> histogramSB = nullptr;
 	std::unique_ptr<StructuredBuffer> adaptationSB = nullptr;
@@ -92,6 +108,9 @@ struct HistogramAutoExposure : public PostProcessFeature
 	float adaptationValue = 0.f;
 	bool resetAdaptation = true;
 	bool hasMeasuredAdaptation = false;
+	bool baselineWasInterior = false;
+	float baselineSnapTime = 0.f;
+	uint baselineLastFrame = 0;
 	bool histogramReadbackRequested = false;
 	int64_t histogramReadbackRequestFrame = -1;
 	int64_t exposureReadbackRequestFrame = -1;
