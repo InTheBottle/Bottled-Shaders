@@ -88,7 +88,7 @@ float4 ComputeBoxBounds(float2 dims)
 			[branch] if (BrightSurfaceCompensation > 0.0 || SkyMeteringWeight < 1.0)
 			{
 				bool isSky;
-				float brightSurfaceStops = SurfaceMetering::BrightSurfaceStops(TexAlbedo, TexDepth, (float2(pxCoord) + 0.5) / float2(dims), GBufferScale, isSky);
+				float brightSurfaceStops = SurfaceMetering::BrightSurfaceStops(TexAlbedo, TexDepth, (float2(pxCoord) + 0.5) / float2(dims), GBufferScale, BrightSurfaceReference, isSky);
 				logLuma -= BrightSurfaceCompensation * brightSurfaceStops;
 				if (isSky)
 					sampleWeight *= SkyMeteringWeight;

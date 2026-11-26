@@ -35,6 +35,7 @@ struct HistogramAutoExposure : public PostProcessFeature
 		float BrightSceneKneeEV = 3.f;  // Scene EV100, same calibration as AdaptationRange.
 
 		float BrightSurfaceCompensation = 1.f;
+		float BrightSurfaceReference = 0.05f;  // Linear albedo of ordinary ground; typical Skyrim terrain is about 0.05.
 		float SkyMeteringWeight = 0.5f;
 
 		float ExteriorAdaptationStrength = 0.35f;
@@ -67,13 +68,15 @@ struct HistogramAutoExposure : public PostProcessFeature
 
 		float AdaptationStrength;
 		float BaselineLerp;
-		float2 Padding;
+		float BrightSurfaceReference;
+		float Padding;
 	};
 	static_assert(sizeof(AutoExposureCB) == 80);
 	static_assert(offsetof(AutoExposureCB, ExposureTarget) == 36);
 	static_assert(offsetof(AutoExposureCB, BrightSceneKneeLogLum) == 40);
 	static_assert(offsetof(AutoExposureCB, GBufferScale) == 48);
 	static_assert(offsetof(AutoExposureCB, AdaptationStrength) == 64);
+	static_assert(offsetof(AutoExposureCB, BrightSurfaceReference) == 72);
 	std::unique_ptr<ConstantBuffer> autoExposureCB = nullptr;
 	std::unique_ptr<StructuredBuffer> histogramSB = nullptr;
 	std::unique_ptr<StructuredBuffer> adaptationSB = nullptr;

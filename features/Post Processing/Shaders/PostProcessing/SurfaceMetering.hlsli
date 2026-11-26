@@ -7,9 +7,10 @@
 
 namespace SurfaceMetering
 {
-	static const float NeutralAlbedo = 0.18;
-
-	float BrightSurfaceStops(Texture2D<unorm float4> texAlbedo, Texture2D<float> texDepth, float2 uv, float2 gbufferScale, out bool isSky)
+	/// Stops by which a surface paler than referenceAlbedo out-reflects it; 0 for anything darker and for sky.
+	/// referenceAlbedo is the linear albedo of ordinary ground. Metering a pale surface this many stops lower
+	/// makes a snow field read like any other ground under the same light.
+	float BrightSurfaceStops(Texture2D<unorm float4> texAlbedo, Texture2D<float> texDepth, float2 uv, float2 gbufferScale, float referenceAlbedo, out bool isSky)
 	{
 		uint2 size;
 		texAlbedo.GetDimensions(size.x, size.y);
@@ -18,7 +19,8 @@ namespace SurfaceMetering
 		if (isSky)
 			return 0.0;
 		float albedo = Color::RGBToLuminance(ColorManagement::SceneToLinear(texAlbedo[coord].rgb));
-		return log2(max(albedo, NeutralAlbedo) / NeutralAlbedo);
+		referenceAlbedo = max(referenceAlbedo, 1e-3);
+		return log2(max(albedo, referenceAlbedo) / referenceAlbedo);
 	}
 }
 

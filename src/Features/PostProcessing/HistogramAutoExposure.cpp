@@ -20,6 +20,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	BrightSceneCompression,
 	BrightSceneKneeEV,
 	BrightSurfaceCompensation,
+	BrightSurfaceReference,
 	SkyMeteringWeight,
 	ExteriorAdaptationStrength,
 	ExteriorSettleTime,
@@ -31,6 +32,8 @@ namespace
 {
 	constexpr float kMinBrightSceneKneeEV = -10.f;
 	constexpr float kMaxBrightSceneKneeEV = 21.f;
+	constexpr float kMinBrightSurfaceReference = 0.02f;
+	constexpr float kMaxBrightSurfaceReference = 0.18f;
 	constexpr float kMinExteriorSettleTime = 1.f;
 	constexpr float kMaxExteriorSettleTime = 300.f;
 	constexpr float kBaselineSnapSeconds = 1.f;
@@ -172,7 +175,11 @@ void HistogramAutoExposure::DrawSettings()
 	ImGui::SliderFloat(T("feature.post_processing.histogram_auto_exposure.bright_surface_compensation", "Bright Surface Compensation"), &settings.BrightSurfaceCompensation, 0.f, 1.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::TextUnformatted(T("feature.post_processing.histogram_auto_exposure.bright_surface_compensation_tooltip",
-			"Meters snow, sand and other pale surfaces as if they were mid grey, so they stay bright instead of pulling the whole view down to grey. Darker surfaces and scenes without pale ground are not affected. 0 meters raw brightness."));
+			"Meters snow, sand and other pale surfaces as if they were ordinary ground, so they stay bright instead of pulling the whole view down to grey. Darker surfaces and scenes without pale ground are not affected. 0 meters raw brightness."));
+	ImGui::SliderFloat(T("feature.post_processing.histogram_auto_exposure.bright_surface_reference", "Bright Surface Reference"), &settings.BrightSurfaceReference, kMinBrightSurfaceReference, kMaxBrightSurfaceReference, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextUnformatted(T("feature.post_processing.histogram_auto_exposure.bright_surface_reference_tooltip",
+			"How reflective ordinary ground is. Bright Surface Compensation meters anything paler as if it were this. Skyrim grass, dirt and rock reflect about 0.05, so at that value a snow field meters like any other ground and exposure does not drop when you look at snow. Higher values let snow darken the view: 0.18, photographic mid grey, by about two stops."));
 	ImGui::SliderFloat(T("feature.post_processing.histogram_auto_exposure.sky_metering_weight", "Sky Metering Weight"), &settings.SkyMeteringWeight, 0.f, 1.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::TextUnformatted(T("feature.post_processing.histogram_auto_exposure.sky_metering_weight_tooltip",
@@ -313,6 +320,7 @@ void HistogramAutoExposure::LoadSettings(json& o_json)
 	settings.BrightSceneCompression = Util::ClampFinite(settings.BrightSceneCompression, defaults.BrightSceneCompression, 0.f, 1.f);
 	settings.BrightSceneKneeEV = Util::ClampFinite(settings.BrightSceneKneeEV, defaults.BrightSceneKneeEV, kMinBrightSceneKneeEV, kMaxBrightSceneKneeEV);
 	settings.BrightSurfaceCompensation = Util::ClampFinite(settings.BrightSurfaceCompensation, defaults.BrightSurfaceCompensation, 0.f, 1.f);
+	settings.BrightSurfaceReference = Util::ClampFinite(settings.BrightSurfaceReference, defaults.BrightSurfaceReference, kMinBrightSurfaceReference, kMaxBrightSurfaceReference);
 	settings.SkyMeteringWeight = Util::ClampFinite(settings.SkyMeteringWeight, defaults.SkyMeteringWeight, 0.f, 1.f);
 	settings.ExteriorAdaptationStrength = Util::ClampFinite(settings.ExteriorAdaptationStrength, defaults.ExteriorAdaptationStrength, 0.f, 1.f);
 	settings.ExteriorSettleTime = Util::ClampFinite(settings.ExteriorSettleTime, defaults.ExteriorSettleTime, kMinExteriorSettleTime, kMaxExteriorSettleTime);
@@ -460,6 +468,7 @@ void HistogramAutoExposure::Draw(TextureInfo& inout_tex)
 		.SkyMeteringWeight = surfaceMetering ? std::clamp(settings.SkyMeteringWeight, 0.f, 1.f) : 1.f,
 		.AdaptationStrength = adaptationStrength,
 		.BaselineLerp = baselineLerp,
+		.BrightSurfaceReference = std::clamp(settings.BrightSurfaceReference, kMinBrightSurfaceReference, kMaxBrightSurfaceReference),
 	};
 	autoExposureCB->Update(cbData);
 

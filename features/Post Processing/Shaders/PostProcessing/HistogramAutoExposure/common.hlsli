@@ -18,5 +18,6 @@ cbuffer AutoExposureCB : register(b1)
 
 	float AdaptationStrength;
 	float BaselineLerp;
-	float2 AutoExposurePadding;
+	float BrightSurfaceReference;
+	float AutoExposurePadding;
 };
