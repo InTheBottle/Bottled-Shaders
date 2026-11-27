@@ -247,7 +247,7 @@ LinearLighting::PerFrameData LinearLighting::GetCommonBufferData()
 	data.lightSpriteEffectMult = 1.0f;
 	data.fireEffectMult = 1.0f;
 	data.fireEffectCurve = 1.0f;
-	data.effectAmbientSaturation = 1.0f;
+	data.effectAmbientSaturation = loaded ? bounded(settings.effectAmbientSaturation, 0.3f, 0.0f, 1.0f) : 1.0f;
 
 	data.isMainOrLoadingMenu = globals::state->IsMainOrLoadingMenuOpen();
 	data.waterGamma = loaded ? bounded(settings.waterGamma, 1.8f, 0.1f, 3.0f) : 1.0f;
@@ -277,7 +277,6 @@ LinearLighting::PerFrameData LinearLighting::GetCommonBufferData()
 	data.lightSpriteEffectMult = settings.lightSpriteEffectMult;
 	data.fireEffectMult = settings.fireEffectMult;
 	data.fireEffectCurve = settings.fireEffectCurve;
-	data.effectAmbientSaturation = bounded(settings.effectAmbientSaturation, 0.3f, 0.0f, 1.0f);
 	return data;
 }
 
