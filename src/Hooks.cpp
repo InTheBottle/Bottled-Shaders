@@ -481,16 +481,13 @@ namespace PostProcessingExtensions
 			const auto input = static_cast<RE::RENDER_TARGET>(a3);
 			const auto output = static_cast<RE::RENDER_TARGET>(a4);
 
-			auto& nightEye = globals::features::nightEye;
 			const bool renderToUI = state->permutationData.RenderToUI;
 
 			// Effects11 replaces the pass outright; when it does, the vanilla call is skipped
 			// and HandlePostProcessing fixes up the render-target state the pass would have set.
-			if (state->HandlePostProcessing(input, output)) {
-				if (!renderToUI)
-					nightEye.RenderPostProcess(output);
+			// Night Eye grades later, before the interface (NightEye::DrawBeforeInterface).
+			if (state->HandlePostProcessing(input, output))
 				return;
-			}
 
 			auto& postProcessing = globals::features::postProcessing;
 			const bool previousFallback = state->IsPostProcessingFallback();
@@ -502,8 +499,6 @@ namespace PostProcessingExtensions
 			func(a1, a2, source, a4, a5);
 			if (renderToUI)
 				state->SetPostProcessingFallback(previousFallback);
-			else
-				nightEye.RenderPostProcess(output);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
