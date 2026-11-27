@@ -5,6 +5,7 @@
 #include "Effects11.h"
 #include "LinearLighting.h"
 #include "Utils/Climate.h"
+#include "Utils/ColorSpace.h"
 #include "Utils/Game.h"
 
 #define I18N_KEY_PREFIX "feature.sky_sync."
@@ -493,6 +494,12 @@ void SkySync::ApplyLightColor(const RE::Sky* sky) const
 	const auto& secunda = (*workingLightColors)[static_cast<size_t>(Caster::Secunda)];
 	const auto& moonlight = secunda.red + secunda.green + secunda.blue > masser.red + masser.green + masser.blue ? secunda : masser;
 	light += globals::features::proceduralNightSky.GetAuroraWorkingLight(light, moonlight);
+	if (const float flash = GetDirectionalFlash(sky); flash > 0.0f) {
+		float linearFlash = Util::ColorSpace::GameGammaToLinear(flash);
+		if (!globals::features::linearLighting.IsLinearLightingActive())
+			linearFlash /= RE::NI_PI;
+		light += RE::NiColor{ linearFlash, linearFlash, linearFlash };
+	}
 	globals::features::linearLighting.SetSunlightColor(sky->sun->light.get(), light);
 }
 
