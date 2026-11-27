@@ -58,7 +58,6 @@ struct LinearLighting : Feature
 		float lightSpriteEffectMult = 1.0f;
 		float fireEffectMult = 1.0f;
 		float fireEffectCurve = 1.0f;
-		float effectAmbientSaturation = 0.3f;
 
 		float waterGamma = 1.8f;
 
@@ -86,7 +85,7 @@ struct LinearLighting : Feature
 		float diffuseCurve;
 		float diffuseWhiteReflectance;
 		float waterGamma;
-		float effectAmbientSaturation;
+		float pad;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrameData);
 

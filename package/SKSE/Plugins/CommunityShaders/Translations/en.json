@@ -2229,8 +2229,6 @@
     "feature.linear_lighting.diffuse_mid_reflectance": "Diffuse Reflectance at 0.5",
     "feature.linear_lighting.diffuse_white_reflectance": "Diffuse White Reflectance",
     "feature.linear_lighting.directional_light_multiplier": "Directional Light Multiplier",
-    "feature.linear_lighting.effect_ambient_saturation": "Effect Sky Light Saturation",
-    "feature.linear_lighting.effect_ambient_saturation_tooltip": "Colour of the sky light on smoke, steam and other lit particles.\nParticles get no bounce light from the ground, so in shade, overcast and fog the sky light alone turns them blue.\n0 is neutral grey, 1 keeps the full sky colour.",
     "feature.linear_lighting.effect_lighting_multiplier": "Effect Lighting Multiplier",
     "feature.linear_lighting.effects": "Effects",
     "feature.linear_lighting.emissive_color_multiplier": "Emissive Color Multiplier",

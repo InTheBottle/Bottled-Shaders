@@ -565,8 +565,6 @@ float3 GetLightingColor(float3 msPosition, float3 worldPosition, float2 screenPo
 	}
 #		endif
 
-	ambientColor = Color::Saturation(ambientColor, SharedData::linearLightingSettings.effectAmbientSaturation);
-
 	float3 color = dirColor + ambientColor;
 
 #		if defined(LIGHTING)
@@ -631,7 +629,7 @@ float GetViewRayShadow(float3 worldPosition, float2 screenPosition, float depth)
 	return shadow;
 }
 
-/** @brief Scene light with the view-ray shadowed share of the directional light removed and the sky share desaturated; unshadowed at full saturation, it equals sceneLight. */
+/** @brief Scene light with the view-ray shadowed share of the directional light removed; unshadowed, it equals sceneLight. */
 float3 GetShadowedSceneLight(float3 sceneLight, float3 worldPosition, float2 screenPosition, float depth, inout float shadowVariance)
 {
 	float shadow = GetViewRayShadow(worldPosition, screenPosition, depth);
@@ -651,7 +649,7 @@ float3 GetShadowedSceneLight(float3 sceneLight, float3 worldPosition, float2 scr
 #		endif
 
 	const float3 dirLight = ShadowSampling::GetDirectionalLighting();
-	const float3 skyLight = Color::Saturation(max(sceneLight - dirLight, 0.0), SharedData::linearLightingSettings.effectAmbientSaturation);
+	const float3 skyLight = max(sceneLight - dirLight, 0.0);
 	return max(skyLight + dirLight * sunlightTransmission, 0.0);
 }
 #	endif
