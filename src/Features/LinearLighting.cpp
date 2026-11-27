@@ -43,6 +43,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	lightSpriteEffectMult,
 	fireEffectMult,
 	fireEffectCurve,
+	effectAmbientSaturation,
 	waterGamma,
 	useWithEffects11)
 
@@ -105,6 +106,8 @@ void LinearLighting::DrawSettings()
 
 			ImGui::SeparatorText(T(TKEY("effects"), "Effects"));
 			ImGui::SliderFloat(T(TKEY("effect_lighting_multiplier"), "Effect Lighting Multiplier"), &settings.effectLightingMult, 0.0f, 10.0f, "%.2f");
+			ImGui::SliderFloat(T(TKEY("effect_ambient_saturation"), "Effect Sky Light Saturation"), &settings.effectAmbientSaturation, 0.0f, 1.0f, "%.2f");
+			Util::AddTooltip(T(TKEY("effect_ambient_saturation_tooltip"), "Colour of the sky light on smoke, steam and other lit particles.\nParticles get no bounce light from the ground, so in shade, overcast and fog the sky light alone turns them blue.\n0 is neutral grey, 1 keeps the full sky colour."));
 			ImGui::SliderFloat(T(TKEY("membrane_effects_multiplier"), "Membrane Effects Multiplier"), &settings.membraneEffectMult, 0.0f, 10.0f, "%.2f");
 			ImGui::SliderFloat(T(TKEY("blood_effects_multiplier"), "Blood Effects Multiplier"), &settings.bloodEffectMult, 0.0f, 10.0f, "%.2f");
 			ImGui::SliderFloat(T(TKEY("projected_effects_multiplier"), "Projected Effects Multiplier"), &settings.projectedEffectMult, 0.0f, 10.0f, "%.2f");
@@ -132,6 +135,7 @@ void LinearLighting::LoadSettings(json& o_json)
 			settings.diffuseWhiteReflectance = std::min(scale, 1.0f);
 	}
 	settings.fireEffectCurve = std::clamp(settings.fireEffectCurve, FireEffectCurveMin, FireEffectCurveMax);
+	settings.effectAmbientSaturation = std::clamp(std::isfinite(settings.effectAmbientSaturation) ? settings.effectAmbientSaturation : 0.3f, 0.0f, 1.0f);
 	applyGameGamma = settings.gameGamma != configuredGameGamma;
 }
 
@@ -243,6 +247,7 @@ LinearLighting::PerFrameData LinearLighting::GetCommonBufferData()
 	data.lightSpriteEffectMult = 1.0f;
 	data.fireEffectMult = 1.0f;
 	data.fireEffectCurve = 1.0f;
+	data.effectAmbientSaturation = 1.0f;
 
 	data.isMainOrLoadingMenu = globals::state->IsMainOrLoadingMenuOpen();
 	data.waterGamma = loaded ? bounded(settings.waterGamma, 1.8f, 0.1f, 3.0f) : 1.0f;
@@ -272,6 +277,7 @@ LinearLighting::PerFrameData LinearLighting::GetCommonBufferData()
 	data.lightSpriteEffectMult = settings.lightSpriteEffectMult;
 	data.fireEffectMult = settings.fireEffectMult;
 	data.fireEffectCurve = settings.fireEffectCurve;
+	data.effectAmbientSaturation = bounded(settings.effectAmbientSaturation, 0.3f, 0.0f, 1.0f);
 	return data;
 }
 

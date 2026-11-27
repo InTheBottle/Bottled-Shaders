@@ -300,7 +300,7 @@ namespace SharedData
 		float diffuseCurve;
 		float diffuseWhiteReflectance;
 		float waterGamma;
-		float pad;
+		float effectAmbientSaturation;
 	};
 
 	struct ENBSettings

@@ -556,6 +556,8 @@ float3 GetLightingColor(float3 msPosition, float3 worldPosition, float2 screenPo
 	}
 #		endif
 
+	ambientColor = Color::Saturation(ambientColor, SharedData::linearLightingSettings.effectAmbientSaturation);
+
 	color = dirColor + ambientColor;
 
 #		if defined(LIGHT_LIMIT_FIX)
