@@ -236,10 +236,8 @@ void SkySync::DisableOnConflict(std::string_view conflictName)
 
 void SkySync::OnSkyUpdateColors(RE::Sky* sky)
 {
-	if (!settings.Enabled || !active || !sky) {
-		flashWeight = 0.0f;
+	if (!settings.Enabled || !active || !sky)
 		return;
-	}
 
 	const bool moonsHidden = lightNightWeight >= 1.0f && globals::features::effects11.enableEffect && sky->skyColor[RE::TESWeather::ColorTypes::kMoonGlare] == RE::NiColor{};
 	const float moonsVisible = moonsHidden ? 0.0f : 1.0f;
@@ -249,8 +247,6 @@ void SkySync::OnSkyUpdateColors(RE::Sky* sky)
 	const float flash = GetDirectionalFlash(sky);
 	const RE::NiColor flashLight{ std::min(flash, dirLight.red), std::min(flash, dirLight.green), std::min(flash, dirLight.blue) };
 	dirLight = (dirLight - flashLight) * GetLightFactor(settings.DimSunlightUnderHorizon) * moonsVisible + flashLight;
-	const float totalLight = dirLight.red + dirLight.green + dirLight.blue;
-	flashWeight = totalLight > 0.0f ? (flashLight.red + flashLight.green + flashLight.blue) / totalLight : 0.0f;
 
 	if (gVolumetricLighting)
 		gVolumetricLighting->intensity *= GetLightFactor(settings.DimVolumetricLighting) * moonsVisible;
@@ -928,13 +924,6 @@ void SkySync::ShadowFader::Update(const RE::Sky* sky, RE::NiPoint3 dirs[], float
 
 void SkySync::ShadowFader::SetLighting(const RE::Sky* sky, RE::NiPoint3 dir)
 {
-	// Steer towards the strike for as long as the flash outshines the caster
-	const float strikeWeight = globals::features::skySync.flashWeight;
-	if (strikeWeight > 0.0f) {
-		dir = dir + (ZenithDirection - dir) * strikeWeight;
-		if (dir.Unitize() <= FLT_EPSILON)
-			dir = ZenithDirection;
-	}
 	ClampDirection(dir);
 
 	RE::NiMatrix3& m = sky->sun->light->local.rotate;

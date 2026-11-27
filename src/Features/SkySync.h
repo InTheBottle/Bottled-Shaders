@@ -231,7 +231,6 @@ private:
 	float twilightCap = 0.0f;
 	float moonNightWeight = 0.0f;
 	float lightNightWeight = 0.0f;
-	float flashWeight = 0.0f;  // lightning's share of this frame's directional light
 	bool sunBelowHorizon = false;
 	ShadowFader shadowFader;
 
