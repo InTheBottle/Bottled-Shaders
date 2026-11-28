@@ -25,14 +25,15 @@
 #include "Features/InteriorSun.h"
 #include "Features/LandscapeSeams.h"
 #include "Features/LightLimitFix.h"
+#include "Features/NeuralRendering.h"
 #include "Features/NightEye.h"
 #include "Features/PostProcessing.h"
 #include "Features/ProceduralNightSky.h"
 #include "Features/RainRefraction.h"
 #include "Features/RemoteControl/FrameRecorder.h"
-#include "Features/ReverseZ.h"
 #include "Features/RemoteControl/NvPerf.h"
 #include "Features/RenderDoc.h"
+#include "Features/ReverseZ.h"
 #include "Features/ScreenshotFeature.h"
 #include "Features/Skin.h"
 #include "Features/SkySync.h"
@@ -486,8 +487,16 @@ namespace PostProcessingExtensions
 			// Effects11 replaces the pass outright; when it does, the vanilla call is skipped
 			// and HandlePostProcessing fixes up the render-target state the pass would have set.
 			// Night Eye grades later, before the interface (NightEye::DrawBeforeInterface).
-			if (state->HandlePostProcessing(input, output))
+			if (state->HandlePostProcessing(input, output)) {
+				auto& neuralRendering = globals::features::neuralRendering;
+				if (neuralRendering.loaded) {
+					// The vanilla pass did not run, so there is no ISHDR exposure/grading to replicate.
+					neuralRendering.CaptureDisplayTransform(nullptr);
+					// Effects11 already wrote its finished, tonemapped frame into `output`.
+					neuralRendering.ApplyFinishedImage(output);
+				}
 				return;
+			}
 
 			auto& postProcessing = globals::features::postProcessing;
 			const bool previousFallback = state->IsPostProcessingFallback();
@@ -499,6 +508,15 @@ namespace PostProcessingExtensions
 			func(a1, a2, source, a4, a5);
 			if (renderToUI)
 				state->SetPostProcessingFallback(previousFallback);
+
+			// Capture vanilla grading for next frame's Neural Rendering proxy.
+			auto& neuralRendering = globals::features::neuralRendering;
+			if (neuralRendering.loaded)
+				neuralRendering.CaptureDisplayTransform(a5);
+
+			// Neural Rendering consumes the finished output after either vanilla or Post Processing tone mapping.
+			if (neuralRendering.loaded)
+				neuralRendering.ApplyFinishedImage(output);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};

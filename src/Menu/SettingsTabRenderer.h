@@ -28,16 +28,20 @@ public:
 	 */
 	struct SettingsState
 	{
-		bool& settingToggleKey;          /**< @brief True while capturing a new menu toggle key. */
-		bool& settingsEffectsToggle;     /**< @brief True while capturing a new effects toggle key. */
-		bool& settingSkipCompilationKey; /**< @brief True while capturing a new skip-compilation key. */
-		bool& settingOverlayToggleKey;   /**< @brief True while capturing a new overlay toggle key. */
-		bool& settingShaderBlockPrevKey; /**< @brief True while capturing a new shader-block-previous key. */
-		bool& settingShaderBlockNextKey; /**< @brief True while capturing a new shader-block-next key. */
-		bool& settingCSEditorToggleKey;  /**< @brief True while capturing a new CS Editor toggle key. */
-		bool& settingScreenshotKey;      /**< @brief True while capturing a new screenshot key. */
-		bool& settingEffects11ToggleKey; /**< @brief True while capturing a new Effects 11 toggle key. */
-		bool& settingEffects11EditorKey; /**< @brief True while capturing a new Effects 11 editor key. */
+		bool& settingToggleKey;                    /**< @brief True while capturing a new menu toggle key. */
+		bool& settingsEffectsToggle;               /**< @brief True while capturing a new effects toggle key. */
+		bool& settingSkipCompilationKey;           /**< @brief True while capturing a new skip-compilation key. */
+		bool& settingOverlayToggleKey;             /**< @brief True while capturing a new overlay toggle key. */
+		bool& settingShaderBlockPrevKey;           /**< @brief True while capturing a new shader-block-previous key. */
+		bool& settingShaderBlockNextKey;           /**< @brief True while capturing a new shader-block-next key. */
+		bool& settingCSEditorToggleKey;            /**< @brief True while capturing a new CS Editor toggle key. */
+		bool& settingScreenshotKey;                /**< @brief True while capturing a new screenshot key. */
+		bool& settingEffects11ToggleKey;           /**< @brief True while capturing a new Effects 11 toggle key. */
+		bool& settingEffects11EditorKey;           /**< @brief True while capturing a new Effects 11 editor key. */
+		bool& settingNeuralRenderingToggleKey;     /**< @brief True while capturing a new Neural Rendering toggle key. */
+		bool& settingNeuralRenderingCompareKey;    /**< @brief True while capturing a new Neural Rendering comparison screenshot key. */
+		bool& settingNeuralRenderingScaleUpKey;    /**< @brief True while capturing a new Neural Rendering scale up key. */
+		bool& settingNeuralRenderingScaleDownKey;  /**< @brief True while capturing a new Neural Rendering scale down key. */
 	};
 
 	/**
